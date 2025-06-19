@@ -1,0 +1,303 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Pylance Type Server Protocol",
+    "description": "JSON Schema for the Pylance TSP (Type Server Protocol) messages, types and enums.",
+    "type": "object",
+    "oneOf": [
+        { "$ref": "#/definitions/RequestMessage" },
+        { "$ref": "#/definitions/ResponseMessage" },
+        { "$ref": "#/definitions/NotificationMessage" }
+    ],
+
+    "definitions": {
+        "RequestMessage": {
+            "type": "object",
+            "properties": {
+                "jsonrpc": { "const": "2.0" },
+                "id": { "type": ["integer", "string"] },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "typeServer/initialize",
+                        "typeServer/shutdown",
+                        "typeServer/getSnapshot",
+                        "typeServer/getDiagnostics",
+                        "typeServer/getDiagnosticsVersion",
+                        "typeServer/getType",
+                        "typeServer/getBuiltinType",
+                        "typeServer/getTypeArgs",
+                        "typeServer/searchForTypeAttribute",
+                        "typeServer/getTypeAttributes",
+                        "typeServer/getOverloads",
+                        "typeServer/getMatchingOverloads",
+                        "typeServer/getMetaclass",
+                        "typeServer/getTypeOfDeclaration",
+                        "typeServer/getSymbol",
+                        "typeServer/getSymbolsForFile",
+                        "typeServer/getFunctionParts",
+                        "typeServer/getRepr",
+                        "typeServer/getDocString",
+                        "typeServer/resolveImportDeclaration",
+                        "typeServer/resolveImport",
+                        "typeServer/getTypeAliasInfo",
+                        "typeServer/combineTypes",
+                        "typeServer/getPythonSearchPaths"
+                    ]
+                },
+                "params": { "type": "object" }
+            },
+            "required": ["jsonrpc", "id", "method", "params"]
+        },
+
+        "ResponseMessage": {
+            "type": "object",
+            "properties": {
+                "jsonrpc": { "const": "2.0" },
+                "id": { "type": ["integer", "string"] },
+                "result": { "type": ["object", "array", "null"] },
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "code": { "type": "integer" },
+                        "message": { "type": "string" },
+                        "data": {}
+                    },
+                    "required": ["code", "message"]
+                }
+            },
+            "required": ["jsonrpc", "id"],
+            "oneOf": [{ "required": ["result"] }, { "required": ["error"] }]
+        },
+
+        "NotificationMessage": {
+            "type": "object",
+            "properties": {
+                "jsonrpc": { "const": "2.0" },
+                "method": {
+                    "type": "string",
+                    "enum": [
+                        "typeServer/initialized",
+                        "typeServer/shutdown",
+                        "textDocument/open",
+                        "textDocument/close",
+                        "typeServer/settingsChange",
+                        "typeServer/filesChanged",
+                        "typeServer/snapshotChanged",
+                        "typeServer/diagnosticsChanged"
+                    ]
+                },
+                "params": { "type": "object" }
+            },
+            "required": ["jsonrpc", "method", "params"]
+        },
+
+        "ModuleName": {
+            "type": "object",
+            "properties": {
+                "leadingDots": { "type": "integer", "minimum": 0 },
+                "nameParts": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                }
+            },
+            "required": ["leadingDots", "nameParts"]
+        },
+
+        "TypeCategory": {
+            "type": "integer",
+            "enum": [0, 1, 2, 3, 4, 5, 6],
+            "description": "0=Any,1=Function,2=Overloaded,3=Class,4=Module,5=Union,6=TypeVar"
+        },
+
+        "TypeFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2, 4, 8, 16, 32, 64],
+            "description": "bitmask: 1=Instantiable,2=Instance,4=Callable,8=Literal,16=Interface,32=Generic,64=FromAlias"
+        },
+
+        "FunctionFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2, 4, 8],
+            "description": "bitmask:1=Async,2=Generator,4=Abstract,8=Static"
+        },
+
+        "ClassFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2],
+            "description": "bitmask:1=Enum,2=TypedDict"
+        },
+
+        "TypeVarFlags": {
+            "type": "integer",
+            "enum": [0, 1],
+            "description": "bitmask:1=IsParamSpec"
+        },
+
+        "AttributeFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2],
+            "description": "bitmask:1=IsArgsList,2=IsKwargsDict"
+        },
+
+        "Attribute": {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "type": { "$ref": "#/definitions/Type" },
+                "owner": { "$ref": "#/definitions/Type" },
+                "boundType": { "$ref": "#/definitions/Type" },
+                "flags": { "$ref": "#/definitions/AttributeFlags" }
+            },
+            "required": ["name", "type"]
+        },
+
+        "Type": {
+            "type": "object",
+            "properties": {
+                "handle": { "oneOf": [{ "type": "string" }, { "type": "integer" }] },
+                "category": { "$ref": "#/definitions/TypeCategory" },
+                "flags": { "$ref": "#/definitions/TypeFlags" },
+                "moduleName": {
+                    "oneOf": [{ "$ref": "#/definitions/ModuleName" }, { "type": "null" }]
+                },
+                "name": { "type": "string" },
+                "categoryFlags": { "type": "integer" },
+                "decl": { "type": ["object", "null"] }
+            },
+            "required": ["handle", "category", "flags", "name", "categoryFlags"]
+        },
+
+        "TypeAliasInfo": {
+            // ...existing code...
+        },
+
+        // Added missing core definitions
+        "Node": {
+            "type": "object",
+            "properties": {
+                "uri": { "type": "string" },
+                "start": { "type": "integer" },
+                "length": { "type": "integer" }
+            },
+            "required": ["uri", "start", "length"]
+        },
+        "DeclarationCategory": {
+            "type": "integer",
+            "enum": [0, 1, 2, 3, 4, 5, 6, 7],
+            "description": "0=Intrinsic,1=Variable,2=Param,3=TypeParam,4=TypeAlias,5=Function,6=Class,7=Import"
+        },
+        "DeclarationFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2, 4, 8, 16, 32],
+            "description": "bitmask:1=ClassMember,2=Constant,4=Final,8=IsDefinedBySlots,16=UsesLocalName,32=UnresolvedImport"
+        },
+        "Declaration": {
+            "type": "object",
+            "properties": {
+                "handle": { "oneOf": [{ "type": "string" }, { "type": "integer" }] },
+                "category": { "$ref": "#/definitions/DeclarationCategory" },
+                "flags": { "$ref": "#/definitions/DeclarationFlags" },
+                "node": { "oneOf": [{ "$ref": "#/definitions/Node" }, { "type": "null" }] },
+                "moduleName": { "$ref": "#/definitions/ModuleName" },
+                "name": { "type": "string" },
+                "uri": { "type": "string" }
+            },
+            "required": ["handle", "category", "flags", "moduleName", "name", "uri"]
+        },
+        "Symbol": {
+            "type": "object",
+            "properties": {
+                "node": { "$ref": "#/definitions/Node" },
+                "name": { "type": "string" },
+                "decls": { "type": "array", "items": { "$ref": "#/definitions/Declaration" } },
+                "synthesizedTypes": { "type": "array", "items": { "$ref": "#/definitions/Type" } }
+            },
+            "required": ["node", "name", "decls", "synthesizedTypes"]
+        },
+        "FileSymbolInfo": {
+            "type": "object",
+            "properties": {
+                "uri": { "type": "string" },
+                "symbols": { "type": "array", "items": { "$ref": "#/definitions/Symbol" } }
+            },
+            "required": ["uri", "symbols"]
+        },
+        "ResolveImportOptions": {
+            "type": "object",
+            "properties": {
+                "resolveLocalNames": { "type": "boolean" },
+                "allowExternallyHiddenAccess": { "type": "boolean" },
+                "skipFileNeededCheck": { "type": "boolean" }
+            }
+        },
+        "TextDocumentOpenParams": {
+            "type": "object",
+            "properties": {
+                "uri": { "type": "string" },
+                "text": { "type": "string" },
+                "version": { "type": "integer" },
+                "chainedFileUri": { "type": "string" }
+            },
+            "required": ["uri", "text", "version"]
+        },
+        "TextDocumentCloseParams": {
+            "type": "object",
+            "properties": {
+                "uri": { "type": "string" }
+            },
+            "required": ["uri"]
+        },
+        "ResolveImportParams": {
+            "type": "object",
+            "properties": {
+                "sourceUri": { "type": "string" },
+                "moduleDescriptor": { "$ref": "#/definitions/ModuleName" },
+                "snapshot": { "type": "integer" }
+            },
+            "required": ["sourceUri", "moduleDescriptor", "snapshot"]
+        },
+        "TypeReprFlags": {
+            "type": "integer",
+            "enum": [0, 1, 2, 4],
+            "description": "bitmask:1=ExpandTypeAliases,2=PrintTypeVarVariance,4=ConvertToInstanceType"
+        },
+        "SearchForTypeAttributeParams": {
+            "type": "object",
+            "properties": {
+                "startType": { "$ref": "#/definitions/Type" },
+                "attributeName": { "type": "string" },
+                "accessFlags": { "$ref": "#/definitions/AttributeAccessFlags" },
+                "expressionNode": { "oneOf": [{ "$ref": "#/definitions/Node" }, { "type": "null" }] },
+                "instanceType": { "oneOf": [{ "$ref": "#/definitions/Type" }, { "type": "null" }] },
+                "snapshot": { "type": "integer" }
+            },
+            "required": ["startType", "attributeName", "accessFlags", "snapshot"]
+        },
+        "GetTypeAttributesParams": {
+            "type": "object",
+            "properties": {
+                "type": { "$ref": "#/definitions/Type" },
+                "snapshot": { "type": "integer" }
+            },
+            "required": ["type", "snapshot"]
+        },
+        "GetDeclarationInfoParams": {
+            "type": "object",
+            "properties": {
+                "node": { "$ref": "#/definitions/Node" },
+                "name": { "type": "string" },
+                "skipUnreachableCode": { "type": "boolean" },
+                "snapshot": { "type": "integer" }
+            },
+            "required": ["node", "skipUnreachableCode", "snapshot"]
+        },
+        "GetBuiltinTypeParams": {
+            "type": "object",
+            "properties": {
+                "scopingNode": { "$ref": "#/definitions/Node" },
+                "name": { "type": "string" }
+            },
+            "required": ["scopingNode", "name"]
+        }
+    }
+}
