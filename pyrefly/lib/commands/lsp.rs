@@ -149,12 +149,15 @@ use pyrefly_util::task_heap::Cancelled;
 use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
 use ruff_text_size::TextRange;
+use ruff_text_size::TextSize;
 use serde::de::DeserializeOwned;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
 use crate::commands::config_finder::standard_config_finder;
 use crate::commands::run::CommandExitStatus;
+use crate::commands::tsp;
+use crate::commands::tsp::GetTypeRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -968,6 +971,13 @@ impl Server {
                         Ok(self.document_diagnostics(&transaction, params)),
                     ));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
+                    let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(
+                        x.id,
+                        Ok(self.get_type(&transaction, params))
+                    ));
+                    ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
                 }
@@ -1298,6 +1308,53 @@ impl Server {
         self.open_files.write().insert(uri, Arc::new(change.text));
         self.validate_in_memory(ide_transaction_manager)
     }
+
+    fn get_type(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetTypeParams,
+    ) -> Result<tsp::Type, ResponseError> {
+        // Convert Node to URI and position
+        let uri = Url::parse(&params.node.uri)
+            .map_err(|_| ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid URI".to_string(),
+                data: None,
+            })?;
+        
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Get module info for position conversion
+        let Some(module_info) = transaction.get_module_info(&handle) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Failed to get module info".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert offset to TextSize
+        let position = TextSize::new(params.node.start as u32);
+        
+        // Get the type at the position
+        let Some(type_info) = transaction.get_type_at(&handle, position) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "No type found at position".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert pyrefly Type to TSP Type format
+        Ok(tsp::convert_to_tsp_type(type_info))
+    }    
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
         let mut created = Vec::new();
@@ -1937,6 +1994,7 @@ impl Server {
         disable_language_services: bool,
     ) {
         let mut workspaces = self.workspaces.workspaces.write();
+       
         match scope_uri {
             Some(scope_uri) => {
                 if let Some(workspace) = workspaces.get_mut(&scope_uri.to_file_path().unwrap()) {

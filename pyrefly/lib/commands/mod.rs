@@ -19,3 +19,4 @@ pub mod lsp;
 pub mod run;
 pub mod suppress;
 pub mod util;
+pub mod tsp;
