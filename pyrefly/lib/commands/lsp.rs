@@ -157,9 +157,9 @@ use starlark_map::small_set::SmallSet;
 use crate::commands::config_finder::standard_config_finder;
 use crate::commands::run::CommandExitStatus;
 use crate::commands::tsp;
-use crate::commands::tsp::GetTypeRequest;
 use crate::commands::tsp::GetPythonSearchPathsRequest;
 use crate::commands::tsp::GetSnapshotRequest;
+use crate::commands::tsp::GetTypeRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -974,21 +974,13 @@ impl Server {
                     ));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
-                    self.send_response(new_response(
-                        x.id,
-                        Ok(self.get_python_search_paths(params))
-                    ));
+                    self.send_response(new_response(x.id, Ok(self.get_python_search_paths(params))));
                 } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
-                    self.send_response(new_response(
-                        x.id,
-                        Ok(self.current_snapshot())
-                    ));
+                    self.send_response(new_response(x.id, Ok(self.current_snapshot())));
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
-                    let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(
-                        x.id,
-                        Ok(self.get_type(&transaction, params))
-                    ));
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, Ok(self.get_type(&transaction, params))));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -1330,13 +1322,12 @@ impl Server {
         params: tsp::GetTypeParams,
     ) -> Result<tsp::Type, ResponseError> {
         // Convert Node to URI and position
-        let uri = Url::parse(&params.node.uri)
-            .map_err(|_| ResponseError {
-                code: ErrorCode::InvalidParams as i32,
-                message: "Invalid URI".to_string(),
-                data: None,
-            })?;
-        
+        let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
+            code: ErrorCode::InvalidParams as i32,
+            message: "Invalid URI".to_string(),
+            data: None,
+        })?;
+
         // Check if workspace has language services enabled
         let Some(handle) = self.make_handle_if_enabled(&uri) else {
             return Err(ResponseError {
@@ -1357,7 +1348,7 @@ impl Server {
 
         // Convert offset to TextSize
         let position = TextSize::new(params.node.start as u32);
-        
+
         // Get the type at the position
         let Some(type_info) = transaction.get_type_at(&handle, position) else {
             return Err(ResponseError {
@@ -1371,16 +1362,13 @@ impl Server {
         Ok(tsp::convert_to_tsp_type(type_info))
     }
 
-    fn get_python_search_paths(
-        &self,
-        params: tsp::GetPythonSearchPathsParams,
-    ) -> Vec<String> {
+    fn get_python_search_paths(&self, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
         // Parse the URI to get the file path
         let uri = match Url::parse(&params.fromUri) {
             Ok(uri) => uri,
             Err(_) => return Vec::new(), // Return empty vector on error
         };
-        
+
         let path = match uri.to_file_path() {
             Ok(path) => path,
             Err(_) => return Vec::new(), // Return empty vector on error
@@ -1389,19 +1377,19 @@ impl Server {
         // Get the configuration for this file
         let config = self.state.config_finder().python_file(
             crate::module::module_name::ModuleName::unknown(),
-            &crate::module::module_path::ModulePath::filesystem(path)
+            &crate::module::module_path::ModulePath::filesystem(path),
         );
 
         // Collect all search paths: search_path + site_package_path
         let mut search_paths = Vec::new();
-        
+
         // Add regular search paths
         for path in config.search_path() {
             if let Some(path_str) = path.to_str() {
                 search_paths.push(path_str.to_string());
             }
         }
-        
+
         // Add site package paths
         for path in config.site_package_path() {
             if let Some(path_str) = path.to_str() {
@@ -1414,7 +1402,7 @@ impl Server {
 
     fn current_snapshot(&self) -> i32 {
         self.state.current_snapshot()
-    }    
+    }
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
         let mut created = Vec::new();
@@ -2055,7 +2043,7 @@ impl Server {
         disable_language_services: bool,
     ) {
         let mut workspaces = self.workspaces.workspaces.write();
-       
+
         match scope_uri {
             Some(scope_uri) => {
                 if let Some(workspace) = workspaces.get_mut(&scope_uri.to_file_path().unwrap()) {
