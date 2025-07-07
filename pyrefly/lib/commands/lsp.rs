@@ -158,6 +158,7 @@ use crate::commands::config_finder::standard_config_finder;
 use crate::commands::run::CommandExitStatus;
 use crate::commands::tsp;
 use crate::commands::tsp::GetTypeRequest;
+use crate::commands::tsp::GetPythonSearchPathsRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -971,6 +972,11 @@ impl Server {
                         Ok(self.document_diagnostics(&transaction, params)),
                     ));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
+                    self.send_response(new_response(
+                        x.id,
+                        Ok(self.get_python_search_paths(params))
+                    ));
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
                     let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(
@@ -1332,7 +1338,7 @@ impl Server {
         };
 
         // Get module info for position conversion
-        let Some(module_info) = transaction.get_module_info(&handle) else {
+        let Some(_module_info) = transaction.get_module_info(&handle) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Failed to get module info".to_string(),
@@ -1354,6 +1360,47 @@ impl Server {
 
         // Convert pyrefly Type to TSP Type format
         Ok(tsp::convert_to_tsp_type(type_info))
+    }
+
+    fn get_python_search_paths(
+        &self,
+        params: tsp::GetPythonSearchPathsParams,
+    ) -> Vec<String> {
+        // Parse the URI to get the file path
+        let uri = match Url::parse(&params.uri) {
+            Ok(uri) => uri,
+            Err(_) => return Vec::new(), // Return empty vector on error
+        };
+        
+        let path = match uri.to_file_path() {
+            Ok(path) => path,
+            Err(_) => return Vec::new(), // Return empty vector on error
+        };
+
+        // Get the configuration for this file
+        let config = self.state.config_finder().python_file(
+            crate::module::module_name::ModuleName::unknown(),
+            &crate::module::module_path::ModulePath::filesystem(path)
+        );
+
+        // Collect all search paths: search_path + site_package_path
+        let mut search_paths = Vec::new();
+        
+        // Add regular search paths
+        for path in config.search_path() {
+            if let Some(path_str) = path.to_str() {
+                search_paths.push(path_str.to_string());
+            }
+        }
+        
+        // Add site package paths
+        for path in config.site_package_path() {
+            if let Some(path_str) = path.to_str() {
+                search_paths.push(path_str.to_string());
+            }
+        }
+
+        search_paths
     }    
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {

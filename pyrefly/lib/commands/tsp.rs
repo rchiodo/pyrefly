@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub enum GetTypeRequest {}
 
+pub enum GetPythonSearchPathsRequest {}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Type {
     pub handle: TypeHandle,
@@ -119,10 +121,21 @@ pub struct GetTypeParams {
     pub snapshot: i32,        // Snapshot version
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GetPythonSearchPathsParams {
+    pub uri: String,          // File URI to determine which config to use
+}
+
 impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
     type Result = Type;
     const METHOD: &'static str = "typeServer/getType";
+}
+
+impl lsp_types::request::Request for GetPythonSearchPathsRequest {
+    type Params = GetPythonSearchPathsParams;
+    type Result = Vec<String>;
+    const METHOD: &'static str = "typeServer/getPythonSearchPaths";
 }
 
 
