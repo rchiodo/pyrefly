@@ -129,9 +129,65 @@ pub struct GetPythonSearchPathsParams {
     pub snapshot: i32,        // Snapshot version
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 pub struct GetSnapshotParams {
-    // No parameters needed for getting snapshot
+    // No parameters needed for getting snapshot, but we need an empty struct
+    // to handle both {} and null parameter cases
+}
+
+impl Default for GetSnapshotParams {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+// Custom deserializer that handles both null and empty object
+impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct GetSnapshotParamsVisitor;
+
+        impl<'de> Visitor<'de> for GetSnapshotParamsVisitor {
+            type Value = GetSnapshotParams;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("null or an empty object")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(GetSnapshotParams {})
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(GetSnapshotParams {})
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                // Read any fields in the map but ignore them since we don't need any params
+                while let Some((key, _value)) = map.next_entry::<String, serde_json::Value>()? {
+                    // Ignore unknown fields for flexibility
+                    let _ = key;
+                }
+                Ok(GetSnapshotParams {})
+            }
+        }
+
+        deserializer.deserialize_any(GetSnapshotParamsVisitor)
+    }
 }
 
 impl lsp_types::request::Request for GetTypeRequest {
@@ -216,5 +272,29 @@ fn convert_module_name_from_string(module_str: &str) -> ModuleName {
     ModuleName {
         leading_dots: 0,
         name_parts: module_str.split('.').map(|s| s.to_string()).collect(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_get_snapshot_params_deserialization() {
+        // Test null case
+        let null_json = serde_json::Value::Null;
+        let result: Result<GetSnapshotParams, _> = serde_json::from_value(null_json);
+        assert!(result.is_ok());
+
+        // Test empty object case
+        let empty_obj_json = serde_json::json!({});
+        let result: Result<GetSnapshotParams, _> = serde_json::from_value(empty_obj_json);
+        assert!(result.is_ok());
+
+        // Test object with unknown fields (should be ignored)
+        let obj_with_fields = serde_json::json!({"unknown_field": "value"});
+        let result: Result<GetSnapshotParams, _> = serde_json::from_value(obj_with_fields);
+        assert!(result.is_ok());
     }
 }
