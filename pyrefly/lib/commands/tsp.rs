@@ -125,7 +125,8 @@ pub struct GetTypeParams {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetPythonSearchPathsParams {
-    pub uri: String,          // File URI to determine which config to use
+    #[allow(non_snake_case)]
+    pub fromUri: String,          // File URI to determine which config to use
     pub snapshot: i32,        // Snapshot version
 }
 

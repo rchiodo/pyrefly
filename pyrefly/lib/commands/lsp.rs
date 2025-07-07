@@ -1376,7 +1376,7 @@ impl Server {
         params: tsp::GetPythonSearchPathsParams,
     ) -> Vec<String> {
         // Parse the URI to get the file path
-        let uri = match Url::parse(&params.uri) {
+        let uri = match Url::parse(&params.fromUri) {
             Ok(uri) => uri,
             Err(_) => return Vec::new(), // Return empty vector on error
         };
