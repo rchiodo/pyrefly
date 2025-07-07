@@ -124,6 +124,7 @@ pub struct GetTypeParams {
 #[derive(Serialize, Deserialize)]
 pub struct GetPythonSearchPathsParams {
     pub uri: String,          // File URI to determine which config to use
+    pub snapshot: i32,        // Snapshot version
 }
 
 impl lsp_types::request::Request for GetTypeRequest {
