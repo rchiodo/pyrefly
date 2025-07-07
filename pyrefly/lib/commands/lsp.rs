@@ -159,6 +159,7 @@ use crate::commands::run::CommandExitStatus;
 use crate::commands::tsp;
 use crate::commands::tsp::GetTypeRequest;
 use crate::commands::tsp::GetPythonSearchPathsRequest;
+use crate::commands::tsp::GetSnapshotRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -977,6 +978,11 @@ impl Server {
                         x.id,
                         Ok(self.get_python_search_paths(params))
                     ));
+                } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
+                    self.send_response(new_response(
+                        x.id,
+                        Ok(self.current_snapshot())
+                    ));
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
                     let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(
@@ -1212,6 +1218,7 @@ impl Server {
             }
             // we have to run, not just commit to process updates
             state.run_with_committing_transaction(transaction, &[]);
+            state.increment_snapshot(); // Increment snapshot after invalidation
             // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
             // the main event loop of the server. As a result, the server can do a revalidation of
             // all the in-memory files based on the fresh main State as soon as possible.
@@ -1288,6 +1295,7 @@ impl Server {
         self.open_files
             .write()
             .insert(uri, Arc::new(params.text_document.text));
+        self.state.increment_snapshot(); // Increment snapshot on file open
         self.validate_in_memory(ide_transaction_manager)?;
         self.populate_project_files_if_necessary(config_to_populate_files);
         // rewatch files in case we loaded or dropped any configs
@@ -1312,6 +1320,7 @@ impl Server {
         let change = params.content_changes.into_iter().next().unwrap();
         let uri = params.text_document.uri.to_file_path().unwrap();
         self.open_files.write().insert(uri, Arc::new(change.text));
+        self.state.increment_snapshot(); // Increment snapshot on file change
         self.validate_in_memory(ide_transaction_manager)
     }
 
@@ -1401,6 +1410,10 @@ impl Server {
         }
 
         search_paths
+    }
+
+    fn current_snapshot(&self) -> i32 {
+        self.state.current_snapshot()
     }    
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
@@ -1475,6 +1488,7 @@ impl Server {
             .map(|x| x.uri.to_file_path().unwrap())
             .collect::<Vec<_>>();
 
+        self.state.increment_snapshot(); // Increment snapshot on workspace change
         self.configure(&added, &removed);
     }
 
@@ -2090,6 +2104,9 @@ impl Server {
                 *modified = true;
                 self.workspaces.default.write().python_info = python_info;
             }
+        }
+        if *modified {
+            self.state.increment_snapshot(); // Increment snapshot on python path change
         }
         self.invalidate_config();
     }

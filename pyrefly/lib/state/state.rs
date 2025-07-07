@@ -24,6 +24,7 @@ use std::sync::Arc;
 use std::sync::MutexGuard;
 use std::sync::RwLockReadGuard;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
@@ -1502,6 +1503,7 @@ pub struct State {
     config_finder: ConfigFinder,
     state: RwLock<StateInner>,
     committing_transaction_lock: Mutex<()>,
+    snapshot_counter: AtomicI32,
 }
 
 impl State {
@@ -1512,11 +1514,20 @@ impl State {
             config_finder,
             state: RwLock::new(StateInner::new()),
             committing_transaction_lock: Mutex::new(()),
+            snapshot_counter: AtomicI32::new(1), // Start at 1
         }
     }
 
     pub fn config_finder(&self) -> &ConfigFinder {
         &self.config_finder
+    }
+
+    pub fn current_snapshot(&self) -> i32 {
+        self.snapshot_counter.load(Ordering::Acquire)
+    }
+    
+    pub fn increment_snapshot(&self) -> i32 {
+        self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1
     }
 
     fn get_config(&self, name: ModuleName, path: &ModulePath) -> ArcId<ConfigFile> {

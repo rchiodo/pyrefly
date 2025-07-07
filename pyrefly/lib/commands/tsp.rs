@@ -4,6 +4,8 @@ pub enum GetTypeRequest {}
 
 pub enum GetPythonSearchPathsRequest {}
 
+pub enum GetSnapshotRequest {}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Type {
     pub handle: TypeHandle,
@@ -127,6 +129,11 @@ pub struct GetPythonSearchPathsParams {
     pub snapshot: i32,        // Snapshot version
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct GetSnapshotParams {
+    // No parameters needed for getting snapshot
+}
+
 impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
     type Result = Type;
@@ -137,6 +144,12 @@ impl lsp_types::request::Request for GetPythonSearchPathsRequest {
     type Params = GetPythonSearchPathsParams;
     type Result = Vec<String>;
     const METHOD: &'static str = "typeServer/getPythonSearchPaths";
+}
+
+impl lsp_types::request::Request for GetSnapshotRequest {
+    type Params = GetSnapshotParams;
+    type Result = i32;
+    const METHOD: &'static str = "typeServer/getSnapshot";
 }
 
 
