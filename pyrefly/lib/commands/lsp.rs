@@ -1882,12 +1882,70 @@ impl Server {
         };
 
         // Get module info for position conversion
-        let Some(_module_info) = transaction.get_module_info(&handle) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Failed to get module info".to_string(),
-                data: None,
-            });
+        // Note: If the module is not loaded in the transaction, we'll load it ourselves
+        // If we can't get module info, the file might not be loaded in the transaction
+        // This can happen when the declaration points to a definition in a file that's not currently loaded
+        let _module_info = match transaction.get_module_info(&handle) {
+            Some(info) => info,
+            None => {
+                // Module not loaded in transaction, we need to load it ourselves
+                // Create a new transaction that can load the required module
+                let mut fresh_transaction = self.state.transaction();
+                
+                // Load the target module
+                fresh_transaction.run(&[(handle.clone(), crate::state::require::Require::Everything)]);
+                
+                // Now try to get the module info from the fresh transaction
+                let Some(_info) = fresh_transaction.get_module_info(&handle) else {
+                    // If we still can't get module info after loading, fall back to default type
+                    return Ok(create_default_type_for_declaration(&params.decl));
+                };
+                
+                // Convert declaration position to TextSize
+                let position = TextSize::new(node.start as u32);
+                
+                // Try to get the type at the declaration's position using the fresh transaction
+                let Some(type_info) = fresh_transaction.get_type_at(&handle, position) else {
+                    // If we can't get type info from the position, try alternative approaches
+                    
+                    // For imports, we might need to resolve the imported symbol first
+                    if params.decl.category == tsp::DeclarationCategory::IMPORT {
+                        // For import declarations, try to resolve the import first
+                        // and then get the type of the resolved symbol
+                        let resolve_params = tsp::ResolveImportDeclarationParams {
+                            decl: params.decl.clone(),
+                            options: tsp::ResolveImportOptions::default(),
+                            snapshot: params.snapshot,
+                        };
+                        
+                        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(&fresh_transaction, resolve_params) {
+                            if let Some(resolved_node) = &resolved_decl.node {
+                                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
+                                    code: ErrorCode::InvalidParams as i32,
+                                    message: "Invalid URI in resolved declaration".to_string(),
+                                    data: None,
+                                })?;
+                                
+                                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                                    // Make sure the resolved module is also loaded
+                                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
+                                    
+                                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                                        return Ok(tsp::convert_to_tsp_type(resolved_type));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If still no type found, create a generic type based on the declaration category
+                    return Ok(create_default_type_for_declaration(&params.decl));
+                };
+                
+                // Convert pyrefly Type to TSP Type format using the fresh transaction result
+                return Ok(tsp::convert_to_tsp_type(type_info));
+            }
         };
 
         // Convert declaration position to TextSize
