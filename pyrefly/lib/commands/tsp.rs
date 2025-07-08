@@ -114,12 +114,14 @@ pub struct Attribute {
 pub struct DeclarationCategory(i32);
 
 impl DeclarationCategory {
-    pub const VARIABLE: DeclarationCategory = DeclarationCategory(0);
-    pub const FUNCTION: DeclarationCategory = DeclarationCategory(1);
-    pub const CLASS: DeclarationCategory = DeclarationCategory(2);
-    pub const MODULE: DeclarationCategory = DeclarationCategory(3);
-    pub const PARAMETER: DeclarationCategory = DeclarationCategory(4);
-    pub const ATTRIBUTE: DeclarationCategory = DeclarationCategory(5);
+    pub const INTRINSIC: DeclarationCategory = DeclarationCategory(0);
+    pub const VARIABLE: DeclarationCategory = DeclarationCategory(1);
+    pub const PARAM: DeclarationCategory = DeclarationCategory(2);
+    pub const TYPE_PARAM: DeclarationCategory = DeclarationCategory(3);
+    pub const TYPE_ALIAS: DeclarationCategory = DeclarationCategory(4);
+    pub const FUNCTION: DeclarationCategory = DeclarationCategory(5);
+    pub const CLASS: DeclarationCategory = DeclarationCategory(6);
+    pub const IMPORT: DeclarationCategory = DeclarationCategory(7);
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]

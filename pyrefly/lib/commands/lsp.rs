@@ -1446,12 +1446,14 @@ impl Server {
                             SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
                             SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
                             SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAMETER, tsp::DeclarationFlags::new()),
+                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
                             _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                         }
                     },
-                    crate::state::lsp::DefinitionMetadata::Module => (tsp::DeclarationCategory::MODULE, tsp::DeclarationFlags::new()),
-                    crate::state::lsp::DefinitionMetadata::Attribute(_) => (tsp::DeclarationCategory::ATTRIBUTE, tsp::DeclarationFlags::new()),
+                    crate::state::lsp::DefinitionMetadata::Module => (tsp::DeclarationCategory::IMPORT, tsp::DeclarationFlags::new()),
+                    crate::state::lsp::DefinitionMetadata::Attribute(_) => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                     _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                 };
 
