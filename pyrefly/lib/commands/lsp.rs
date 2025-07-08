@@ -1328,6 +1328,15 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetTypeParams,
     ) -> Result<tsp::Type, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
         // Convert Node to URI and position
         let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
             code: ErrorCode::InvalidParams as i32,
@@ -1374,6 +1383,15 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolParams,
     ) -> Result<tsp::Symbol, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
         // Convert Node to URI and position
         let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
             code: ErrorCode::InvalidParams as i32,
