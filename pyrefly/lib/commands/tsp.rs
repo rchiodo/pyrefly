@@ -110,7 +110,7 @@ pub struct Attribute {
     pub flags: AttributeFlags,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct DeclarationCategory(i32);
 
 impl DeclarationCategory {
@@ -129,26 +129,44 @@ pub struct DeclarationFlags(i32);
 
 impl DeclarationFlags {
     pub const NONE: DeclarationFlags = DeclarationFlags(0);
-    pub const BUILTIN: DeclarationFlags = DeclarationFlags(1);
-    pub const IMPLICIT: DeclarationFlags = DeclarationFlags(2);
-    pub const IMPORTED: DeclarationFlags = DeclarationFlags(4);
+    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1 << 0);   // Method defined within a class
+    pub const CONSTANT: DeclarationFlags = DeclarationFlags(1 << 1);       // Variable that cannot be changed
+    pub const FINAL: DeclarationFlags = DeclarationFlags(1 << 2);          // Final variable/class
+    pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(1 << 3); // Class uses __slots__
+    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1 << 4);     // Import uses 'as' alias
+    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1 << 5);   // Import is unresolved
     
     pub fn new() -> Self {
         DeclarationFlags(0)
     }
     
-    pub fn with_builtin(mut self) -> Self {
-        self.0 |= Self::BUILTIN.0;
+    pub fn with_class_member(mut self) -> Self {
+        self.0 |= Self::CLASS_MEMBER.0;
         self
     }
     
-    pub fn with_implicit(mut self) -> Self {
-        self.0 |= Self::IMPLICIT.0;
+    pub fn with_constant(mut self) -> Self {
+        self.0 |= Self::CONSTANT.0;
         self
     }
     
-    pub fn with_imported(mut self) -> Self {
-        self.0 |= Self::IMPORTED.0;
+    pub fn with_final(mut self) -> Self {
+        self.0 |= Self::FINAL.0;
+        self
+    }
+    
+    pub fn with_defined_by_slots(mut self) -> Self {
+        self.0 |= Self::IS_DEFINED_BY_SLOTS.0;
+        self
+    }
+    
+    pub fn with_local_name(mut self) -> Self {
+        self.0 |= Self::USES_LOCAL_NAME.0;
+        self
+    }
+    
+    pub fn with_unresolved_import(mut self) -> Self {
+        self.0 |= Self::UNRESOLVED_IMPORT.0;
         self
     }
 }

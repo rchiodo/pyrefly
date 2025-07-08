@@ -1446,21 +1446,61 @@ impl Server {
                             SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
                             SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
                             SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
                             SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
                             SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
                             SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
                             _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                         }
                     },
-                    crate::state::lsp::DefinitionMetadata::Module => (tsp::DeclarationCategory::IMPORT, tsp::DeclarationFlags::new()),
-                    crate::state::lsp::DefinitionMetadata::Attribute(_) => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                    crate::state::lsp::DefinitionMetadata::Module => {
+                        // For module imports, check if type info is available to determine if resolved
+                        let mut import_flags = tsp::DeclarationFlags::new();
+                        if transaction.get_type_at(&handle, position).is_none() {
+                            // If we can't get type info for an import, it might be unresolved
+                            import_flags = import_flags.with_unresolved_import();
+                        }
+                        (tsp::DeclarationCategory::IMPORT, import_flags)
+                    },
+                    crate::state::lsp::DefinitionMetadata::Attribute(_) => {
+                        // Attributes are typically class members
+                        (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member())
+                    },
+                    crate::state::lsp::DefinitionMetadata::VariableOrAttribute(_, Some(symbol_kind)) => {
+                        match symbol_kind {
+                            SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new().with_class_member()),
+                            SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member().with_constant()),
+                            SymbolKind::Attribute => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                        }
+                    },
                     _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                 };
 
                 // Extract module name from the handle
+                let module_parts: Vec<String> = handle.module().as_str().split('.').map(|s| s.to_string()).collect();
                 let module_name = tsp::ModuleName {
                     leading_dots: 0,
-                    name_parts: handle.module().as_str().split('.').map(|s| s.to_string()).collect(),
+                    name_parts: module_parts.clone(),
+                };
+
+                // Check if this is from builtins and update category/flags accordingly
+                let (category, flags) = if module_parts.first().map_or(false, |first| first == "builtins") {
+                    match category {
+                        tsp::DeclarationCategory::FUNCTION | 
+                        tsp::DeclarationCategory::CLASS | 
+                        tsp::DeclarationCategory::VARIABLE => {
+                            (tsp::DeclarationCategory::INTRINSIC, flags)
+                        },
+                        _ => (category, flags),
+                    }
+                } else {
+                    (category, flags)
                 };
 
                 // Add the primary declaration
