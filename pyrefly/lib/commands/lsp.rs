@@ -1572,7 +1572,8 @@ impl Server {
 
         // Only resolve import declarations
         if params.decl.category != tsp::DeclarationCategory::IMPORT {
-            return Ok(None);
+            // Return the same declaration if it's not an import
+            return Ok(Some(params.decl));
         }
 
         // Parse the module name from the declaration
@@ -1589,28 +1590,79 @@ impl Server {
         // Try to find the module and resolve the imported symbol
         let pyrefly_module_name = crate::module::module_name::ModuleName::from_str(&full_module_path);
         
-        // Create a module path - we'll try to find it in the filesystem
-        // In a more complete implementation, this would need to search through
-        // the Python path to find the actual module file
-        let temp_module_path = crate::module::module_path::ModulePath::filesystem(std::path::PathBuf::from(&full_module_path));
+        // Get Python search paths from the current context
+        // We need to get the search paths from the importing file's context
+        let importing_uri = match Url::parse(&params.decl.uri) {
+            Ok(uri) => uri,
+            Err(_) => {
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            }
+        };
+
+        let importing_path = match importing_uri.to_file_path() {
+            Ok(path) => path,
+            Err(_) => {
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            }
+        };
+
+        // Get the configuration for the importing file to get proper search paths
         let config = self.state.config_finder().python_file(
-            pyrefly_module_name,
-            &temp_module_path,
+            crate::module::module_name::ModuleName::unknown(),
+            &crate::module::module_path::ModulePath::filesystem(importing_path),
         );
-        let search_paths = config.search_path();
         
-        // Try to find the module file in the search paths
+        // Get all search paths: regular search paths + site packages
+        let mut all_search_paths = Vec::new();
+        all_search_paths.extend(config.search_path());
+        all_search_paths.extend(config.site_package_path());
+        
+        // Try to find the module file in all search paths
         let mut target_module_path = None;
-        for search_path in search_paths {
-            let potential_path = search_path.join(&full_module_path.replace('.', "/")).with_extension("py");
-            if potential_path.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_path));
+        let module_path_components = full_module_path.replace('.', "/");
+        
+        for search_path in &all_search_paths {
+            // Try as a regular .py file
+            let potential_py_file = search_path.join(&module_path_components).with_extension("py");
+            if potential_py_file.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_py_file));
                 break;
             }
-            // Also try __init__.py for packages
-            let package_init = search_path.join(&full_module_path.replace('.', "/")).join("__init__.py");
-            if package_init.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(package_init));
+            
+            // Try as a package with __init__.py
+            let potential_package_init = search_path.join(&module_path_components).join("__init__.py");
+            if potential_package_init.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_package_init));
+                break;
+            }
+            
+            // Try as a .pyi stub file
+            let potential_pyi_file = search_path.join(&module_path_components).with_extension("pyi");
+            if potential_pyi_file.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_pyi_file));
+                break;
+            }
+            
+            // Try as a package with __init__.pyi stub
+            let potential_package_pyi = search_path.join(&module_path_components).join("__init__.pyi");
+            if potential_package_pyi.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_package_pyi));
                 break;
             }
         }
