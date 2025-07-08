@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 pub enum GetTypeRequest {}
 
+pub enum GetSymbolRequest {}
+
 pub enum GetPythonSearchPathsRequest {}
 
 pub enum GetSnapshotRequest {}
@@ -108,6 +110,25 @@ pub struct Attribute {
     pub flags: AttributeFlags,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Declaration {
+    pub node: Node,
+    #[serde(rename = "type")]
+    pub declaration_type: String, // e.g., "function", "class", "variable", etc.
+    pub name: String,
+    #[serde(rename = "moduleName")]
+    pub module_name: Option<ModuleName>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Symbol {
+    pub node: Node,
+    pub name: String,
+    pub decls: Vec<Declaration>,
+    #[serde(rename = "synthesizedTypes")]
+    pub synthesized_types: Vec<Type>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct AttributeFlags(i32);
 
@@ -120,6 +141,15 @@ impl AttributeFlags {
 #[derive(Serialize, Deserialize)]
 pub struct GetTypeParams {
     pub node: Node,           // Location in the file
+    pub snapshot: i32,        // Snapshot version
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct GetSymbolParams {
+    pub node: Node,           // Location in the file
+    pub name: Option<String>, // Optional symbol name
+    #[serde(rename = "skipUnreachableCode")]
+    pub skip_unreachable_code: bool, // Whether to skip unreachable code
     pub snapshot: i32,        // Snapshot version
 }
 
@@ -195,6 +225,12 @@ impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
     type Result = Type;
     const METHOD: &'static str = "typeServer/getType";
+}
+
+impl lsp_types::request::Request for GetSymbolRequest {
+    type Params = GetSymbolParams;
+    type Result = Symbol;
+    const METHOD: &'static str = "typeServer/getSymbol";
 }
 
 impl lsp_types::request::Request for GetPythonSearchPathsRequest {

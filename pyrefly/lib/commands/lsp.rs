@@ -159,9 +159,11 @@ use crate::commands::run::CommandExitStatus;
 use crate::commands::tsp;
 use crate::commands::tsp::GetPythonSearchPathsRequest;
 use crate::commands::tsp::GetSnapshotRequest;
+use crate::commands::tsp::GetSymbolRequest;
 use crate::commands::tsp::GetTypeRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
+use crate::common::symbol_kind::SymbolKind;
 use crate::config::config::ConfigFile;
 use crate::config::config::ConfigSource;
 use crate::config::environment::environment::PythonEnvironment;
@@ -982,6 +984,11 @@ impl Server {
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, Ok(self.get_type(&transaction, params))));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, self.get_symbol(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
                 }
@@ -1360,6 +1367,111 @@ impl Server {
 
         // Convert pyrefly Type to TSP Type format
         Ok(tsp::convert_to_tsp_type(type_info))
+    }
+
+    fn get_symbol(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetSymbolParams,
+    ) -> Result<tsp::Symbol, ResponseError> {
+        // Convert Node to URI and position
+        let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
+            code: ErrorCode::InvalidParams as i32,
+            message: "Invalid URI".to_string(),
+            data: None,
+        })?;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Get module info for position conversion
+        let Some(module_info) = transaction.get_module_info(&handle) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Failed to get module info".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert offset to TextSize
+        let position = TextSize::new(params.node.start as u32);
+
+        // Try to find definition at the position
+        let (symbol_name, declarations, synthesized_types) = 
+            if let Some((definition_metadata, _definition, _docstring)) = 
+                transaction.find_definition(&handle, position) {
+                
+                // Use provided name or extract from definition
+                let name = params.name.unwrap_or_else(|| {
+                    // Try to extract symbol name from the source code at the position
+                    let start = position;
+                    let end = TextSize::new(params.node.end as u32);
+                    module_info.code_at(TextRange::new(start, end)).to_string()
+                });
+
+                // Create declarations from the definition
+                let mut decls = Vec::new();
+                
+                // Add the primary declaration
+                decls.push(tsp::Declaration {
+                    node: tsp::Node {
+                        uri: params.node.uri.clone(),
+                        start: u32::from(position) as i32,
+                        end: params.node.end,
+                    },
+                    declaration_type: match definition_metadata {
+                        crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
+                            match symbol_kind {
+                                SymbolKind::Function => "function".to_string(),
+                                SymbolKind::Class => "class".to_string(),
+                                SymbolKind::Variable => "variable".to_string(),
+                                SymbolKind::Parameter => "parameter".to_string(),
+                                _ => "variable".to_string(),
+                            }
+                        },
+                        crate::state::lsp::DefinitionMetadata::Module => "module".to_string(),
+                        crate::state::lsp::DefinitionMetadata::Attribute(_) => "attribute".to_string(),
+                        _ => "unknown".to_string(),
+                    },
+                    name: name.clone(),
+                    module_name: None, // TODO: Extract module name from definition if needed
+                });
+
+                // Get synthesized types if available
+                let mut synth_types = Vec::new();
+                if let Some(type_info) = transaction.get_type_at(&handle, position) {
+                    synth_types.push(tsp::convert_to_tsp_type(type_info));
+                }
+
+                (name, decls, synth_types)
+            } else {
+                // If no definition found, try to get type information at least
+                let name = params.name.unwrap_or_else(|| {
+                    let start = position;
+                    let end = TextSize::new(params.node.end as u32);
+                    module_info.code_at(TextRange::new(start, end)).to_string()
+                });
+
+                let mut synth_types = Vec::new();
+                if let Some(type_info) = transaction.get_type_at(&handle, position) {
+                    synth_types.push(tsp::convert_to_tsp_type(type_info));
+                }
+
+                (name, Vec::new(), synth_types)
+            };
+
+        Ok(tsp::Symbol {
+            node: params.node,
+            name: symbol_name,
+            decls: declarations,
+            synthesized_types,
+        })
     }
 
     fn get_python_search_paths(&self, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
