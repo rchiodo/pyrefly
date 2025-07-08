@@ -164,6 +164,7 @@ use crate::commands::tsp::GetTypeRequest;
 use crate::commands::tsp::ResolveImportDeclarationRequest;
 use crate::commands::tsp::GetTypeOfDeclarationRequest;
 use crate::commands::tsp::GetReprRequest;
+use crate::commands::tsp::GetDocstringRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::common::symbol_kind::SymbolKind;
@@ -1080,6 +1081,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, self.get_repr(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, self.get_docstring(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2131,6 +2137,75 @@ impl Server {
         
         let type_repr = format_type_representation(&params.type_param, params.flags);
         Ok(type_repr)
+    }
+
+    fn get_docstring(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetDocstringParams,
+    ) -> Result<Option<String>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
+        // Extract the location information from the declaration
+        let Some(node) = &params.decl.node else {
+            // If there's no node information, we can't find the docstring
+            return Ok(None);
+        };
+
+        // Convert Node URI to a handle
+        let uri = Url::parse(&node.uri).map_err(|_| ResponseError {
+            code: ErrorCode::InvalidParams as i32,
+            message: "Invalid URI in declaration node".to_string(),
+            data: None,
+        })?;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+            return Ok(None);
+        };
+
+        // Get module info for position conversion
+        let Some(_module_info) = transaction.get_module_info(&handle) else {
+            // If module not loaded in transaction, try to load it
+            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+                return Ok(None);
+            };
+            
+            return self.extract_docstring_from_transaction(&fresh_transaction, &handle, node);
+        };
+
+        // Use the current transaction to find the docstring
+        self.extract_docstring_from_transaction(transaction, &handle, node)
+    }
+
+    /// Helper method to extract docstring from a transaction, reusing hover logic
+    fn extract_docstring_from_transaction(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        node: &tsp::Node,
+    ) -> Result<Option<String>, ResponseError> {
+        // Convert position to TextSize
+        let position = TextSize::new(node.start as u32);
+
+        // Try to find definition at the position - this is the same logic as hover
+        if let Some((_definition_metadata, _text_range_with_module_info, docstring)) =
+            transaction.find_definition(handle, position)
+        {
+            if let Some(docstring) = docstring {
+                return Ok(Some(docstring.as_string().trim().to_string()));
+            }
+        }
+
+        // No docstring found
+        Ok(None)
     }
 
     fn current_snapshot(&self) -> i32 {

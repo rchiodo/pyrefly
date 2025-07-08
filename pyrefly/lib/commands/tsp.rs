@@ -491,3 +491,22 @@ impl lsp_types::request::Request for GetReprRequest {
     type Result = String;
     const METHOD: &'static str = "typeServer/getRepr";
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetDocstringParams {
+    #[serde(rename = "type")]
+    pub type_param: Option<Type>,
+    pub decl: Declaration,
+    #[serde(rename = "boundObjectOrClass")]
+    pub bound_object_or_class: Option<Type>,
+    pub snapshot: i32,
+}
+
+// LSP request type for getDocstring
+pub enum GetDocstringRequest {}
+
+impl lsp_types::request::Request for GetDocstringRequest {
+    type Params = GetDocstringParams;
+    type Result = Option<String>;
+    const METHOD: &'static str = "typeServer/getDocstring";
+}
