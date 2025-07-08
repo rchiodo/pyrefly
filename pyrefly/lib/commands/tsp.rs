@@ -28,7 +28,7 @@ pub enum TypeHandle {
     Integer(i32),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct TypeCategory(i32);
 
 impl TypeCategory {
@@ -450,4 +450,44 @@ impl lsp_types::request::Request for GetTypeOfDeclarationRequest {
     type Params = GetTypeOfDeclarationParams;
     type Result = Type;
     const METHOD: &'static str = "typeServer/getTypeOfDeclaration";
+}
+
+// Flags that control how type representations are formatted
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TypeReprFlags(i32);
+
+impl TypeReprFlags {
+    pub const NONE: TypeReprFlags = TypeReprFlags(0);
+    pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1 << 0);
+    pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1 << 1);
+    pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(1 << 2);
+    
+    pub fn has_expand_type_aliases(&self) -> bool {
+        self.0 & Self::EXPAND_TYPE_ALIASES.0 != 0
+    }
+    
+    pub fn has_print_type_var_variance(&self) -> bool {
+        self.0 & Self::PRINT_TYPE_VAR_VARIANCE.0 != 0
+    }
+    
+    pub fn has_convert_to_instance_type(&self) -> bool {
+        self.0 & Self::CONVERT_TO_INSTANCE_TYPE.0 != 0
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetReprParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub flags: TypeReprFlags,
+    pub snapshot: i32,
+}
+
+// LSP request type for getRepr
+pub enum GetReprRequest {}
+
+impl lsp_types::request::Request for GetReprRequest {
+    type Params = GetReprParams;
+    type Result = String;
+    const METHOD: &'static str = "typeServer/getRepr";
 }
