@@ -1060,7 +1060,7 @@ impl Server {
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, Ok(self.get_type(&transaction, params))));
+                    self.send_response(new_response(x.id, self.get_type(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
                     let transaction =
