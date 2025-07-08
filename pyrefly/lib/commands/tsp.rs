@@ -398,3 +398,40 @@ mod tests {
         assert!(result.is_ok());
     }
 }
+
+// Request/Response types for resolveImportDeclaration
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResolveImportOptions {
+    #[serde(rename = "resolveLocalNames")]
+    pub resolve_local_names: Option<bool>,
+    #[serde(rename = "allowExternallyHiddenAccess")]
+    pub allow_externally_hidden_access: Option<bool>,
+    #[serde(rename = "skipFileNeededCheck")]
+    pub skip_file_needed_check: Option<bool>,
+}
+
+impl Default for ResolveImportOptions {
+    fn default() -> Self {
+        Self {
+            resolve_local_names: Some(false),
+            allow_externally_hidden_access: Some(false),
+            skip_file_needed_check: Some(false),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ResolveImportDeclarationParams {
+    pub decl: Declaration,
+    pub options: ResolveImportOptions,
+    pub snapshot: i32,
+}
+
+// LSP request type for resolveImportDeclaration
+pub enum ResolveImportDeclarationRequest {}
+
+impl lsp_types::request::Request for ResolveImportDeclarationRequest {
+    type Params = ResolveImportDeclarationParams;
+    type Result = Option<Declaration>;
+    const METHOD: &'static str = "typeServer/resolveImportDeclaration";
+}

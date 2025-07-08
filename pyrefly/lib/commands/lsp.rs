@@ -161,6 +161,7 @@ use crate::commands::tsp::GetPythonSearchPathsRequest;
 use crate::commands::tsp::GetSnapshotRequest;
 use crate::commands::tsp::GetSymbolRequest;
 use crate::commands::tsp::GetTypeRequest;
+use crate::commands::tsp::ResolveImportDeclarationRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::common::symbol_kind::SymbolKind;
@@ -989,6 +990,11 @@ impl Server {
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, self.get_symbol(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, self.resolve_import_declaration(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
                 }
@@ -1548,6 +1554,187 @@ impl Server {
             decls: declarations,
             synthesized_types,
         })
+    }
+
+    fn resolve_import_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::ResolveImportDeclarationParams,
+    ) -> Result<Option<tsp::Declaration>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
+        // Only resolve import declarations
+        if params.decl.category != tsp::DeclarationCategory::IMPORT {
+            return Ok(None);
+        }
+
+        // Parse the module name from the declaration
+        let module_name = &params.decl.module_name;
+        let import_name = &params.decl.name;
+
+        // Construct the full module path
+        let full_module_path = if module_name.name_parts.is_empty() {
+            return Ok(None);
+        } else {
+            module_name.name_parts.join(".")
+        };
+
+        // Try to find the module and resolve the imported symbol
+        let pyrefly_module_name = crate::module::module_name::ModuleName::from_str(&full_module_path);
+        
+        // Create a module path - we'll try to find it in the filesystem
+        // In a more complete implementation, this would need to search through
+        // the Python path to find the actual module file
+        let temp_module_path = crate::module::module_path::ModulePath::filesystem(std::path::PathBuf::from(&full_module_path));
+        let config = self.state.config_finder().python_file(
+            pyrefly_module_name,
+            &temp_module_path,
+        );
+        let search_paths = config.search_path();
+        
+        // Try to find the module file in the search paths
+        let mut target_module_path = None;
+        for search_path in search_paths {
+            let potential_path = search_path.join(&full_module_path.replace('.', "/")).with_extension("py");
+            if potential_path.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_path));
+                break;
+            }
+            // Also try __init__.py for packages
+            let package_init = search_path.join(&full_module_path.replace('.', "/")).join("__init__.py");
+            if package_init.exists() {
+                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(package_init));
+                break;
+            }
+        }
+        
+        let Some(module_path) = target_module_path else {
+            // Module file not found, return unresolved import
+            return Ok(Some(tsp::Declaration {
+                handle: params.decl.handle,
+                category: params.decl.category,
+                flags: params.decl.flags.with_unresolved_import(),
+                node: params.decl.node,
+                module_name: params.decl.module_name,
+                name: params.decl.name,
+                uri: params.decl.uri,
+            }));
+        };
+
+        // Get the configuration for this module
+        let config = self.state.config_finder().python_file(
+            pyrefly_module_name,
+            &module_path,
+        );
+
+        // Create a handle for the target module
+        let target_handle = crate::state::handle::Handle::new(
+            pyrefly_module_name,
+            module_path.clone(),
+            config.get_sys_info(),
+        );
+
+        // Try to get module info for the target module
+        let Some(target_module_info) = transaction.get_module_info(&target_handle) else {
+            // Module not found, possibly an unresolved import
+            return Ok(Some(tsp::Declaration {
+                handle: params.decl.handle,
+                category: params.decl.category,
+                flags: params.decl.flags.with_unresolved_import(),
+                node: params.decl.node,
+                module_name: params.decl.module_name,
+                name: params.decl.name,
+                uri: params.decl.uri,
+            }));
+        };
+
+        // Look for the specific symbol in the target module
+        // We'll use find_definition with a synthetic position to locate the symbol
+        // This is a simplified approach - a full implementation would need to:
+        // 1. Parse the target module's AST to find all exports
+        // 2. Check __all__ if it exists
+        // 3. Handle star imports properly
+        // 4. Respect visibility rules (private vs public symbols)
+        
+        // Try to find all identifiers in the target module that match our import name
+        // For simplicity, we'll search through the module content for the symbol definition
+        let module_content = target_module_info.contents();
+        
+        // Look for function, class, or variable definitions of the imported name
+        let patterns = [
+            format!("def {}(", import_name),      // Function definition
+            format!("class {}(", import_name),    // Class definition  
+            format!("class {}:", import_name),    // Class definition without inheritance
+            format!("{} =", import_name),         // Variable assignment
+        ];
+        
+        let mut found_position = None;
+        for pattern in &patterns {
+            if let Some(pos) = module_content.find(pattern) {
+                found_position = Some(pos);
+                break;
+            }
+        }
+
+        // If we found the symbol, try to get its definition info
+        if let Some(pos) = found_position {
+            let text_pos = TextSize::new(pos as u32);
+            if let Some((def_metadata, def_info, _docstring)) = transaction.find_definition(&target_handle, text_pos) {
+                // Create a resolved declaration with proper category and flags
+                let (category, flags) = match &def_metadata {
+                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
+                        match symbol_kind {
+                            crate::common::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            crate::common::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            crate::common::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            crate::common::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                        }
+                    },
+                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                };
+
+                return Ok(Some(tsp::Declaration {
+                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", full_module_path, import_name)),
+                    category,
+                    flags,
+                    node: Some(tsp::Node {
+                        uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()),
+                        start: u32::from(def_info.range.start()) as i32,
+                        length: u32::from(def_info.range.end() - def_info.range.start()) as i32,
+                    }),
+                    module_name: tsp::ModuleName {
+                        leading_dots: 0,
+                        name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
+                    },
+                    name: import_name.clone(),
+                    uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()),
+                }));
+            }
+        }
+
+        // Fallback: create a generic resolved declaration pointing to the target module
+        let resolved_declaration = tsp::Declaration {
+            handle: tsp::TypeHandle::String(format!("resolved_{}_{}", full_module_path, import_name)),
+            category: tsp::DeclarationCategory::VARIABLE, // Default to variable since we couldn't determine the type
+            flags: tsp::DeclarationFlags::new(),
+            node: None, // We don't have the exact location in the target module
+            module_name: tsp::ModuleName {
+                leading_dots: 0,
+                name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
+            },
+            name: import_name.clone(),
+            uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()), // Convert module path to URI
+        };
+
+        Ok(Some(resolved_declaration))
     }
 
     fn get_python_search_paths(&self, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
