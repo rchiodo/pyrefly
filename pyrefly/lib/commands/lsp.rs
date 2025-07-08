@@ -1516,19 +1516,27 @@ impl Server {
                     (category, flags)
                 };
 
+                // Create node pointing to the actual definition location
+                let definition_uri = match definition.module_info.path().as_path() {
+                    path => match Url::from_file_path(path) {
+                        Ok(url) => url.to_string(),
+                        Err(_) => params.node.uri.clone(), // Fallback to original URI
+                    },
+                };
+
                 // Add the primary declaration
                 decls.push(tsp::Declaration {
                     handle: declaration_handle,
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: params.node.uri.clone(),
-                        start: u32::from(position) as i32,
-                        length: params.node.length,
+                        uri: definition_uri.clone(),
+                        start: u32::from(definition.range.start()) as i32,
+                        length: u32::from(definition.range.end() - definition.range.start()) as i32,
                     }),
                     module_name,
                     name: name.clone(),
-                    uri: params.node.uri.clone(),
+                    uri: definition_uri,
                 });
 
                 // Get synthesized types if available
