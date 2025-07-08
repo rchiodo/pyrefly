@@ -198,8 +198,8 @@ pub struct GetSymbolParams {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetPythonSearchPathsParams {
-    #[allow(non_snake_case)]
-    pub fromUri: String,          // File URI to determine which config to use
+    #[serde(rename = "fromUri")]
+    pub from_uri: String,          // File URI to determine which config to use
     pub snapshot: i32,        // Snapshot version
 }
 
