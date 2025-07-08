@@ -1841,6 +1841,96 @@ impl Server {
         search_paths
     }
 
+    /// Load a module in a fresh transaction if it's not available in the current transaction
+    fn load_module_if_needed(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+    ) -> Option<Transaction> {
+        // Check if module is already loaded in the current transaction
+        if transaction.get_module_info(handle).is_some() {
+            return None; // Module already loaded, no need for fresh transaction
+        }
+
+        // Module not loaded, create a fresh transaction and load it
+        let mut fresh_transaction = self.state.transaction();
+        fresh_transaction.run(&[(handle.clone(), crate::state::require::Require::Everything)]);
+        
+        // Verify the module was loaded successfully
+        if fresh_transaction.get_module_info(handle).is_some() {
+            Some(fresh_transaction)
+        } else {
+            None // Module couldn't be loaded even with fresh transaction
+        }
+    }
+
+    /// Try to get type information for an import declaration by resolving the import
+    fn get_type_for_import_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
+                    code: ErrorCode::InvalidParams as i32,
+                    message: "Invalid URI in resolved declaration".to_string(),
+                    data: None,
+                })?;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(tsp::convert_to_tsp_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Try to get type information for an import declaration using a fresh transaction
+    fn get_type_for_import_declaration_with_fresh_transaction(
+        &self,
+        fresh_transaction: &mut Transaction,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(fresh_transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
+                    code: ErrorCode::InvalidParams as i32,
+                    message: "Invalid URI in resolved declaration".to_string(),
+                    data: None,
+                })?;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                    // Make sure the resolved module is also loaded
+                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
+                    
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(tsp::convert_to_tsp_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
     fn get_type_of_declaration(
         &self,
         transaction: &Transaction<'_>,
@@ -1888,16 +1978,9 @@ impl Server {
         let _module_info = match transaction.get_module_info(&handle) {
             Some(info) => info,
             None => {
-                // Module not loaded in transaction, we need to load it ourselves
-                // Create a new transaction that can load the required module
-                let mut fresh_transaction = self.state.transaction();
-                
-                // Load the target module
-                fresh_transaction.run(&[(handle.clone(), crate::state::require::Require::Everything)]);
-                
-                // Now try to get the module info from the fresh transaction
-                let Some(_info) = fresh_transaction.get_module_info(&handle) else {
-                    // If we still can't get module info after loading, fall back to default type
+                // Module not loaded in transaction, try to load it
+                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+                    // If we still can't load the module, fall back to default type
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
                 
@@ -1910,32 +1993,8 @@ impl Server {
                     
                     // For imports, we might need to resolve the imported symbol first
                     if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                        // For import declarations, try to resolve the import first
-                        // and then get the type of the resolved symbol
-                        let resolve_params = tsp::ResolveImportDeclarationParams {
-                            decl: params.decl.clone(),
-                            options: tsp::ResolveImportOptions::default(),
-                            snapshot: params.snapshot,
-                        };
-                        
-                        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(&fresh_transaction, resolve_params) {
-                            if let Some(resolved_node) = &resolved_decl.node {
-                                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
-                                    code: ErrorCode::InvalidParams as i32,
-                                    message: "Invalid URI in resolved declaration".to_string(),
-                                    data: None,
-                                })?;
-                                
-                                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
-                                    // Make sure the resolved module is also loaded
-                                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
-                                    
-                                    let resolved_position = TextSize::new(resolved_node.start as u32);
-                                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
-                                        return Ok(tsp::convert_to_tsp_type(resolved_type));
-                                    }
-                                }
-                            }
+                        if let Ok(Some(import_type)) = self.get_type_for_import_declaration_with_fresh_transaction(&mut fresh_transaction, &params) {
+                            return Ok(import_type);
                         }
                     }
                     
@@ -1957,29 +2016,8 @@ impl Server {
             
             // For imports, we might need to resolve the imported symbol first
             if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                // For import declarations, try to resolve the import first
-                // and then get the type of the resolved symbol
-                let resolve_params = tsp::ResolveImportDeclarationParams {
-                    decl: params.decl.clone(),
-                    options: tsp::ResolveImportOptions::default(),
-                    snapshot: params.snapshot,
-                };
-                
-                if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
-                    if let Some(resolved_node) = &resolved_decl.node {
-                        let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
-                            code: ErrorCode::InvalidParams as i32,
-                            message: "Invalid URI in resolved declaration".to_string(),
-                            data: None,
-                        })?;
-                        
-                        if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
-                            let resolved_position = TextSize::new(resolved_node.start as u32);
-                            if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
-                                return Ok(tsp::convert_to_tsp_type(resolved_type));
-                            }
-                        }
-                    }
+                if let Ok(Some(import_type)) = self.get_type_for_import_declaration(transaction, &params) {
+                    return Ok(import_type);
                 }
             }
             
