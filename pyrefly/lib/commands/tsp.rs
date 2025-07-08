@@ -96,7 +96,7 @@ pub struct ModuleName {
 pub struct Node {
     pub uri: String,
     pub start: i32,
-    pub end: i32,
+    pub length: i32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

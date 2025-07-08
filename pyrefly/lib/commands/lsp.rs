@@ -1411,7 +1411,7 @@ impl Server {
                 let name = params.name.unwrap_or_else(|| {
                     // Try to extract symbol name from the source code at the position
                     let start = position;
-                    let end = TextSize::new(params.node.end as u32);
+                    let end = TextSize::new((params.node.start + params.node.length) as u32);
                     module_info.code_at(TextRange::new(start, end)).to_string()
                 });
 
@@ -1451,7 +1451,7 @@ impl Server {
                     node: Some(tsp::Node {
                         uri: params.node.uri.clone(),
                         start: u32::from(position) as i32,
-                        end: params.node.end,
+                        length: params.node.length,
                     }),
                     module_name,
                     name: name.clone(),
@@ -1469,7 +1469,7 @@ impl Server {
                 // If no definition found, try to get type information at least
                 let name = params.name.unwrap_or_else(|| {
                     let start = position;
-                    let end = TextSize::new(params.node.end as u32);
+                    let end = TextSize::new((params.node.start + params.node.length) as u32);
                     module_info.code_at(TextRange::new(start, end)).to_string()
                 });
 
