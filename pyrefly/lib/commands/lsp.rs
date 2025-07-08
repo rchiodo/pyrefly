@@ -1422,7 +1422,7 @@ impl Server {
 
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
-            if let Some((definition_metadata, _definition, _docstring)) = 
+            if let Some((definition_metadata, definition, _docstring)) = 
                 transaction.find_definition(&handle, position) {
                 
                 // Use provided name or extract from definition
@@ -1482,8 +1482,9 @@ impl Server {
                     _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                 };
 
-                // Extract module name from the handle
-                let module_parts: Vec<String> = handle.module().as_str().split('.').map(|s| s.to_string()).collect();
+                // Extract module name from the definition's module (where the symbol is actually defined)
+                let definition_module_name = definition.module_info.name();
+                let module_parts: Vec<String> = definition_module_name.as_str().split('.').map(|s| s.to_string()).collect();
                 let module_name = tsp::ModuleName {
                     leading_dots: 0,
                     name_parts: module_parts.clone(),
