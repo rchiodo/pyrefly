@@ -162,6 +162,7 @@ use crate::commands::tsp::GetSnapshotRequest;
 use crate::commands::tsp::GetSymbolRequest;
 use crate::commands::tsp::GetTypeRequest;
 use crate::commands::tsp::ResolveImportDeclarationRequest;
+use crate::commands::tsp::GetTypeOfDeclarationRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::common::symbol_kind::SymbolKind;
@@ -995,6 +996,11 @@ impl Server {
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, self.resolve_import_declaration(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, self.get_type_of_declaration(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
                 }
@@ -1827,6 +1833,98 @@ impl Server {
         search_paths
     }
 
+    fn get_type_of_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetTypeOfDeclarationParams,
+    ) -> Result<tsp::Type, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
+        // Extract the location information from the declaration
+        let Some(node) = &params.decl.node else {
+            // If there's no node information, we can't get the type
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Declaration has no node information".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert Node URI to a handle
+        let uri = Url::parse(&node.uri).map_err(|_| ResponseError {
+            code: ErrorCode::InvalidParams as i32,
+            message: "Invalid URI in declaration node".to_string(),
+            data: None,
+        })?;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Get module info for position conversion
+        let Some(_module_info) = transaction.get_module_info(&handle) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Failed to get module info".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert declaration position to TextSize
+        let position = TextSize::new(node.start as u32);
+
+        // Try to get the type at the declaration's position
+        let Some(type_info) = transaction.get_type_at(&handle, position) else {
+            // If we can't get type info from the position, try alternative approaches
+            
+            // For imports, we might need to resolve the imported symbol first
+            if params.decl.category == tsp::DeclarationCategory::IMPORT {
+                // For import declarations, try to resolve the import first
+                // and then get the type of the resolved symbol
+                let resolve_params = tsp::ResolveImportDeclarationParams {
+                    decl: params.decl.clone(),
+                    options: tsp::ResolveImportOptions::default(),
+                    snapshot: params.snapshot,
+                };
+                
+                if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
+                    if let Some(resolved_node) = &resolved_decl.node {
+                        let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
+                            code: ErrorCode::InvalidParams as i32,
+                            message: "Invalid URI in resolved declaration".to_string(),
+                            data: None,
+                        })?;
+                        
+                        if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                            let resolved_position = TextSize::new(resolved_node.start as u32);
+                            if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                                return Ok(tsp::convert_to_tsp_type(resolved_type));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // If still no type found, create a generic type based on the declaration category
+            return Ok(create_default_type_for_declaration(&params.decl));
+        };
+
+        // Convert pyrefly Type to TSP Type format
+        Ok(tsp::convert_to_tsp_type(type_info))
+    }
+
     fn current_snapshot(&self) -> i32 {
         self.state.current_snapshot()
     }
@@ -2524,6 +2622,28 @@ impl Server {
             self.state.increment_snapshot(); // Increment snapshot on python path change
         }
         self.invalidate_config();
+    }
+}
+
+// Helper function to create a default type when we can't determine the actual type
+fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
+    let (category, flags) = match decl.category {
+        tsp::DeclarationCategory::FUNCTION => (tsp::TypeCategory::FUNCTION, tsp::TypeFlags::new().with_callable()),
+        tsp::DeclarationCategory::CLASS => (tsp::TypeCategory::CLASS, tsp::TypeFlags::new().with_instantiable()),
+        tsp::DeclarationCategory::IMPORT => (tsp::TypeCategory::MODULE, tsp::TypeFlags::new()),
+        tsp::DeclarationCategory::TYPE_ALIAS => (tsp::TypeCategory::ANY, tsp::TypeFlags::new().with_from_alias()),
+        tsp::DeclarationCategory::TYPE_PARAM => (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new()),
+        _ => (tsp::TypeCategory::ANY, tsp::TypeFlags::new()),
+    };
+
+    tsp::Type {
+        handle: decl.handle.clone(),
+        category,
+        flags,
+        module_name: Some(decl.module_name.clone()),
+        name: decl.name.clone(),
+        category_flags: 0,
+        decl: None,
     }
 }
 

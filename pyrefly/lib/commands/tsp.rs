@@ -435,3 +435,19 @@ impl lsp_types::request::Request for ResolveImportDeclarationRequest {
     type Result = Option<Declaration>;
     const METHOD: &'static str = "typeServer/resolveImportDeclaration";
 }
+
+// Request/Response types for getTypeOfDeclaration
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetTypeOfDeclarationParams {
+    pub decl: Declaration,
+    pub snapshot: i32,
+}
+
+// LSP request type for getTypeOfDeclaration
+pub enum GetTypeOfDeclarationRequest {}
+
+impl lsp_types::request::Request for GetTypeOfDeclarationRequest {
+    type Params = GetTypeOfDeclarationParams;
+    type Result = Type;
+    const METHOD: &'static str = "typeServer/getTypeOfDeclaration";
+}
