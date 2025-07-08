@@ -1418,29 +1418,44 @@ impl Server {
                 // Create declarations from the definition
                 let mut decls = Vec::new();
                 
+                // Generate a unique handle for this declaration
+                let declaration_handle = tsp::TypeHandle::String(format!("decl_{:p}_{}", &definition_metadata as *const _, u32::from(position)));
+                
+                // Determine the category and flags based on definition metadata
+                let (category, flags) = match &definition_metadata {
+                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
+                        match symbol_kind {
+                            SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAMETER, tsp::DeclarationFlags::new()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                        }
+                    },
+                    crate::state::lsp::DefinitionMetadata::Module => (tsp::DeclarationCategory::MODULE, tsp::DeclarationFlags::new()),
+                    crate::state::lsp::DefinitionMetadata::Attribute(_) => (tsp::DeclarationCategory::ATTRIBUTE, tsp::DeclarationFlags::new()),
+                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                };
+
+                // Extract module name from the handle
+                let module_name = tsp::ModuleName {
+                    leading_dots: 0,
+                    name_parts: handle.module().as_str().split('.').map(|s| s.to_string()).collect(),
+                };
+
                 // Add the primary declaration
                 decls.push(tsp::Declaration {
-                    node: tsp::Node {
+                    handle: declaration_handle,
+                    category,
+                    flags,
+                    node: Some(tsp::Node {
                         uri: params.node.uri.clone(),
                         start: u32::from(position) as i32,
                         end: params.node.end,
-                    },
-                    declaration_type: match definition_metadata {
-                        crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-                            match symbol_kind {
-                                SymbolKind::Function => "function".to_string(),
-                                SymbolKind::Class => "class".to_string(),
-                                SymbolKind::Variable => "variable".to_string(),
-                                SymbolKind::Parameter => "parameter".to_string(),
-                                _ => "variable".to_string(),
-                            }
-                        },
-                        crate::state::lsp::DefinitionMetadata::Module => "module".to_string(),
-                        crate::state::lsp::DefinitionMetadata::Attribute(_) => "attribute".to_string(),
-                        _ => "unknown".to_string(),
-                    },
+                    }),
+                    module_name,
                     name: name.clone(),
-                    module_name: None, // TODO: Extract module name from definition if needed
+                    uri: params.node.uri.clone(),
                 });
 
                 // Get synthesized types if available

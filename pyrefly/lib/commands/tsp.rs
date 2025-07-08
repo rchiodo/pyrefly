@@ -110,14 +110,57 @@ pub struct Attribute {
     pub flags: AttributeFlags,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct DeclarationCategory(i32);
+
+impl DeclarationCategory {
+    pub const VARIABLE: DeclarationCategory = DeclarationCategory(0);
+    pub const FUNCTION: DeclarationCategory = DeclarationCategory(1);
+    pub const CLASS: DeclarationCategory = DeclarationCategory(2);
+    pub const MODULE: DeclarationCategory = DeclarationCategory(3);
+    pub const PARAMETER: DeclarationCategory = DeclarationCategory(4);
+    pub const ATTRIBUTE: DeclarationCategory = DeclarationCategory(5);
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct DeclarationFlags(i32);
+
+impl DeclarationFlags {
+    pub const NONE: DeclarationFlags = DeclarationFlags(0);
+    pub const BUILTIN: DeclarationFlags = DeclarationFlags(1);
+    pub const IMPLICIT: DeclarationFlags = DeclarationFlags(2);
+    pub const IMPORTED: DeclarationFlags = DeclarationFlags(4);
+    
+    pub fn new() -> Self {
+        DeclarationFlags(0)
+    }
+    
+    pub fn with_builtin(mut self) -> Self {
+        self.0 |= Self::BUILTIN.0;
+        self
+    }
+    
+    pub fn with_implicit(mut self) -> Self {
+        self.0 |= Self::IMPLICIT.0;
+        self
+    }
+    
+    pub fn with_imported(mut self) -> Self {
+        self.0 |= Self::IMPORTED.0;
+        self
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Declaration {
-    pub node: Node,
-    #[serde(rename = "type")]
-    pub declaration_type: String, // e.g., "function", "class", "variable", etc.
-    pub name: String,
+    pub handle: TypeHandle, // Unique identifier for the declaration
+    pub category: DeclarationCategory, // Category of the symbol
+    pub flags: DeclarationFlags, // Extra information about the declaration
+    pub node: Option<Node>, // Parse node associated with the declaration
     #[serde(rename = "moduleName")]
-    pub module_name: Option<ModuleName>,
+    pub module_name: ModuleName, // Dot-separated import name for the file
+    pub name: String, // Symbol name as the user sees it
+    pub uri: String, // File that contains the declaration
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
