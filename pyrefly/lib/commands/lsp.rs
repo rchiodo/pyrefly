@@ -1605,13 +1605,17 @@ impl Server {
                     (category, flags)
                 };
 
-                // Create node pointing to the actual definition location
-                let definition_uri = match definition.module_info.path().as_path() {
-                    path => match Url::from_file_path(path) {
-                        Ok(url) => url.to_string(),
-                        Err(_) => params.node.uri.clone(), // Fallback to original URI
-                    },
+                // Create node pointing to the actual definition location using the same logic as goto_definition
+                let definition_uri = match &self.initialize_params.initialization_options {
+                    Some(serde_json::Value::Object(map))
+                        if (map.get("supportContentsAsUri")
+                            == Some(&serde_json::Value::Bool(true))) =>
+                    {
+                        module_info_to_uri_with_document_content_provider(&definition.module_info)
+                    }
+                    Some(_) | None => module_info_to_uri(&definition.module_info),
                 };
+                let definition_uri_str = definition_uri.map(|uri| uri.to_string()).unwrap_or_else(|| params.node.uri.clone());
 
                 // Add the primary declaration
                 decls.push(tsp::Declaration {
@@ -1619,13 +1623,13 @@ impl Server {
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: definition_uri.clone(),
+                        uri: definition_uri_str.clone(),
                         start: u32::from(definition.range.start()) as i32,
                         length: u32::from(definition.range.end() - definition.range.start()) as i32,
                     }),
                     module_name,
                     name: name.clone(),
-                    uri: definition_uri,
+                    uri: definition_uri_str,
                 });
 
                 // Get synthesized types if available
