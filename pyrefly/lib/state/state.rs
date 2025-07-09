@@ -30,6 +30,13 @@ use std::time::Instant;
 
 use dupe::Dupe;
 use enum_iterator::Sequence;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
+use itertools::Itertools;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModulePathDetails;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::lock::Mutex;
@@ -59,15 +66,16 @@ use vec1::vec1;
 use crate::alt::answers::AnswerEntry;
 use crate::alt::answers::AnswerTable;
 use crate::alt::answers::Answers;
-use crate::alt::answers::AnswersSolver;
-use crate::alt::answers::CalcStack;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers::Solutions;
 use crate::alt::answers::SolutionsEntry;
 use crate::alt::answers::SolutionsTable;
+use crate::alt::answers_solver::AnswersSolver;
+use crate::alt::answers_solver::ThreadState;
 use crate::alt::traits::Solve;
 use crate::binding::binding::Exported;
 use crate::binding::binding::KeyExport;
+use crate::binding::binding::KeyTParams;
 use crate::binding::binding::Keyed;
 use crate::binding::bindings::BindingEntry;
 use crate::binding::bindings::BindingTable;
@@ -79,14 +87,12 @@ use crate::config::finder::ConfigFinder;
 use crate::error::collector::ErrorCollector;
 use crate::error::kind::ErrorKind;
 use crate::export::definitions::DocString;
+use crate::export::exports::Export;
 use crate::export::exports::ExportLocation;
 use crate::export::exports::Exports;
 use crate::export::exports::LookupExport;
 use crate::module::bundled::BundledTypeshed;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::module::module_path::ModulePathDetails;
 use crate::state::dirty::Dirty;
 use crate::state::epoch::Epoch;
 use crate::state::epoch::Epochs;
@@ -105,9 +111,9 @@ use crate::state::steps::Context;
 use crate::state::steps::Step;
 use crate::state::steps::Steps;
 use crate::state::subscriber::Subscriber;
-use crate::sys_info::SysInfo;
 use crate::types::class::Class;
 use crate::types::stdlib::Stdlib;
+use crate::types::types::TParams;
 use crate::types::types::Type;
 
 /// `ModuleData` is a snapshot of `ArcId<ModuleDataMut>` in the main state.
@@ -355,42 +361,105 @@ impl<'a> Transaction<'a> {
         Errors::new(res)
     }
 
-    pub fn search_exports(&self, name: &str) -> Vec<Handle> {
-        let mut handles = Vec::new();
-        for (handle, module_data) in self.data.updated_modules.iter_unordered() {
-            if let Some(export) = self
-                .lookup_export(module_data)
-                .exports(&self.lookup(module_data.dupe()))
-                .get(&Name::new(name))
-            {
+    pub fn search_exports_exact(&self, name: &str) -> Vec<Handle> {
+        self.search_exports_helper(|handle, exports| {
+            if let Some(export) = exports.get(&Name::new(name)) {
                 match export {
-                    ExportLocation::ThisModule(_) => handles.push(handle.dupe()),
+                    ExportLocation::ThisModule(_) => vec![handle.dupe()],
                     // Re-exported modules like `foo` in `from from_module import foo`
                     // should likely be ignored in autoimport suggestions
                     // because the original export in from_module will show it.
                     // The current strategy will prevent intended re-exports from showing up in
                     // result list, but it's better than showing thousands of likely bad results.
-                    ExportLocation::OtherModule(_) => {}
+                    ExportLocation::OtherModule(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
+            }
+        })
+    }
+
+    pub fn search_exports_fuzzy(&self, pattern: &str) -> Vec<(Handle, String, Export)> {
+        self.search_exports_helper(|handle, exports| {
+            let matcher = SkimMatcherV2::default().smart_case();
+            let mut results = Vec::new();
+            for (name, location) in exports.iter() {
+                let name = name.as_str();
+                if let Some(score) = matcher.fuzzy_match(name, pattern) {
+                    match location {
+                        ExportLocation::OtherModule(_) => {}
+                        ExportLocation::ThisModule(export) => {
+                            results.push((score, handle.dupe(), name.to_owned(), export.clone()));
+                        }
+                    }
                 }
             }
-        }
-        for (handle, module_data) in self.readable.modules.iter() {
-            if self.data.updated_modules.get(handle).is_some() {
-                continue;
+            results
+        })
+        .into_iter()
+        .sorted_by_key(|(score, _, _, _)| *score)
+        .rev()
+        .map(|(_, handle, name, export)| (handle, name, export))
+        .collect()
+    }
+
+    fn search_exports_helper<V: Send + Sync>(
+        &self,
+        searcher: impl Fn(&Handle, Arc<SmallMap<Name, ExportLocation>>) -> Vec<V> + Sync,
+    ) -> Vec<V> {
+        let all_results = Mutex::new(Vec::new());
+        {
+            let tasks = TaskHeap::new();
+            // It's very fast to find whether a module contains an export, but the cost will
+            // add up for a large codebase. Therefore, we will parallelize the work. The work is
+            // distributed in the task heap above.
+            // To avoid too much lock contention, we chunk the work into size of 1000 modules.
+            for chunk in &self.data.updated_modules.iter_unordered().chunks(1000) {
+                tasks.push((), chunk.collect_vec(), false);
             }
-            let module_data = ArcId::new(module_data.clone_for_mutation());
-            if let Some(export) = self
-                .lookup_export(&module_data)
-                .exports(&self.lookup(module_data))
-                .get(&Name::new(name))
+            self.data.state.threads.spawn_many(|| {
+                tasks.work_without_cancellation(|_, modules| {
+                    let mut thread_local_results = Vec::new();
+                    for (handle, module_data) in modules {
+                        let exports = self
+                            .lookup_export(module_data)
+                            .exports(&self.lookup(module_data.dupe()));
+                        thread_local_results.extend(searcher(handle, exports));
+                    }
+                    if !thread_local_results.is_empty() {
+                        all_results.lock().push(thread_local_results);
+                    }
+                });
+            });
+        }
+        {
+            let tasks = TaskHeap::new();
+            for chunk in &self
+                .readable
+                .modules
+                .iter()
+                .filter(|(handle, _)| self.data.updated_modules.get(handle).is_none())
+                .chunks(1000)
             {
-                match export {
-                    ExportLocation::ThisModule(_) => handles.push(handle.dupe()),
-                    ExportLocation::OtherModule(_) => {}
-                }
+                tasks.push((), chunk.collect_vec(), false);
             }
+            self.data.state.threads.spawn_many(|| {
+                tasks.work_without_cancellation(|_, modules| {
+                    let mut thread_local_results = Vec::new();
+                    for (handle, module_data) in modules {
+                        let module_data = ArcId::new(module_data.clone_for_mutation());
+                        let exports = self
+                            .lookup_export(&module_data)
+                            .exports(&self.lookup(module_data));
+                        thread_local_results.extend(searcher(handle, exports));
+                    }
+                    if !thread_local_results.is_empty() {
+                        all_results.lock().push(thread_local_results);
+                    }
+                });
+            });
         }
-        handles
+        all_results.into_inner().into_iter().flatten().collect()
     }
 
     pub fn get_config_errors(&self) -> Vec<ConfigError> {
@@ -848,7 +917,12 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn lookup_stdlib(&self, handle: &Handle, name: &Name, stack: &CalcStack) -> Option<Class> {
+    fn lookup_stdlib(
+        &self,
+        handle: &Handle,
+        name: &Name,
+        thread_state: &ThreadState,
+    ) -> Option<(Class, Arc<TParams>)> {
         let module_data = self.get_module(handle);
         if !self
             .lookup_export(&module_data)
@@ -867,8 +941,8 @@ impl<'a> Transaction<'a> {
             return None;
         }
 
-        let t = self.lookup_answer(module_data.dupe(), &KeyExport(name.clone()), stack);
-        match t.arc_clone() {
+        let t = self.lookup_answer(module_data.dupe(), &KeyExport(name.clone()), thread_state);
+        let class = match t.arc_clone() {
             Type::ClassDef(cls) => Some(cls),
             ty => {
                 self.add_error(
@@ -882,7 +956,16 @@ impl<'a> Transaction<'a> {
                 );
                 None
             }
-        }
+        };
+        class.map(|class| {
+            let tparams = match class.precomputed_tparams() {
+                Some(tparams) => tparams.dupe(),
+                None => {
+                    self.lookup_answer(module_data.dupe(), &KeyTParams(class.index()), thread_state)
+                }
+            };
+            (class, tparams)
+        })
     }
 
     fn lookup_export(&self, module_data: &ArcId<ModuleDataMut>) -> Exports {
@@ -895,7 +978,7 @@ impl<'a> Transaction<'a> {
         &'b self,
         module_data: ArcId<ModuleDataMut>,
         key: &K,
-        stack: &CalcStack,
+        thread_state: &ThreadState,
     ) -> Arc<<K as Keyed>::Answer>
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
@@ -924,7 +1007,7 @@ impl<'a> Transaction<'a> {
                     &stdlib,
                     &self.data.state.uniques,
                     key,
-                    stack,
+                    thread_state,
                 );
             }
             drop(lock);
@@ -958,14 +1041,14 @@ impl<'a> Transaction<'a> {
 
     fn compute_stdlib(&mut self, sys_infos: SmallSet<SysInfo>) {
         let loader = self.get_cached_loader(&BundledTypeshed::config());
-        let stack = CalcStack::new();
+        let thread_state = ThreadState::new();
         for k in sys_infos.into_iter_hashed() {
             self.data
                 .stdlib
                 .insert_hashed(k.to_owned(), Arc::new(Stdlib::for_bootstrapping()));
             let v = Arc::new(Stdlib::new(k.version(), &|module, name| {
                 let path = loader.find_import(module, None).ok()?;
-                self.lookup_stdlib(&Handle::new(module, path, (*k).dupe()), name, &stack)
+                self.lookup_stdlib(&Handle::new(module, path, (*k).dupe()), name, &thread_state)
             }));
             self.data.stdlib.insert_hashed(k, v);
         }
@@ -1128,7 +1211,7 @@ impl<'a> Transaction<'a> {
         let (bindings, answers) = steps.answers.as_deref().as_ref()?;
         let stdlib = self.get_stdlib(handle);
         let recurser = Recurser::new();
-        let stack = CalcStack::new();
+        let thread_state = ThreadState::new();
         let solver = AnswersSolver::new(
             &lookup,
             answers,
@@ -1138,7 +1221,7 @@ impl<'a> Transaction<'a> {
             &self.data.state.uniques,
             &recurser,
             &stdlib,
-            &stack,
+            &thread_state,
         );
         let result = solve(solver);
         Some(result)
@@ -1434,7 +1517,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         module: ModuleName,
         path: Option<&ModulePath>,
         k: &K,
-        stack: &CalcStack,
+        thread_state: &ThreadState,
     ) -> Arc<K::Answer>
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
@@ -1444,7 +1527,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         // The unwrap is safe because we must have said there were no exports,
         // so no one can be trying to get at them
         let module_data = self.get_module(module, path).unwrap();
-        self.transaction.lookup_answer(module_data, k, stack)
+        self.transaction.lookup_answer(module_data, k, thread_state)
     }
 }
 

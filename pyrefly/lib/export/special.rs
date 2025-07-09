@@ -6,9 +6,8 @@
  */
 
 use dupe::Dupe;
+use pyrefly_python::module_name::ModuleName;
 use ruff_python_ast::name::Name;
-
-use crate::module::module_name::ModuleName;
 
 /// These are names that are exported from the stdlib, but which take on
 /// a more keyword-like quality. E.g. `x: TypeAlias = ...` meaningfully
@@ -38,6 +37,7 @@ pub enum SpecialExport {
     OsExit,
     Len,
     NoTypeCheck,
+    Overload,
 }
 
 impl SpecialExport {
@@ -66,6 +66,7 @@ impl SpecialExport {
             "_exit" => Some(Self::OsExit),
             "len" => Some(Self::Len),
             "no_type_check" => Some(Self::NoTypeCheck),
+            "overload" => Some(Self::Overload),
             _ => None,
         }
     }
@@ -85,6 +86,7 @@ impl SpecialExport {
             | Self::Optional
             | Self::AssertType
             | Self::NoTypeCheck
+            | Self::Overload
             | Self::Cast => {
                 matches!(m.as_str(), "typing" | "typing_extensions")
             }

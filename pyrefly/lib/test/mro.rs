@@ -9,23 +9,23 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 
-use crate::alt::types::class_metadata::ClassMetadata;
-use crate::binding::binding::KeyClassMetadata;
+use crate::alt::types::class_metadata::ClassMro;
+use crate::binding::binding::KeyClassMro;
 use crate::state::handle::Handle;
 use crate::state::state::State;
 use crate::test::util::get_class;
 use crate::test::util::mk_state;
 use crate::testcase;
 
-pub fn get_class_metadata(name: &str, handle: &Handle, state: &State) -> Arc<ClassMetadata> {
+pub fn get_class_mro(name: &str, handle: &Handle, state: &State) -> Arc<ClassMro> {
     let solutions = state.transaction().get_solutions(handle).unwrap();
 
     let cls = get_class(name, handle, state);
-    solutions.get(&KeyClassMetadata(cls.index())).dupe()
+    solutions.get(&KeyClassMro(cls.index())).dupe()
 }
 
 fn get_mro_names(name: &str, handle: &Handle, state: &State) -> Vec<String> {
-    get_class_metadata(name, handle, state)
+    get_class_mro(name, handle, state)
         .ancestors_no_object()
         .iter()
         .map(|cls| cls.name().as_str().to_owned())
@@ -166,7 +166,7 @@ class D(C): pass  # we will still record the MRO up until a linearization failur
     assert_has_error(
         &handle,
         &driver,
-        "Class `main.C` has a nonlinearizable inheritance chain detected at `main.A`",
+        "Class `C` has a nonlinearizable inheritance chain detected at `A`",
         "No error for nonlinearizable inheritance chain",
     );
     let mro_c = get_mro_names("C", &handle, &driver);
@@ -187,20 +187,20 @@ class C(B): pass
     assert_has_error(
         &handle,
         &state,
-        "Class `main.A` inheriting from `main.C` creates a cycle",
-        "No error for cyclical inheritance chain at `main.A`",
+        "Class `A` inheriting from `C` creates a cycle",
+        "No error for cyclical inheritance chain at `A`",
     );
     assert_has_error(
         &handle,
         &state,
-        "Class `main.B` inheriting from `main.A` creates a cycle",
-        "No error for cyclical inheritance chain at `main.B`",
+        "Class `B` inheriting from `A` creates a cycle",
+        "No error for cyclical inheritance chain at `B`",
     );
     assert_has_error(
         &handle,
         &state,
-        "Class `main.C` inheriting from `main.B` creates a cycle",
-        "No error for cyclical inheritance chain at `main.C`",
+        "Class `C` inheriting from `B` creates a cycle",
+        "No error for cyclical inheritance chain at `C`",
     );
     // The current logic is essentially correct but has bad UX because we only actually
     // error where we detect the cycle, other classes silently produce an MRO right up

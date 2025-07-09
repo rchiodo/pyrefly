@@ -8,6 +8,7 @@
 use num_traits::ToPrimitive;
 use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::Arguments;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::ExprStringLiteral;
@@ -20,18 +21,18 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::attr::Narrowable;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::binding::narrow::AtomicNarrowOp;
-use crate::binding::narrow::FacetChain;
-use crate::binding::narrow::FacetKind;
 use crate::binding::narrow::NarrowOp;
 use crate::error::collector::ErrorCollector;
 use crate::types::callable::FunctionKind;
 use crate::types::class::ClassType;
+use crate::types::facet::FacetChain;
+use crate::types::facet::FacetKind;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
@@ -60,8 +61,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.get_enum_members(cls.class_object())
                 .into_iter()
                 .filter_map(|f| {
-                    if let Lit::Enum(box (_, member_name, _)) = &f
-                        && *member_name == *name
+                    if let Lit::Enum(lit_enum) = &f
+                        && &lit_enum.member == name
                     {
                         None
                     } else {
@@ -151,51 +152,91 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     fn narrow_isinstance(&self, left: &Type, right: &Type) -> Type {
-        if let Some(ts) = right.as_decomposed_tuple_or_union(self.stdlib) {
-            self.unions(ts.iter().map(|t| self.narrow_isinstance(left, t)).collect())
-        } else if let Some(right) = self.unwrap_class_object_silently(right) {
-            self.intersect_with_fallback(left, &right, || right.clone())
-        } else {
-            left.clone()
+        let mut res = Vec::new();
+        for right in self.as_class_info(right.clone()) {
+            if let Some(right) = self.unwrap_class_object_silently(&right) {
+                res.push(self.intersect_with_fallback(left, &right, || right.clone()))
+            } else {
+                res.push(left.clone());
+            }
         }
+        self.unions(res)
     }
 
     fn narrow_is_not_instance(&self, left: &Type, right: &Type) -> Type {
-        if let Some(ts) = right.as_decomposed_tuple_or_union(self.stdlib) {
-            self.intersects(&ts.map(|t| self.narrow_is_not_instance(left, t)))
-        } else if let Some(right) = self.unwrap_class_object_silently(right) {
-            self.subtract(left, &right)
-        } else {
-            left.clone()
+        let mut res = Vec::new();
+        for right in self.as_class_info(right.clone()) {
+            if let Some(right) = self.unwrap_class_object_silently(&right) {
+                res.push(self.subtract(left, &right))
+            } else {
+                res.push(left.clone())
+            }
         }
+        self.intersects(&res)
     }
 
     fn narrow_issubclass(&self, left: &Type, right: &Type, range: TextRange) -> Type {
-        if let Some(ts) = right.as_decomposed_tuple_or_union(self.stdlib) {
-            self.unions(
-                ts.iter()
-                    .map(|t| self.narrow_issubclass(left, t, range))
-                    .collect(),
-            )
-        } else if let Some(left) = self.untype_opt(left.clone(), range)
-            && let Some(right) = self.unwrap_class_object_silently(right)
-        {
-            Type::type_form(self.intersect(&left, &right))
-        } else {
-            left.clone()
+        let mut res = Vec::new();
+        for right in self.as_class_info(right.clone()) {
+            if let Some(left) = self.untype_opt(left.clone(), range)
+                && let Some(right) = self.unwrap_class_object_silently(&right)
+            {
+                res.push(Type::type_form(self.intersect(&left, &right)))
+            } else {
+                res.push(left.clone())
+            }
         }
+        self.unions(res)
     }
 
     fn narrow_is_not_subclass(&self, left: &Type, right: &Type, range: TextRange) -> Type {
-        if let Some(ts) = right.as_decomposed_tuple_or_union(self.stdlib) {
-            self.intersects(&ts.map(|t| self.narrow_is_not_subclass(left, t, range)))
-        } else if let Some(left) = self.untype_opt(left.clone(), range)
-            && let Some(right) = self.unwrap_class_object_silently(right)
-        {
-            Type::type_form(self.subtract(&left, &right))
-        } else {
-            left.clone()
+        let mut res = Vec::new();
+        for right in self.as_class_info(right.clone()) {
+            if let Some(left) = self.untype_opt(left.clone(), range)
+                && let Some(right) = self.unwrap_class_object_silently(&right)
+            {
+                res.push(Type::type_form(self.subtract(&left, &right)))
+            } else {
+                res.push(left.clone())
+            }
         }
+        self.intersects(&res)
+    }
+
+    fn narrow_length_greater(&self, ty: &Type, len: usize) -> Type {
+        self.distribute_over_union(ty, |ty| match ty {
+            Type::Tuple(Tuple::Concrete(elts)) if elts.len() <= len => Type::never(),
+            Type::ClassType(class)
+                if let Some(elements) = self.named_tuple_element_types(class)
+                    && elements.len() <= len =>
+            {
+                Type::never()
+            }
+            _ => ty.clone(),
+        })
+    }
+
+    fn narrow_length_less_than(&self, ty: &Type, len: usize) -> Type {
+        // TODO: simplify some tuple forms
+        // - unbounded tuples can be narrowed to empty tuple if len==1
+        // - unpacked tuples can be narrowed to concrete prefix+suffix if len==prefix.len()+suffix.len()+1
+        // this needs to be done in conjunction with https://github.com/facebook/pyrefly/issues/273
+        // otherwise the narrowed forms make weird unions when used with control flow
+        self.distribute_over_union(ty, |ty| match ty {
+            Type::Tuple(Tuple::Concrete(elts)) if elts.len() >= len => Type::never(),
+            Type::Tuple(Tuple::Unpacked(box (prefix, _, suffix)))
+                if prefix.len() + suffix.len() >= len =>
+            {
+                Type::never()
+            }
+            Type::ClassType(class)
+                if let Some(elements) = self.named_tuple_element_types(class)
+                    && elements.len() >= len =>
+            {
+                Type::never()
+            }
+            _ => ty.clone(),
+        })
     }
 
     pub fn atomic_narrow(
@@ -274,6 +315,52 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     _ => ty.clone(),
                 })
             }
+            AtomicNarrowOp::LenGt(v) => {
+                let right = self.expr_infer(v, errors);
+                let Type::Literal(Lit::Int(lit)) = &right else {
+                    return ty.clone();
+                };
+                let Some(len) = lit.as_i64().and_then(|i| i.to_usize()) else {
+                    return ty.clone();
+                };
+                self.narrow_length_greater(ty, len)
+            }
+            AtomicNarrowOp::LenGte(v) => {
+                let right = self.expr_infer(v, errors);
+                let Type::Literal(Lit::Int(lit)) = &right else {
+                    return ty.clone();
+                };
+                let Some(len) = lit.as_i64().and_then(|i| i.to_usize()) else {
+                    return ty.clone();
+                };
+                if len == 0 {
+                    return ty.clone();
+                }
+                self.narrow_length_greater(ty, len - 1)
+            }
+            AtomicNarrowOp::LenLt(v) => {
+                let right = self.expr_infer(v, errors);
+                let Type::Literal(Lit::Int(lit)) = &right else {
+                    return ty.clone();
+                };
+                let Some(len) = lit.as_i64().and_then(|i| i.to_usize()) else {
+                    return Type::never();
+                };
+                if len == 0 {
+                    return Type::never();
+                }
+                self.narrow_length_less_than(ty, len)
+            }
+            AtomicNarrowOp::LenLte(v) => {
+                let right = self.expr_infer(v, errors);
+                let Type::Literal(Lit::Int(lit)) = &right else {
+                    return ty.clone();
+                };
+                let Some(len) = lit.as_i64().and_then(|i| i.to_usize()) else {
+                    return ty.clone();
+                };
+                self.narrow_length_less_than(ty, len + 1)
+            }
             AtomicNarrowOp::In(v) => {
                 let exprs = match v {
                     Expr::List(list) => Some(list.elts.clone()),
@@ -318,7 +405,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let mut result = t.clone();
                     for right in &literal_types {
                         match (t, right) {
-                            (_, _) if *t == *right => {
+                            (_, _) if t == right => {
                                 result = Type::never();
                             }
                             (Type::ClassType(cls), Type::Literal(Lit::Bool(b)))
@@ -326,11 +413,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             {
                                 result = Type::Literal(Lit::Bool(!b));
                             }
-                            (
-                                Type::ClassType(left_cls),
-                                Type::Literal(Lit::Enum(box (right_cls, name, _))),
-                            ) if *left_cls == *right_cls => {
-                                result = self.subtract_enum_member(left_cls, name);
+                            (Type::ClassType(left_cls), Type::Literal(Lit::Enum(right)))
+                                if left_cls == &right.class =>
+                            {
+                                result = self.subtract_enum_member(left_cls, &right.member);
                             }
                             _ => {}
                         }
@@ -358,10 +444,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         {
                             Type::Literal(Lit::Bool(!b))
                         }
-                        (
-                            Type::ClassType(left_cls),
-                            Type::Literal(Lit::Enum(box (right_cls, name, _))),
-                        ) if *left_cls == *right_cls => self.subtract_enum_member(left_cls, name),
+                        (Type::ClassType(left_cls), Type::Literal(Lit::Enum(right)))
+                            if left_cls == &right.class =>
+                        {
+                            self.subtract_enum_member(left_cls, &right.member)
+                        }
                         _ => t.clone(),
                     }
                 })
@@ -446,10 +533,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         {
                             Type::Literal(Lit::Bool(!b))
                         }
-                        (
-                            Type::ClassType(left_cls),
-                            Type::Literal(Lit::Enum(box (right_cls, name, _))),
-                        ) if *left_cls == *right_cls => self.subtract_enum_member(left_cls, name),
+                        (Type::ClassType(left_cls), Type::Literal(Lit::Enum(right)))
+                            if left_cls == &right.class =>
+                        {
+                            self.subtract_enum_member(left_cls, &right.member)
+                        }
                         _ => t.clone(),
                     })
                 } else {
@@ -528,6 +616,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // We synthesize a slice expression for the subscript here
                 // The range doesn't matter, since narrowing logic swallows type errors
                 let synthesized_slice = Expr::NumberLiteral(ExprNumberLiteral {
+                    node_index: AtomicNodeIndex::dummy(),
                     range,
                     value: Number::Int(Int::from(*idx as u64)),
                 });
@@ -557,8 +646,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // We synthesize a slice expression for the subscript here
                 // The range doesn't matter, since narrowing logic swallows type errors
                 let synthesized_slice = Expr::StringLiteral(ExprStringLiteral {
+                    node_index: AtomicNodeIndex::dummy(),
                     range,
                     value: StringLiteralValue::single(StringLiteral {
+                        node_index: AtomicNodeIndex::dummy(),
                         range,
                         value: key.clone().into_boxed_str(),
                         flags: StringLiteralFlags::empty(),

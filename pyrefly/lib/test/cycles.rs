@@ -21,9 +21,9 @@ fn env_leaky_loop() -> TestEnv {
 x = None
 def f(_: str | None) -> tuple[str, str]: ...
 def g(_: int | None) -> tuple[int, int]: ...
-while True:
+while True: # E: `int | None` is not assignable to `str | None` (caused by inconsistent types when breaking cycles)
     y, x = f(x)
-    z, x = g(x)
+    z, x = g(x) # E: Argument `str` is not assignable to parameter `_` with type `int | None` in function `g`
 "#,
     )
 }
@@ -188,7 +188,7 @@ fn env_import_cycle_annotated() -> TestEnv {
         r#"
 from yy import yyy
 def fx(arg: int) -> int: ...
-xxx: bytes = fx(yyy)
+xxx: bytes = fx(yyy) # E: `int` is not assignable to `bytes` # E: Argument `bytes` is not assignable to parameter `arg` with type `int`
 "#,
     );
     env.add(
@@ -196,7 +196,7 @@ xxx: bytes = fx(yyy)
         r#"
 from xx import xxx
 def fy(arg: str) -> str: ...
-yyy: bytes = fy(xxx)
+yyy: bytes = fy(xxx) # E: `str` is not assignable to `bytes` # E: Argument `bytes` is not assignable to parameter `arg` with type `str`
 "#,
     );
     env
@@ -241,6 +241,7 @@ assert_type(yyy, bytes)
 // the cycle winds up with type `int` prior to `@dec` being applied, but
 // whichever one *does* break it has type `Any` (until the cycle completes).
 
+/*
 fn env_import_cycle_decorators() -> TestEnv {
     let mut env = TestEnv::new();
     env.add(
@@ -295,5 +296,60 @@ from xx import fx
 assert_type(fx, Callable[..., int])
 from yy import fy
 assert_type(fy, Callable[..., int])
+"#,
+);
+*/
+
+testcase!(
+    bug = "This cycle is deterministic but ill-behaved. Both speculative Phi and narrowing pinning Var are contributing",
+    test_inconsistent_types_from_cycle_in_loop,
+    r#"
+from typing import Iterable, Iterator, cast
+
+def iterate[T](*items: T | Iterable[T]) -> Iterator[T]:
+    for item in items:  # E: `Iterable[T] | str | T` is not assignable to `Iterable[T] | T` (caused by inconsistent types when breaking cycles)
+        if isinstance(item, str):
+            yield cast(T, item)
+        elif isinstance(item, Iterable):
+            yield from item
+        else:
+            yield item
+"#,
+);
+
+// This pair of tests failed until we separated Mro out from ClassMetadata - parsing base
+// types depends on the metadata but not the Mro, which was leading to patterns where a base
+// class in the cycle is generic over a class in the cycle to incorrectly fail to resolve
+// Mro (nondeterministically, it depended on where we entered the cycle).
+
+testcase!(
+    potential_cycle_through_generic_bases_a,
+    r#"
+from typing import assert_type
+class Node[T]:
+    @property
+    def x(self) -> T: ...
+class A(Node['B']):
+    pass
+class B(A):
+    pass
+assert_type(B().x, B)
+assert_type(A().x, B)
+"#,
+);
+
+testcase!(
+    potential_cycle_through_generic_bases_b,
+    r#"
+from typing import assert_type
+class Node[T]:
+    @property
+    def x(self) -> T: ...
+class A(Node['B']):
+    pass
+class B(A):
+    pass
+assert_type(A().x, B)
+assert_type(B().x, B)
 "#,
 );

@@ -11,22 +11,22 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use dupe::Dupe;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_python::sys_info::SysInfo;
 use ruff_python_ast::Stmt;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::common::symbol_kind::SymbolKind;
 use crate::export::definitions::DefinitionStyle;
 use crate::export::definitions::Definitions;
 use crate::export::definitions::DocString;
 use crate::export::definitions::DunderAllEntry;
 use crate::graph::calculation::Calculation;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
 use crate::state::loader::FindError;
-use crate::sys_info::SysInfo;
 
 /// Find the exports of a given module.
 pub trait LookupExport {
@@ -90,7 +90,21 @@ impl Exports {
             module_info.path().is_init(),
             sys_info,
         );
+        definitions.inject_globals();
         definitions.ensure_dunder_all(module_info.path().style());
+        if module_info.name() == ModuleName::builtins() {
+            // The `builtins` module is a bit weird. It has no `__all__` in TypeShed,
+            // if you do `from builtins import *` it behaves weirdly, and things that
+            // would otherwise be hidden show up.
+            //
+            // Eventually it would be good to make TypeShed the source of truth, but
+            // until then, manually extend the synthetic `__all__` to match runtime.
+            definitions.extend_dunder_all(&[
+                Name::new_static("__build_class__"),
+                Name::new_static("__import__"),
+            ]);
+        }
+
         Self(Arc::new(ExportsInner {
             definitions,
             wildcard: Calculation::new(),
@@ -156,6 +170,11 @@ impl Exports {
                         symbol_kind: None,
                         docstring: definition.docstring.clone(),
                     }),
+                    DefinitionStyle::Global => ExportLocation::ThisModule(Export {
+                        location: definition.range,
+                        symbol_kind: Some(SymbolKind::Constant),
+                        docstring: None,
+                    }),
                     DefinitionStyle::ImportAs(from)
                     | DefinitionStyle::ImportAsEq(from)
                     | DefinitionStyle::Import(from)
@@ -181,13 +200,13 @@ mod tests {
     use std::path::PathBuf;
 
     use anyhow::anyhow;
+    use pyrefly_python::ast::Ast;
+    use pyrefly_python::module_path::ModulePath;
+    use pyrefly_python::module_path::ModuleStyle;
     use starlark_map::small_map::SmallMap;
     use starlark_map::smallmap;
 
     use super::*;
-    use crate::module::module_path::ModulePath;
-    use crate::module::module_path::ModuleStyle;
-    use crate::ruff::ast::Ast;
 
     impl LookupExport for SmallMap<ModuleName, Exports> {
         fn get(&self, module: ModuleName) -> Result<Exports, FindError> {

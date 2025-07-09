@@ -47,17 +47,12 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use dupe::Dupe;
+    use pyrefly_python::ast::Ast;
+    use pyrefly_python::module_name::ModuleName;
+    use pyrefly_python::module_path::ModulePath;
     use ruff_python_ast::Expr;
-    use ruff_python_ast::Stmt;
-    use ruff_python_ast::StmtAssign;
 
     use super::*;
-    use crate::error::collector::ErrorCollector;
-    use crate::error::style::ErrorStyle;
-    use crate::module::module_name::ModuleName;
-    use crate::module::module_path::ModulePath;
-    use crate::sys_info::PythonVersion;
 
     fn from_expr(x: &Expr) -> ShortIdentifier {
         match x {
@@ -73,22 +68,13 @@ mod tests {
             ModulePath::filesystem(Path::new("foo.py").to_owned()),
             Arc::new("hello_world = Baz123.attribute".to_owned()),
         );
-        let module = module_info.parse(
-            PythonVersion::default(),
-            &ErrorCollector::new(module_info.dupe(), ErrorStyle::Delayed),
-        );
+        let module = Ast::parse(module_info.contents()).0;
         let show = |x: &ShortIdentifier| module_info.display(x).to_string();
-        if let Stmt::Assign(StmtAssign {
-            targets: x1,
-            value: box Expr::Attribute(x23),
-            ..
-        }) = &module.body[0]
-        {
-            assert_eq!(show(&from_expr(&x1[0])), "hello_world");
-            assert_eq!(show(&from_expr(&x23.value)), "Baz123");
-            assert_eq!(show(&ShortIdentifier::new(&x23.attr)), "attribute");
-            return;
-        }
-        unreachable!();
+
+        let assign = &module.body[0].as_assign_stmt().unwrap();
+        let attribute = assign.value.as_attribute_expr().unwrap();
+        assert_eq!(show(&from_expr(&assign.targets[0])), "hello_world");
+        assert_eq!(show(&from_expr(&attribute.value)), "Baz123");
+        assert_eq!(show(&ShortIdentifier::new(&attribute.attr)), "attribute");
     }
 }

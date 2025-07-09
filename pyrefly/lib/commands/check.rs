@@ -23,6 +23,12 @@ use clap::Parser;
 use clap::ValueEnum;
 use dupe::Dupe;
 use path_absolutize::Absolutize;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModulePathDetails;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::args::clap_env;
 use pyrefly_util::display;
@@ -31,10 +37,10 @@ use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::globs::FilteredGlobs;
+use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::memory::MemoryUsageTrace;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::watcher::Watcher;
-use ruff_source_file::OneIndexed;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 use tracing::debug;
@@ -45,19 +51,15 @@ use crate::commands::util::module_from_path;
 use crate::config::base::UntypedDefBehavior;
 use crate::config::config::ConfigFile;
 use crate::config::config::validate_path;
-use crate::config::environment::environment::SitePackagePathSource;
 use crate::config::finder::ConfigError;
 use crate::config::finder::ConfigFinder;
+use crate::config::util::ConfigOrigin;
 use crate::error::error::Error;
 use crate::error::error::print_error_counts;
 use crate::error::kind::Severity;
 use crate::error::legacy::LegacyErrors;
 use crate::error::summarise::print_error_summary;
 use crate::module::bundled::stdlib_search_path;
-use crate::module::ignore::SuppressionKind;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::module::module_path::ModulePathDetails;
 use crate::module::wildcard::ModuleWildcard;
 use crate::report;
 use crate::state::handle::Handle;
@@ -65,9 +67,6 @@ use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 use crate::state::subscriber::ProgressBarSubscriber;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
-use crate::sys_info::SysInfo;
 
 #[derive(Debug, Clone, ValueEnum, Default)]
 enum OutputFormat {
@@ -78,19 +77,27 @@ enum OutputFormat {
     FullText,
     /// JSON output
     Json,
+    /// Only show error count, omitting individual errors
+    OmitErrors,
 }
 
+/// Main arguments for Pyrefly type checker
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
-    #[command(flatten)]
+    /// Output related configuration options
+    #[command(flatten, next_help_heading = "Output")]
     output: OutputArgs,
-    #[command(flatten)]
+    /// Behavior-related configuration options
+    #[command(flatten, next_help_heading = "Behavior")]
     behavior: BehaviorArgs,
-    #[command(flatten)]
+    /// Configuration override options
+    #[command(flatten, next_help_heading = "Config Overrides")]
     config_override: ConfigOverrideArgs,
 }
 
 /// how/what should Pyrefly output
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 struct OutputArgs {
     /// Write the errors to a file, instead of printing them.
@@ -142,6 +149,7 @@ struct OutputArgs {
 }
 
 /// non-config type checker behavior
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 struct BehaviorArgs {
     /// Check all reachable modules, not just the ones that are passed in explicitly on CLI positional arguments.
@@ -159,26 +167,45 @@ struct BehaviorArgs {
 }
 
 /// config overrides
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 struct ConfigOverrideArgs {
     /// The list of directories where imports are imported from, including
     /// type checked files.
     #[arg(long, env = clap_env("SEARCH_PATH"))]
     search_path: Option<Vec<PathBuf>>,
+
     /// The Python version any `sys.version` checks should evaluate against.
     #[arg(long, env = clap_env("PYTHON_VERSION"))]
     python_version: Option<PythonVersion>,
+
     /// The platform any `sys.platform` checks should evaluate against.
     #[arg(long, env = clap_env("PLATFORM"))]
     python_platform: Option<PythonPlatform>,
+
     /// Directories containing third-party package imports, searched
     /// after first checking `search_path` and `typeshed`.
     #[arg(long, env = clap_env("SITE_PACKAGE_PATH"))]
     site_package_path: Option<Vec<PathBuf>>,
+
+    /// Use a specific Conda environment to query Python environment information,
+    /// even if it isn't activated.
+    #[arg(long, env = clap_env("CONDA_ENVIRONMENT"), group = "env_source")]
+    conda_environment: Option<String>,
+
     /// The Python executable that will be queried for `python_version`
     /// `python_platform`, or `site_package_path` if any of the values are missing.
-    #[arg(long, env = clap_env("PYTHON_INTERPRETER"), value_name = "EXE_PATH")]
+    #[arg(long, env = clap_env("PYTHON_INTERPRETER"), value_name = "EXE_PATH", group = "env_source")]
     python_interpreter: Option<PathBuf>,
+
+    /// Skip doing any automatic querying for `python-interpreter` or `conda-environment`
+    #[arg(long, env = clap_env("SKIP_INTERPRETER_QUERY"), group = "env_source")]
+    skip_interpreter_query: bool,
+
+    /// Override the bundled typeshed with a custom path.
+    #[arg(long, env = clap_env("TYPESHED_PATH"))]
+    typeshed_path: Option<PathBuf>,
+
     /// Whether to search imports in `site-package-path` that do not have a `py.typed` file unconditionally.
     #[arg(long, env = clap_env("USE_UNTYPED_IMPORTS"))]
     use_untyped_imports: Option<bool>,
@@ -194,6 +221,9 @@ struct ConfigOverrideArgs {
     /// Controls how Pyrefly analyzes function definitions that lack type annotations on parameters and return values.
     #[arg(long, env = clap_env("UNTYPED_DEF_BEHAVIOR"))]
     untyped_def_behavior: Option<UntypedDefBehavior>,
+    /// Whether Pyrefly will respect ignore statements for other tools, e.g. `# mypy: ignore`.
+    #[arg(long, env = clap_env("PERMISSIVE_IGNORES"))]
+    permissive_ignores: Option<bool>,
 }
 
 impl OutputFormat {
@@ -248,6 +278,7 @@ impl OutputFormat {
             Self::MinText => Self::write_error_text_to_file(path, errors, false),
             Self::FullText => Self::write_error_text_to_file(path, errors, true),
             Self::Json => Self::write_error_json_to_file(path, errors),
+            Self::OmitErrors => Ok(()),
         }
     }
 
@@ -256,6 +287,7 @@ impl OutputFormat {
             Self::MinText => Self::write_error_text_to_console(errors, false),
             Self::FullText => Self::write_error_text_to_console(errors, true),
             Self::Json => Self::write_error_json_to_console(errors),
+            Self::OmitErrors => Ok(()),
         }
     }
 }
@@ -442,7 +474,7 @@ impl Args {
         files_to_check: FilteredGlobs,
         config_finder: ConfigFinder,
         allow_forget: bool,
-    ) -> anyhow::Result<CommandExitStatus> {
+    ) -> anyhow::Result<(CommandExitStatus, usize)> {
         let mut timings = Timings::new();
         let list_files_start = Instant::now();
         let expanded_file_list = checkpoint(files_to_check.files(), &config_finder)?;
@@ -453,7 +485,7 @@ impl Args {
             Timings::show(timings.list_files),
         );
         if expanded_file_list.is_empty() {
-            return Ok(CommandExitStatus::Success);
+            return Ok((CommandExitStatus::Success, 0));
         }
 
         let holder = Forgetter::new(State::new(config_finder), allow_forget);
@@ -560,10 +592,25 @@ impl Args {
         }
         if let Some(x) = &self.config_override.site_package_path {
             config.python_environment.site_package_path = Some(x.clone());
-            config.python_environment.site_package_path_source = SitePackagePathSource::CommandLine;
+        }
+
+        if self.config_override.skip_interpreter_query || config.interpreters.skip_interpreter_query
+        {
+            config.interpreters.skip_interpreter_query = true;
+            config.interpreters.python_interpreter = None;
+            config.interpreters.conda_environment = None;
+        }
+        if let Some(conda_environment) = &self.config_override.conda_environment {
+            config.interpreters.conda_environment =
+                Some(ConfigOrigin::cli(conda_environment.clone()));
+            config.interpreters.python_interpreter = None;
+        }
+        if let Some(x) = &self.config_override.typeshed_path {
+            config.typeshed_path = Some(x.clone());
         }
         if let Some(x) = &self.config_override.python_interpreter {
-            config.python_interpreter = Some(x.clone());
+            config.interpreters.python_interpreter = Some(ConfigOrigin::cli(x.clone()));
+            config.interpreters.conda_environment = None;
         }
         if let Some(x) = &self.config_override.use_untyped_imports {
             config.use_untyped_imports = *x;
@@ -573,6 +620,9 @@ impl Args {
         }
         if let Some(x) = &self.config_override.untyped_def_behavior {
             config.root.untyped_def_behavior = Some(*x);
+        }
+        if let Some(x) = self.config_override.permissive_ignores {
+            config.root.permissive_ignores = Some(x);
         }
         if let Some(wildcards) = &self.config_override.replace_imports_with_any {
             config.root.replace_imports_with_any = Some(
@@ -585,8 +635,7 @@ impl Args {
         if let Some(x) = &self.config_override.ignore_errors_in_generated_code {
             config.root.ignore_errors_in_generated_code = Some(*x);
         }
-        config.configure();
-        let errors = config.validate();
+        let errors = config.configure();
         (ArcId::new(config), errors)
     }
 
@@ -616,7 +665,7 @@ impl Args {
         mut timings: Timings,
         transaction: &mut Transaction,
         handles: &[(Handle, Require)],
-    ) -> anyhow::Result<CommandExitStatus> {
+    ) -> anyhow::Result<(CommandExitStatus, usize)> {
         let mut memory_trace = MemoryUsageTrace::start(Duration::from_secs_f32(0.1));
 
         let type_check_start = Instant::now();
@@ -655,7 +704,12 @@ impl Args {
         if let Some(path_index) = self.output.summarize_errors {
             print_error_summary(&errors.shown, path_index);
         }
-        let shown_errors_count = config_errors_count + errors.shown.len();
+        let mut shown_errors_count = config_errors_count;
+        for error in &errors.shown {
+            if error.error_kind().severity() >= Severity::Warn {
+                shown_errors_count += 1;
+            }
+        }
         timings.report_errors = report_errors_start.elapsed();
 
         if !self.output.no_summary {
@@ -708,31 +762,32 @@ impl Args {
         }
         if self.behavior.suppress_errors {
             let mut errors_to_suppress: SmallMap<PathBuf, Vec<Error>> = SmallMap::new();
-
             for e in errors.shown {
-                if let ModulePathDetails::FileSystem(path) = e.path().details() {
+                if e.error_kind().severity() >= Severity::Warn
+                    && let ModulePathDetails::FileSystem(path) = e.path().details()
+                {
                     errors_to_suppress.entry(path.clone()).or_default().push(e);
                 }
             }
             suppress::suppress_errors(&errors_to_suppress);
         }
         if self.behavior.remove_unused_ignores {
-            let mut all_ignores: SmallMap<&PathBuf, SmallSet<OneIndexed>> = SmallMap::new();
+            let mut all_ignores: SmallMap<&PathBuf, SmallSet<LineNumber>> = SmallMap::new();
             for (module_path, ignore) in loads.collect_ignores() {
                 if let ModulePathDetails::FileSystem(path) = module_path.details() {
-                    all_ignores.insert(path, ignore.get_ignores(SuppressionKind::Pyrefly));
+                    all_ignores.insert(path, ignore.get_pyrefly_ignores());
                 }
             }
 
-            let mut suppressed_errors: SmallMap<&PathBuf, SmallSet<OneIndexed>> = SmallMap::new();
+            let mut suppressed_errors: SmallMap<&PathBuf, SmallSet<LineNumber>> = SmallMap::new();
             for e in &errors.suppressed {
-                if e.is_ignored()
+                if e.is_ignored(false)
                     && let ModulePathDetails::FileSystem(path) = e.path().details()
                 {
                     suppressed_errors
                         .entry(path)
                         .or_default()
-                        .insert(e.source_range().start.line);
+                        .insert(e.display_range().start.line);
                 }
             }
 
@@ -741,11 +796,11 @@ impl Args {
         }
         if self.behavior.expectations {
             loads.check_against_expectations()?;
-            Ok(CommandExitStatus::Success)
+            Ok((CommandExitStatus::Success, shown_errors_count))
         } else if shown_errors_count > 0 {
-            Ok(CommandExitStatus::UserError)
+            Ok((CommandExitStatus::UserError, shown_errors_count))
         } else {
-            Ok(CommandExitStatus::Success)
+            Ok((CommandExitStatus::Success, shown_errors_count))
         }
     }
 }

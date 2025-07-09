@@ -5,9 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::Context as _;
 use clap::Parser;
 use dupe::Dupe;
 use pyrefly_util::forgetter::Forgetter;
@@ -27,6 +27,8 @@ use crate::types::simplify::unions_with_literals;
 use crate::types::stdlib::Stdlib;
 use crate::types::types::Type;
 
+/// Arguments for the autotype command which automatically adds type annotations to Python code
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 pub struct Args {}
 
@@ -60,8 +62,10 @@ fn format_hints(
         if formatted_hint.contains("Unknown") {
             continue;
         }
-
         if formatted_hint.contains("Never") {
+            continue;
+        }
+        if formatted_hint == "None" && kind == AnnotationKind::Parameter {
             continue;
         }
         match kind {
@@ -99,6 +103,7 @@ impl Args {
     pub fn new() -> Self {
         Self {}
     }
+
     pub fn run(
         self,
         files_to_check: FilteredGlobs,
@@ -133,32 +138,33 @@ impl Args {
                 .into_iter()
                 .filter_map(|p| p.to_inlay_hint())
                 .collect();
-            let i_types = match inferred_types {
-                Some(inferred_types) => {
-                    parameter_types.extend(inferred_types);
-                    parameter_types
-                }
-                None => parameter_types,
-            };
-            let formatted = format_hints(i_types, &stdlib.clone());
-            let sorted = sort_inlay_hints(formatted);
-
-            let file_path = handle.path().as_path();
-            let file_content = fs_anyhow::read_to_string(file_path)
-                .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
-            let mut result = file_content;
-            for inlay_hint in sorted {
-                let (position, hint) = inlay_hint;
-                // Convert the TextSize to a byte offset
-                let offset = (position).into();
-                if offset <= result.len() {
-                    result.insert_str(offset, &hint);
-                }
+            if let Some(inferred_types) = inferred_types {
+                parameter_types.extend(inferred_types);
+                let formatted = format_hints(parameter_types, &stdlib);
+                let sorted = sort_inlay_hints(formatted);
+                let file_path = handle.path().as_path();
+                self.add_annotations_to_file(file_path, sorted)?;
             }
-            fs_anyhow::write(file_path, result.as_bytes())
-                .with_context(|| format!("Failed to write to file: {}", file_path.display()))?;
         }
         Ok(CommandExitStatus::Success)
+    }
+
+    fn add_annotations_to_file(
+        &self,
+        file_path: &Path,
+        sorted: Vec<(TextSize, String)>,
+    ) -> anyhow::Result<()> {
+        let file_content = fs_anyhow::read_to_string(file_path)?;
+        let mut result = file_content;
+        for inlay_hint in sorted {
+            let (position, hint) = inlay_hint;
+            // Convert the TextSize to a byte offset
+            let offset = (position).into();
+            if offset <= result.len() {
+                result.insert_str(offset, &hint);
+            }
+        }
+        fs_anyhow::write(file_path, result.as_bytes())
     }
 }
 
@@ -213,17 +219,16 @@ def foo() -> int:
     }
 
     #[test]
-    fn test_parameter_annotation() -> anyhow::Result<()> {
-        // Test parameter type annotation
-        // TODO: Figure out how to get the parameter type inferred here, too
+    fn test_literal_string() -> anyhow::Result<()> {
+        // Test return type annotation for integer literal
         assert_annotations(
             r#"
-def greet(name):
-    return "Hello, " + name
+def foo():
+    return ""
 "#,
             r#"
-def greet(name) -> str:
-    return "Hello, " + name
+def foo() -> str:
+    return ""
 "#,
         );
         Ok(())
@@ -280,6 +285,78 @@ def greet(name) -> str:
     example(1, 2, 3)
     x = 2
     example("a", "b", x)
+    "#,
+        );
+        Ok(())
+    }
+
+    #[test]
+
+    fn test_default_parameters() -> anyhow::Result<()> {
+        assert_annotations(
+            r#"
+    def example(a, b, c = None):
+        return c
+    example(1, 2, 3)
+    x = 2
+    example("a", "b", x)
+    "#,
+            r#"
+    def example(a: int | str, b: int | str, c: int | None = None):
+        return c
+    example(1, 2, 3)
+    x = 2
+    example("a", "b", x)
+    "#,
+        );
+        Ok(())
+    }
+
+    #[test]
+
+    fn test_default_parameters_infer_default_type() -> anyhow::Result<()> {
+        assert_annotations(
+            r#"
+    def example(c = 1):
+        return c
+    example("a")
+    "#,
+            r#"
+    def example(c: int | str = 1):
+        return c
+    example("a")
+    "#,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_return_none() -> anyhow::Result<()> {
+        assert_annotations(
+            r#"
+    def example(c):
+        c + 1
+    "#,
+            r#"
+    def example(c) -> None:
+        c + 1
+    "#,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_no_none_parameter() -> anyhow::Result<()> {
+        assert_annotations(
+            r#"
+    def example(c = None):
+        pass
+    example(None)
+    "#,
+            r#"
+    def example(c = None) -> None:
+        pass
+    example(None)
     "#,
         );
         Ok(())

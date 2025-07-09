@@ -5,5 +5,16 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Functions that could be part of the Ruff API, but aren't.
-pub mod ast;
+#![cfg(test)]
+
+mod basic;
+mod completion;
+mod configuration;
+mod definition;
+mod diagnostic;
+mod did_change;
+mod hover;
+mod io;
+mod references;
+mod rename;
+mod util;

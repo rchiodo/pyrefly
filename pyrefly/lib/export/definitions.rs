@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Meta Platforms, Inc. an affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,6 +8,12 @@
 use std::cmp;
 use std::sync::Arc;
 
+use pyrefly_python::ast::Ast;
+use pyrefly_python::dunder;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModuleStyle;
+use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::ExceptHandler;
 use ruff_python_ast::Expr;
@@ -25,13 +31,8 @@ use starlark_map::small_map::Entry;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::common::symbol_kind::SymbolKind;
-use crate::dunder;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModuleStyle;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
-use crate::sys_info::SysInfo;
+use crate::types::globals::Global;
 
 /// How a name is defined. If a name is defined outside of this
 /// module, we additionally store the module we got it from
@@ -40,6 +41,8 @@ pub enum DefinitionStyle {
     /// Defined in this module, e.g. `x = 1` or `def x(): ...`
     /// We also store what kind of symbol it is
     Local(SymbolKind),
+    /// Defined as an implicit global like `__name__`.
+    Global,
     /// Imported with an alias, e.g. `from x import y as z`
     ImportAs(ModuleName),
     /// Imported with an alias, where the alias is identical, e.g. `from x import y as y`
@@ -106,11 +109,10 @@ impl DunderAllEntry {
         match x {
             Expr::List(x) => x.elts.iter().filter_map(DunderAllEntry::as_item).collect(),
             Expr::Tuple(x) => x.elts.iter().filter_map(DunderAllEntry::as_item).collect(),
-            Expr::Attribute(ExprAttribute {
-                value: box Expr::Name(name),
-                attr,
-                ..
-            }) if attr.id == dunder::ALL => {
+            Expr::Attribute(ExprAttribute { value, attr, .. })
+                if let Expr::Name(name) = &**value
+                    && attr.id == dunder::ALL =>
+            {
                 vec![DunderAllEntry::Module(
                     name.range,
                     ModuleName::from_name(&name.id),
@@ -138,7 +140,7 @@ struct DefinitionsBuilder<'a> {
 }
 
 fn is_private_name(name: &Name) -> bool {
-    name.starts_with('_') && !name.starts_with("__")
+    name.starts_with('_')
 }
 
 fn implicitly_imported_submodule(
@@ -169,6 +171,22 @@ impl Definitions {
         self.import_all.entry(ModuleName::builtins()).or_default();
     }
 
+    pub fn inject_globals(&mut self) {
+        for global in Global::globals(false) {
+            self.definitions.insert(
+                global.name().clone(),
+                Definition {
+                    range: TextRange::default(),
+                    style: DefinitionStyle::Global,
+                    annot: None,
+                    count: 1,
+                    docstring: None,
+                },
+            );
+        }
+    }
+
+    /// Ensure that `dunder_all` is populated, synthesising it if `__all__` isn't present.
     pub fn ensure_dunder_all(&mut self, style: ModuleStyle) {
         if self.definitions.contains_key(&dunder::ALL) {
             // Explicitly defined, so don't redefine it
@@ -189,6 +207,16 @@ impl Definitions {
             {
                 self.dunder_all
                     .push(DunderAllEntry::Name(def.range, name.clone()));
+            }
+        }
+    }
+
+    /// Add these names to `duner_all`, if they are defined in the module.
+    pub fn extend_dunder_all(&mut self, extra: &[Name]) {
+        for name in extra {
+            if let Some(def) = self.definitions.get(name) {
+                self.dunder_all
+                    .push(DunderAllEntry::Name(def.range, name.clone()))
             }
         }
     }
@@ -280,7 +308,8 @@ impl<'a> DefinitionsBuilder<'a> {
                 None,
             )
         };
-        Ast::expr_lvalue(x, &mut add_name)
+        Ast::expr_lvalue(x, &mut add_name);
+        self.named_in_expr(x);
     }
 
     fn pattern(&mut self, x: &Pattern) {
@@ -378,6 +407,7 @@ impl<'a> DefinitionsBuilder<'a> {
                 }
             }
             Stmt::Assign(x) => {
+                self.named_in_expr(&x.value);
                 for t in &x.targets {
                     self.expr_lvalue(t);
                     if DunderAllEntry::is_all(t) {
@@ -386,62 +416,77 @@ impl<'a> DefinitionsBuilder<'a> {
                 }
             }
             Stmt::AugAssign(x) => {
+                self.named_in_expr(&x.value);
                 if DunderAllEntry::is_all(&x.target) && x.op == Operator::Add {
                     self.inner
                         .dunder_all
                         .extend(DunderAllEntry::as_list(&x.value));
-                } else {
-                    self.expr_lvalue(&x.target);
-                }
-            }
-            Stmt::Expr(StmtExpr {
-                value:
-                    box Expr::Call(
-                        ExprCall {
-                            func: box Expr::Attribute(ExprAttribute { value, attr, .. }),
-                            arguments,
-                            ..
-                        },
-                        ..,
-                    ),
-                ..
-            }) if DunderAllEntry::is_all(value)
-                && arguments.len() == 1
-                && arguments.keywords.is_empty() =>
-            {
-                match attr.as_str() {
-                    "extend" => self
-                        .inner
-                        .dunder_all
-                        .extend(DunderAllEntry::as_list(&arguments.args[0])),
-                    "append" => self
-                        .inner
-                        .dunder_all
-                        .extend(DunderAllEntry::as_item(&arguments.args[0])),
-                    "remove" => {
-                        if let Some(DunderAllEntry::Name(range, remove)) =
-                            DunderAllEntry::as_item(&arguments.args[0])
-                        {
-                            self.inner
-                                .dunder_all
-                                .push(DunderAllEntry::Remove(range, remove));
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            Stmt::AnnAssign(x) => match &*x.target {
-                Expr::Name(x) => {
+                } else if let Expr::Name(name) = &*x.target {
                     self.add_name(
-                        &x.id,
-                        x.range,
+                        &name.id,
+                        name.range,
                         DefinitionStyle::Local(SymbolKind::Variable),
-                        Some(ShortIdentifier::expr_name(x)),
-                    );
+                        None,
+                    )
                 }
-                _ => self.expr_lvalue(&x.target),
-            },
-            Stmt::TypeAlias(x) if matches!(&*x.name, Expr::Name(_)) => self.expr_lvalue(&x.name),
+            }
+            Stmt::Expr(StmtExpr { value, .. }) => {
+                self.named_in_expr(value);
+                if let Expr::Call(
+                    ExprCall {
+                        func, arguments, ..
+                    },
+                    ..,
+                ) = &**value
+                    && let Expr::Attribute(ExprAttribute { value, attr, .. }) = &**func
+                    && DunderAllEntry::is_all(value)
+                    && arguments.len() == 1
+                    && arguments.keywords.is_empty()
+                {
+                    match attr.as_str() {
+                        "extend" => self
+                            .inner
+                            .dunder_all
+                            .extend(DunderAllEntry::as_list(&arguments.args[0])),
+                        "append" => self
+                            .inner
+                            .dunder_all
+                            .extend(DunderAllEntry::as_item(&arguments.args[0])),
+                        "remove" => {
+                            if let Some(DunderAllEntry::Name(range, remove)) =
+                                DunderAllEntry::as_item(&arguments.args[0])
+                            {
+                                self.inner
+                                    .dunder_all
+                                    .push(DunderAllEntry::Remove(range, remove));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Stmt::AnnAssign(x) => {
+                if let Some(value) = &x.value {
+                    self.named_in_expr(value);
+                }
+                match &*x.target {
+                    Expr::Name(x) => {
+                        self.add_name(
+                            &x.id,
+                            x.range,
+                            DefinitionStyle::Local(SymbolKind::Variable),
+                            Some(ShortIdentifier::expr_name(x)),
+                        );
+                    }
+                    _ => self.expr_lvalue(&x.target),
+                }
+            }
+            Stmt::TypeAlias(x) => {
+                self.named_in_expr(&x.value);
+                if matches!(&*x.name, Expr::Name(_)) {
+                    self.expr_lvalue(&x.name)
+                }
+            }
             Stmt::FunctionDef(x) => {
                 self.add_identifier_with_body(
                     &x.name,
@@ -450,15 +495,20 @@ impl<'a> DefinitionsBuilder<'a> {
                 );
                 return; // don't recurse because a separate scope
             }
-            Stmt::For(x) => self.expr_lvalue(&x.target),
+            Stmt::For(x) => {
+                self.named_in_expr(&x.iter);
+                self.expr_lvalue(&x.target)
+            }
             Stmt::With(x) => {
                 for x in &x.items {
+                    self.named_in_expr(&x.context_expr);
                     if let Some(target) = &x.optional_vars {
                         self.expr_lvalue(target);
                     }
                 }
             }
             Stmt::Match(x) => {
+                self.named_in_expr(&x.subject);
                 for x in &x.cases {
                     self.pattern(&x.pattern);
                 }
@@ -478,14 +528,51 @@ impl<'a> DefinitionsBuilder<'a> {
                 }
             }
             Stmt::If(x) => {
+                self.named_in_expr(&x.test);
                 for (_, body) in self.sys_info.pruned_if_branches(x) {
                     self.stmts(body);
                 }
                 return; // We went through the relevant branches already
             }
-            _ => {}
+            Stmt::While(x) => {
+                self.named_in_expr(&x.test);
+            }
+            Stmt::Assert(x) => {
+                self.named_in_expr(&x.test);
+                if let Some(msg) = &x.msg {
+                    self.named_in_expr(msg);
+                }
+            }
+            Stmt::Raise(x) => {
+                if let Some(exc) = &x.exc {
+                    self.named_in_expr(exc);
+                }
+                if let Some(c) = &x.cause {
+                    self.named_in_expr(c);
+                }
+            }
+            Stmt::Return(..)
+            | Stmt::Delete(..)
+            | Stmt::Pass(..)
+            | Stmt::Break(..)
+            | Stmt::Continue(..)
+            | Stmt::IpyEscapeCommand(..) => {}
         }
         x.recurse(&mut |xs| self.stmt(xs))
+    }
+
+    /// Accumulate names defined by walrus operators in an expression.
+    fn named_in_expr(&mut self, x: &Expr) {
+        match x {
+            Expr::Named(expr_named) => {
+                self.expr_lvalue(&expr_named.target);
+            }
+            Expr::Lambda(..) | Expr::SetComp(..) | Expr::DictComp(..) | Expr::ListComp(..) => {
+                // These expressions define a scope, so walrus operators only define a name
+                // within that scope, not in the surrounding statement's scope.
+            }
+            _ => x.recurse(&mut |x| self.named_in_expr(x)),
+        }
     }
 }
 
@@ -607,10 +694,52 @@ no.thing = 8
 n = True
 
 r[p] = 1
+
+type X = int
+type Y[T] = list[T]
+
+match x():
+    case case0: pass
+    case moo.Moo(case1): pass
 "#,
         );
         assert_import_all(&defs, &["foo"]);
-        assert_definition_names(&defs, &["qux", "moo", "mod", "x", "z", "w", "n"]);
+        assert_definition_names(
+            &defs,
+            &[
+                "qux", "moo", "mod", "x", "z", "w", "n", "X", "Y", "case0", "case1",
+            ],
+        );
+    }
+
+    #[test]
+    fn test_walrus() {
+        let defs = calculate_unranged_definitions_with_defaults(
+            r#"
+# Most named expressions should appear in definitions.
+y: int = (x0 := 42)
+y = (x1 := 42)
+y += (x2 := 42)
+(x3 := 42)
+with (x4 := 42) as y: pass
+for y in (x5 := 42): pass
+while (x6 := True): pass
+match (x7 := 42):
+    case int(): pass
+(x8 := 42)[y] = 42
+assert (x9 := 42), (x10 := "oops")
+type y = (x11 := int)
+# Named expressions inside expression-level scopes should not appear in definitions.
+lambda x: (z := 42)
+[z for x in [1, 2, 3] if z := x > 2]
+"#,
+        );
+        assert_definition_names(
+            &defs,
+            &[
+                "x0", "y", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+            ],
+        );
     }
 
     #[test]

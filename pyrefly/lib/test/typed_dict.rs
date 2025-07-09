@@ -97,7 +97,7 @@ m = Movie(name='Blade Runner', year=1982)
 );
 
 testcase!(
-    test_typed_dict_readonly,
+    test_typed_dict_read_only,
     r#"
 from typing import TypedDict, ReadOnly
 class Coord(TypedDict):
@@ -108,6 +108,47 @@ def foo(c: Coord) -> None:
     c["x"] = "foo"  # E: `Literal['foo']` is not assignable to TypedDict key `x` with type `int`
     c["y"] = 3  # E: Key `y` in TypedDict `Coord` is read-only
     c["z"] = 4  # E: TypedDict `Coord` does not have key `z`
+    "#,
+);
+
+testcase!(
+    bug = "a1.update(a2) should be an error and a.update(b) should not be",
+    test_typed_dict_readonly_partial_update,
+    r#"
+from typing import Never, NotRequired, TypedDict, ReadOnly
+from typing_extensions import ReadOnly
+
+class A(TypedDict):
+    x: ReadOnly[int]
+    y: int
+
+a1: A = {"x": 1, "y": 2}
+a2: A = {"x": 3, "y": 4}
+a1.update(a2) 
+
+class B(TypedDict):
+    x: NotRequired[Never]
+    y: ReadOnly[int]
+
+def update_a(a: A, b: B) -> None:
+    a.update(b) # E: No matching overload found for function `A.update` 
+    "#,
+);
+
+testcase!(
+    test_typed_dict_readonly_kwargs_tuple_update,
+    r#"
+from typing import TypedDict, ReadOnly
+
+class A(TypedDict):
+    x: ReadOnly[int]
+    y: int
+
+def test(a: A) -> None:
+    a.update([("x", 123), ("y", 456)])  # E: No matching overload found for function `A.update`
+    a.update([("y", 456)]) 
+    a.update(x=789, y=999)  # E: No matching overload found for function `A.update`
+    a.update(y=999) 
     "#,
 );
 
@@ -220,7 +261,6 @@ Invalid = TypedDict()  # E: Expected a callable, got type[TypedDict]
 );
 
 testcase!(
-    bug = "TypedDict should allow pop()",
     test_typed_dict_pop,
     r#"
 from typing import TypedDict, NotRequired
@@ -229,7 +269,202 @@ class TD(TypedDict):
     x: NotRequired[int]
     
 def f(td: TD):
-    td.pop("x") # E:  Argument `Literal['x']` is not assignable to parameter `k` with type `Never` in function `_typeshed._type_checker_internals.TypedDictFallback.pop`
+    td.pop("x") 
+    "#,
+);
+
+testcase!(
+    test_typed_dict_pop_2,
+    r#"
+from typing import TypedDict, NotRequired, assert_type, Any
+
+class TDRequired(TypedDict):
+    a: int
+    b: str
+
+class TDOptional(TypedDict):
+    x: NotRequired[int]
+    y: NotRequired[str]
+
+class TDMixed(TypedDict):
+    a: int
+    x: NotRequired[int]
+
+td_r: TDRequired = {"a": 10, "b": "hi"}
+td_o: TDOptional = {"x": 42}
+td_m: TDMixed = {"a": 1, "x": 99}
+
+v1 = td_r.pop("a") # E: 
+assert_type(v1, object)
+
+v2 = td_r.pop("a", 3.14) # E: 
+assert_type(v2, object)
+
+v3 = td_o.pop("x")
+assert_type(v3, int | None)
+
+v4 = td_o.pop("x", -1)
+assert_type(v4, int)
+
+v5 = td_o.pop("x", "fallback")
+assert_type(v5, int | str)
+
+v6 = td_m.pop("a") # E: 
+assert_type(v6, Any)
+
+v7 = td_m.pop("x")
+assert_type(v7, int | None)
+
+v8 = td_m.pop("x", 0)
+assert_type(v8, int)
+
+v9 = td_m.pop("x", "fallback")
+assert_type(v9, int | str)
+
+v10 = td_r.pop("abc", 123) # E:
+assert_type(v10, object)
+
+v11 = td_r.pop("abc", "default") # E: 
+assert_type(v11, object)
+    "#,
+);
+
+testcase!(
+    test_typed_dict_del,
+    r#"
+from typing import TypedDict, NotRequired
+
+class TDRequired(TypedDict):
+    a: int
+    b: str
+
+class TDOptional(TypedDict):
+    x: NotRequired[int]
+    y: NotRequired[str]
+
+class TDMixed(TypedDict):
+    a: int
+    x: NotRequired[int]
+
+td_r: TDRequired = {"a": 10, "b": "hi"}
+td_o: TDOptional = {"x": 42}
+td_m: TDMixed = {"a": 1, "x": 99}
+
+del td_r["a"]  # E: 
+del td_o["x"]  # OK
+del td_o["y"]  # OK
+del td_m["x"]  # OK
+del td_m["a"]  # E: 
+del td_r["nonexistent"]  # E: 
+
+# Delete optional key from TDOptional again 
+del td_o["x"]  # OK
+
+del td_r["b"]  # E:
+
+del td_o["unknown"]  # E:
+
+key_var = "x"
+del td_o[key_var]  
+
+unknown_key = "a"
+del td_m[unknown_key]  # E: 
+
+td_r: TDRequired = {"a": 10, "b": "hi"}
+td_o: TDOptional = {"x": 42}
+td_m: TDMixed = {"a": 1, "x": 99}
+
+td_r.__delitem__("a") # E: Argument `Literal['a']` is not assignable to parameter `k` with type `Never`
+td_o.__delitem__("x")
+td_o.__delitem__("y")
+td_m.__delitem__("x")
+td_m.__delitem__("a") # E: No matching overload found for function `TDMixed.__delitem__`
+
+td_r.__delitem__("nonexistent") # E: Argument `Literal['nonexistent']` is not assignable to parameter `k` with type `Never`
+td_r.__delitem__("unknown") # E:  Argument `Literal['unknown']` is not assignable to parameter `k` with type `Never
+ 
+    "#,
+);
+
+testcase!(
+    test_typed_dict_dunder_or,
+    r#"
+from typing import TypedDict, assert_type
+
+class TD1(TypedDict):
+    a: int 
+    b: str 
+
+class TD2(TypedDict):
+    c: float 
+    d: bool 
+
+class TD3(TypedDict, total=False):
+    a: str 
+    f: int 
+
+class TD4(TypedDict):
+    a: int 
+
+class TD5(TypedDict, total=False):
+    a: int  
+
+td1 = TD1(a=1, b="x")
+td2 = TD2(c=3.14, d=True)
+td3 = TD3(a="str", f=5)
+td4 = TD4(a=42)
+td5 = TD5(a=100)
+
+td12 = td1 | td2 # E: `|` is not supported between `TypedDict[TD1]` and `TypedDict[TD2]`
+td14 = td1 | td4
+assert_type(td14.get("a"), int)
+td13 = td1 | td3 # E:   No matching overload found for function `_typeshed._type_checker_internals.TypedDictFallback.__or__`
+td15 = td1 | td5 # E: No matching overload found for function `_typeshed._type_checker_internals.TypedDictFallback.__or__`
+    "#,
+);
+
+testcase!(
+    test_typed_dict_dunder_ior,
+    r#"
+from typing import TypedDict, assert_type
+
+class TD(TypedDict):
+    a: int | str
+    b: int | str
+
+x: TD = {"a": 1, "b": 2}
+
+y: TD = {"a": "3", "b": "4"}
+
+x |= y  
+
+assert_type((x["a"]), int | str)
+
+x |= {} # E: Augmented assignment produces a value of type `dict[str, object]`, which is not assignable to `TypedDict[TD]`
+
+x: TD = {"a": 1, "b": 2}
+x.__ior__(y)
+x.__ior__({}) # E:  Missing required key `a` for TypedDict `TD` # E: Missing required key `b` for TypedDict `TD` 
+
+    "#,
+);
+
+testcase!(
+    test_typed_dict_dunder_ror,
+    r#"
+from typing import TypedDict, assert_type
+
+class TD(TypedDict):
+    a: int | str
+    b: int | str
+
+x: TD = {"a": 1, "b": 2}
+
+result = {"a": "1", "b": "2", "c":4} | x
+assert_type(result.get("c"), object | None)
+
+result = x.__ror__({"a": "1", "b": "2", "c":4})
+assert_type(result.get("c"), object | None)
     "#,
 );
 
@@ -257,7 +492,7 @@ def foo(a: Coord, b: Coord3D, c: Pair):
 );
 
 testcase!(
-    test_typed_dict_readonly_subtype,
+    test_typed_dict_read_only_subtype,
     r#"
 from typing import ReadOnly, TypedDict
 
@@ -401,7 +636,7 @@ f(x="", y=2)  # E: Argument `Literal['']` is not assignable to parameter `x` wit
 );
 
 testcase!(
-    test_typed_dict_readonly_variance,
+    test_typed_dict_read_only_variance,
     r#"
 from typing import ReadOnly, TypedDict
 
@@ -551,7 +786,6 @@ def f(c: C):
 );
 
 testcase!(
-    bug = "Omitting keys should be allowed",
     test_update,
     r#"
 from typing import TypedDict
@@ -567,15 +801,35 @@ class E(TypedDict):
 class F(TypedDict):
     x: int
 def f(c1: C, c2: C, c3: dict[str, int], d: D, e: E, f: F):
-    c1.update(c2)
-    c1.update(c3)  # E: `dict[str, int]` is not assignable to parameter `m` with type `TypedDict[C]`
-    c1.update(d)
-    c1.update(e)  # E: `TypedDict[E]` is not assignable to parameter `m` with type `TypedDict[C]`
+    c1.update(c2) 
+    c1.update(c3)  # E: No matching overload found for function `C.update`
+    c1.update(d) 
+    c1.update(e)  # E: No matching overload found for function `C.update`
     # This is not ok because `F` could contain `y` with an incompatible type
-    c1.update(f)  # E: `TypedDict[F]` is not assignable to parameter `m` with type `TypedDict[C]`
+    c1.update(f) # E: No matching overload found for function `C.update`
     c1.update({"x": 1, "y": 1})
-    c1.update({"x": 1})  # Should be OK  # E: Missing required key `y`
-    c1.update({"z": 1})  # E: Missing required key `x`  # E: Missing required key `y`  # E: Key `z` is not defined
+    c1.update({"x": 1})  
+    c1.update({"z": 1})  # E: Key `z` is not defined in TypedDict `C`
+    c1.update([("x", 1), ("y", 2)])
+    c1.update([("z", 3)]) # E: No matching overload found for function `C.update`
+    c1.update(x=1, y=2)
+    c1.update(z=1) # E: No matching overload found for function `C.update`
+    "#,
+);
+
+testcase!(
+    test_update_with_type_var,
+    r#"
+from typing import TypedDict
+
+class X[T](TypedDict):
+    a: T
+    
+def f(x: X[int], y: dict[str, int]):
+    x.update(y)  # E: No matching overload found for function `X.update`
+    x.update(x) 
+    x.update({"a": 1})
+    x.update({"b": 1}) # E: Key `b` is not defined in TypedDict `X`
     "#,
 );
 
@@ -611,6 +865,22 @@ def f(c: C, s: str):
     c.setdefault("x", 0.0)  # E: No matching overload
     c.setdefault("x")  # E: No matching overload
     c.setdefault(s, 0)  # E: No matching overload
+    "#,
+);
+
+testcase!(
+    test_setdefault_read_only,
+    r#"
+from typing import ReadOnly, TypedDict
+class C(TypedDict):
+    x: ReadOnly[int]
+class D(TypedDict):
+    x: int
+    y: ReadOnly[str]
+def f(c: C, d: D):
+    c.setdefault("x", 0)  # E: `Literal['x']` is not assignable to parameter `k` with type `Never`
+    d.setdefault("x", 0)
+    d.setdefault("y", "oops")  # E: No matching overload
     "#,
 );
 
@@ -675,4 +945,20 @@ def test(x: TypedDict):  # E: `TypedDict` is not allowed in this context
 
 x: TypedDict  # E: `TypedDict` is not allowed in this context
     "#,
+);
+
+testcase!(
+    test_invalid_typed_dict_keywords,
+    r#"
+from typing import TypedDict
+
+class TD1(TypedDict, total=True):  # OK
+    x: int
+
+class TD2(TypedDict, foo=1):  # E: TypedDict does not support keyword argument `foo`
+    x: int
+
+class TD3(TypedDict, bar="test", baz=False):  # E: TypedDict does not support keyword argument `bar`  # E: TypedDict does not support keyword argument `baz`
+    x: int
+"#,
 );

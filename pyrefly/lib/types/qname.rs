@@ -14,14 +14,14 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
 use crate::types::equality::TypeEq;
 use crate::types::equality::TypeEqCtx;
 
@@ -116,6 +116,10 @@ impl QName {
         self.module.name()
     }
 
+    pub fn module_path(&self) -> &ModulePath {
+        self.module.path()
+    }
+
     pub fn fmt_name(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -130,7 +134,7 @@ impl QName {
             "{}.{}@{}",
             self.module_name(),
             self.name,
-            self.module.source_range(self.name.range)
+            self.module.display_range(self.name.range)
         )
     }
 }

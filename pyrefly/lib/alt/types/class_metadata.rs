@@ -11,11 +11,13 @@ use std::fmt::Formatter;
 use std::iter;
 use std::sync::Arc;
 
+use dupe::Dupe;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::VisitMut;
 use pyrefly_util::display::commas_iter;
 use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::name::Name;
+use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
@@ -24,17 +26,17 @@ use vec1::vec1;
 use crate::alt::class::class_field::ClassField;
 use crate::error::collector::ErrorCollector;
 use crate::error::kind::ErrorKind;
-use crate::types::callable::BoolKeywords;
-use crate::types::callable::DataclassKeywords;
 use crate::types::class::Class;
 use crate::types::class::ClassType;
-use crate::types::qname::QName;
+use crate::types::display::ClassDisplayContext;
+use crate::types::keywords::DataclassKeywords;
+use crate::types::keywords::DataclassTransformKeywords;
 use crate::types::stdlib::Stdlib;
+use crate::types::types::CalleeKind;
 use crate::types::types::Type;
 
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
 pub struct ClassMetadata {
-    mro: Mro,
     metaclass: Metaclass,
     keywords: Keywords,
     typed_dict_metadata: Option<TypedDictMetadata>,
@@ -49,19 +51,22 @@ pub struct ClassMetadata {
     /// Is it possible for this class to have type parameters that we don't know about?
     /// This can happen if, e.g., a class inherits from Any.
     has_unknown_tparams: bool,
+    total_ordering_metadata: Option<TotalOrderingMetadata>,
+    /// If this class is decorated with `typing.dataclass_transform(...)`, the keyword arguments
+    /// that were passed to the `dataclass_transform` call.
+    dataclass_transform_metadata: Option<DataclassTransformKeywords>,
 }
 
 impl VisitMut<Type> for ClassMetadata {
-    fn recurse_mut(&mut self, f: &mut dyn FnMut(&mut Type)) {
+    fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {
         // TODO: This is definitely wrong. We have types in lots of these places.
         // Doesn't seem to have gone wrong yet, but it will.
-        self.mro.recurse_mut(f);
     }
 }
 
 impl Display for ClassMetadata {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ClassMetadata({}, {})", self.mro, self.metaclass)
+        write!(f, "ClassMetadata(metaclass={})", self.metaclass)
     }
 }
 
@@ -80,9 +85,10 @@ impl ClassMetadata {
         is_new_type: bool,
         is_final: bool,
         has_unknown_tparams: bool,
+        total_ordering_metadata: Option<TotalOrderingMetadata>,
+        dataclass_transform_metadata: Option<DataclassTransformKeywords>,
         errors: &ErrorCollector,
     ) -> ClassMetadata {
-        let mro = Mro::new(cls, &bases_with_metadata, errors);
         Self::validate_frozen_dataclass_inheritance(
             cls,
             &dataclass_metadata,
@@ -90,7 +96,6 @@ impl ClassMetadata {
             errors,
         );
         ClassMetadata {
-            mro,
             metaclass: Metaclass(metaclass),
             keywords: Keywords(keywords),
             typed_dict_metadata,
@@ -103,6 +108,8 @@ impl ClassMetadata {
             is_new_type,
             is_final,
             has_unknown_tparams,
+            total_ordering_metadata,
+            dataclass_transform_metadata,
         }
     }
 
@@ -115,11 +122,8 @@ impl ClassMetadata {
         if let Some(dataclass_metadata) = dataclass_metadata {
             for (base_type, base_metadata) in bases_with_metadata {
                 if let Some(base_dataclass_metadata) = base_metadata.dataclass_metadata() {
-                    let is_base_frozen = base_dataclass_metadata
-                        .kws
-                        .is_set(&DataclassKeywords::FROZEN);
-                    let is_current_frozen =
-                        dataclass_metadata.kws.is_set(&DataclassKeywords::FROZEN);
+                    let is_base_frozen = base_dataclass_metadata.kws.frozen;
+                    let is_current_frozen = dataclass_metadata.kws.frozen;
 
                     if is_current_frozen != is_base_frozen {
                         let current_status = if is_current_frozen {
@@ -133,6 +137,8 @@ impl ClassMetadata {
                             "non-frozen"
                         };
 
+                        let base = base_type.class_object();
+                        let ctx = ClassDisplayContext::new(&[cls, base]);
                         errors.add(
                             cls.range(),
                             ErrorKind::InvalidInheritance,
@@ -140,9 +146,9 @@ impl ClassMetadata {
                             vec1![format!(
                                 "Cannot inherit {} dataclass `{}` from {} dataclass `{}`",
                                 current_status,
-                                ClassName(cls.qname()),
+                                ctx.display(cls),
                                 base_status,
-                                ClassName(base_type.qname()),
+                                ctx.display(base),
                             )],
                         );
                     }
@@ -153,7 +159,6 @@ impl ClassMetadata {
 
     pub fn recursive() -> Self {
         ClassMetadata {
-            mro: Mro::Cyclic,
             metaclass: Metaclass::default(),
             keywords: Keywords::default(),
             typed_dict_metadata: None,
@@ -166,6 +171,8 @@ impl ClassMetadata {
             is_new_type: false,
             is_final: false,
             has_unknown_tparams: false,
+            total_ordering_metadata: None,
+            dataclass_transform_metadata: None,
         }
     }
 
@@ -228,6 +235,14 @@ impl ClassMetadata {
         self.enum_metadata.is_some()
     }
 
+    pub fn is_total_ordering(&self) -> bool {
+        self.total_ordering_metadata.is_some()
+    }
+
+    pub fn total_ordering_metadata(&self) -> Option<&TotalOrderingMetadata> {
+        self.total_ordering_metadata.as_ref()
+    }
+
     pub fn protocol_metadata(&self) -> Option<&ProtocolMetadata> {
         self.protocol_metadata.as_ref()
     }
@@ -236,16 +251,8 @@ impl ClassMetadata {
         self.dataclass_metadata.as_ref()
     }
 
-    pub fn ancestors<'a>(&'a self, stdlib: &'a Stdlib) -> impl Iterator<Item = &'a ClassType> {
-        self.ancestors_no_object()
-            .iter()
-            .chain(iter::once(stdlib.object()))
-    }
-
-    /// The MRO doesn't track `object` directly for efficiency, since it always comes last, and
-    /// some use cases (for example checking if the type is an enum) do not care about `object`.
-    pub fn ancestors_no_object(&self) -> &[ClassType] {
-        self.mro.ancestors_no_object()
+    pub fn dataclass_transform_metadata(&self) -> Option<&DataclassTransformKeywords> {
+        self.dataclass_transform_metadata.as_ref()
     }
 }
 
@@ -295,6 +302,16 @@ impl ClassSynthesizedFields {
 
     pub fn get(&self, name: &Name) -> Option<&ClassSynthesizedField> {
         self.0.get(name)
+    }
+
+    /// Combines two sets of synthesized fields, with the second set
+    /// overwriting any fields in the first set that have the same name.
+    pub fn combine(mut self, other: Self) -> Self {
+        self.0.reserve(other.0.len());
+        for (name, field) in other.0.into_iter_hashed() {
+            self.0.insert_hashed(name, field);
+        }
+        self
     }
 }
 
@@ -367,20 +384,8 @@ pub struct NamedTupleMetadata {
 pub struct DataclassMetadata {
     /// The dataclass fields, e.g., `{'x'}` for `@dataclass class C: x: int`.
     pub fields: SmallSet<Name>,
-    pub kws: BoolKeywords,
-}
-
-impl DataclassMetadata {
-    /// Gets the DataclassMetadata that should be inherited by a class that is a dataclass via
-    /// inheritance but is not itself decorated with `@dataclass`.
-    pub fn inherit(&self) -> Self {
-        Self {
-            // Dataclass fields are inherited.
-            fields: self.fields.clone(),
-            // The remaining metadata are irrelevant, so just set them to some sensible-seeming value.
-            kws: self.kws.clone(),
-        }
-    }
+    pub kws: DataclassKeywords,
+    pub field_specifiers: Vec<CalleeKind>,
 }
 
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
@@ -389,6 +394,12 @@ pub struct ProtocolMetadata {
     pub members: SmallSet<Name>,
     /// Whether this protocol is decorated with @runtime_checkable
     pub is_runtime_checkable: bool,
+}
+
+#[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
+pub struct TotalOrderingMetadata {
+    /// Location of the decorator for `@total_ordering`.
+    pub location: TextRange,
 }
 
 /// A struct representing a class's ancestors, in method resolution order (MRO)
@@ -409,31 +420,23 @@ pub struct ProtocolMetadata {
 /// different type arguments. The type arguments computed here will always be
 /// those coming from the instance that was selected during lineariation.
 #[derive(Clone, Debug, VisitMut, TypeEq, PartialEq, Eq)]
-enum Mro {
+pub enum ClassMro {
     Resolved(Vec<ClassType>),
     Cyclic,
 }
 
-impl Display for Mro {
+impl Display for ClassMro {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Mro::Resolved(xs) => {
+            ClassMro::Resolved(xs) => {
                 write!(f, "[{}]", commas_iter(|| xs.iter()))
             }
-            Mro::Cyclic => write!(f, "Cyclic"),
+            ClassMro::Cyclic => write!(f, "Cyclic"),
         }
     }
 }
 
-struct ClassName<'a>(&'a QName);
-
-impl Display for ClassName<'_> {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        QName::fmt_with_module(self.0, f)
-    }
-}
-
-impl Mro {
+impl ClassMro {
     /// Compute all ancestors the method resolution order (MRO).
     ///
     /// Each ancestor is paired with `targs: TArgs` representing type
@@ -449,10 +452,10 @@ impl Mro {
     /// `Generic`, `Protocol`, and `object`.
     pub fn new(
         cls: &Class,
-        bases_with_metadata: &[(ClassType, Arc<ClassMetadata>)],
+        bases_with_mro: Vec<(&ClassType, Arc<ClassMro>)>,
         errors: &ErrorCollector,
     ) -> Self {
-        match Linearization::new(cls, bases_with_metadata, errors) {
+        match Linearization::new(cls, bases_with_mro, errors) {
             Linearization::Cyclic => Self::Cyclic,
             Linearization::Resolved(ancestor_chains) => {
                 let ancestors = Linearization::merge(cls, ancestor_chains, errors);
@@ -465,9 +468,19 @@ impl Mro {
     /// some use cases (for example checking if the type is an enum) do not care about `object`.
     pub fn ancestors_no_object(&self) -> &[ClassType] {
         match self {
-            Mro::Resolved(ancestors) => ancestors,
-            Mro::Cyclic => &[],
+            ClassMro::Resolved(ancestors) => ancestors,
+            ClassMro::Cyclic => &[],
         }
+    }
+
+    pub fn ancestors<'a>(&'a self, stdlib: &'a Stdlib) -> impl Iterator<Item = &'a ClassType> {
+        self.ancestors_no_object()
+            .iter()
+            .chain(iter::once(stdlib.object()))
+    }
+
+    pub fn recursive() -> Self {
+        Self::Cyclic
     }
 }
 
@@ -507,26 +520,23 @@ impl Linearization {
     /// - One consisting of the base classes themselves in the order defined.
     fn new(
         cls: &Class,
-        bases_with_metadata: &[(ClassType, Arc<ClassMetadata>)],
+        bases_with_mro: Vec<(&ClassType, Arc<ClassMro>)>,
         errors: &ErrorCollector,
     ) -> Linearization {
         let bases = match Vec1::try_from_vec(
-            bases_with_metadata
+            bases_with_mro
                 .iter()
                 .rev()
-                .map(|(base, _)| base.clone())
+                .map(|(base, _)| (*base).clone())
                 .collect(),
         ) {
             Ok(bases) => bases,
             Err(_) => return Linearization::empty(),
         };
         let mut ancestor_chains = Vec::new();
-        for (base, mro) in bases_with_metadata {
-            match &**mro {
-                ClassMetadata {
-                    mro: Mro::Resolved(ancestors),
-                    ..
-                } => {
+        for (base, mro) in bases_with_mro {
+            match &*mro {
+                ClassMro::Resolved(ancestors) => {
                     let ancestors_through_base = ancestors
                         .iter()
                         .map(|ancestor| ancestor.substitute(&base.substitution()))
@@ -539,17 +549,17 @@ impl Linearization {
                 }
                 // None and Cyclic both indicate a cycle, the distinction just
                 // depends on how exactly the recursion in resolving keys plays out.
-                ClassMetadata {
-                    mro: Mro::Cyclic, ..
-                } => {
+                ClassMro::Cyclic => {
+                    let base = base.class_object();
+                    let ctx = ClassDisplayContext::new(&[cls, base]);
                     errors.add(
                         cls.range(),
                         ErrorKind::InvalidInheritance,
                         None,
                         vec1![format!(
                             "Class `{}` inheriting from `{}` creates a cycle",
-                            ClassName(cls.qname()),
-                            ClassName(base.qname()),
+                            ctx.display(cls),
+                            ctx.display(base),
                         )],
                     );
                     // Signal that we detected a cycle
@@ -619,15 +629,22 @@ impl Linearization {
                 // The ancestors are not linearizable at this point. Record an error and stop with
                 // what we have so far.
                 // (The while loop invariant ensures that ancestor_chains is non-empty, so unwrap is safe.)
-                let first_candidate = &ancestor_chains.first().unwrap().0.last().class_object();
+                let first_candidate = &ancestor_chains
+                    .first()
+                    .unwrap()
+                    .0
+                    .last()
+                    .class_object()
+                    .dupe();
+                let ctx = ClassDisplayContext::new(&[cls, first_candidate]);
                 errors.add(
                     cls.range(),
                     ErrorKind::InvalidInheritance,
                     None,
                     vec1![format!(
                         "Class `{}` has a nonlinearizable inheritance chain detected at `{}`",
-                        ClassName(cls.qname()),
-                        ClassName(first_candidate.qname()),
+                        ctx.display(cls),
+                        ctx.display(first_candidate),
                     )],
                 );
 

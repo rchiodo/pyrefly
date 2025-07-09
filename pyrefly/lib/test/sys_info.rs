@@ -5,7 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use crate::sys_info::PythonVersion;
+use pyrefly_python::sys_info::PythonVersion;
+
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -118,6 +119,28 @@ assert_type(Z1(), str)
 );
 
 testcase!(
+    test_typechecking_with_pyrefly_constant,
+    TestEnv::one("foo", "TYPE_CHECKING_WITH_PYREFLY: bool = False"),
+    r#"
+from typing import assert_type
+from foo import TYPE_CHECKING_WITH_PYREFLY
+
+if TYPE_CHECKING_WITH_PYREFLY:
+    X0 = str
+else:
+    X0 = int
+assert_type(X0(), str)
+
+import foo
+if foo.TYPE_CHECKING_WITH_PYREFLY:
+    X1 = str
+else:
+    X1 = int
+assert_type(X1(), str)
+"#,
+);
+
+testcase!(
     test_platform,
     r#"
 from typing import assert_type
@@ -135,6 +158,21 @@ elif sys.platform.startswith("lin"):
 else:
     Y = None
 assert_type(Y(), int)
+"#,
+);
+
+testcase!(
+    test_sys_info_with_or,
+    r#"
+from typing import TYPE_CHECKING, Literal, assert_type
+x = 1
+
+if x or TYPE_CHECKING:
+    y = ""
+else:
+    y = 1
+
+assert_type(y, Literal[''])
 "#,
 );
 

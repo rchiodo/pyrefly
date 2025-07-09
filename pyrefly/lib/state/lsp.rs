@@ -17,6 +17,13 @@ use lsp_types::ParameterLabel;
 use lsp_types::SemanticToken;
 use lsp_types::SignatureHelp;
 use lsp_types::SignatureInformation;
+use lsp_types::TextEdit;
+use pyrefly_python::ast::Ast;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModulePathDetails;
+use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::gas::Gas;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
@@ -39,26 +46,21 @@ use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 use starlark_map::ordered_set::OrderedSet;
+use starlark_map::small_map::SmallMap;
 
 use crate::alt::attr::AttrDefinition;
 use crate::alt::attr::AttrInfo;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Key;
 use crate::binding::bindings::Bindings;
-use crate::common::symbol_kind::SymbolKind;
 use crate::error::kind::ErrorKind;
 use crate::export::definitions::DocString;
 use crate::export::exports::Export;
 use crate::export::exports::ExportLocation;
 use crate::graph::index::Idx;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_info::SourceRange;
 use crate::module::module_info::TextRangeWithModuleInfo;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::module::module_path::ModulePathDetails;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::state::handle::Handle;
 use crate::state::ide::IntermediateDefinition;
 use crate::state::ide::insert_import_edit;
@@ -68,17 +70,16 @@ use crate::state::semantic_tokens::SemanticTokenBuilder;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::CancellableTransaction;
 use crate::state::state::Transaction;
-use crate::sys_info::SysInfo;
 use crate::types::callable::Param;
 use crate::types::callable::Params;
-use crate::types::lsp::source_range_to_range;
 use crate::types::module::Module;
 use crate::types::types::BoundMethodType;
 use crate::types::types::Type;
 
 const INITIAL_GAS: Gas = Gas::new(100);
+const MIN_CHARACTERS_TYPED_AUTOIMPORT: usize = 3;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum DefinitionMetadata {
     Attribute(Name),
     Module,
@@ -196,6 +197,7 @@ struct IdentifierWithContext {
     context: IdentifierContext,
 }
 
+#[derive(PartialEq, Eq)]
 pub enum AnnotationKind {
     #[allow(dead_code)]
     Parameter,
@@ -358,6 +360,13 @@ impl IdentifierWithContext {
             context: IdentifierContext::Expr(expr_name.ctx),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FindDefinitionItem {
+    pub metadata: DefinitionMetadata,
+    pub location: TextRangeWithModuleInfo,
+    pub docstring: Option<DocString>,
 }
 
 impl<'a> Transaction<'a> {
@@ -555,6 +564,7 @@ impl<'a> Transaction<'a> {
                 let key = Key::BoundName(ShortIdentifier::new(&id));
                 if self.get_bindings(handle)?.is_valid_key(&key) {
                     if let Some(ExprCall {
+                        node_index: _,
                         range: _,
                         func,
                         arguments,
@@ -581,7 +591,7 @@ impl<'a> Transaction<'a> {
             }) => {
                 // TODO: Handle relative import (via ModuleName::new_maybe_relative)
                 Some(Type::Module(Module::new(
-                    module_name.components().first().unwrap().clone(),
+                    module_name.first_component(),
                     OrderedSet::from_iter([module_name]),
                 )))
             }
@@ -646,6 +656,7 @@ impl<'a> Transaction<'a> {
                 context: IdentifierContext::Attribute { range, .. },
             }) => {
                 if let Some(ExprCall {
+                    node_index: _,
                     range: _,
                     func,
                     arguments,
@@ -664,38 +675,43 @@ impl<'a> Transaction<'a> {
         }
     }
 
+    fn visit_finding_signature_range(
+        x: &Expr,
+        find: TextSize,
+        res: &mut Option<(TextRange, TextRange, usize)>,
+    ) {
+        if let Expr::Call(call) = x
+            && call.arguments.range.contains_inclusive(find)
+        {
+            for (i, arg) in call.arguments.args.as_ref().iter().enumerate() {
+                if arg.range().contains_inclusive(find) {
+                    Self::visit_finding_signature_range(arg, find, res);
+                    if res.is_some() {
+                        return;
+                    }
+                    *res = Some((call.func.range(), call.arguments.range, i));
+                }
+            }
+            if res.is_none() {
+                *res = Some((
+                    call.func.range(),
+                    call.arguments.range,
+                    call.arguments.len(),
+                ));
+            }
+        } else {
+            x.recurse(&mut |x| Self::visit_finding_signature_range(x, find, res));
+        }
+    }
+
     pub fn get_signature_help_at(
         &self,
         handle: &Handle,
         position: TextSize,
     ) -> Option<SignatureHelp> {
         let mod_module = self.get_ast(handle)?;
-        fn visit(x: &Expr, find: TextSize, res: &mut Option<(TextRange, TextRange, usize)>) {
-            if let Expr::Call(call) = x
-                && call.arguments.range.contains_inclusive(find)
-            {
-                for (i, arg) in call.arguments.args.as_ref().iter().enumerate() {
-                    if arg.range().contains_inclusive(find) {
-                        visit(arg, find, res);
-                        if res.is_some() {
-                            return;
-                        }
-                        *res = Some((call.func.range(), call.arguments.range, i));
-                    }
-                }
-                if res.is_none() {
-                    *res = Some((
-                        call.func.range(),
-                        call.arguments.range,
-                        call.arguments.len(),
-                    ));
-                }
-            } else {
-                x.recurse(&mut |x| visit(x, find, res));
-            }
-        }
         let mut res = None;
-        mod_module.visit(&mut |x| visit(x, position, &mut res));
+        mod_module.visit(&mut |x| Self::visit_finding_signature_range(x, position, &mut res));
         let (callee_range, call_args_range, arg_index) = res?;
         let answers = self.get_answers(handle)?;
         if let Some((overloads, chosen_overload_index)) =
@@ -726,24 +742,23 @@ impl<'a> Transaction<'a> {
     fn create_signature_information(type_: Type, arg_index: usize) -> SignatureInformation {
         let type_ = type_.deterministic_printing();
         let label = format!("{}", type_);
-        let (parameters, active_parameter) = if let Some(params) =
-            Self::normalize_singleton_function_type_for_signature_help(type_)
-        {
-            let active_parameter = if arg_index < params.len() {
-                Some(arg_index as u32)
+        let (parameters, active_parameter) =
+            if let Some(params) = Self::normalize_singleton_function_type_into_params(type_) {
+                let active_parameter = if arg_index < params.len() {
+                    Some(arg_index as u32)
+                } else {
+                    None
+                };
+                (
+                    Some(params.map(|param| ParameterInformation {
+                        label: ParameterLabel::Simple(format!("{}", param)),
+                        documentation: None,
+                    })),
+                    active_parameter,
+                )
             } else {
-                None
+                (None, None)
             };
-            (
-                Some(params.map(|param| ParameterInformation {
-                    label: ParameterLabel::Simple(format!("{}", param)),
-                    documentation: None,
-                })),
-                active_parameter,
-            )
-        } else {
-            (None, None)
-        };
         SignatureInformation {
             label,
             documentation: None,
@@ -752,7 +767,7 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn normalize_singleton_function_type_for_signature_help(type_: Type) -> Option<Vec<Param>> {
+    fn normalize_singleton_function_type_into_params(type_: Type) -> Option<Vec<Param>> {
         let callable = match type_ {
             Type::Callable(callable) => Some(*callable),
             Type::Function(function) => Some(function.signature),
@@ -799,16 +814,37 @@ impl<'a> Transaction<'a> {
         None
     }
 
+    /// When `jump_through_renamed_import` is true, we will jump through renamed import like
+    /// `from foo import bar as baz`, when we try to compute definition of baz.
+    /// Otherwise, we will stop at `baz``.
     fn resolve_intermediate_definition(
         &self,
         handle: &Handle,
         intermediate_definition: IntermediateDefinition,
+        jump_through_renamed_import: bool,
         mut gas: Gas,
     ) -> Option<(Handle, Export)> {
         match intermediate_definition {
             IntermediateDefinition::Local(export) => Some((handle.dupe(), export)),
-            IntermediateDefinition::NamedImport(module_name, name) => {
-                self.resolve_named_import(handle, module_name, name, &mut gas)
+            IntermediateDefinition::NamedImport(
+                import_key,
+                module_name,
+                name,
+                original_name_range,
+            ) => {
+                let (def_handle, export) =
+                    self.resolve_named_import(handle, module_name, name, &mut gas)?;
+                if !jump_through_renamed_import && original_name_range.is_some() {
+                    Some((
+                        handle.dupe(),
+                        Export {
+                            location: import_key,
+                            ..export
+                        },
+                    ))
+                } else {
+                    Some((def_handle, export))
+                }
             }
             IntermediateDefinition::Module(name) => {
                 let handle = self.import_handle(handle, name, None).ok()?;
@@ -849,21 +885,46 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn key_to_export(&self, handle: &Handle, key: &Key, mut gas: Gas) -> Option<(Handle, Export)> {
+    fn key_to_export(
+        &self,
+        handle: &Handle,
+        key: &Key,
+        jump_through_renamed_import: bool,
+        mut gas: Gas,
+    ) -> Option<(Handle, Export)> {
         let bindings = self.get_bindings(handle)?;
         let intermediate_definition = key_to_intermediate_definition(&bindings, key, &mut gas)?;
-        self.resolve_intermediate_definition(handle, intermediate_definition, gas)
+        self.resolve_intermediate_definition(
+            handle,
+            intermediate_definition,
+            jump_through_renamed_import,
+            gas,
+        )
+    }
+
+    // This is for cases where we are 100% certain that `identifier` points to a "real" name
+    // definition at a known context (e.g. `identifier is the name of a function or class`).
+    // If we are not certain (e.g. `identifier` is imported from another module so it's "real"
+    // definition could be somewhere else), use `find_definition_for_name_def()` instead.
+    fn find_definition_for_simple_def(
+        &self,
+        handle: &Handle,
+        identifier: &Identifier,
+        symbol_kind: SymbolKind,
+    ) -> Option<FindDefinitionItem> {
+        Some(FindDefinitionItem {
+            metadata: DefinitionMetadata::Variable(Some(symbol_kind)),
+            location: TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
+            docstring: None,
+        })
     }
 
     fn find_definition_for_name_def(
         &self,
         handle: &Handle,
         name: &Identifier,
-    ) -> Option<(
-        DefinitionMetadata,
-        TextRangeWithModuleInfo,
-        Option<DocString>,
-    )> {
+        jump_through_renamed_import: bool,
+    ) -> Option<FindDefinitionItem> {
         let def_key = Key::Definition(ShortIdentifier::new(name));
         if !self.get_bindings(handle)?.is_valid_key(&def_key) {
             return None;
@@ -875,25 +936,22 @@ impl<'a> Transaction<'a> {
                 symbol_kind,
                 docstring,
             },
-        ) = self.key_to_export(handle, &def_key, INITIAL_GAS)?;
+        ) = self.key_to_export(handle, &def_key, jump_through_renamed_import, INITIAL_GAS)?;
         let module_info = self.get_module_info(&handle)?;
         let name = Name::new(module_info.code_at(location));
-        Some((
-            DefinitionMetadata::VariableOrAttribute(name, symbol_kind),
-            TextRangeWithModuleInfo::new(module_info, location),
+        Some(FindDefinitionItem {
+            metadata: DefinitionMetadata::VariableOrAttribute(name, symbol_kind),
+            location: TextRangeWithModuleInfo::new(module_info, location),
             docstring,
-        ))
+        })
     }
 
     fn find_definition_for_name_use(
         &self,
         handle: &Handle,
         name: &Identifier,
-    ) -> Option<(
-        DefinitionMetadata,
-        TextRangeWithModuleInfo,
-        Option<DocString>,
-    )> {
+        jump_through_renamed_import: bool,
+    ) -> Option<FindDefinitionItem> {
         let use_key = Key::BoundName(ShortIdentifier::new(name));
         if !self.get_bindings(handle)?.is_valid_key(&use_key) {
             return None;
@@ -905,12 +963,12 @@ impl<'a> Transaction<'a> {
                 symbol_kind,
                 docstring,
             },
-        ) = self.key_to_export(handle, &use_key, INITIAL_GAS)?;
-        Some((
-            DefinitionMetadata::Variable(symbol_kind),
-            TextRangeWithModuleInfo::new(self.get_module_info(&handle)?, location),
+        ) = self.key_to_export(handle, &use_key, jump_through_renamed_import, INITIAL_GAS)?;
+        Some(FindDefinitionItem {
+            metadata: DefinitionMetadata::Variable(symbol_kind),
+            location: TextRangeWithModuleInfo::new(self.get_module_info(&handle)?, location),
             docstring,
-        ))
+        })
     }
 
     fn find_definition_for_attribute(
@@ -918,40 +976,135 @@ impl<'a> Transaction<'a> {
         handle: &Handle,
         base_range: TextRange,
         name: &Identifier,
-    ) -> Option<(
-        DefinitionMetadata,
-        TextRangeWithModuleInfo,
-        Option<DocString>,
-    )> {
-        let base_type = self.get_answers(handle)?.get_type_trace(base_range)?;
-        self.ad_hoc_solve(handle, |solver| {
-            let items = solver.completions(base_type.arc_clone(), Some(name.id()), false);
-            items.into_iter().find_map(|x| {
-                if &x.name == name.id() {
-                    let (definition, docstring) =
-                        self.resolve_attribute_definition(handle, &x.name, x.definition?)?;
-                    Some((DefinitionMetadata::Attribute(x.name), definition, docstring))
-                } else {
-                    None
+    ) -> Vec<FindDefinitionItem> {
+        if let Some(answers) = self.get_answers(handle)
+            && let Some(base_type) = answers.get_type_trace(base_range)
+        {
+            self.ad_hoc_solve(handle, |solver| {
+                let find_definition_for_base_type = |ty: Type| {
+                    solver
+                        .completions_no_union_intersection(ty, Some(name.id()), false)
+                        .into_iter()
+                        .find_map(|x| {
+                            if &x.name == name.id() {
+                                let (definition, docstring) = self.resolve_attribute_definition(
+                                    handle,
+                                    &x.name,
+                                    x.definition?,
+                                )?;
+                                Some(FindDefinitionItem {
+                                    metadata: DefinitionMetadata::Attribute(x.name),
+                                    location: definition,
+                                    docstring,
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                };
+                match base_type.arc_clone() {
+                    Type::Union(tys) | Type::Intersect(tys) => tys
+                        .into_iter()
+                        .filter_map(&find_definition_for_base_type)
+                        .collect(),
+                    ty => find_definition_for_base_type(ty).map_or(vec![], |item| vec![item]),
                 }
             })
+            .unwrap_or_default()
+        } else {
+            vec![]
+        }
+    }
+
+    fn find_definition_for_imported_module(
+        &self,
+        handle: &Handle,
+        module_name: ModuleName,
+    ) -> Option<FindDefinitionItem> {
+        // TODO: Handle relative import (via ModuleName::new_maybe_relative)
+        let handle = self.import_handle(handle, module_name, None).ok()?;
+        Some(FindDefinitionItem {
+            metadata: DefinitionMetadata::Module,
+            location: TextRangeWithModuleInfo::new(
+                self.get_module_info(&handle)?,
+                TextRange::default(),
+            ),
+            docstring: self.get_module_docstring(&handle),
         })
-        .flatten()
+    }
+
+    fn find_definition_for_keyword_argument(
+        &self,
+        handle: &Handle,
+        identifier: &Identifier,
+        callee_kind: &CalleeKind,
+    ) -> Vec<FindDefinitionItem> {
+        // NOTE(grievejia): There might be a better way to compute this that doesn't require 2 containing node
+        // traversal, once we gain access to the callee function def from callee_kind directly.
+        let callee_locations = self.get_callee_location(handle, callee_kind);
+        if callee_locations.is_empty() {
+            return vec![];
+        }
+
+        // Group all locations by their containing module, so later we could avoid reparsing
+        // the same module multiple times.
+        let location_count = callee_locations.len();
+        let mut modules_to_ranges: SmallMap<ModuleInfo, Vec<TextRange>> =
+            SmallMap::with_capacity(location_count);
+        for TextRangeWithModuleInfo { module_info, range } in callee_locations.into_iter() {
+            modules_to_ranges
+                .entry(module_info)
+                .or_default()
+                .push(range)
+        }
+
+        let mut results: Vec<FindDefinitionItem> = Vec::with_capacity(location_count);
+        for (module_info, ranges) in modules_to_ranges.into_iter() {
+            let ast = {
+                let handle = Handle::new(
+                    module_info.name(),
+                    module_info.path().dupe(),
+                    handle.sys_info().dupe(),
+                );
+                self.get_ast(&handle).unwrap_or_else(|| {
+                    // We may not have the AST available for the handle if it's not opened -- in that case,
+                    // Re-parse the module to get the AST.
+                    Ast::parse(module_info.contents()).0.into()
+                })
+            };
+
+            for range in ranges.into_iter() {
+                let refined_param_range =
+                    self.refine_param_location_for_callee(ast.as_ref(), range, identifier);
+                // TODO(grievejia): Should we filter out unrefinable ranges here?
+                results.push(FindDefinitionItem {
+                    metadata: DefinitionMetadata::Variable(Some(SymbolKind::Variable)),
+                    location: TextRangeWithModuleInfo::new(
+                        module_info.dupe(),
+                        refined_param_range.unwrap_or(range),
+                    ),
+                    docstring: None,
+                })
+            }
+        }
+        results
     }
 
     fn get_callee_location(
         &self,
         handle: &Handle,
         callee_kind: &CalleeKind,
-    ) -> Option<TextRangeWithModuleInfo> {
-        let (_, location, _) = match callee_kind {
-            CalleeKind::Function(name) => self.find_definition_for_name_use(handle, name),
+    ) -> Vec<TextRangeWithModuleInfo> {
+        let defs = match callee_kind {
+            CalleeKind::Function(name) => self
+                .find_definition_for_name_use(handle, name, true)
+                .map_or(vec![], |item| vec![item]),
             CalleeKind::Method(base_range, name) => {
                 self.find_definition_for_attribute(handle, *base_range, name)
             }
-            CalleeKind::Unknown => None,
-        }?;
-        Some(location)
+            CalleeKind::Unknown => vec![],
+        };
+        defs.into_iter().map(|item| item.location).collect()
     }
 
     /// Find the definition, metadata and optionally the docstring for the given position.
@@ -959,11 +1112,8 @@ impl<'a> Transaction<'a> {
         &self,
         handle: &Handle,
         position: TextSize,
-    ) -> Option<(
-        DefinitionMetadata,
-        TextRangeWithModuleInfo,
-        Option<DocString>,
-    )> {
+        jump_through_renamed_import: bool,
+    ) -> Vec<FindDefinitionItem> {
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: id,
@@ -972,11 +1122,16 @@ impl<'a> Transaction<'a> {
                 match expr_context {
                     ExprContext::Store => {
                         // This is a variable definition
-                        self.find_definition_for_name_def(handle, &id)
+                        // Can't use `find_definition_for_simple_def()` here because not all assignments
+                        // are guaranteed defs: they might be a modification to a name defined somewhere
+                        // else.
+                        self.find_definition_for_name_def(handle, &id, jump_through_renamed_import)
+                            .map_or(vec![], |item| vec![item])
                     }
                     ExprContext::Load | ExprContext::Del | ExprContext::Invalid => {
                         // This is a usage of the variable
-                        self.find_definition_for_name_use(handle, &id)
+                        self.find_definition_for_name_use(handle, &id, jump_through_renamed_import)
+                            .map_or(vec![], |item| vec![item])
                     }
                 }
             }
@@ -986,98 +1141,61 @@ impl<'a> Transaction<'a> {
                     IdentifierContext::ImportedModule {
                         name: module_name, ..
                     },
-            }) => {
-                // TODO: Handle relative import (via ModuleName::new_maybe_relative)
-                let handle = self.import_handle(handle, module_name, None).ok()?;
-                Some((
-                    DefinitionMetadata::Module,
-                    TextRangeWithModuleInfo::new(
-                        self.get_module_info(&handle)?,
-                        TextRange::default(),
-                    ),
-                    self.get_module_docstring(&handle),
-                ))
-            }
+            }) => self
+                .find_definition_for_imported_module(handle, module_name)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier: _,
                 context:
                     IdentifierContext::ImportedName {
                         name_after_import, ..
                     },
-            }) => self.find_definition_for_name_def(handle, &name_after_import),
+            }) => self
+                .find_definition_for_name_def(
+                    handle,
+                    &name_after_import,
+                    jump_through_renamed_import,
+                )
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::FunctionDef,
-            }) => Some((
-                DefinitionMetadata::Variable(Some(SymbolKind::Function)),
-                TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
-                None,
-            )),
+            }) => self
+                .find_definition_for_simple_def(handle, &identifier, SymbolKind::Function)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::ClassDef,
-            }) => Some((
-                DefinitionMetadata::Variable(Some(SymbolKind::Class)),
-                TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
-                None,
-            )),
+            }) => self
+                .find_definition_for_simple_def(handle, &identifier, SymbolKind::Class)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::Parameter,
-            }) => Some((
-                DefinitionMetadata::Variable(Some(SymbolKind::Parameter)),
-                TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
-                None,
-            )),
+            }) => self
+                .find_definition_for_simple_def(handle, &identifier, SymbolKind::Parameter)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::TypeParameter,
-            }) => Some((
-                DefinitionMetadata::Variable(Some(SymbolKind::TypeParameter)),
-                TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
-                None,
-            )),
+            }) => self
+                .find_definition_for_simple_def(handle, &identifier, SymbolKind::TypeParameter)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::ExceptionHandler | IdentifierContext::PatternMatch(_),
-            }) => Some((
-                DefinitionMetadata::Variable(Some(SymbolKind::Variable)),
-                TextRangeWithModuleInfo::new(self.get_module_info(handle)?, identifier.range),
-                None,
-            )),
+            }) => self
+                .find_definition_for_simple_def(handle, &identifier, SymbolKind::Variable)
+                .map_or(vec![], |item| vec![item]),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::KeywordArgument(callee_kind),
-            }) => {
-                // NOTE(grievejia): There might be a better way to compute this that doesn't require 2 containing node
-                // traversal, once we gain access to the callee function def from callee_kind directly.
-                let TextRangeWithModuleInfo { module_info, range } =
-                    self.get_callee_location(handle, &callee_kind)?;
-                let ast = {
-                    let handle = Handle::new(
-                        module_info.name(),
-                        module_info.path().dupe(),
-                        handle.sys_info().dupe(),
-                    );
-                    self.get_ast(&handle).unwrap_or_else(|| {
-                        // We may not have the AST available for the handle if it's not opened -- in that case,
-                        // Re-parse the module to get the AST.
-                        Ast::parse(module_info.contents()).0.into()
-                    })
-                };
-                let refined_param_range =
-                    self.refine_param_location_for_callee(ast.as_ref(), range, &identifier);
-                Some((
-                    DefinitionMetadata::Variable(Some(SymbolKind::Variable)),
-                    TextRangeWithModuleInfo::new(module_info, refined_param_range.unwrap_or(range)),
-                    None,
-                ))
-            }
+            }) => self.find_definition_for_keyword_argument(handle, &identifier, &callee_kind),
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::Attribute { base_range, .. },
             }) => self.find_definition_for_attribute(handle, base_range, &identifier),
-            None => None,
+            None => vec![],
         }
     }
 
@@ -1085,8 +1203,23 @@ impl<'a> Transaction<'a> {
         &self,
         handle: &Handle,
         position: TextSize,
+    ) -> Vec<TextRangeWithModuleInfo> {
+        self.find_definition(handle, position, true)
+            .into_map(|item| item.location)
+    }
+
+    /// This function should not be used for user-facing go-to-definition. However, it is exposed to
+    /// tests so that we can test the behavior that's useful for find-refs.
+    #[cfg(test)]
+    pub(crate) fn goto_definition_do_not_jump_through_renamed_import(
+        &self,
+        handle: &Handle,
+        position: TextSize,
     ) -> Option<TextRangeWithModuleInfo> {
-        self.find_definition(handle, position).map(|x| x.1)
+        self.find_definition(handle, position, false)
+            .into_iter()
+            .next()
+            .map(|item| item.location)
     }
 
     /// Produce code actions that makes edits local to the file.
@@ -1094,7 +1227,7 @@ impl<'a> Transaction<'a> {
         &self,
         handle: &Handle,
         range: TextRange,
-    ) -> Option<Vec<(String, SourceRange, String)>> {
+    ) -> Option<Vec<(String, ModuleInfo, TextRange, String)>> {
         let module_info = self.get_module_info(handle)?;
         let ast = self.get_ast(handle)?;
         let errors = self.get_errors(vec![handle]).collect_errors().shown;
@@ -1102,35 +1235,47 @@ impl<'a> Transaction<'a> {
         for error in errors {
             match error.error_kind() {
                 ErrorKind::UnknownName => {
-                    let error_range = module_info.to_text_range(error.source_range());
+                    let error_range = error.range();
                     if error_range.contains_range(range) {
                         let unknown_name = module_info.code_at(error_range);
-                        for handle_to_import_from in self.search_exports(unknown_name) {
+                        for handle_to_import_from in self.search_exports_exact(unknown_name) {
                             let (position, insert_text) =
                                 insert_import_edit(&ast, handle_to_import_from, unknown_name);
                             let range = TextRange::at(position, TextSize::new(0));
-                            let source_range = module_info.source_range(range);
                             let title = format!("Insert import: `{}`", insert_text.trim());
-                            code_actions.push((title, source_range, insert_text));
+                            code_actions.push((title, module_info.dupe(), range, insert_text));
                         }
                     }
                 }
                 _ => {}
             }
         }
-        code_actions.sort_by(|(title1, _, _), (title2, _, _)| title1.cmp(title2));
+        code_actions.sort_by(|(title1, _, _, _), (title2, _, _, _)| title1.cmp(title2));
         Some(code_actions)
     }
 
+    pub fn prepare_rename(&self, handle: &Handle, position: TextSize) -> Option<TextRange> {
+        self.identifier_at(handle, position).map(
+            |IdentifierWithContext {
+                 identifier,
+                 context: _,
+             }| identifier.range,
+        )
+    }
+
     pub fn find_local_references(&self, handle: &Handle, position: TextSize) -> Vec<TextRange> {
-        if let Some((definition_kind, definition, _docstring)) =
-            self.find_definition(handle, position)
-        {
-            self.local_references_from_definition(handle, definition_kind, definition)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+        self.find_definition(handle, position, false)
+            .into_iter()
+            .filter_map(
+                |FindDefinitionItem {
+                     metadata,
+                     location,
+                     docstring: _,
+                 }| {
+                    self.local_references_from_definition(handle, metadata, location)
+                },
+            )
+            .concat()
     }
 
     fn local_references_from_definition(
@@ -1143,8 +1288,10 @@ impl<'a> Transaction<'a> {
             let index = self.get_solutions(handle)?.get_index()?;
             let index = index.lock();
             let mut references = Vec::new();
-            for ((imported_module_name, imported_name), ranges) in
-                &index.externally_defined_variable_references
+            for ((imported_module_name, imported_name), ranges) in index
+                .externally_defined_variable_references
+                .iter()
+                .chain(&index.renamed_imports)
             {
                 let mut gas = INITIAL_GAS;
                 if let Some((imported_handle, export)) = self.resolve_named_import(
@@ -1211,7 +1358,7 @@ impl<'a> Transaction<'a> {
         let relevant_attributes = if let Some(mod_module) = self.get_ast(handle) {
             fn f(x: &Expr, expected_name: &Name, res: &mut Vec<ExprAttribute>) {
                 if let Expr::Attribute(x) = x
-                    && x.attr.id == *expected_name
+                    && &x.attr.id == expected_name
                 {
                     res.push(x.clone());
                 }
@@ -1292,7 +1439,7 @@ impl<'a> Transaction<'a> {
                 continue;
             }
             if let Some((definition_handle, definition_export)) =
-                self.key_to_export(handle, key, INITIAL_GAS)
+                self.key_to_export(handle, key, false, INITIAL_GAS)
             {
                 named_bindings.push(NamedBinding {
                     definition_handle,
@@ -1304,12 +1451,66 @@ impl<'a> Transaction<'a> {
         named_bindings
     }
 
+    fn add_kwargs_completions(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+        completions: &mut Vec<CompletionItem>,
+    ) {
+        let mod_module = match self.get_ast(handle) {
+            Some(module) => module,
+            None => return,
+        };
+
+        let mut call_context = None;
+        mod_module
+            .visit(&mut |x| Self::visit_finding_signature_range(x, position, &mut call_context));
+        let (callee_range, _call_args_range, _arg_index) = match call_context {
+            Some(context) => context,
+            None => return,
+        };
+
+        let answers = match self.get_answers(handle) {
+            Some(answers) => answers,
+            None => return,
+        };
+        let callee_type = match answers.get_type_trace(callee_range) {
+            Some(ty) => ty,
+            None => return,
+        };
+
+        let params =
+            match Self::normalize_singleton_function_type_into_params(callee_type.arc_clone()) {
+                Some(params) => params,
+                None => return,
+            };
+
+        for param in params {
+            match param {
+                Param::Pos(name, ty, _)
+                | Param::PosOnly(Some(name), ty, _)
+                | Param::KwOnly(name, ty, _)
+                | Param::VarArg(Some(name), ty) => {
+                    if name.as_str() != "self" {
+                        completions.push(CompletionItem {
+                            label: format!("{}=", name.as_str()),
+                            detail: Some(ty.to_string()),
+                            kind: Some(CompletionItemKind::VARIABLE),
+                            ..Default::default()
+                        });
+                    }
+                }
+                Param::VarArg(None, _) | Param::Kwargs(_, _) | Param::PosOnly(None, _, _) => {}
+            }
+        }
+    }
+
     pub fn completion(&self, handle: &Handle, position: TextSize) -> Vec<CompletionItem> {
-        let mut results = self
-            .completion_unsorted_opt(handle, position)
-            .unwrap_or_default();
+        let mut results = self.completion_unsorted_opt(handle, position);
         for item in &mut results {
-            let sort_text = if item.label.starts_with("__") {
+            let sort_text = if item.additional_text_edits.is_some() {
+                "3"
+            } else if item.label.starts_with("__") {
                 "2"
             } else if item.label.as_str().starts_with("_") {
                 "1"
@@ -1320,39 +1521,40 @@ impl<'a> Transaction<'a> {
             item.sort_text = Some(sort_text);
         }
         results.sort_by(|item1, item2| item1.sort_text.cmp(&item2.sort_text));
+        results.dedup_by(|item1, item2| item1.label == item2.label && item1.detail == item2.detail);
         results
     }
 
-    fn completion_unsorted_opt(
-        &self,
-        handle: &Handle,
-        position: TextSize,
-    ) -> Option<Vec<CompletionItem>> {
+    fn completion_unsorted_opt(&self, handle: &Handle, position: TextSize) -> Vec<CompletionItem> {
+        let mut result = Vec::new();
+        self.add_kwargs_completions(handle, position, &mut result);
+
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::ImportedName { module_name, .. },
             }) => {
                 // TODO: Handle relative import (via ModuleName::new_maybe_relative)
-                let handle = self.import_handle(handle, module_name, None).ok()?;
-                let exports = self.get_exports(&handle);
-                let completions = exports
-                    .keys()
-                    .map(|name| CompletionItem {
-                        label: name.to_string(),
-                        // todo(kylei): completion kind for exports
-                        kind: Some(CompletionItemKind::VARIABLE),
-                        ..Default::default()
-                    })
-                    .collect();
-                Some(completions)
+                if let Ok(handle) = self.import_handle(handle, module_name, None) {
+                    let exports = self.get_exports(&handle);
+                    for name in exports.keys() {
+                        result.push(CompletionItem {
+                            label: name.to_string(),
+                            // todo(kylei): completion kind for exports
+                            kind: Some(CompletionItemKind::VARIABLE),
+                            ..Default::default()
+                        })
+                    }
+                }
             }
             Some(IdentifierWithContext {
                 identifier,
                 context: IdentifierContext::ImportedModule { .. },
-            }) => Some(
-                self.import_prefixes(handle, ModuleName::from_name(identifier.id()))
-                    .map(|module_name| CompletionItem {
+            }) => self
+                .import_prefixes(handle, ModuleName::from_name(identifier.id()))
+                .iter()
+                .for_each(|module_name| {
+                    result.push(CompletionItem {
                         label: module_name
                             .components()
                             .last()
@@ -1361,54 +1563,107 @@ impl<'a> Transaction<'a> {
                         detail: Some(module_name.to_string()),
                         kind: Some(CompletionItemKind::MODULE),
                         ..Default::default()
-                    }),
-            ),
+                    })
+                }),
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::Attribute { base_range, .. },
             }) => {
-                let base_type = self.get_answers(handle)?.get_type_trace(base_range)?;
-                self.ad_hoc_solve(handle, |solver| {
-                    solver
-                        .completions(base_type.arc_clone(), None, true)
-                        .into_map(|x| CompletionItem {
-                            label: x.name.as_str().to_owned(),
-                            detail: x.ty.map(|t| t.to_string()),
-                            kind: Some(CompletionItemKind::FIELD),
-                            ..Default::default()
-                        })
-                })
+                if let Some(answers) = self.get_answers(handle) {
+                    if let Some(base_type) = answers.get_type_trace(base_range) {
+                        self.ad_hoc_solve(handle, |solver| {
+                            solver
+                                .completions(base_type.arc_clone(), None, true)
+                                .iter()
+                                .for_each(|x| {
+                                    let kind = match x.ty {
+                                        Some(Type::BoundMethod(_)) => {
+                                            Some(CompletionItemKind::METHOD)
+                                        }
+                                        Some(Type::Function(_)) => {
+                                            Some(CompletionItemKind::FUNCTION)
+                                        }
+                                        _ => Some(CompletionItemKind::FIELD),
+                                    };
+                                    result.push(CompletionItem {
+                                        label: x.name.as_str().to_owned(),
+                                        detail: x.ty.clone().map(|t| t.to_string()),
+                                        kind,
+                                        ..Default::default()
+                                    });
+                                });
+                        });
+                    }
+                }
             }
-            Some(IdentifierWithContext { .. }) => {
-                let bindings = self.get_bindings(handle)?;
-                let module_info = self.get_module_info(handle)?;
-                let names = bindings
-                    .available_definitions(position)
-                    .into_iter()
-                    .filter_map(|idx| {
-                        let key = bindings.idx_to_key(idx);
-                        if let Key::Definition(id) = key {
-                            let binding = bindings.get(idx);
-                            let detail = self.get_type(handle, key).map(|t| t.to_string());
-                            Some(CompletionItem {
-                                label: module_info.code_at(id.range()).to_owned(),
-                                detail,
-                                kind: binding
-                                    .symbol_kind()
-                                    .map_or(Some(CompletionItemKind::VARIABLE), |k| {
-                                        Some(k.to_lsp_completion_item_kind())
-                                    }),
-                                ..Default::default()
-                            })
-                        } else {
-                            None
+            Some(IdentifierWithContext { identifier, .. }) => {
+                if let Some(bindings) = self.get_bindings(handle) {
+                    if let Some(module_info) = self.get_module_info(handle) {
+                        bindings
+                            .available_definitions(position)
+                            .into_iter()
+                            .for_each(|idx| {
+                                let key = bindings.idx_to_key(idx);
+                                if let Key::Definition(id) = key {
+                                    let binding = bindings.get(idx);
+                                    let detail = self.get_type(handle, key).map(|t| t.to_string());
+                                    result.push(CompletionItem {
+                                        label: module_info.code_at(id.range()).to_owned(),
+                                        detail,
+                                        kind: binding
+                                            .symbol_kind()
+                                            .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                                                Some(k.to_lsp_completion_item_kind())
+                                            }),
+                                        ..Default::default()
+                                    })
+                                }
+                            });
+                        // We should not try to generate autoimport when the user has typed very few
+                        // characters. It's unhelpful to narrow down suggestions.
+                        if identifier.as_str().len() >= MIN_CHARACTERS_TYPED_AUTOIMPORT
+                            && let Some(ast) = self.get_ast(handle)
+                        {
+                            for (handle_to_import_from, name, export) in
+                                self.search_exports_fuzzy(identifier.as_str())
+                            {
+                                let (insert_text, additional_text_edits) =
+                                    match handle_to_import_from.module().as_str() {
+                                        "builtins" => (None, None),
+                                        _ => {
+                                            let (position, insert_text) = insert_import_edit(
+                                                &ast,
+                                                handle_to_import_from,
+                                                &name,
+                                            );
+                                            let import_text_edit = TextEdit {
+                                                range: module_info.lined_buffer().to_lsp_range(
+                                                    TextRange::at(position, TextSize::new(0)),
+                                                ),
+                                                new_text: insert_text.clone(),
+                                            };
+                                            (Some(insert_text), Some(vec![import_text_edit]))
+                                        }
+                                    };
+                                result.push(CompletionItem {
+                                    label: name,
+                                    detail: insert_text,
+                                    kind: export
+                                        .symbol_kind
+                                        .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                                            Some(k.to_lsp_completion_item_kind())
+                                        }),
+                                    additional_text_edits,
+                                    ..Default::default()
+                                });
+                            }
                         }
-                    })
-                    .collect::<Vec<_>>();
-                Some(names)
+                    }
+                }
             }
-            None => None,
+            None => {}
         }
+        result
     }
 
     fn collect_types_from_callees(&self, range: TextRange, handle: &Handle) -> Vec<Type> {
@@ -1435,9 +1690,7 @@ impl<'a> Transaction<'a> {
                 let callee = callee_at(mod_module, range.start());
                 match callee {
                     Some(ExprCall {
-                        range: _,
-                        func: _,
-                        arguments: args,
+                        arguments: args, ..
                     }) => args
                         .args
                         .iter()
@@ -1475,6 +1728,25 @@ impl<'a> Transaction<'a> {
         Vec::new()
     }
 
+    fn filter_parameters(
+        &self,
+        param_with_default: ParameterWithDefault,
+        handle: &Handle,
+    ) -> Option<ParameterAnnotation> {
+        if param_with_default.name() == "self" || param_with_default.name() == "cls" {
+            return None;
+        }
+        let ty = match param_with_default.default() {
+            Some(expr) => self.get_type_trace(handle, expr.range()),
+            None => None,
+        };
+        Some(ParameterAnnotation {
+            text_size: param_with_default.parameter.range().end(),
+            ty,
+            has_annotation: param_with_default.annotation().is_some(),
+        })
+    }
+
     pub fn infer_parameter_annotations(
         &self,
         handle: &Handle,
@@ -1496,18 +1768,7 @@ impl<'a> Transaction<'a> {
                 }
                 result
             }
-            fn filter_parameters(
-                param_with_default: ParameterWithDefault,
-            ) -> Option<ParameterAnnotation> {
-                if param_with_default.name() == "self" || param_with_default.name() == "cls" {
-                    return None;
-                }
-                Some(ParameterAnnotation {
-                    text_size: param_with_default.range().end(),
-                    ty: None,
-                    has_annotation: param_with_default.annotation().is_some(),
-                })
-            }
+
             fn zip_types(
                 inferred_types: Vec<Vec<Type>>,
                 function_arguments: Vec<ParameterAnnotation>,
@@ -1516,8 +1777,11 @@ impl<'a> Transaction<'a> {
                 function_arguments
                     .into_iter()
                     .zip(zipped_inferred_types)
-                    .map(|(arg, ty)| {
+                    .map(|(arg, mut ty)| {
                         let mut arg = arg;
+                        if let Some(default_type) = arg.ty {
+                            ty.push(default_type)
+                        }
                         if ty.len() == 1 {
                             arg.ty = Some(ty[0].clone());
                         } else {
@@ -1537,8 +1801,12 @@ impl<'a> Transaction<'a> {
                     if let Binding::Function(key_function, _, _) = binding {
                         let binding_func = bindings.get(*key_function);
                         let args = binding_func.def.parameters.args.clone();
-                        let func_args: Vec<ParameterAnnotation> =
-                            args.into_iter().filter_map(filter_parameters).collect();
+                        let func_args: Vec<ParameterAnnotation> = args
+                            .into_iter()
+                            .filter_map(|param_with_default| {
+                                self.filter_parameters(param_with_default, handle)
+                            })
+                            .collect();
                         let references =
                             self.collect_references(handle, idx, bindings.clone(), transaction);
                         let ranges: Vec<&TextRange> =
@@ -1567,7 +1835,7 @@ impl<'a> Transaction<'a> {
                 key @ Key::ReturnType(id) => {
                     match bindings.get(bindings.key_to_idx(&Key::Definition(id.clone()))) {
                         Binding::Function(x, _pred, _class_meta) => {
-                            if matches!(&bindings.get(idx), Binding::ReturnType(ret) if ret.annot.is_none())
+                            if matches!(&bindings.get(idx), Binding::ReturnType(ret) if !ret.kind.has_return_annotation())
                                 && let Some(ty) = self.get_type(handle, key)
                                 && is_interesting_type(&ty)
                             {
@@ -1599,7 +1867,7 @@ impl<'a> Transaction<'a> {
                 key @ Key::ReturnType(id) => {
                     match bindings.get(bindings.key_to_idx(&Key::Definition(id.clone()))) {
                         Binding::Function(x, _pred, _class_meta) => {
-                            if matches!(&bindings.get(idx), Binding::ReturnType(ret) if ret.annot.is_none())
+                            if matches!(&bindings.get(idx), Binding::ReturnType(ret) if !ret.kind.has_return_annotation())
                                 && let Some(ty) = self.get_type(handle, key)
                                 && is_interesting_type(&ty)
                             {
@@ -1690,12 +1958,13 @@ impl<'a> Transaction<'a> {
                         kind: lsp_types::SymbolKind::FUNCTION,
                         tags: None,
                         deprecated: None,
-                        range: source_range_to_range(
-                            &module_info.source_range(stmt_function_def.range),
-                        ),
-                        selection_range: source_range_to_range(
-                            &module_info.source_range(stmt_function_def.name.range),
-                        ),
+                        range: module_info
+                            .lined_buffer()
+                            .to_lsp_range(stmt_function_def.range),
+                        selection_range: module_info
+                            .lined_buffer()
+                            .to_lsp_range(stmt_function_def.name.range),
+
                         children: Some(children),
                     });
                 }
@@ -1712,12 +1981,12 @@ impl<'a> Transaction<'a> {
                         kind: lsp_types::SymbolKind::CLASS,
                         tags: None,
                         deprecated: None,
-                        range: source_range_to_range(
-                            &module_info.source_range(stmt_class_def.range),
-                        ),
-                        selection_range: source_range_to_range(
-                            &module_info.source_range(stmt_class_def.name.range),
-                        ),
+                        range: module_info
+                            .lined_buffer()
+                            .to_lsp_range(stmt_class_def.range),
+                        selection_range: module_info
+                            .lined_buffer()
+                            .to_lsp_range(stmt_class_def.name.range),
                         children: Some(children),
                     });
                 }

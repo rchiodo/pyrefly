@@ -17,6 +17,12 @@ use std::time::Instant;
 use anstream::ColorChoice;
 use anyhow::anyhow;
 use dupe::Dupe;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModulePathDetails;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::thread_pool::ThreadCount;
@@ -36,16 +42,10 @@ use crate::config::base::UntypedDefBehavior;
 use crate::config::config::ConfigFile;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::print_errors;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::module::module_path::ModulePathDetails;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::subscriber::TestSubscriber;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
-use crate::sys_info::SysInfo;
 use crate::types::class::Class;
 use crate::types::types::Type;
 
@@ -181,6 +181,7 @@ impl TestEnv {
         for (name, (path, _)) in self.modules.iter() {
             config.custom_module_paths.insert(*name, path.clone());
         }
+        config.interpreters.skip_interpreter_query = true;
         config.configure();
         ArcId::new(config)
     }
@@ -453,9 +454,19 @@ pub fn testcase_for_macro(
             errors.check_against_expectations()?;
         } else {
             let (state, handle) = env.clone().to_state();
+            let t = state.transaction();
+            // First check against main, so we can capture any import order errors.
+            t.get_errors([&handle("main")])
+                .check_against_expectations()?;
+            // THen check all handles, so we make sure the rest of the TestEnv is valid.
+            let handles = env
+                .modules
+                .keys()
+                .map(|x| handle(x.as_str()))
+                .collect::<Vec<_>>();
             state
                 .transaction()
-                .get_errors([&handle("main")])
+                .get_errors(handles.iter())
                 .check_against_expectations()?;
         }
         if start.elapsed().as_secs() <= limit {

@@ -13,8 +13,8 @@ use ruff_python_ast::name::Name;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::attr::Attribute;
 use crate::alt::class::variance_inference::VarianceMap;
 use crate::binding::binding::KeyVariance;
@@ -50,6 +50,10 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
 
     pub fn as_superclass(self, class: &ClassType, want: &Class) -> Option<ClassType> {
         self.0.as_superclass(class, want)
+    }
+
+    pub fn as_class_type_unchecked(self, class: &Class) -> ClassType {
+        self.0.as_class_type_unchecked(class)
     }
 
     pub fn is_compatible_constructor_return(self, ty: &Type, class: &Class) -> bool {

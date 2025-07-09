@@ -11,17 +11,16 @@ use ruff_python_ast::name::Name;
 pub const AENTER: Name = Name::new_static("__aenter__");
 pub const AEXIT: Name = Name::new_static("__aexit__");
 pub const ALL: Name = Name::new_static("__all__");
+pub const BOOL: Name = Name::new_static("__bool__");
 pub const CALL: Name = Name::new_static("__call__");
 pub const CONTAINS: Name = Name::new_static("__contains__");
 pub const DATACLASS_FIELDS: Name = Name::new_static("__dataclass_fields__");
-pub const DEBUG: Name = Name::new_static("__debug__");
 pub const DELATTR: Name = Name::new_static("__delattr__");
 pub const DELITEM: Name = Name::new_static("__delitem__");
 pub const DOC: Name = Name::new_static("__doc__");
 pub const ENTER: Name = Name::new_static("__enter__");
 pub const EQ: Name = Name::new_static("__eq__");
 pub const EXIT: Name = Name::new_static("__exit__");
-pub const FILE: Name = Name::new_static("__file__");
 pub const GE: Name = Name::new_static("__ge__");
 pub const GET: Name = Name::new_static("__get__");
 pub const GETATTR: Name = Name::new_static("__getattr__");
@@ -35,19 +34,20 @@ pub const ITER: Name = Name::new_static("__iter__");
 pub const LE: Name = Name::new_static("__le__");
 pub const LT: Name = Name::new_static("__lt__");
 pub const MATCH_ARGS: Name = Name::new_static("__match_args__");
-pub const NAME: Name = Name::new_static("__name__");
 pub const NE: Name = Name::new_static("__ne__");
 pub const NEG: Name = Name::new_static("__neg__");
 pub const NEW: Name = Name::new_static("__new__");
-#[expect(dead_code)]
 pub const NEXT: Name = Name::new_static("__next__");
 pub const POS: Name = Name::new_static("__pos__");
+pub const POST_INIT: Name = Name::new_static("__post_init__");
 pub const SET: Name = Name::new_static("__set__");
 pub const SETATTR: Name = Name::new_static("__setattr__");
 pub const SETITEM: Name = Name::new_static("__setitem__");
-pub const BOOL: Name = Name::new_static("__bool__");
+pub const SLOTS: Name = Name::new_static("__slots__");
 
 pub const RICH_CMPS: &[Name] = &[LT, LE, EQ, NE, GT, GE];
+/// Rich comparison methods supplied by the `functools.total_ordering` decorator
+pub const RICH_CMPS_TOTAL_ORDERING: &[Name] = &[LT, LE, GT, GE];
 
 /// Returns the associated dunder if `op` corresponds to a "rich comparison method":
 /// https://docs.python.org/3/reference/datamodel.html#object.__lt__.

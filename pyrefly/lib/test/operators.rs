@@ -20,6 +20,14 @@ def f(a: int, b: int) -> None:
 );
 
 testcase!(
+    test_bounded_type_var_comparison,
+    r#"
+def compare[T: int](x: T, y: T) -> bool:
+    return x > y
+"#,
+);
+
+testcase!(
     test_negative_literals,
     r#"
 from typing import Literal
@@ -339,6 +347,31 @@ testcase!(
 from typing import Any, assert_type
 def f(x: Any):
     assert_type(-x, Any)
+    "#,
+);
+
+testcase!(
+    test_binop_on_any,
+    r#"
+from typing import Any, assert_type
+
+def f(x: Any):
+    assert_type(1 + x, Any)
+    assert_type(x < 10, Any)
+
+def f2(x: int | Any):
+    assert_type(1 + x, int | Any)
+    assert_type(x < 10,  bool | Any )
+    "#,
+);
+
+testcase!(
+    test_binop_type_var,
+    r#"
+from typing import TypeVar, reveal_type
+T_co = TypeVar("T_co", covariant=True)
+T_co == int 
+reveal_type(T_co) # E:  revealed type: type[TypeVar[T_co]]
     "#,
 );
 

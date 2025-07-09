@@ -36,7 +36,6 @@ mod binding;
 mod commands;
 mod common;
 mod config;
-mod dunder;
 mod error;
 mod export;
 mod graph;
@@ -44,10 +43,8 @@ mod module;
 pub mod playground;
 pub mod query;
 mod report;
-mod ruff;
 mod solver;
 mod state;
-mod sys_info;
 mod test;
 mod types;
 
@@ -61,8 +58,15 @@ pub mod library {
     pub mod library {
         pub mod library {
             pub mod library {
+                pub use pyrefly_python::module_name::ModuleName;
+                pub use pyrefly_python::module_path::ModulePath;
+                pub use pyrefly_python::sys_info::PythonPlatform;
+                pub use pyrefly_python::sys_info::PythonVersion;
+
                 #[cfg(not(target_arch = "wasm32"))]
                 pub use crate::commands::config_finder::standard_config_finder;
+                #[cfg(not(target_arch = "wasm32"))]
+                pub use crate::commands::globs_and_config_getter;
                 #[cfg(not(target_arch = "wasm32"))]
                 pub use crate::commands::run;
                 pub use crate::config::base::ConfigBase;
@@ -72,11 +76,6 @@ pub mod library {
                 pub use crate::config::environment::environment::PythonEnvironment;
                 pub use crate::config::finder;
                 pub use crate::error::kind::Severity;
-                pub use crate::module::module_info::SourceRange;
-                pub use crate::module::module_name::ModuleName;
-                pub use crate::module::module_path::ModulePath;
-                pub use crate::sys_info::PythonPlatform;
-                pub use crate::sys_info::PythonVersion;
             }
         }
     }

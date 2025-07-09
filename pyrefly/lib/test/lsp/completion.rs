@@ -19,6 +19,7 @@ fn get_test_report(state: &State, handle: &Handle, position: TextSize) -> String
         label,
         detail,
         kind,
+        insert_text,
         ..
     } in state.transaction().completion(handle, position)
     {
@@ -29,6 +30,11 @@ fn get_test_report(state: &State, handle: &Handle, position: TextSize) -> String
         if let Some(detail) = detail {
             report.push_str(": ");
             report.push_str(&detail);
+        }
+        if let Some(insert_text) = insert_text {
+            report.push_str(" inserting `");
+            report.push_str(&insert_text);
+            report.push('`');
         }
     }
     report
@@ -62,6 +68,37 @@ Completion Results:
 Completion Results:
 - (Field) y: int
 - (Field) x: int
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn dot_complete_types_test() {
+    let code = r#"
+class Foo:
+    x: int
+    def method(self): ...
+    @staticmethod
+    def static_method(): ...
+    @classmethod
+    def class_method(cls): ...
+foo = Foo()
+foo.
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+10 | foo.
+         ^
+Completion Results:
+- (Field) x: int
+- (Method) method: BoundMethod[Foo, (self: Self@Foo) -> None]
+- (Function) static_method: () -> None
+- (Method) class_method: BoundMethod[type[Foo], (cls: type[Self@Foo]) -> None]
 "#
         .trim(),
         report.trim(),
@@ -201,6 +238,18 @@ from foo imp
                ^
 Completion Results:
 - (Variable) imperial_guard
+- (Variable) __annotations__
+- (Variable) __builtins__
+- (Variable) __cached__
+- (Variable) __debug__
+- (Variable) __dict__
+- (Variable) __file__
+- (Variable) __loader__
+- (Variable) __name__
+- (Variable) __package__
+- (Variable) __path__
+- (Variable) __spec__
+- (Variable) __doc__
 
 
 # foo.py
@@ -262,9 +311,334 @@ Completion Results:
                            ^
 Completion Results:
 - (Variable) imperial_guard
+- (Variable) __annotations__
+- (Variable) __builtins__
+- (Variable) __cached__
+- (Variable) __debug__
+- (Variable) __dict__
+- (Variable) __file__
+- (Variable) __loader__
+- (Variable) __name__
+- (Variable) __package__
+- (Variable) __path__
+- (Variable) __spec__
+- (Variable) __doc__
 
 
 # foo.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_basic() {
+    let code = r#"
+def foo(a: int, b: str): ...
+xyz = 5
+foo(x
+#    ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+4 | foo(x
+         ^
+Completion Results:
+- (Variable) a=: int
+- (Variable) b=: str
+- (Function) foo: (a: int, b: str) -> None
+- (Variable) xyz: Literal[5]
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_with_existing_args() {
+    let code = r#"
+def foo(a: int, b: str, c: bool): ...
+foo(1, 
+#      ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | foo(1, 
+           ^
+Completion Results:
+- (Variable) a=: int
+- (Variable) b=: str
+- (Variable) c=: bool
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_method() {
+    let code = r#"
+class Foo:
+    def method(self, x: int, y: str): ...
+
+foo = Foo()
+foo.method(
+#          ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+6 | foo.method(
+               ^
+Completion Results:
+- (Variable) x=: int
+- (Variable) y=: str
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_kwonly_params() {
+    let code = r#"
+def foo(a: int, *, b: str, c: bool): ...
+foo(
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | foo(
+        ^
+Completion Results:
+- (Variable) a=: int
+- (Variable) b=: str
+- (Variable) c=: bool
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_mixed_params() {
+    let code = r#"
+def foo(a: int, b: str = "default", *, c: bool, d: float = 1.0): ...
+foo(
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | foo(
+        ^
+Completion Results:
+- (Variable) a=: int
+- (Variable) b=: str
+- (Variable) c=: bool
+- (Variable) d=: float
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_no_self_param() {
+    let code = r#"
+class Foo:
+    def test(self, x: int, y: str): ...
+
+Foo().test(
+#          ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+5 | Foo().test(
+               ^
+Completion Results:
+- (Variable) x=: int
+- (Variable) y=: str
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+// todo(kylei): completion on constructor
+#[test]
+fn kwargs_completion_constructor() {
+    let code = r#"
+class Foo:
+    def __init__(self, x: int, y: str): ...
+
+Foo(
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+5 | Foo(
+        ^
+Completion Results:
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_nested_call() {
+    let code = r#"
+def outer(a: int): ...
+def inner(b: str): ...
+outer(inner(
+#           ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+4 | outer(inner(
+                ^
+Completion Results:
+- (Variable) b=: str
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn kwargs_completion_no_completions_for_non_function() {
+    let code = r#"
+x = 42
+x(
+# ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | x(
+      ^
+Completion Results:
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn builtins_doesnt_autoimport() {
+    let code = r#"
+isins
+#    ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+2 | isins
+         ^
+Completion Results:
+- (Function) isinstance
+- (Function) timerfd_settime_ns: from os import timerfd_settime_ns
+
+- (Function) distributions: from importlib.metadata import distributions
+
+- (Function) packages_distributions: from importlib.metadata import packages_distributions
+
+- (Class) MissingHeaderBodySeparatorDefect: from email.errors import MissingHeaderBodySeparatorDefect
+
+- (Function) fix_missing_locations: from ast import fix_missing_locations
+
+- (Class) FirstHeaderLineIsContinuationDefect: from email.errors import FirstHeaderLineIsContinuationDefect
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+// todo(kylei): completion on literal
+#[test]
+fn completion_literal() {
+    let code = r#"
+from typing import Literal
+def foo(x: Literal['foo']): ...
+foo(
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+4 | foo(
+        ^
+Completion Results:
+- (Variable) x=: Literal['foo']
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+// todo(kylei): completion on known dict values
+// Pyright completes "a", "b"
+#[test]
+fn completion_dict() {
+    let code = r#"
+x = {"a": 3, "b", 4}
+x["
+# ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | x["
+      ^
+Completion Results:
+- (Variable) x: dict[int | str, int]
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+// todo(kylei): kwarg completion on overload
+#[test]
+fn kwargs_completion_literal() {
+    let code = r#"
+from typing import Literal, overload
+@overload
+def foo(x: int):
+    print(x)
+@overload
+def foo(y: bool):
+    print(y)
+foo(
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+9 | foo(
+        ^
+Completion Results:
 "#
         .trim(),
         report.trim(),

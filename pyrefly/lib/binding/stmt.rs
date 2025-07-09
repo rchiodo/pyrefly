@@ -5,6 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::ast::Ast;
+use pyrefly_python::module_name::ModuleName;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprCall;
 use ruff_python_ast::ExprName;
@@ -39,9 +42,7 @@ use crate::binding::scope::LoopExit;
 use crate::error::kind::ErrorKind;
 use crate::export::special::SpecialExport;
 use crate::graph::index::Idx;
-use crate::module::module_name::ModuleName;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::state::loader::FindError;
 use crate::types::alias::resolve_typeshed_alias;
 use crate::types::special_form::SpecialForm;
@@ -68,15 +69,15 @@ impl<'a> BindingsBuilder<'a> {
         name: &ExprName,
         make_binding: impl FnOnce(Option<Idx<KeyAnnotation>>) -> Binding,
     ) {
-        let user = self.declare_user(Key::Definition(ShortIdentifier::expr_name(name)));
+        let assigned = self.declare_current_idx(Key::Definition(ShortIdentifier::expr_name(name)));
         // TODO(stroxler): It probably should be an error if the annotation is ever non-None
-        let (ann, default) = self.bind_user(&name.id, &user, FlowStyle::Other);
+        let (ann, default) = self.bind_current(&name.id, &assigned, FlowStyle::Other);
         let mut binding = make_binding(ann);
         // TODO(stroxler): It probably should be an error if the default is ever non-None
         if let Some(default) = default {
             binding = Binding::Default(default, Box::new(binding));
         }
-        self.insert_binding_user(user, binding);
+        self.insert_binding_current(assigned, binding);
     }
 
     fn assign_type_var(&mut self, name: &ExprName, call: &mut ExprCall) {
@@ -229,12 +230,12 @@ impl<'a> BindingsBuilder<'a> {
     /// If this is the top level, report a type error about the invalid return
     /// and also create a binding to ensure we type check the expression.
     fn record_return(&mut self, mut x: StmtReturn) {
-        let mut user = self.declare_user(Key::ReturnExplicit(x.range()));
-        self.ensure_expr_opt(x.value.as_deref_mut(), user.usage());
-        if let Err((user, oops_top_level)) = self.scopes.record_or_reject_return(user, x) {
+        let mut ret = self.declare_current_idx(Key::ReturnExplicit(x.range()));
+        self.ensure_expr_opt(x.value.as_deref_mut(), ret.usage());
+        if let Err((ret, oops_top_level)) = self.scopes.record_or_reject_return(ret, x) {
             match oops_top_level.value {
-                Some(v) => self.insert_binding_user(user, Binding::Expr(None, *v)),
-                None => self.insert_binding_user(user, Binding::Type(Type::None)),
+                Some(v) => self.insert_binding_current(ret, Binding::Expr(None, *v)),
+                None => self.insert_binding_current(ret, Binding::Type(Type::None)),
             };
             self.error(
                 oops_top_level.range,
@@ -259,7 +260,7 @@ impl<'a> BindingsBuilder<'a> {
             }
             Stmt::Delete(mut x) => {
                 for target in &mut x.targets {
-                    let mut user = self.declare_user(Key::UsageLink(target.range()));
+                    let mut delete_link = self.declare_current_idx(Key::UsageLink(target.range()));
                     if let Expr::Name(name) = target {
                         let idx = self.ensure_mutable_name(name);
                         self.scopes.update_flow_info(
@@ -268,14 +269,14 @@ impl<'a> BindingsBuilder<'a> {
                             Some(FlowStyle::Uninitialized),
                         );
                     } else {
-                        self.ensure_expr(target, user.usage());
+                        self.ensure_expr(target, delete_link.usage());
                     }
                     let delete_idx = self.insert_binding(
                         KeyExpect(target.range()),
-                        BindingExpect::Delete(Box::new(target.clone())),
+                        BindingExpect::Delete(target.clone()),
                     );
-                    self.insert_binding_user(
-                        user,
+                    self.insert_binding_current(
+                        delete_link,
                         Binding::UsageLink(LinkedKey::Expect(delete_idx)),
                     );
                 }
@@ -290,7 +291,7 @@ impl<'a> BindingsBuilder<'a> {
                 //
                 // For example, we treat `typing.List` as if it were an import of `builtins.list`.
                 self.bind_legacy_type_var_or_typing_alias(name, |_| {
-                    Binding::Import(module, forward)
+                    Binding::Import(module, forward, None)
                 })
             }
             Stmt::Assign(mut x) => {
@@ -390,20 +391,21 @@ impl<'a> BindingsBuilder<'a> {
                     Expr::Name(name) => {
                         // TODO(stroxler): Is this really a good key for an augmented assignment?
                         // It works okay for type checking, but might have weird effects on the IDE.
-                        let mut user =
-                            self.declare_user(Key::Definition(ShortIdentifier::expr_name(name)));
+                        let mut assigned = self
+                            .declare_current_idx(Key::Definition(ShortIdentifier::expr_name(name)));
                         // Ensure the target name, which must already be in scope (it is part of the implicit dunder method call
                         // used in augmented assignment).
                         self.ensure_mutable_name(name);
-                        self.ensure_expr(&mut x.value, user.usage());
+                        self.ensure_expr(&mut x.value, assigned.usage());
                         // TODO(stroxler): Should we really be using `bind_key` here? This will update the
                         // flow info to define the name, even if it was not previously defined.
-                        let (ann, default) = self.bind_user(&name.id, &user, FlowStyle::Other);
+                        let (ann, default) =
+                            self.bind_current(&name.id, &assigned, FlowStyle::Other);
                         let mut binding = Binding::AugAssign(ann, x.clone());
                         if let Some(default) = default {
                             binding = Binding::Default(default, Box::new(binding));
                         }
-                        self.insert_binding_user(user, binding);
+                        self.insert_binding_current(assigned, binding);
                     }
                     Expr::Attribute(attr) => {
                         let mut x_cloned = x.clone();
@@ -548,6 +550,7 @@ impl<'a> BindingsBuilder<'a> {
                     // Try and continue as much as we can, by throwing away the type or just binding to error
                     match x.value {
                         Some(value) => self.stmt(Stmt::Assign(StmtAssign {
+                            node_index: AtomicNodeIndex::dummy(),
                             range: x.range,
                             targets: vec![target],
                             value,
@@ -602,14 +605,8 @@ impl<'a> BindingsBuilder<'a> {
                 // Note that is is important we ensure *after* we set up the loop, so that both the
                 // narrowing and type checking are aware that the test might be impacted by changes
                 // made in the loop (e.g. if we reassign the test variable).
-                let range = x.test.range();
-                let user = self.declare_user(Key::Anon(range));
-                self.insert_binding_user(user, Binding::Expr(None, *x.test.clone()));
                 // Typecheck the test condition during solving.
-                self.insert_binding(
-                    KeyExpect(range),
-                    BindingExpect::Bool(Box::new(*x.test), range),
-                );
+                self.insert_binding(KeyExpect(x.test.range()), BindingExpect::Bool(*x.test));
                 self.stmts(x.body);
                 self.teardown_loop(x.range, &narrow_ops, x.orelse);
             }
@@ -636,14 +633,10 @@ impl<'a> BindingsBuilder<'a> {
                     self.ensure_expr_opt(test.as_mut(), &mut Usage::Narrowing);
                     let new_narrow_ops = NarrowOps::from_expr(self, test.as_ref());
                     if let Some(test_expr) = test {
-                        self.insert_binding(
-                            Key::Anon(test_expr.range()),
-                            Binding::Expr(None, test_expr.clone()),
-                        );
                         // Typecheck the test condition during solving.
                         self.insert_binding(
                             KeyExpect(test_expr.range()),
-                            BindingExpect::Bool(Box::new(test_expr.clone()), range),
+                            BindingExpect::Bool(test_expr),
                         );
                     } else {
                         implicit_else = false;
@@ -681,10 +674,10 @@ impl<'a> BindingsBuilder<'a> {
                 for mut item in x.items {
                     let item_range = item.range();
                     let expr_range = item.context_expr.range();
-                    let mut context_user = self.declare_user(Key::ContextExpr(expr_range));
-                    self.ensure_expr(&mut item.context_expr, context_user.usage());
+                    let mut context = self.declare_current_idx(Key::ContextExpr(expr_range));
+                    self.ensure_expr(&mut item.context_expr, context.usage());
                     let context_idx = self
-                        .insert_binding_user(context_user, Binding::Expr(None, item.context_expr));
+                        .insert_binding_current(context, Binding::Expr(None, item.context_expr));
                     if let Some(mut opts) = item.optional_vars {
                         let make_binding =
                             |ann| Binding::ContextValue(ann, context_idx, expr_range, kind);
@@ -703,10 +696,10 @@ impl<'a> BindingsBuilder<'a> {
             }
             Stmt::Raise(x) => {
                 if let Some(mut exc) = x.exc {
-                    let mut user = self.declare_user(Key::UsageLink(x.range));
-                    self.ensure_expr(&mut exc, user.usage());
+                    let mut current = self.declare_current_idx(Key::UsageLink(x.range));
+                    self.ensure_expr(&mut exc, current.usage());
                     let raised = if let Some(mut cause) = x.cause {
-                        self.ensure_expr(&mut cause, user.usage());
+                        self.ensure_expr(&mut cause, current.usage());
                         RaisedException::WithCause(Box::new((*exc, *cause)))
                     } else {
                         RaisedException::WithoutCause(*exc)
@@ -715,7 +708,10 @@ impl<'a> BindingsBuilder<'a> {
                         KeyExpect(x.range),
                         BindingExpect::CheckRaisedException(raised),
                     );
-                    self.insert_binding_user(user, Binding::UsageLink(LinkedKey::Expect(idx)));
+                    self.insert_binding_current(
+                        current,
+                        Binding::UsageLink(LinkedKey::Expect(idx)),
+                    );
                 } else {
                     // If there's no exception raised, don't bother checking the cause.
                 }
@@ -743,19 +739,22 @@ impl<'a> BindingsBuilder<'a> {
                     if let Some(name) = h.name
                         && let Some(mut type_) = h.type_
                     {
-                        let mut user =
-                            self.declare_user(Key::Definition(ShortIdentifier::new(&name)));
-                        self.ensure_expr(&mut type_, user.usage());
-                        self.bind_definition_user(
+                        let mut handler =
+                            self.declare_current_idx(Key::Definition(ShortIdentifier::new(&name)));
+                        self.ensure_expr(&mut type_, handler.usage());
+                        self.bind_definition_current(
                             &name,
-                            user,
+                            handler,
                             Binding::ExceptionHandler(type_, x.is_star),
                             FlowStyle::Other,
                         );
                     } else if let Some(mut type_) = h.type_ {
-                        let mut user = self.declare_user(Key::Anon(range));
-                        self.ensure_expr(&mut type_, user.usage());
-                        self.insert_binding_user(user, Binding::ExceptionHandler(type_, x.is_star));
+                        let mut handler = self.declare_current_idx(Key::Anon(range));
+                        self.ensure_expr(&mut type_, handler.usage());
+                        self.insert_binding_current(
+                            handler,
+                            Binding::ExceptionHandler(type_, x.is_star),
+                        );
                     }
                     self.stmts(h.body);
                     self.scopes.swap_current_flow_with(&mut base);
@@ -770,13 +769,13 @@ impl<'a> BindingsBuilder<'a> {
                 self.bind_narrow_ops(&NarrowOps::from_expr(self, Some(&x.test)), x.range);
                 self.insert_binding(Key::Anon(x.test.range()), Binding::Expr(None, *x.test));
                 if let Some(mut msg_expr) = x.msg {
-                    let mut msg_user = self.declare_user(Key::UsageLink(msg_expr.range()));
-                    self.ensure_expr(&mut msg_expr, msg_user.usage());
+                    let mut msg = self.declare_current_idx(Key::UsageLink(msg_expr.range()));
+                    self.ensure_expr(&mut msg_expr, msg.usage());
                     let idx = self.insert_binding(
                         KeyExpect(msg_expr.range()),
-                        BindingExpect::TypeCheckExpr(Box::new(*msg_expr)),
+                        BindingExpect::TypeCheckExpr(*msg_expr),
                     );
-                    self.insert_binding_user(msg_user, Binding::UsageLink(LinkedKey::Expect(idx)));
+                    self.insert_binding_current(msg, Binding::UsageLink(LinkedKey::Expect(idx)));
                 };
             }
             Stmt::Import(x) => {
@@ -828,7 +827,7 @@ impl<'a> BindingsBuilder<'a> {
                                     for name in module_exports.wildcard(self.lookup).iter_hashed() {
                                         let key = Key::Import(name.into_key().clone(), x.range);
                                         let val = if exported.contains_key_hashed(name) {
-                                            Binding::Import(m, name.into_key().clone())
+                                            Binding::Import(m, name.into_key().clone(), None)
                                         } else {
                                             self.error(
                                                 x.range,
@@ -846,6 +845,11 @@ impl<'a> BindingsBuilder<'a> {
                                         );
                                     }
                                 } else {
+                                    let original_name_range = if x.asname.is_some() {
+                                        Some(x.name.range)
+                                    } else {
+                                        None
+                                    };
                                     let asname = x.asname.unwrap_or_else(|| x.name.clone());
                                     // A `from x import y` statement is ambiguous; if `x` is a package with
                                     // an `__init__.py` file, then it might import the name `y` from the
@@ -858,7 +862,7 @@ impl<'a> BindingsBuilder<'a> {
                                     let val = if (self.module_info.name() != m)
                                         && exported.contains_key(&x.name.id)
                                     {
-                                        Binding::Import(m, x.name.id.clone())
+                                        Binding::Import(m, x.name.id.clone(), original_name_range)
                                     } else {
                                         let x_as_module_name = m.append(&x.name.id);
                                         if self.lookup.get(x_as_module_name).is_ok() {
@@ -928,9 +932,9 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Stmt::Expr(mut x) => {
-                let mut user = self.declare_user(Key::StmtExpr(x.value.range()));
-                self.ensure_expr(&mut x.value, user.usage());
-                self.insert_binding_user(user, Binding::Expr(None, *x.value));
+                let mut current = self.declare_current_idx(Key::StmtExpr(x.value.range()));
+                self.ensure_expr(&mut x.value, current.usage());
+                self.insert_binding_current(current, Binding::Expr(None, *x.value));
             }
             Stmt::Pass(_) => { /* no-op */ }
             Stmt::Break(x) => {

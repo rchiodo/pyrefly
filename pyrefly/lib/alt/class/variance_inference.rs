@@ -6,10 +6,11 @@ use std::sync::Arc;
 use dupe::Dupe;
 use pyrefly_derive::TypeEq;
 use pyrefly_util::visit::VisitMut;
+use ruff_python_ast::name::Name;
 use starlark_map::small_map::SmallMap;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::class_field::ClassField;
 use crate::alt::class::variance_inference::variance_visitor::Injectivity;
 use crate::alt::class::variance_inference::variance_visitor::TParamArray;
@@ -43,13 +44,9 @@ use crate::types::types::Type;
 // For example, SelfType is intentionally skipped and should not be visited because it should not be included in the variance calculation.
 
 #[derive(Debug, Clone, PartialEq, Eq, TypeEq)]
-pub struct VarianceMap(pub SmallMap<String, Variance>);
+pub struct VarianceMap(pub SmallMap<Name, Variance>);
 
 impl VisitMut<Type> for VarianceMap {
-    fn visit_mut(&mut self, _visitor: &mut dyn FnMut(&mut Type)) {
-        // No-op: VarianceMap does not contain any Type
-    }
-
     fn recurse_mut(&mut self, _visitor: &mut dyn FnMut(&mut Type)) {
         // No-op: VarianceMap does not contain any Type
     }
@@ -68,6 +65,7 @@ impl Display for VarianceMap {
 pub mod variance_visitor {
     use std::sync::Arc;
 
+    use ruff_python_ast::name::Name;
     use starlark_map::small_map::SmallMap;
 
     use crate::alt::class::class_field::ClassField;
@@ -79,7 +77,7 @@ pub mod variance_visitor {
     use crate::types::type_var::Variance;
     use crate::types::types::Type;
     pub type Injectivity = bool;
-    pub type TypeParam = (String, Variance, Injectivity);
+    pub type TypeParam = (Name, Variance, Injectivity);
     pub type TParamArray = Vec<TypeParam>;
 
     // A map from class name to tparam environment
@@ -88,11 +86,11 @@ pub mod variance_visitor {
     pub fn on_class(
         class: &Class,
         on_edge: &mut impl FnMut(&Class) -> TParamArray,
-        on_var: &mut impl FnMut(&str, Variance, Injectivity),
+        on_var: &mut impl FnMut(&Name, Variance, Injectivity),
         get_metadata: &impl Fn(&Class) -> Arc<ClassMetadata>,
-        get_fields: &impl Fn(&Class) -> SmallMap<String, Arc<ClassField>>,
+        get_fields: &impl Fn(&Class) -> SmallMap<Name, Arc<ClassField>>,
     ) {
-        fn is_private_field(name: &str) -> bool {
+        fn is_private_field(name: &Name) -> bool {
             let starts_with_underscore = name.starts_with('_');
             let ends_with_double_underscore = name.ends_with("__");
 
@@ -104,7 +102,7 @@ pub mod variance_visitor {
             variance: Variance,
             inj: Injectivity,
             on_edge: &mut impl FnMut(&Class) -> TParamArray,
-            on_var: &mut impl FnMut(&str, Variance, Injectivity),
+            on_var: &mut impl FnMut(&Name, Variance, Injectivity),
         ) {
             match tuple {
                 Tuple::Concrete(concrete_types) => {
@@ -133,7 +131,7 @@ pub mod variance_visitor {
             inj: Injectivity,
             typ: &Type,
             on_edge: &mut impl FnMut(&Class) -> TParamArray,
-            on_var: &mut impl FnMut(&str, Variance, Injectivity),
+            on_var: &mut impl FnMut(&Name, Variance, Injectivity),
         ) {
             match typ {
                 Type::Type(t) => {
@@ -169,7 +167,7 @@ pub mod variance_visitor {
                     }
                 }
                 Type::Quantified(q) => {
-                    on_var(q.name().as_str(), variance, inj);
+                    on_var(q.name(), variance, inj);
                 }
                 Type::Union(t) => {
                     for ty in t {
@@ -235,7 +233,7 @@ pub mod variance_visitor {
                 continue;
             }
 
-            if let Some((ty, _, readonly, descriptor_getter, descriptor_setter)) =
+            if let Some((ty, _, read_only, descriptor_getter, descriptor_setter)) =
                 field.for_variance_inference()
             {
                 // Case 1: Regular attribute
@@ -245,7 +243,7 @@ pub mod variance_visitor {
                 if descriptor_getter.is_none() && descriptor_setter.is_none() {
                     let variance = if ty.is_function_type()
                         || is_private_field(name)
-                        || readonly
+                        || read_only
                         || field.is_final()
                     {
                         Variance::Covariant
@@ -281,15 +279,15 @@ fn default_variance_and_inj(gp: &TParam, contains_bivariant: &mut bool) -> (Vari
     (variance, inj)
 }
 
-fn from_gp_to_decl(gp: &TParam, contains_bivariant: &mut bool) -> (String, Variance, Injectivity) {
+fn from_gp_to_decl(gp: &TParam, contains_bivariant: &mut bool) -> (Name, Variance, Injectivity) {
     let (variance, inj) = default_variance_and_inj(gp, contains_bivariant);
-    (gp.name().as_str().to_owned(), variance, inj)
+    (gp.name().clone(), variance, inj)
 }
 
 pub fn params_from_gp(tparams: &[TParam], contains_bivariant: &mut bool) -> TParamArray {
-    let mut params: Vec<(String, Variance, Injectivity)> = tparams
+    let mut params: Vec<(Name, Variance, Injectivity)> = tparams
         .iter()
-        .map(|param| (param.name().as_str().to_owned(), Variance::Bivariant, false))
+        .map(|param| (param.name().clone(), Variance::Bivariant, false))
         .collect();
 
     for (i, param) in tparams.iter().enumerate() {
@@ -302,12 +300,12 @@ pub fn params_from_gp(tparams: &[TParam], contains_bivariant: &mut bool) -> TPar
 pub fn convert_gp_to_map(
     tparams: &TParams,
     contains_bivariant: &mut bool,
-) -> SmallMap<String, Variance> {
+) -> SmallMap<Name, Variance> {
     let mut lookup = SmallMap::new();
 
     for param in tparams.iter() {
         lookup.insert(
-            param.name().as_str().to_owned(),
+            param.name().clone(),
             pre_to_post_variance(param.variance, contains_bivariant),
         );
     }
@@ -335,7 +333,8 @@ fn loop_fn<'a>(
     environment: &mut VarianceEnv,
     contains_bivariant: &mut bool,
     get_metadata: &impl Fn(&Class) -> Arc<ClassMetadata>,
-    get_fields: &impl Fn(&Class) -> SmallMap<String, Arc<ClassField>>,
+    get_fields: &impl Fn(&Class) -> SmallMap<Name, Arc<ClassField>>,
+    get_tparams: &impl Fn(&Class) -> Arc<TParams>,
 ) -> TParamArray {
     let class_name = class.qname();
 
@@ -343,15 +342,23 @@ fn loop_fn<'a>(
         return params.clone();
     }
 
-    let params: Vec<(String, Variance, bool)> =
-        params_from_gp(class.tparams().as_vec(), contains_bivariant);
+    let params: Vec<(Name, Variance, bool)> =
+        params_from_gp(get_tparams(class).as_vec(), contains_bivariant);
 
     environment.insert(class_name.clone(), params.clone());
-    let mut on_var = |_name: &str, _variance: Variance, _inj: Injectivity| {};
+    let mut on_var = |_name: &Name, _variance: Variance, _inj: Injectivity| {};
 
     // get the variance results of a given class c
-    let mut on_edge =
-        |c: &Class| loop_fn(c, environment, contains_bivariant, get_metadata, get_fields);
+    let mut on_edge = |c: &Class| {
+        loop_fn(
+            c,
+            environment,
+            contains_bivariant,
+            get_metadata,
+            get_fields,
+            get_tparams,
+        )
+    };
 
     variance_visitor::on_class(class, &mut on_edge, &mut on_var, get_metadata, get_fields);
 
@@ -362,12 +369,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn variance_map(&self, class: &Class) -> Arc<VarianceMap> {
         let mut contains_bivariant: bool = false;
 
-        let post_inference_initial = convert_gp_to_map(class.tparams(), &mut contains_bivariant);
+        let post_inference_initial =
+            convert_gp_to_map(&self.get_class_tparams(class), &mut contains_bivariant);
 
         fn to_map(
             params: &TParamArray,
-            post_inference_initial: &SmallMap<String, Variance>,
-        ) -> SmallMap<String, Variance> {
+            post_inference_initial: &SmallMap<Name, Variance>,
+        ) -> SmallMap<Name, Variance> {
             let mut map = SmallMap::new();
 
             for (name, variance, inj) in params.iter() {
@@ -401,8 +409,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             for (class_name, params) in env.iter() {
                 let mut params_prime = params.clone();
 
-                let metadata = solver.get_metadata_for_class(class);
-                let ancestor_class = metadata.ancestors(solver.stdlib).find(|ancestor| {
+                let mro = solver.get_mro_for_class(class);
+                let ancestor_class = mro.ancestors(solver.stdlib).find(|ancestor| {
                     let class_obj = ancestor.class_object();
                     class_obj.qname() == class_name
                 });
@@ -414,7 +422,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 } else if class.qname() == class_name {
                     class
                 } else {
-                    let class_name_module = class_name.module_info().name();
+                    let class_name_module = class_name.module_name();
                     let curr_module = solver.module_info().name();
 
                     if class_name_module != curr_module {
@@ -428,8 +436,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
 
                     let ty = solver.get_from_module(
-                        class_name.module_info().name(),
-                        Some(class_name.module_info().path()),
+                        class_name.module_name(),
+                        Some(class_name.module_path()),
                         &KeyExport(class_name.id().clone()),
                     );
                     if let Type::ClassDef(cls) = &*ty {
@@ -439,7 +447,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 };
 
-                let mut on_var = |name: &str, variance: Variance, inj: Injectivity| {
+                let mut on_var = |name: &Name, variance: Variance, inj: Injectivity| {
                     for (n, variance_prime, inj_prime) in params_prime.iter_mut() {
                         if n == name {
                             *variance_prime = variance.union(*variance_prime);
@@ -483,6 +491,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 &mut contains_bivariant,
                 &|c| self.get_metadata_for_class(c),
                 &|c| self.get_class_field_map(c),
+                &|c| self.get_class_tparams(c),
             );
 
             let environment = fixpoint(self, class, &environment);

@@ -12,6 +12,10 @@ use std::str::FromStr;
 use anyhow::Context as _;
 use clap::Parser;
 use dupe::Dupe;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::args::clap_env;
 use pyrefly_util::fs_anyhow;
@@ -24,21 +28,19 @@ use crate::config::config::ConfigFile;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::Error;
 use crate::error::legacy::LegacyErrors;
-use crate::module::module_path::ModulePath;
 use crate::module::source_db::BuckSourceDatabase;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::State;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
-use crate::sys_info::SysInfo;
 
+/// Arguments for Buck-powered type checking.
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Clone, Parser)]
 pub struct Args {
-    /// Path to input JSON file
+    /// Path to input JSON manifest.
     input_path: PathBuf,
 
-    /// Path to output JSON file
+    /// Path to output JSON file containing Pyrefly Pyrefly type check results.
     #[arg(long = "output", short = 'o', env = clap_env("OUTPUT_PATH"), value_name = "FILE")]
     output_path: Option<PathBuf>,
 }

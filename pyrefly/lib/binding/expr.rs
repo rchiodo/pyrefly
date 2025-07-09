@@ -5,8 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::ast::Ast;
 use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::Arguments;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::BoolOp;
 use ruff_python_ast::Comprehension;
 use ruff_python_ast::Decorator;
@@ -44,12 +46,10 @@ use crate::binding::scope::Flow;
 use crate::binding::scope::Scope;
 use crate::binding::scope::ScopeClass;
 use crate::binding::scope::ScopeKind;
-use crate::dunder;
 use crate::error::kind::ErrorKind;
 use crate::export::special::SpecialExport;
 use crate::graph::index::Idx;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::types::callable::unexpected_keyword;
 use crate::types::types::Type;
 
@@ -61,8 +61,8 @@ use crate::types::types::Type;
 /// tracking.
 #[derive(Debug)]
 pub enum Usage {
-    /// Usage to create a `Binding`.
-    User(Idx<Key>, SmallSet<Idx<Key>>),
+    /// I am a usage to create a `Binding`.
+    CurrentIdx(Idx<Key>, SmallSet<Idx<Key>>),
     /// I am a usage that will appear in a narrowing operation (including a
     /// match pattern). We don't allow pinning in this case:
     /// - It is generally not useful (narrowing operations don't usually pin types)
@@ -104,6 +104,7 @@ impl TestAssertion {
                 Some(NarrowOps::from_single_narrow_op(
                     arg0,
                     AtomicNarrowOp::Is(Expr::NoneLiteral(ExprNoneLiteral {
+                        node_index: AtomicNodeIndex::dummy(),
                         range: TextRange::default(),
                     })),
                     arg0.range(),
@@ -113,6 +114,7 @@ impl TestAssertion {
                 Some(NarrowOps::from_single_narrow_op(
                     arg0,
                     AtomicNarrowOp::IsNot(Expr::NoneLiteral(ExprNoneLiteral {
+                        node_index: AtomicNodeIndex::dummy(),
                         range: TextRange::default(),
                     })),
                     arg0.range(),
@@ -241,18 +243,6 @@ impl<'a> BindingsBuilder<'a> {
                 }
                 self.insert_binding(key, value)
             }
-            Err(_) if name.id == dunder::FILE || name.id == dunder::NAME => {
-                self.insert_binding(key, Binding::StrType)
-            }
-            Err(_) if name.id == dunder::DEBUG => self.insert_binding(key, Binding::BoolType),
-            Err(_) if name.id == dunder::DOC => self.insert_binding(
-                key,
-                if self.has_docstring {
-                    Binding::StrType
-                } else {
-                    Binding::Type(Type::None)
-                },
-            ),
             Err(error) => {
                 // Record a type error and fall back to `Any`.
                 self.error(
@@ -357,25 +347,26 @@ impl<'a> BindingsBuilder<'a> {
                 return None;
             }
             match func {
-                Expr::Attribute(ExprAttribute {
-                    value: box Expr::Name(base_name),
-                    attr,
-                    ..
-                }) if base_name.id.as_str() == "self" => match attr.id.as_str() {
-                    "assertTrue" => Some(TestAssertion::AssertTrue),
-                    "assertFalse" => Some(TestAssertion::AssertFalse),
-                    "assertIsNone" => Some(TestAssertion::AssertIsNone),
-                    "assertIsNotNone" => Some(TestAssertion::AssertIsNotNone),
-                    "assertIsInstance" => Some(TestAssertion::AssertIsInstance),
-                    "assertNotIsInstance" => Some(TestAssertion::AssertNotIsInstance),
-                    "assertIs" => Some(TestAssertion::AssertIs),
-                    "assertIsNot" => Some(TestAssertion::AssertIsNot),
-                    "assertEqual" => Some(TestAssertion::AssertEqual),
-                    "assertNotEqual" => Some(TestAssertion::AssertNotEqual),
-                    "assertIn" => Some(TestAssertion::AssertIn),
-                    "assertNotIn" => Some(TestAssertion::AssertNotIn),
-                    _ => None,
-                },
+                Expr::Attribute(ExprAttribute { value, attr, .. })
+                    if let Expr::Name(base_name) = &**value
+                        && base_name.id.as_str() == "self" =>
+                {
+                    match attr.id.as_str() {
+                        "assertTrue" => Some(TestAssertion::AssertTrue),
+                        "assertFalse" => Some(TestAssertion::AssertFalse),
+                        "assertIsNone" => Some(TestAssertion::AssertIsNone),
+                        "assertIsNotNone" => Some(TestAssertion::AssertIsNotNone),
+                        "assertIsInstance" => Some(TestAssertion::AssertIsInstance),
+                        "assertNotIsInstance" => Some(TestAssertion::AssertNotIsInstance),
+                        "assertIs" => Some(TestAssertion::AssertIs),
+                        "assertIsNot" => Some(TestAssertion::AssertIsNot),
+                        "assertEqual" => Some(TestAssertion::AssertEqual),
+                        "assertNotEqual" => Some(TestAssertion::AssertNotEqual),
+                        "assertIn" => Some(TestAssertion::AssertIn),
+                        "assertNotIn" => Some(TestAssertion::AssertNotIn),
+                        _ => None,
+                    }
+                }
                 _ => None,
             }
         } else {
@@ -384,23 +375,26 @@ impl<'a> BindingsBuilder<'a> {
     }
 
     fn record_yield(&mut self, mut x: ExprYield) {
-        let mut user = self.declare_user(Key::UsageLink(x.range));
+        let mut yield_link = self.declare_current_idx(Key::UsageLink(x.range));
         let idx = self.idx_for_promise(KeyYield(x.range));
-        self.ensure_expr_opt(x.value.as_deref_mut(), user.usage());
+        self.ensure_expr_opt(x.value.as_deref_mut(), yield_link.usage());
         if let Err(oops_top_level) = self.scopes.record_or_reject_yield(idx, x) {
             self.insert_binding_idx(idx, BindingYield::Invalid(oops_top_level));
         }
-        self.insert_binding_user(user, Binding::UsageLink(LinkedKey::Yield(idx)));
+        self.insert_binding_current(yield_link, Binding::UsageLink(LinkedKey::Yield(idx)));
     }
 
     fn record_yield_from(&mut self, mut x: ExprYieldFrom) {
-        let mut user = self.declare_user(Key::UsageLink(x.range));
+        let mut yield_from_link = self.declare_current_idx(Key::UsageLink(x.range));
         let idx = self.idx_for_promise(KeyYieldFrom(x.range));
-        self.ensure_expr(&mut x.value, user.usage());
+        self.ensure_expr(&mut x.value, yield_from_link.usage());
         if let Err(oops_top_level) = self.scopes.record_or_reject_yield_from(idx, x) {
             self.insert_binding_idx(idx, BindingYieldFrom::Invalid(oops_top_level));
         }
-        self.insert_binding_user(user, Binding::UsageLink(LinkedKey::YieldFrom(idx)));
+        self.insert_binding_current(
+            yield_from_link,
+            Binding::UsageLink(LinkedKey::YieldFrom(idx)),
+        );
     }
 
     /// Execute through the expr, ensuring every name has a binding.
@@ -416,7 +410,12 @@ impl<'a> BindingsBuilder<'a> {
                 let range = x.range();
                 self.negate_and_merge_flow(base, &narrow_ops, Some(&mut x.orelse), range, usage);
             }
-            Expr::BoolOp(ExprBoolOp { range, op, values }) => {
+            Expr::BoolOp(ExprBoolOp {
+                node_index: _,
+                range,
+                op,
+                values,
+            }) => {
                 let base = self.scopes.clone_current_flow();
                 let mut narrow_ops = NarrowOps::new();
                 for value in values {
@@ -437,6 +436,7 @@ impl<'a> BindingsBuilder<'a> {
                 self.negate_and_merge_flow(base, &narrow_ops, None, *range, usage);
             }
             Expr::Call(ExprCall {
+                node_index: _,
                 range: _,
                 func,
                 arguments,
@@ -457,6 +457,7 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Expr::Call(ExprCall {
+                node_index: _,
                 range: _,
                 func,
                 arguments,
@@ -482,10 +483,12 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Expr::Call(ExprCall {
+                node_index: _,
                 range,
                 func,
                 arguments:
                     Arguments {
+                        node_index: _,
                         range: _,
                         args: posargs,
                         keywords,
@@ -564,6 +567,7 @@ impl<'a> BindingsBuilder<'a> {
                 );
             }
             Expr::Call(ExprCall {
+                node_index: _,
                 range,
                 func,
                 arguments,
@@ -580,6 +584,8 @@ impl<'a> BindingsBuilder<'a> {
                 self.bind_narrow_ops(&narrow_op, *range);
             }
             Expr::Named(x) => {
+                // For scopes defined in terms of Definitions, we should normally already have the name in Static, but
+                // we still need this for comprehensions, whose scope is defined on-the-fly.
                 self.scopes.add_lvalue_to_current_static(&x.target);
                 self.bind_target_with_expr(&mut x.target, &mut x.value, &|expr, ann| {
                     Binding::Expr(ann, expr.clone())
@@ -609,14 +615,11 @@ impl<'a> BindingsBuilder<'a> {
                 self.ensure_expr(&mut x.elt, usage);
                 self.scopes.pop();
             }
-            Expr::Call(ExprCall {
-                range: _,
-                func,
-                arguments: _,
-            }) if matches!(
-                self.as_special_export(func),
-                Some(SpecialExport::Exit | SpecialExport::Quit | SpecialExport::OsExit)
-            ) =>
+            Expr::Call(ExprCall { func, .. })
+                if matches!(
+                    self.as_special_export(func),
+                    Some(SpecialExport::Exit | SpecialExport::Quit | SpecialExport::OsExit)
+                ) =>
             {
                 x.recurse_mut(&mut |x| self.ensure_expr(x, usage));
                 // Control flow doesn't proceed after sys.exit(), exit(), quit(), or os._exit().
@@ -671,15 +674,14 @@ impl<'a> BindingsBuilder<'a> {
                 // Don't go inside a literal, since you might find strings which are really strings, not string-types
                 self.ensure_expr(x, static_type_usage);
             }
-            Expr::Subscript(ExprSubscript {
-                value,
-                slice: box Expr::Tuple(tup),
-                ..
-            }) if self.as_special_export(value) == Some(SpecialExport::Annotated)
-                && !tup.is_empty() =>
+            Expr::Subscript(ExprSubscript { value, slice, .. })
+                if self.as_special_export(value) == Some(SpecialExport::Annotated)
+                    && matches!(&**slice, Expr::Tuple(tup) if !tup.is_empty()) =>
             {
                 // Only go inside the first argument to Annotated, the rest are non-type metadata.
                 self.ensure_type(&mut *value, tparams_builder);
+                // We can't bind a mut box in the guard (sadly), so force unwrapping it here
+                let tup = slice.as_tuple_expr_mut().unwrap();
                 self.ensure_type(&mut tup.elts[0], tparams_builder);
                 for e in tup.elts[1..].iter_mut() {
                     self.ensure_expr(e, static_type_usage);
@@ -736,5 +738,20 @@ impl<'a> BindingsBuilder<'a> {
             decorator_keys.push(k);
         }
         decorator_keys
+    }
+
+    pub fn ensure_and_bind_decorators_with_ranges(
+        &mut self,
+        decorators: Vec<Decorator>,
+        usage: &mut Usage,
+    ) -> Vec<(Idx<Key>, TextRange)> {
+        let mut decorator_keys_with_ranges = Vec::with_capacity(decorators.len());
+        for mut x in decorators {
+            self.ensure_expr(&mut x.expression, usage);
+            let range = x.range();
+            let k = self.insert_binding(Key::Anon(x.range), Binding::Decorator(x.expression));
+            decorator_keys_with_ranges.push((k, range));
+        }
+        decorator_keys_with_ranges
     }
 }

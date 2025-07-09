@@ -15,42 +15,17 @@ use std::sync::LazyLock;
 use anyhow::Context;
 use anyhow::anyhow;
 use itertools::Itertools;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_util::lock::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use starlark_map::small_map::SmallMap;
-use tracing::error;
 use tracing::warn;
-#[cfg(not(target_arch = "wasm32"))]
-use which::which;
 
-use crate::config::environment::active_environment::ActiveEnvironment;
-use crate::config::environment::venv::Venv;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
-
-static INTERPRETER_ENV_REGISTRY: LazyLock<Mutex<SmallMap<PathBuf, Option<PythonEnvironment>>>> =
-    LazyLock::new(|| Mutex::new(SmallMap::new()));
-
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone, Default)]
-pub enum SitePackagePathSource {
-    #[default]
-    ConfigFile,
-    CommandLine,
-    Interpreter(PathBuf),
-}
-
-impl Display for SitePackagePathSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ConfigFile => write!(f, "from config file"),
-            Self::CommandLine => write!(f, "from command line"),
-            Self::Interpreter(path) => {
-                write!(f, "queried from interpreter at `{}`", path.display())
-            }
-        }
-    }
-}
+static INTERPRETER_ENV_REGISTRY: LazyLock<
+    Mutex<SmallMap<PathBuf, Result<PythonEnvironment, String>>>,
+> = LazyLock::new(|| Mutex::new(SmallMap::new()));
 
 /// Values representing the environment of the Python interpreter.
 /// These values are `None` by default, so we can tell if a config
@@ -93,26 +68,15 @@ pub struct PythonEnvironment {
     )]
     pub site_package_path: Option<Vec<PathBuf>>,
 
-    /// Is the `site_package_path` here one we got from
-    /// querying an interpreter?
     #[serde(skip, default)]
-    pub site_package_path_source: SitePackagePathSource,
+    pub interpreter_site_package_path: Vec<PathBuf>,
 }
 
 impl PythonEnvironment {
-    const DEFAULT_INTERPRETERS: &[&str] = &["python3", "python"];
-
     fn pyrefly_default() -> Self {
         let mut env = Self::default();
         env.set_empty_to_default();
         env
-    }
-
-    /// Are any Python environment values `None`?
-    pub fn any_empty(&self) -> bool {
-        self.python_platform.is_none()
-            || self.python_version.is_none()
-            || self.site_package_path.is_none()
     }
 
     /// If any Python environment values are `None`, set them to
@@ -126,7 +90,6 @@ impl PythonEnvironment {
         }
         if self.site_package_path.is_none() {
             self.site_package_path = Some(Vec::new());
-            self.site_package_path_source = SitePackagePathSource::ConfigFile;
         }
     }
 
@@ -141,8 +104,8 @@ impl PythonEnvironment {
         }
         if self.site_package_path.is_none() {
             self.site_package_path = other.site_package_path;
-            self.site_package_path_source = other.site_package_path_source;
         }
+        self.interpreter_site_package_path = other.interpreter_site_package_path.clone();
     }
 
     /// Given a path to a Python interpreter executable, query that interpreter for its
@@ -196,37 +159,17 @@ print(json.dumps({'python_platform': platform, 'python_version': version, 'site_
         deserialized.python_version.as_ref().ok_or_else(|| {
             anyhow!("Expected `python_version` from Python interpreter query to be non-empty")
         })?;
-        deserialized.site_package_path.as_ref().ok_or_else(|| {
-            anyhow!("Expected `site_package_path` from Python interpreter query to be non-empty")
-        })?;
-
-        deserialized.site_package_path_source =
-            SitePackagePathSource::Interpreter(interpreter.to_path_buf());
+        let site_package_path = deserialized
+            .site_package_path
+            .replace(Vec::new())
+            .ok_or_else(|| {
+                anyhow!(
+                    "Expected `site_package_path` from Python interpreter query to be non-empty"
+                )
+            })?;
+        deserialized.interpreter_site_package_path = site_package_path;
 
         Ok(deserialized)
-    }
-
-    /// Get the first interpreter available on the path by using `which`
-    /// and querying for [`Self::DEFAULT_INTERPRETERS`] in order.
-    pub fn get_default_interpreter() -> Option<&'static Path> {
-        static SYSTEM_INTERP: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
-            // disable query with `which` on wasm
-            #[cfg(not(target_arch = "wasm32"))]
-            for binary_name in PythonEnvironment::DEFAULT_INTERPRETERS {
-                let Ok(binary_path) = which(binary_name) else {
-                    continue;
-                };
-                let mut check = Command::new(&binary_path);
-                check.arg("--version");
-                if let Ok(output) = check.output()
-                    && output.status.success()
-                {
-                    return Some(binary_path);
-                }
-            }
-            None
-        });
-        SYSTEM_INTERP.as_deref()
     }
 
     /// Given a path to an interpreter, query the interpreter with
@@ -235,41 +178,28 @@ print(json.dumps({'python_platform': platform, 'python_version': version, 'site_
     ///
     /// In the case of failure, log an error message and return Pyrefly's
     /// [`PythonEnvironment::default()`].
-    pub fn get_interpreter_env(interpreter: &Path) -> PythonEnvironment {
-        INTERPRETER_ENV_REGISTRY.lock()
+    pub fn get_interpreter_env(interpreter: &Path) -> (PythonEnvironment, Option<anyhow::Error>) {
+        let env = INTERPRETER_ENV_REGISTRY.lock()
         .entry(interpreter.to_path_buf()).or_insert_with(move || {
-            Self::get_env_from_interpreter(interpreter).inspect_err(|e| {
-                error!("Failed to query interpreter at {}, falling back to default Python environment settings\n{}", interpreter.display(), e);
-            }).ok()
-        }).clone().unwrap_or_else(Self::pyrefly_default)
+            Self::get_env_from_interpreter(interpreter).map_err(|e| {
+                format!("Failed to query interpreter at {}, falling back to default Python environment settings\n{}", interpreter.display(), e)
+            })
+        }).clone();
+        match env {
+            Ok(env) => (env, None),
+            Err(message) => (Self::pyrefly_default(), Some(anyhow::anyhow!(message))),
+        }
     }
 
     /// [`Self::get_default_interpreter()`] and [`Self::get_interpreter_env()`] with the resulting value,
     /// or return [`PythonEnvironment::default()`] if `None`.
+    #[cfg(test)]
     pub fn get_default_interpreter_env() -> PythonEnvironment {
-        Self::get_default_interpreter()
-            .map_or_else(Self::pyrefly_default, Self::get_interpreter_env)
-    }
+        use crate::config::environment::interpreters::Interpreters;
 
-    /// Uses the same logic as [vscode-python] to [find interpreters] that should be used for the given
-    /// project. This function will use the same [non-workspace] logic as vscode-python, and
-    /// workspace-specific logic will be handled directly by VSCode and provided to our extension.
-    ///
-    /// [vscode-python]: https://github.com/microsoft/vscode-python
-    /// [find interpreters]: https://github.com/microsoft/vscode-python/blob/main/src/client/interpreter/autoselection/index.ts#l240-l242
-    /// [non-workspace]: https://github.com/microsoft/vscode-python/blob/main/src/client/pythonEnvironments/index.ts#L173
-    pub fn find_interpreter(path: Option<&Path>) -> Option<PathBuf> {
-        if let Some(active_env) = ActiveEnvironment::find() {
-            return Some(active_env);
-        }
-
-        if let Some(start_path) = path {
-            let venv = Venv::find(start_path);
-            if venv.is_some() {
-                return venv;
-            }
-        }
-        Self::get_default_interpreter().map(|p| p.to_path_buf())
+        Interpreters::get_default_interpreter().map_or_else(Self::pyrefly_default, |path| {
+            Self::get_interpreter_env(path).0
+        })
     }
 }
 
@@ -277,7 +207,7 @@ impl Display for PythonEnvironment {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{{python_platform: {}, python_version: {}, site_package_path: [{}], site_package_path_source: {:?}}}",
+            "{{python_platform: {}, python_version: {}, site_package_path: [{}], interpreter_site_package_path: [{}]}}",
             self.python_platform
                 .as_ref()
                 .map_or_else(|| "None".to_owned(), |platform| platform.to_string()),
@@ -285,9 +215,12 @@ impl Display for PythonEnvironment {
                 .map_or_else(|| "None".to_owned(), |version| version.to_string()),
             self.site_package_path.as_ref().map_or_else(
                 || "".to_owned(),
-                |path| path.iter().map(|p| p.display()).join(", ")
+                |packages| packages.iter().map(|p| p.display()).join(", ")
             ),
-            self.site_package_path_source,
+            self.interpreter_site_package_path
+                .iter()
+                .map(|p| p.display())
+                .join(", "),
         )
     }
 }

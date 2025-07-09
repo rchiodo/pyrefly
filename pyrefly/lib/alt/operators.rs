@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::dunder;
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::ExprBinOp;
 use ruff_python_ast::ExprCompare;
@@ -16,13 +17,12 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::call::CallStyle;
 use crate::alt::callable::CallArg;
 use crate::alt::solve::Iterable;
 use crate::binding::binding::KeyAnnotation;
-use crate::dunder;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::context::TypeCheckContext;
@@ -220,7 +220,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let rhs = self.expr_infer(&x.right, errors);
         self.distribute_over_union(&lhs, |lhs| {
             self.distribute_over_union(&rhs, |rhs| {
-                if let Type::Any(style) = &lhs {
+                // If an Any appears on the RHS, do not refine the return type based on the LHS.
+                // Without loss of generality, consider e1 + e2 where e1 has type int and e2 has type Any.
+                // Then e1 + e2 should have a return type of Any since e2's __radd__  signature could be
+                // inconsistent with the signature of e1 __add__.
+                if let Type::Any(style) = &rhs {
+                    style.propagate()
+                } else if let Type::Any(style) = &lhs {
                     style.propagate()
                 } else if x.op == Operator::BitOr
                     && let Some(l) = self.untype_opt(lhs.clone(), x.left.range())
@@ -410,8 +416,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::ClassType(_) | Type::SelfType(_) => {
                     self.call_method_or_error(t, method, x.range, &[], &[], errors, Some(&context))
                 }
-                Type::Literal(Lit::Enum(box (cls, ..))) => self.call_method_or_error(
-                    &cls.clone().to_type(),
+                Type::Literal(Lit::Enum(lit_enum)) => self.call_method_or_error(
+                    &lit_enum.class.clone().to_type(),
                     method,
                     x.range,
                     &[],

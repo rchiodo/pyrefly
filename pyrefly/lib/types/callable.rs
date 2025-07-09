@@ -12,19 +12,15 @@ use std::fmt::Display;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
+use pyrefly_python::dunder;
+use pyrefly_python::module_name::ModuleName;
 use pyrefly_util::display::commas_iter;
 use pyrefly_util::prelude::SliceExt;
-use pyrefly_util::visit::Visit;
-use pyrefly_util::visit::VisitMut;
-use ruff_python_ast::Identifier;
 use ruff_python_ast::Keyword;
 use ruff_python_ast::name::Name;
-use starlark_map::ordered_map::OrderedMap;
 
-use crate::dunder;
-use crate::module::module_name::ModuleName;
 use crate::types::class::ClassType;
-use crate::types::literal::Lit;
+use crate::types::keywords::DataclassTransformKeywords;
 use crate::types::types::Type;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -199,12 +195,20 @@ pub struct FuncFlags {
     pub is_deprecated: bool,
     /// A function decorated with `@property`
     pub is_property_getter: bool,
+    /// A `foo.setter` function, where `foo` is some `@property`-decorated function.
+    /// When used to decorate a function, turns the decorated function into a property setter.
+    pub is_property_setter_decorator: bool,
     /// A function decorated with `@foo.setter`, where `foo` is some `@property`-decorated function.
     /// The stored type is `foo` (the getter).
     pub is_property_setter_with_getter: Option<Type>,
     pub has_enum_member_decoration: bool,
     pub is_override: bool,
     pub has_final_decoration: bool,
+    /// A function decorated with `typing.dataclass_transform(...)`, turning it into a
+    /// `dataclasses.dataclass`-like decorator. Stores the keyword values passed to the
+    /// `dataclass_transform` call. See
+    /// https://typing.python.org/en/latest/spec/dataclasses.html#specification.
+    pub dataclass_transform_metadata: Option<DataclassTransformKeywords>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -238,8 +242,12 @@ impl FuncId {
 pub enum FunctionKind {
     IsInstance,
     IsSubclass,
-    Dataclass(Box<BoolKeywords>),
+    Dataclass,
     DataclassField,
+    /// `typing.dataclass_transform`. Note that this is `dataclass_transform` itself, *not* the
+    /// decorator created by a `dataclass_transform(...)` call. See
+    /// https://typing.python.org/en/latest/spec/dataclasses.html#specification.
+    DataclassTransform,
     ClassMethod,
     Overload,
     Override,
@@ -248,69 +256,11 @@ pub enum FunctionKind {
     RevealType,
     Final,
     RuntimeCheckable,
-    PropertySetter(Box<FuncId>),
     Def(Box<FuncId>),
     AbstractMethod,
     /// Instance of a protocol with a `__call__` method. The function has the `__call__` signature.
     CallbackProtocol(Box<ClassType>),
-}
-
-/// A map from keywords to boolean values. Useful for storing sets of keyword arguments for various
-/// dataclass functions.
-#[derive(Debug, Clone, TypeEq, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct BoolKeywords(OrderedMap<Name, bool>);
-
-impl Visit<Type> for BoolKeywords {
-    const RECURSE_CONTAINS: bool = false;
-    fn recurse<'a>(&'a self, _: &mut dyn FnMut(&'a Type)) {}
-}
-
-impl VisitMut<Type> for BoolKeywords {
-    const RECURSE_CONTAINS: bool = false;
-    fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {}
-}
-
-impl BoolKeywords {
-    pub fn new() -> Self {
-        Self(OrderedMap::new())
-    }
-
-    pub fn set_keyword(&mut self, name: Option<&Identifier>, ty: Type) {
-        if let Some(name) = name.map(|id| &id.id) {
-            let value = match ty {
-                Type::Literal(Lit::Bool(b)) => b,
-                _ => {
-                    return;
-                }
-            };
-            self.0.insert(name.clone(), value);
-        }
-    }
-
-    pub fn is_set(&self, name_and_default: &(Name, bool)) -> bool {
-        let (name, default) = name_and_default;
-        *(self.0.get(name).unwrap_or(default))
-    }
-
-    pub fn set(&mut self, name: Name, value: bool) {
-        self.0.insert(name, value);
-    }
-}
-
-/// Namespace for keyword names and defaults.
-pub struct DataclassKeywords;
-
-impl DataclassKeywords {
-    pub const INIT: (Name, bool) = (Name::new_static("init"), true);
-    pub const ORDER: (Name, bool) = (Name::new_static("order"), false);
-    pub const FROZEN: (Name, bool) = (Name::new_static("frozen"), false);
-    pub const MATCH_ARGS: (Name, bool) = (Name::new_static("match_args"), true);
-    pub const KW_ONLY: (Name, bool) = (Name::new_static("kw_only"), false);
-    /// We combine default and default_factory into a single "default" keyword indicating whether
-    /// the field has a default. The default value isn't stored.
-    pub const DEFAULT: (Name, bool) = (Name::new_static("default"), false);
-    pub const EQ: (Name, bool) = (Name::new_static("eq"), true);
-    pub const UNSAFE_HASH: (Name, bool) = (Name::new_static("unsafe_hash"), false);
+    TotalOrdering,
 }
 
 impl Callable {
@@ -519,7 +469,7 @@ impl FunctionKind {
             ("builtins", None, "isinstance") => Self::IsInstance,
             ("builtins", None, "issubclass") => Self::IsSubclass,
             ("builtins", None, "classmethod") => Self::ClassMethod,
-            ("dataclasses", None, "dataclass") => Self::Dataclass(Box::new(BoolKeywords::new())),
+            ("dataclasses", None, "dataclass") => Self::Dataclass,
             ("dataclasses", None, "field") => Self::DataclassField,
             ("typing", None, "overload") => Self::Overload,
             ("typing", None, "override") => Self::Override,
@@ -528,8 +478,10 @@ impl FunctionKind {
             ("typing", None, "reveal_type") => Self::RevealType,
             ("typing", None, "final") => Self::Final,
             ("typing", None, "runtime_checkable") => Self::RuntimeCheckable,
+            ("typing", None, "dataclass_transform") => Self::DataclassTransform,
             ("typing_extensions", None, "runtime_checkable") => Self::RuntimeCheckable,
             ("abc", None, "abstractmethod") => Self::AbstractMethod,
+            ("functools", None, "total_ordering") => Self::TotalOrdering,
             _ => Self::Def(Box::new(FuncId {
                 module,
                 cls: cls.cloned(),
@@ -555,7 +507,7 @@ impl FunctionKind {
                 cls: None,
                 func: Name::new_static("classmethod"),
             },
-            Self::Dataclass(_) => FuncId {
+            Self::Dataclass => FuncId {
                 module: ModuleName::dataclasses(),
                 cls: None,
                 func: Name::new_static("dataclass"),
@@ -564,6 +516,11 @@ impl FunctionKind {
                 module: ModuleName::dataclasses(),
                 cls: None,
                 func: Name::new_static("field"),
+            },
+            Self::DataclassTransform => FuncId {
+                module: ModuleName::typing(),
+                cls: None,
+                func: Name::new_static("dataclass_transform"),
             },
             Self::Final => FuncId {
                 module: ModuleName::typing(),
@@ -610,7 +567,12 @@ impl FunctionKind {
                 cls: None,
                 func: Name::new_static("abstractmethod"),
             },
-            Self::PropertySetter(func_id) | Self::Def(func_id) => (**func_id).clone(),
+            Self::TotalOrdering => FuncId {
+                module: ModuleName::functools(),
+                cls: None,
+                func: Name::new_static("total_ordering"),
+            },
+            Self::Def(func_id) => (**func_id).clone(),
         }
     }
 }

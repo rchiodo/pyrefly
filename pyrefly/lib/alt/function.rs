@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 use itertools::Either;
+use pyrefly_python::dunder;
+use pyrefly_python::module_path::ModuleStyle;
 use ruff_python_ast::Expr;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::StmtFunctionDef;
@@ -17,8 +19,8 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use vec1::Vec1;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::types::decorated_function::DecoratedFunction;
 use crate::binding::binding::Binding;
 use crate::binding::binding::FunctionStubOrImpl;
@@ -27,13 +29,11 @@ use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyFunction;
 use crate::binding::binding::KeyLegacyTypeParam;
-use crate::dunder;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::TypeCheckContext;
 use crate::error::context::TypeCheckKind;
 use crate::error::kind::ErrorKind;
 use crate::graph::index::Idx;
-use crate::module::module_path::ModuleStyle;
 use crate::module::short_identifier::ShortIdentifier;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncFlags;
@@ -45,6 +45,7 @@ use crate::types::callable::ParamList;
 use crate::types::callable::Required;
 use crate::types::class::ClassKind;
 use crate::types::class::ClassType;
+use crate::types::keywords::DataclassTransformKeywords;
 use crate::types::types::CalleeKind;
 use crate::types::types::Forall;
 use crate::types::types::Forallable;
@@ -70,20 +71,48 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let ty = def.ty.clone();
             if successor.is_none() {
                 // This is the last definition in the chain. We should produce an overload type.
-                let mut acc = Vec1::new((def.id_range, ty));
+                let last_range = def.id_range;
+                let has_impl = def.stub_or_impl == FunctionStubOrImpl::Impl;
+                let mut acc = Vec1::new((last_range, ty));
                 let mut first = def;
-                while let Some(def) = self.step_overload_pred(predecessor) {
-                    acc.push((def.id_range, def.ty.clone()));
-                    first = def;
+                let mut impl_before_overload_range = None;
+                while let Some(def) = self.step_pred(predecessor) {
+                    if def.metadata.flags.is_overload {
+                        acc.push((def.id_range, def.ty.clone()));
+                        first = def;
+                    } else {
+                        impl_before_overload_range = Some(def.id_range);
+                        break;
+                    }
                 }
                 if !skip_implementation {
-                    self.error(
-                        errors,
-                        first.id_range,
-                        ErrorKind::InvalidOverload,
-                        None,
-                        "Overloaded function must have an implementation".to_owned(),
-                    );
+                    if let Some(range) = impl_before_overload_range {
+                        self.error(
+                            errors,
+                            range,
+                            ErrorKind::InvalidOverload,
+                            None,
+                            "@overload declarations must come before function implementation"
+                                .to_owned(),
+                        );
+                    } else if has_impl {
+                        self.error(
+                            errors,
+                            last_range,
+                            ErrorKind::InvalidOverload,
+                            None,
+                            "@overload decorator should not be used on function implementation"
+                                .to_owned(),
+                        );
+                    } else {
+                        self.error(
+                            errors,
+                            first.id_range,
+                            ErrorKind::InvalidOverload,
+                            None,
+                            "Overloaded function must have an implementation".to_owned(),
+                        );
+                    }
                 }
                 if acc.len() == 1 {
                     self.error(
@@ -91,7 +120,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         first.id_range,
                         ErrorKind::InvalidOverload,
                         None,
-                        "Overloaded function needs at least two signatures".to_owned(),
+                        "Overloaded function needs at least two @overload declarations".to_owned(),
                     );
                     acc.split_off_first().0.1
                 } else {
@@ -111,7 +140,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             let mut acc = Vec::new();
             let mut first = def;
-            while let Some(def) = self.step_overload_pred(predecessor) {
+            while let Some(def) = self.step_pred(predecessor)
+                && def.metadata.flags.is_overload
+            {
                 acc.push((def.id_range, def.ty.clone()));
                 first = def;
             }
@@ -123,7 +154,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         first.id_range,
                         ErrorKind::InvalidOverload,
                         None,
-                        "Overloaded function needs at least two signatures".to_owned(),
+                        "Overloaded function needs at least two @overload declarations".to_owned(),
                     );
                     defs.split_off_first().0.1
                 } else {
@@ -158,7 +189,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             defining_cls
                 .as_ref()
-                .map(|cls| Type::SelfType(cls.as_class_type()))
+                .map(|cls| Type::SelfType(self.as_class_type_unchecked(cls)))
         };
 
         let mut is_overload = false;
@@ -170,12 +201,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut has_enum_member_decoration = false;
         let mut is_override = false;
         let mut has_final_decoration = false;
+        let mut dataclass_transform_metadata = None;
         let decorators = decorators
             .iter()
             .filter(|k| {
                 let decorator = self.get_idx(**k);
-                is_deprecated |= matches!(decorator.ty(), Type::ClassType(cls) if cls.has_qname("warnings", "deprecated"));
-                match decorator.ty().callee_kind() {
+                let decorator_ty = decorator.ty();
+                match decorator_ty.callee_kind() {
                     Some(CalleeKind::Function(FunctionKind::Overload)) => {
                         is_overload = true;
                         false
@@ -192,13 +224,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         is_property_getter = true;
                         false
                     }
-                    Some(CalleeKind::Function(FunctionKind::PropertySetter(_))) => {
-                        // When the `setter` attribute is accessed on a property, we return the
-                        // getter with its kind set to FunctionKind::PropertySetter. See
-                        // AnswersSolver::lookup_attr_from_attribute_base for details.
-                        is_property_setter_with_getter = Some(decorator.arc_clone_ty());
-                        false
-                    }
                     Some(CalleeKind::Class(ClassKind::EnumMember)) => {
                         has_enum_member_decoration = true;
                         false
@@ -209,6 +234,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                     Some(CalleeKind::Function(FunctionKind::Final)) => {
                         has_final_decoration = true;
+                        false
+                    }
+                    _ if matches!(decorator_ty, Type::ClassType(cls) if cls.has_qname("warnings", "deprecated")) => {
+                        is_deprecated = true;
+                        false
+                    }
+                    _ if decorator_ty.is_property_setter_decorator() => {
+                        // When the `setter` attribute is accessed on a property, we return the
+                        // getter with the is_property_setter_decorator flag set to true. See
+                        // AnswersSolver::lookup_attr_from_attribute_base for details.
+                        is_property_setter_with_getter = Some(decorator.arc_clone_ty());
+                        false
+                    }
+                    _ if let Type::KwCall(call) = decorator_ty && call.has_function_kind(FunctionKind::DataclassTransform) => {
+                        dataclass_transform_metadata = Some(DataclassTransformKeywords::from_type_map(&call.keywords));
                         false
                     }
                     _ => true,
@@ -284,6 +324,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             };
             Param::PosOnly(Some(x.parameter.name.id.clone()), ty, required)
         }));
+
+        // See: https://typing.python.org/en/latest/spec/historical.html#positional-only-parameters
+        let is_historical_args_usage =
+            def.parameters.posonlyargs.is_empty() && def.parameters.kwonlyargs.is_empty();
+        let mut seen_keyword_args = false;
+
         params.extend(def.parameters.args.iter().map(|x| {
             let ty = get_param_ty(&x.parameter.name, x.default.as_deref());
             let required = if x.default.is_some() {
@@ -291,7 +337,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } else {
                 Required::Required
             };
-            Param::Pos(x.parameter.name.id.clone(), ty, required)
+
+            // If the parameter begins but does not end with "__", it is a positional-only parameter.
+            // See: https://typing.python.org/en/latest/spec/historical.html#positional-only-parameters
+            if is_historical_args_usage
+                && x.parameter.name.starts_with("__")
+                && !x.parameter.name.ends_with("__")
+            {
+                if seen_keyword_args {
+                    self.error(
+                        errors,
+                        x.parameter.name.range,
+                        ErrorKind::BadFunctionDefinition,
+                        None,
+                        format!(
+                            "Positional-only parameter `{}` cannot appear after keyword parameters",
+                            x.parameter.name
+                        ),
+                    );
+                }
+
+                Param::PosOnly(Some(x.parameter.name.id.clone()), ty, required)
+            } else {
+                seen_keyword_args |=
+                    x.parameter.name.as_str() != "self" && x.parameter.name.as_str() != "cls";
+                Param::Pos(x.parameter.name.id.clone(), ty, required)
+            }
         }));
         params.extend(def.parameters.vararg.iter().map(|x| {
             let ty = get_param_ty(&x.name, None);
@@ -412,17 +483,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 is_classmethod,
                 is_deprecated,
                 is_property_getter,
+                is_property_setter_decorator: false,
                 is_property_setter_with_getter,
                 has_enum_member_decoration,
                 is_override,
                 has_final_decoration,
+                dataclass_transform_metadata,
             },
         };
         let mut ty = Forallable::Function(Function {
             signature: callable,
             metadata: metadata.clone(),
         })
-        .forall(self.type_params(def.range, tparams, errors));
+        .forall(self.validated_tparams(def.range, tparams, errors));
         for x in decorators.into_iter().rev() {
             ty = match self.apply_decorator(*x, ty, errors) {
                 // Preserve function metadata, so things like method binding still work.
@@ -463,6 +536,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             id_range: def.name.range,
             ty,
             metadata,
+            stub_or_impl,
         })
     }
 
@@ -473,7 +547,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     // Given the index to a function binding, return the previous function binding, if any.
-    fn step_overload_pred(&self, pred: &mut Option<Idx<Key>>) -> Option<Arc<DecoratedFunction>> {
+    fn step_pred(&self, pred: &mut Option<Idx<Key>>) -> Option<Arc<DecoratedFunction>> {
         let pred_idx = (*pred)?;
         let mut b = self.bindings().get(pred_idx);
         while let Binding::Forward(k) = b {
@@ -481,12 +555,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         if let Binding::Function(idx, pred_, _) = b {
             let def = self.get_idx(*idx);
-            if def.metadata.flags.is_overload {
-                *pred = *pred_;
-                Some(def)
-            } else {
-                None
-            }
+            *pred = *pred_;
+            Some(def)
         } else {
             None
         }

@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use itertools::Itertools;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_util::globs::Glob;
 use pyrefly_util::globs::Globs;
 use serde::Deserialize;
@@ -20,9 +22,8 @@ use crate::config::config::ConfigFile;
 use crate::config::config::SubConfig;
 use crate::config::error::ErrorDisplayConfig;
 use crate::config::mypy::regex_converter;
+use crate::config::util::ConfigOrigin;
 use crate::module::wildcard::ModuleWildcard;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
 
 // A pyproject.toml Mypy config differs a bit from the INI format:
 // - The [mypy] section is written as [tool.mypy]
@@ -164,7 +165,7 @@ pub fn parse_pyproject_config(raw_file: &str) -> anyhow::Result<ConfigFile> {
         cfg.python_environment.python_version = mypy.python_version;
     }
     if mypy.python_interpreter.is_some() {
-        cfg.python_interpreter = mypy.python_interpreter;
+        cfg.interpreters.python_interpreter = mypy.python_interpreter.map(ConfigOrigin::config);
     }
 
     let disable_error_code = mypy

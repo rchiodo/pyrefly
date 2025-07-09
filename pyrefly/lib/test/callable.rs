@@ -166,6 +166,31 @@ def test(f: Callable):
 );
 
 testcase!(
+    test_callable_subtype_vararg_and_positional,
+    r#"
+from typing import Protocol
+class P1(Protocol):
+    def __call__(self, a: int, b: str) -> None: ...
+
+class P2(Protocol):
+    def __call__(self, *args: int | str) -> None: ...
+
+class P3(Protocol):
+    def __call__(self, *args: int | str, a: int, b: str) -> None: ...
+
+class P4(Protocol):
+    def __call__(self, *args: int | str, a: int = 1, b: str = "") -> None: ...
+
+def test(p2: P2, p3: P3, p4: P4):
+    # this one doesn't work because a/b can be passed by name
+    x1: P1 = p2  # E: `P2` is not assignable to `P1`
+    # this one doesn't work because a/b isn't always passed by name
+    x2: P1 = p3  # E: `P3` is not assignable to `P1`
+    x3: P1 = p4  # OK
+"#,
+);
+
+testcase!(
     test_callable_annot_too_few_args,
     r#"
 from typing import Callable
@@ -268,6 +293,38 @@ test(1, "hello") # OK
 test(1) # E: Missing positional argument `y`
 test(1, y="hello") # E: Expected argument `y` to be positional
 test(1, "hello", 2) # E: Expected 2 positional arguments, got 3
+"#,
+);
+
+testcase!(
+    test_historical_positional_only_params,
+    r#"
+def f1(__x: str): ...
+f1("hello") # OK
+f1(__x="hello") # E: Expected argument `__x` to be positional
+
+def f2(__x: str, /, __y: str, __z__: str): ...
+f2(__x="hello", __y="my", __z__="world") # E: Expected argument `__x` to be positional
+f2("hello", __y="my", __z__="world") # OK
+
+def f3(__x: str, *, __y__: str, __z: str): ...
+f3(__x="hello", __y__="my", __z="world") # OK
+
+def f4(x: str, __y: str): ... # E: Positional-only parameter `__y` cannot appear after keyword parameters
+
+class C:
+    def f5(self, __x: str): ...
+
+    def f6(self, x: str, __y: str): ... # E: Positional-only parameter `__y` cannot appear after keyword parameters
+
+    @classmethod
+    def f7(cls, __x: str): ...
+
+c = C()
+c.f5("hello") # OK
+c.f5(__x="hello") # E: Expected argument `__x` to be positional
+C.f7("hello") # OK
+C.f7(__x="hello") # E: Expected argument `__x` to be positional
 "#,
 );
 

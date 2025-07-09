@@ -13,6 +13,8 @@ use std::str::FromStr;
 use anyhow::Context as _;
 use configparser::ini::Ini;
 use configparser::ini::IniDefault;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_util::globs::Glob;
 use pyrefly_util::globs::Globs;
 use serde::Deserialize;
@@ -23,9 +25,8 @@ use crate::config::config::SubConfig;
 use crate::config::environment::environment::PythonEnvironment;
 use crate::config::error::ErrorDisplayConfig;
 use crate::config::mypy::regex_converter;
+use crate::config::util::ConfigOrigin;
 use crate::module::wildcard::ModuleWildcard;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
 #[derive(Clone, Debug, Deserialize)]
 pub struct MypyConfig {
     files: Option<Vec<String>>,
@@ -172,7 +173,9 @@ impl MypyConfig {
         if let Some(python_interpreter) = python_executable {
             // TODO: Add handling for when these are virtual environments
             // Is this something we can auto detect instead of hardcoding here.
-            cfg.python_interpreter = PathBuf::from_str(&python_interpreter).ok();
+            cfg.interpreters.python_interpreter = PathBuf::from_str(&python_interpreter)
+                .ok()
+                .map(ConfigOrigin::config);
         }
 
         if let Some(version) = python_version {

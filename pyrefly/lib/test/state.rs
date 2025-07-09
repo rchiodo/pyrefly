@@ -12,6 +12,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use dupe::Dupe;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
@@ -20,15 +25,10 @@ use starlark_map::small_map::SmallMap;
 use crate::config::config::ConfigFile;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::print_errors;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::subscriber::TestSubscriber;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
-use crate::sys_info::SysInfo;
 use crate::test::util::TestEnv;
 use crate::test::util::init_test;
 

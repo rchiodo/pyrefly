@@ -7,6 +7,8 @@
 
 use dupe::Dupe;
 use num_traits::ToPrimitive;
+use pyrefly_python::ast::Ast;
+use pyrefly_python::dunder;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::visit::Visit;
@@ -26,8 +28,8 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::call::CallStyle;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
@@ -36,21 +38,19 @@ use crate::alt::solve::TypeFormContext;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
-use crate::binding::narrow::FacetKind;
-use crate::dunder;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::context::TypeCheckContext;
 use crate::error::kind::ErrorKind;
 use crate::graph::index::Idx;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::types::callable::Callable;
 use crate::types::callable::FunctionKind;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
 use crate::types::callable::Params;
 use crate::types::callable::Required;
+use crate::types::facet::FacetKind;
 use crate::types::lit_int::LitInt;
 use crate::types::literal::Lit;
 use crate::types::param_spec::ParamSpec;
@@ -862,6 +862,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         )
                     }
                 }
+                Type::ClassDef(ref cls) if self.get_enum_from_class(cls).is_some() => {
+                    if self.is_subset_eq(
+                        &self.expr(slice, None, errors),
+                        &self.stdlib.str().clone().to_type(),
+                    ) {
+                        Type::ClassType(self.as_class_type_unchecked(cls))
+                    } else {
+                        self.error(
+                            errors,
+                            slice.range(),
+                            ErrorKind::IndexError,
+                            None,
+                            format!("Enum `{}` can only be indexed by strings", cls.name()),
+                        )
+                    }
+                }
                 Type::ClassDef(cls) => Type::type_form(self.specialize(
                     &cls,
                     xs.map(|x| self.expr_untype(x, TypeFormContext::TypeArgument, errors)),
@@ -1153,6 +1169,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.check_dict_items_against_typed_dict(
                         flattened_items,
                         typed_dict,
+                        false,
+                        x.range,
+                        errors,
+                    );
+                    hint.clone()
+                } else if let Some(hint @ Type::PartialTypedDict(typed_dict)) = hint {
+                    self.check_dict_items_against_typed_dict(
+                        flattened_items,
+                        typed_dict,
+                        true,
                         x.range,
                         errors,
                     );

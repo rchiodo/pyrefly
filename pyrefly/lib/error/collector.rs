@@ -6,9 +6,11 @@
  */
 
 use std::fmt::Debug;
+use std::mem;
 
 use dupe::Dupe;
 use pyrefly_util::lock::Mutex;
+use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use vec1::Vec1;
 
@@ -44,8 +46,25 @@ impl ModuleErrors {
         self.clean = true;
         // We want to sort only by source-range, not by message.
         // When we get an overload error, we want that overload to remain before whatever the precise overload failure is.
-        self.items.sort_by_key(|x| x.source_range().clone());
-        self.items.dedup();
+        self.items
+            .sort_by_key(|x| (x.range().start(), x.range().end()));
+
+        // Within a single source range we want to dedupe, even if the error messages aren't adjacent
+        let mut res = Vec::with_capacity(self.items.len());
+        mem::swap(&mut res, &mut self.items);
+
+        // The range and where that range started in self.items
+        let mut previous_range = TextRange::default();
+        let mut previous_start = 0;
+        for x in res {
+            if x.range() != previous_range {
+                previous_range = x.range();
+                previous_start = self.items.len();
+                self.items.push(x);
+            } else if !self.items[previous_start..].contains(&x) {
+                self.items.push(x);
+            }
+        }
     }
 
     fn is_empty(&self) -> bool {
@@ -109,12 +128,10 @@ impl ErrorCollector {
         if self.style == ErrorStyle::Never {
             return;
         }
-        let source_range = self.module_info.source_range(range);
-        let is_ignored = self.module_info.is_ignored(&source_range);
         if let Some(ctx) = context {
             msg.insert(0, ctx().format());
         }
-        let err = Error::new(self.module_info.dupe(), source_range, msg, is_ignored, kind);
+        let err = Error::new(self.module_info.dupe(), range, msg, kind);
         self.errors.lock().push(err);
     }
 
@@ -138,7 +155,7 @@ impl ErrorCollector {
         let mut errors = self.errors.lock();
         if !(self.module_info.is_generated() && error_config.ignore_errors_in_generated_code) {
             for err in errors.iter() {
-                if err.is_ignored() {
+                if err.is_ignored(error_config.permissive_ignores) {
                     result.suppressed.push(err.clone());
                 } else if !error_config.display_config.is_enabled(err.error_kind()) {
                     result.disabled.push(err.clone());
@@ -163,6 +180,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use pyrefly_python::module_name::ModuleName;
+    use pyrefly_python::module_path::ModulePath;
     use pyrefly_util::prelude::SliceExt;
     use ruff_python_ast::name::Name;
     use ruff_text_size::TextSize;
@@ -170,8 +189,6 @@ mod tests {
 
     use super::*;
     use crate::config::error::ErrorDisplayConfig;
-    use crate::module::module_name::ModuleName;
-    use crate::module::module_path::ModulePath;
 
     fn add(errors: &ErrorCollector, range: TextRange, kind: ErrorKind, msg: String) {
         errors.add(range, kind, None, vec1![msg]);
@@ -217,13 +234,14 @@ mod tests {
         );
         assert_eq!(
             errors
-                .collect(&ErrorConfig::new(&ErrorDisplayConfig::default(), false))
+                .collect(&ErrorConfig::new(
+                    &ErrorDisplayConfig::default(),
+                    false,
+                    false
+                ))
                 .shown
                 .map(|x| x.msg()),
-            // We do end up with two `b` with the same location.
-            // We could fix that by deduplicating within the same source location, but that
-            // requires more effort and is rare. So for now, let's just keep it simple.
-            vec!["b", "a", "b", "a"]
+            vec!["b", "a", "a"]
         );
     }
 
@@ -271,7 +289,7 @@ mod tests {
             (ErrorKind::BadAssignment, false),
             (ErrorKind::NotIterable, false),
         ]));
-        let config = ErrorConfig::new(&display_config, false);
+        let config = ErrorConfig::new(&display_config, false, false);
 
         assert_eq!(
             errors.collect(&config).shown.map(|x| x.msg()),
@@ -295,10 +313,10 @@ mod tests {
         );
 
         let display_config = ErrorDisplayConfig::default();
-        let config0 = ErrorConfig::new(&display_config, false);
+        let config0 = ErrorConfig::new(&display_config, false, false);
         assert_eq!(errors.collect(&config0).shown.map(|x| x.msg()), vec!["a"]);
 
-        let config1 = ErrorConfig::new(&display_config, true);
+        let config1 = ErrorConfig::new(&display_config, true, false);
         assert!(errors.collect(&config1).shown.map(|x| x.msg()).is_empty());
     }
 
@@ -324,7 +342,11 @@ mod tests {
         );
         assert_eq!(
             errors
-                .collect(&ErrorConfig::new(&ErrorDisplayConfig::default(), false))
+                .collect(&ErrorConfig::new(
+                    &ErrorDisplayConfig::default(),
+                    false,
+                    false
+                ))
                 .shown
                 .map(|x| x.msg()),
             vec!["Overload", "A specific error"]

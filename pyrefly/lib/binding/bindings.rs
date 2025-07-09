@@ -14,6 +14,10 @@ use std::sync::Arc;
 use dupe::Dupe;
 use itertools::Either;
 use itertools::Itertools;
+use pyrefly_python::ast::Ast;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::AnyParameterRef;
@@ -61,7 +65,6 @@ use crate::binding::scope::ScopeKind;
 use crate::binding::scope::ScopeTrace;
 use crate::binding::scope::Scopes;
 use crate::binding::table::TableKeyed;
-use crate::common::symbol_kind::SymbolKind;
 use crate::config::base::UntypedDefBehavior;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -73,15 +76,13 @@ use crate::graph::index::Idx;
 use crate::graph::index::Index;
 use crate::graph::index_map::IndexMap;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::solver::solver::Solver;
 use crate::state::loader::FindError;
-use crate::sys_info::SysInfo;
 use crate::table;
 use crate::table_for_each;
 use crate::table_try_for_each;
+use crate::types::globals::Global;
 use crate::types::quantified::QuantifiedKind;
 use crate::types::types::Var;
 
@@ -254,7 +255,7 @@ impl Bindings {
         if let Binding::FunctionParameter(p) = b {
             match p {
                 Either::Left(idx) => Either::Left(*idx),
-                Either::Right((var, _)) => Either::Right(*var),
+                Either::Right(var) => Either::Right(*var),
             }
         } else {
             panic!(
@@ -297,6 +298,7 @@ impl Bindings {
         if module_info.name() != ModuleName::builtins() {
             builder.inject_builtins();
         }
+        builder.inject_globals();
         builder.stmts(x.body);
         assert_eq!(builder.scopes.loop_depth(), 0);
         let scope_trace = builder.scopes.finish();
@@ -469,12 +471,15 @@ pub enum MutableCaptureLookupKind {
 /// An abstraction representing the `Idx<Key>` for a binding that we
 /// are currently constructing, which can be used as a factory to create
 /// usage values for `ensure_expr`.
+///
+/// Note that while it wraps a `Usage`, that usage is always `Usage::CurrentIdx`,
+/// never some other variant.
 #[derive(Debug)]
-pub struct User(Usage);
+pub struct CurrentIdx(Usage);
 
-impl User {
+impl CurrentIdx {
     pub fn new(idx: Idx<Key>) -> Self {
-        Self(Usage::User(idx, SmallSet::new()))
+        Self(Usage::CurrentIdx(idx, SmallSet::new()))
     }
 
     pub fn usage(&mut self) -> &mut Usage {
@@ -483,7 +488,7 @@ impl User {
 
     fn idx(&self) -> Idx<Key> {
         match self.0 {
-            Usage::User(idx, ..) => idx,
+            Usage::CurrentIdx(idx, ..) => idx,
             _ => unreachable!(),
         }
     }
@@ -494,7 +499,7 @@ impl User {
 
     pub fn decompose(self) -> (SmallSet<Idx<Key>>, Idx<Key>) {
         match self.0 {
-            Usage::User(idx, first_used_by) => (first_used_by, idx),
+            Usage::CurrentIdx(idx, first_used_by) => (first_used_by, idx),
             _ => unreachable!(),
         }
     }
@@ -514,8 +519,8 @@ impl<'a> BindingsBuilder<'a> {
 
     /// Declare a `Key` as a usage, which can be used for name lookups. Like `idx_for_promise`,
     /// this is a promise to later provide a `Binding` corresponding this key.
-    pub fn declare_user(&mut self, key: Key) -> User {
-        User::new(self.idx_for_promise(key))
+    pub fn declare_current_idx(&mut self, key: Key) -> CurrentIdx {
+        CurrentIdx::new(self.idx_for_promise(key))
     }
 
     /// Insert a binding into the bindings table immediately, given a `key`
@@ -542,8 +547,8 @@ impl<'a> BindingsBuilder<'a> {
 
     /// Insert a binding into the bindings table, given a `Usage`. This will panic if the usage
     /// is `Usage::NoUsageTracking`.
-    pub fn insert_binding_user(&mut self, user: User, value: Binding) -> Idx<Key> {
-        self.insert_binding_idx(user.into_idx(), value)
+    pub fn insert_binding_current(&mut self, current: CurrentIdx, value: Binding) -> Idx<Key> {
+        self.insert_binding_idx(current.into_idx(), value)
     }
 
     /// Allow access to an `Idx<Key>` given a `LastStmt` coming from a scan of a function body.
@@ -620,6 +625,14 @@ impl<'a> BindingsBuilder<'a> {
         }
     }
 
+    fn inject_globals(&mut self) {
+        for global in Global::globals(self.has_docstring) {
+            let key = Key::Global(global.name().clone());
+            let idx = self.table.insert(key, Binding::Global(global.clone()));
+            self.bind_key(global.name(), idx, FlowStyle::Other);
+        }
+    }
+
     fn inject_builtins(&mut self) {
         let builtins_module = ModuleName::builtins();
         match self.lookup.get(builtins_module) {
@@ -628,7 +641,7 @@ impl<'a> BindingsBuilder<'a> {
                     let key = Key::Import(name.clone(), TextRange::default());
                     let idx = self
                         .table
-                        .insert(key, Binding::Import(builtins_module, name.clone()));
+                        .insert(key, Binding::Import(builtins_module, name.clone(), None));
                     self.bind_key(name, idx, FlowStyle::Import(builtins_module, name.clone()));
                 }
             }
@@ -654,10 +667,8 @@ impl<'a> BindingsBuilder<'a> {
                     .as_special_export(&name.id, None, self.module_info.name())
             }
             Expr::Attribute(ExprAttribute {
-                value: box Expr::Name(base_name),
-                attr: name,
-                ..
-            }) => self.scopes.as_special_export(
+                value, attr: name, ..
+            }) if let Expr::Name(base_name) = &**value => self.scopes.as_special_export(
                 &name.id,
                 Some(&base_name.id),
                 self.module_info.name(),
@@ -860,19 +871,19 @@ impl<'a> BindingsBuilder<'a> {
         match self.table.types.1.get(flow_idx) {
             Some(Binding::Pin(unpinned_idx, FirstUse::Undetermined)) => match usage {
                 Usage::StaticTypeInformation | Usage::Narrowing => (flow_idx, Some(flow_idx)),
-                Usage::User(..) => (*unpinned_idx, Some(flow_idx)),
+                Usage::CurrentIdx(..) => (*unpinned_idx, Some(flow_idx)),
             },
             Some(Binding::Pin(unpinned_idx, first_use)) => match first_use {
                 FirstUse::DoesNotPin => (flow_idx, None),
                 FirstUse::Undetermined => match usage {
                     Usage::StaticTypeInformation | Usage::Narrowing => (flow_idx, Some(flow_idx)),
-                    Usage::User(..) => (*unpinned_idx, Some(flow_idx)),
+                    Usage::CurrentIdx(..) => (*unpinned_idx, Some(flow_idx)),
                 },
                 FirstUse::UsedBy(usage_idx) => {
                     // Detect secondary reads of the same name from a first use, and make
                     // sure they all use the raw binding rather than the `Pin`.
                     let currently_in_first_use = match usage {
-                        Usage::User(idx, ..) => idx == usage_idx,
+                        Usage::CurrentIdx(idx, ..) => idx == usage_idx,
                         Usage::Narrowing | Usage::StaticTypeInformation => false,
                     };
                     if currently_in_first_use {
@@ -891,7 +902,7 @@ impl<'a> BindingsBuilder<'a> {
         match self.table.types.1.get_mut(used) {
             Some(Binding::Pin(.., first_use @ FirstUse::Undetermined)) => {
                 *first_use = match usage {
-                    Usage::User(use_idx, first_uses_of) => {
+                    Usage::CurrentIdx(use_idx, first_uses_of) => {
                         first_uses_of.insert(used);
                         FirstUse::UsedBy(*use_idx)
                     }
@@ -998,24 +1009,24 @@ impl<'a> BindingsBuilder<'a> {
         self.bind_key(&name.id, idx, style).0
     }
 
-    pub fn bind_definition_user(
+    pub fn bind_definition_current(
         &mut self,
         name: &Identifier,
-        user: User,
+        current: CurrentIdx,
         binding: Binding,
         style: FlowStyle,
     ) -> Option<Idx<KeyAnnotation>> {
-        let idx = self.insert_binding_user(user, binding);
+        let idx = self.insert_binding_current(current, binding);
         self.bind_key(&name.id, idx, style).0
     }
 
-    pub fn bind_user(
+    pub fn bind_current(
         &mut self,
         name: &Name,
-        user: &User,
+        current: &CurrentIdx,
         style: FlowStyle,
     ) -> (Option<Idx<KeyAnnotation>>, Option<Idx<Key>>) {
-        self.bind_key(name, user.idx(), style)
+        self.bind_key(name, current.idx(), style)
     }
 
     /// Return a pair of:
@@ -1149,7 +1160,6 @@ impl<'a> BindingsBuilder<'a> {
         &mut self,
         target: AnnotationTarget,
         x: AnyParameterRef,
-        function_idx: Idx<KeyFunction>,
         class_key: Option<Idx<KeyClass>>,
     ) {
         let name = x.name();
@@ -1167,7 +1177,7 @@ impl<'a> BindingsBuilder<'a> {
                     KeyAnnotation::Annotation(ShortIdentifier::new(name)),
                     BindingAnnotation::Type(target.clone(), var.to_type()),
                 );
-                (annot, Either::Right((var, function_idx)))
+                (annot, Either::Right(var))
             }
         };
         let key = self.insert_binding(

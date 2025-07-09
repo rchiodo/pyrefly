@@ -22,10 +22,10 @@
     "Line 75: Expected 1 errors",
     "Line 30: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveTuple']`\"]",
     "Line 42: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveMapping']`\"]",
-    "Line 58: Unexpected errors [\"`|` is not supported between `Literal['GenericTypeAlias1[T1]']` and `type[TypeVar[T1]]`\\n  TODO: Expr::binop_infer attribute base undefined for type: type[TypeVar[T1]] (trying to access __ror__)\"]",
+    "Line 58: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
     "Line 59: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
     "Line 62: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
-    "Line 65: Unexpected errors [\"`|` is not supported between `Literal['GenericTypeAlias2[T1, T2]']` and `type[TypeVar[T1]]`\\n  TODO: Expr::binop_infer attribute base undefined for type: type[TypeVar[T1]] (trying to access __ror__)\"]",
+    "Line 65: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
     "Line 67: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
     "Line 68: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]"
   ],
@@ -143,10 +143,7 @@
   "dataclasses_hash.py": [],
   "dataclasses_inheritance.py": [],
   "dataclasses_kwonly.py": [
-    "Line 32: Unexpected errors ['Missing argument `a` in function `DC2.__init__`', 'Expected 0 positional arguments, got 1 in function `DC2.__init__`']",
-    "Line 35: Unexpected errors ['Missing argument `a` in function `DC2.__init__`', 'Expected 0 positional arguments, got 1 in function `DC2.__init__`']",
-    "Line 47: Unexpected errors ['Missing argument `a` in function `DC3.__init__`', 'Expected 0 positional arguments, got 1 in function `DC3.__init__`']",
-    "Line 50: Unexpected errors ['Missing argument `a` in function `DC3.__init__`', 'Expected 0 positional arguments, got 1 in function `DC3.__init__`']",
+    "Line 58: Unexpected errors ['Dataclass field `c` without a default may not follow dataclass field with a default']",
     "Line 61: Unexpected errors ['Missing argument `c` in function `DC4.__init__`', 'Argument `float` is not assignable to parameter `b` with type `int` in function `DC4.__init__`', 'Multiple values for argument `b` in function `DC4.__init__`']"
   ],
   "dataclasses_order.py": [],
@@ -156,61 +153,27 @@
   ],
   "dataclasses_slots.py": [
     "Line 25: Expected 1 errors",
-    "Line 38: Expected 1 errors",
-    "Lines 10, 11: Expected error (tag 'DC1')",
-    "Line 56: Unexpected errors ['Class `DC5` has no class attribute `__slots__`']",
-    "Line 57: Unexpected errors ['Object of class `DC5` has no attribute `__slots__`']"
+    "Line 38: Expected 1 errors"
   ],
-  "dataclasses_transform_class.py": [
-    "Line 51: Expected 1 errors",
-    "Line 63: Expected 1 errors",
-    "Line 122: Expected 1 errors",
-    "Line 60: Unexpected errors ['Missing argument `not_a_field` in function `ModelBase.__init__`', 'Unexpected keyword argument `id` in function `ModelBase.__init__`', 'Unexpected keyword argument `name` in function `ModelBase.__init__`', 'Unexpected keyword argument `other_name` in function `ModelBase.__init__`']",
-    "Line 68: Unexpected errors ['Missing argument `not_a_field` in function `ModelBase.__init__`', 'Unexpected keyword argument `id` in function `ModelBase.__init__`', 'Unexpected keyword argument `name` in function `ModelBase.__init__`']",
-    "Line 74: Unexpected errors ['Missing argument `not_a_field` in function `ModelBase.__init__`', 'Unexpected keyword argument `id` in function `ModelBase.__init__`', 'Unexpected keyword argument `name` in function `ModelBase.__init__`']",
-    "Line 76: Unexpected errors ['Missing argument `not_a_field` in function `ModelBase.__init__`', 'Unexpected keyword argument `id` in function `ModelBase.__init__`']",
-    "Line 78: Unexpected errors ['`<` is not supported between `Customer2` and `Customer2`\\n  Cannot find `__lt__` or `__gt__`']",
-    "Line 106: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`']",
-    "Line 119: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']"
-  ],
+  "dataclasses_transform_class.py": [],
   "dataclasses_transform_converter.py": [
     "Line 118: Expected 1 errors",
     "Line 29: Unexpected errors ['Argument `tuple[[S, T](*, converter: (S) -> T, default: S | None, default_factory: (() -> S) | None) -> T]` is not assignable to parameter `field_specifiers` with type `tuple[((...) -> Any) | type[Any], ...]` in function `typing.dataclass_transform`']",
-    "Line 112: Unexpected errors ['Expected 0 positional arguments, got 5 in function `object.__init__`']",
+    "Line 112: Unexpected errors [\"Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`\", \"Argument `Literal[b'f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`\", 'Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`']",
     "Line 114: Unexpected errors [\"`Literal['f1']` is not assignable to attribute `field0` with type `int`\"]",
     "Line 115: Unexpected errors [\"`Literal['f6']` is not assignable to attribute `field3` with type `ConverterClass`\"]",
     "Line 116: Unexpected errors [\"`Literal[b'f6']` is not assignable to attribute `field3` with type `ConverterClass`\"]",
-    "Line 121: Unexpected errors ['Expected 0 positional arguments, got 6 in function `object.__init__`']"
+    "Line 121: Unexpected errors [\"Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`\", \"Argument `Literal['1']` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`\", \"Argument `tuple[tuple[Literal['a'], Literal['1']], tuple[Literal['b'], Literal['2']]]` is not assignable to parameter `field5` with type `dict[str, str]` in function `DC2.__init__`\"]"
   ],
   "dataclasses_transform_field.py": [
-    "Line 60: Unexpected errors ['Unexpected keyword argument `name` in function `object.__init__`']",
-    "Line 77: Unexpected errors ['Unexpected keyword argument `name` in function `object.__init__`']"
+    "Line 64: Expected 1 errors",
+    "Line 59: Unexpected errors ['Missing argument `id` in function `CustomerModel1.__init__`']",
+    "Line 60: Unexpected errors ['Missing argument `id` in function `CustomerModel1.__init__`']",
+    "Line 77: Unexpected errors ['Missing argument `id` in function `CustomerModel2.__init__`']"
   ],
-  "dataclasses_transform_func.py": [
-    "Line 97: Expected 1 errors",
-    "Lines 89, 90: Expected error (tag 'Customer3Subclass')",
-    "Line 50: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']",
-    "Line 53: Unexpected errors ['Expected 0 positional arguments, got 2 in function `object.__init__`']",
-    "Line 67: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']",
-    "Line 73: Unexpected errors ['`<` is not supported between `Customer2` and `Customer2`\\n  Cannot find `__lt__` or `__gt__`']",
-    "Line 94: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']"
-  ],
-  "dataclasses_transform_meta.py": [
-    "Line 51: Expected 1 errors",
-    "Line 63: Expected 1 errors",
-    "Line 103: Expected 1 errors",
-    "Line 60: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`', 'Unexpected keyword argument `other_name` in function `object.__init__`']",
-    "Line 69: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']",
-    "Line 75: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']",
-    "Line 77: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`']",
-    "Line 79: Unexpected errors ['`<` is not supported between `Customer2` and `Customer2`\\n  Cannot find `__lt__` or `__gt__`']",
-    "Line 100: Unexpected errors ['Unexpected keyword argument `id` in function `object.__init__`', 'Unexpected keyword argument `name` in function `object.__init__`']"
-  ],
-  "dataclasses_usage.py": [
-    "Lines 58, 61: Expected error (tag 'DC1')",
-    "Lines 64, 67: Expected error (tag 'DC2')",
-    "Lines 70, 73: Expected error (tag 'DC3')"
-  ],
+  "dataclasses_transform_func.py": [],
+  "dataclasses_transform_meta.py": [],
+  "dataclasses_usage.py": [],
   "directives_assert_type.py": [],
   "directives_cast.py": [],
   "directives_deprecated.py": [
@@ -259,7 +222,7 @@
   "generics_basic.py": [
     "Line 49: Expected 1 errors",
     "Line 121: Expected 1 errors",
-    "Line 34: Unexpected errors ['`+` is not supported between `AnyStr` and `AnyStr`\\n  TODO: Expr::binop_infer attribute base undefined for type: AnyStr (trying to access __add__)']",
+    "Line 34: Unexpected errors ['`+` is not supported between `AnyStr` and `AnyStr`\\n  Argument `AnyStr` is not assignable to parameter `self` with type `Self@bytes` in function `bytes.__add__`', '`+` is not supported between `AnyStr` and `AnyStr`\\n  Argument `AnyStr` is not assignable to parameter `value` with type `Buffer` in function `bytes.__add__`', '`+` is not supported between `AnyStr` and `AnyStr`\\n  No matching overload found for function `str.__add__`\\n  Possible overloads:\\n  (value: LiteralString, /) -> LiteralString [closest match]\\n  (value: str, /) -> str', 'Returned type `bytes | Unknown` is not assignable to declared return type `AnyStr`']",
     "Line 67: Unexpected errors ['assert_type(MyStr, str) failed']",
     "Line 68: Unexpected errors ['assert_type(MyStr, str) failed', 'Argument `str` is not assignable to parameter `y` with type `MyStr` in function `concat`']"
   ],
@@ -341,7 +304,7 @@
   ],
   "generics_typevartuple_callable.py": [],
   "generics_typevartuple_concat.py": [
-    "Line 56: Unexpected errors ['Returned type `tuple[*tuple[Unknown, ...], Unknown]` is not assignable to declared return type `tuple[*Ts, T]`']"
+    "Line 56: Unexpected errors ['Returned type `tuple[*tuple[object | T, ...], object | T]` is not assignable to declared return type `tuple[*Ts, T]`']"
   ],
   "generics_typevartuple_overloads.py": [],
   "generics_typevartuple_specialization.py": [
@@ -369,12 +332,7 @@
     "Lines 195, 196: Expected error (tag 'ContraToContraToContra_WithTA')"
   ],
   "generics_variance_inference.py": [],
-  "historical_positional.py": [
-    "Line 18: Expected 1 errors",
-    "Line 26: Expected 1 errors",
-    "Line 38: Expected 1 errors",
-    "Line 43: Expected 1 errors"
-  ],
+  "historical_positional.py": [],
   "literals_interactions.py": [
     "Line 71: Unexpected errors ['`@` is not supported between `Matrix[Literal[2], Literal[3]]` and `Matrix[Literal[3], Literal[7]]`\\n  Argument `Matrix[Literal[3], Literal[7]]` is not assignable to parameter `other` with type `Matrix[Literal[3], int]` in function `Matrix.__matmul__`']",
     "Line 72: Unexpected errors ['assert_type(Matrix[Literal[2], int], Matrix[Literal[2], Literal[7]]) failed']"
@@ -386,10 +344,7 @@
   ],
   "literals_parameterizations.py": [],
   "literals_semantics.py": [],
-  "namedtuples_define_class.py": [
-    "Line 59: Expected 1 errors",
-    "Line 79: Expected 1 errors"
-  ],
+  "namedtuples_define_class.py": [],
   "namedtuples_define_functional.py": [],
   "namedtuples_type_compat.py": [],
   "namedtuples_usage.py": [],
@@ -446,8 +401,7 @@
   "protocols_definition.py": [
     "Line 116: Expected 1 errors",
     "Line 117: Expected 1 errors",
-    "Line 79: Unexpected errors ['`Concrete` is not assignable to `Template`']",
-    "Line 281: Unexpected errors ['`Concrete5_Good2` is not assignable to `Template5`']"
+    "Line 79: Unexpected errors ['`Concrete` is not assignable to `Template`']"
   ],
   "protocols_explicit.py": [
     "Line 27: Expected 1 errors",
@@ -536,12 +490,6 @@
     "Line 139: Unexpected errors ['assert_type(type, type[Any]) failed']"
   ],
   "tuples_type_compat.py": [
-    "Line 93: Unexpected errors ['Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 1 value']",
-    "Line 95: Unexpected errors ['assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int]) failed']",
-    "Line 97: Unexpected errors ['Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 2 values']",
-    "Line 99: Unexpected errors ['assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, int] | tuple[str, str]) failed']",
-    "Line 101: Unexpected errors ['Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 3 values', 'Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 3 values']",
-    "Line 103: Unexpected errors ['assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, str, int]) failed']",
     "Line 115: Unexpected errors ['assert_type(tuple[int | str, int | str], tuple[int | str, str]) failed']",
     "Line 117: Unexpected errors ['assert_type(tuple[int | str, int | str], tuple[int | str, int]) failed']"
   ],
@@ -551,7 +499,6 @@
   "typeddicts_class_syntax.py": [
     "Line 33: Expected 1 errors",
     "Line 38: Expected 1 errors",
-    "Line 49: Expected 1 errors",
     "Line 34: Unexpected errors ['TypedDict item `method2` may not be initialized']",
     "Line 39: Unexpected errors ['TypedDict item `method3` may not be initialized']"
   ],
@@ -565,18 +512,15 @@
     "Line 79: Unexpected errors ['`TypedDict[C2]` is not assignable to `TypedDict[A2]`']"
   ],
   "typeddicts_readonly_inheritance.py": [
-    "Line 94: Expected 1 errors",
     "Line 98: Expected 1 errors",
     "Line 106: Expected 1 errors",
     "Line 119: Expected 1 errors",
-    "Line 132: Expected 1 errors",
-    "Line 49: Unexpected errors ['Class member `RecordShop.albums` overrides parent class `AlbumCollection` in an inconsistent manner\\n  `RecordShop.albums` has type `list[TypedDict[Album1]]`, which is not consistent with `Collection[TypedDict[Album1]]` in `AlbumCollection.albums` (the type of read-write attributes cannot be changed)']",
-    "Line 76: Unexpected errors ['Class member `User.ident` overrides parent class `OptionalIdent` in an inconsistent manner\\n  `User.ident` has type `str`, which is not consistent with `int | str` in `OptionalIdent.ident` (the type of read-write attributes cannot be changed)']"
+    "Line 132: Expected 1 errors"
   ],
   "typeddicts_readonly_kwargs.py": [],
   "typeddicts_readonly_update.py": [
     "Line 23: Expected 1 errors",
-    "Line 34: Unexpected errors ['Argument `TypedDict[B]` is not assignable to parameter `m` with type `TypedDict[A]` in function `_typeshed._type_checker_internals.TypedDictFallback.update`']"
+    "Line 34: Unexpected errors [\"No matching overload found for function `A.update`\\n  Possible overloads:\\n  (__m: Partial[typeddicts_readonly_update.A@16:7-8], /) -> None [closest match]\\n  (__m: Iterable[tuple[Literal['y'], int]], /) -> None\\n  (*, y: int) -> None\"]"
   ],
   "typeddicts_required.py": [
     "Line 62: Expected 1 errors",

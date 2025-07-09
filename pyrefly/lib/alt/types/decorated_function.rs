@@ -12,10 +12,11 @@ use std::fmt::Display;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
+use pyrefly_python::module_name::ModuleName;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 
-use crate::module::module_name::ModuleName;
+use crate::binding::binding::FunctionStubOrImpl;
 use crate::types::callable::FuncFlags;
 use crate::types::callable::FuncId;
 use crate::types::callable::FuncMetadata;
@@ -30,6 +31,7 @@ pub struct DecoratedFunction {
     pub id_range: TextRange,
     pub ty: Type,
     pub metadata: FuncMetadata,
+    pub stub_or_impl: FunctionStubOrImpl,
 }
 
 impl Display for DecoratedFunction {
@@ -51,6 +53,7 @@ impl DecoratedFunction {
                 })),
                 flags: FuncFlags::default(),
             },
+            stub_or_impl: FunctionStubOrImpl::Stub,
         }
     }
 }

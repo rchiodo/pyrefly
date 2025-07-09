@@ -6,10 +6,9 @@
  */
 
 use dupe::Dupe;
-
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::sys_info::SysInfo;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::SysInfo;
 
 #[derive(Debug, Clone, Dupe, PartialEq, Eq, Hash)]
 pub struct Handle {

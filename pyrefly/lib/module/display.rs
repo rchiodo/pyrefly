@@ -10,11 +10,13 @@ use std::fmt::Display;
 
 use pyrefly_util::display::DisplayWith;
 use pyrefly_util::display::DisplayWithCtx;
+use ruff_python_ast::Arguments;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprCall;
 use ruff_python_ast::ExprYield;
 use ruff_python_ast::ExprYieldFrom;
 use ruff_python_ast::Stmt;
+use ruff_python_ast::StmtAugAssign;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
@@ -59,6 +61,18 @@ impl DisplayWith<ModuleInfo> for ExprCall {
     }
 }
 
+impl DisplayWith<ModuleInfo> for Arguments {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, m: &ModuleInfo) -> fmt::Result {
+        write!(f, "{}", m.code_at(self.range()))
+    }
+}
+
+impl DisplayWith<ModuleInfo> for StmtAugAssign {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, m: &ModuleInfo) -> fmt::Result {
+        write!(f, "{}", m.code_at(self.range()))
+    }
+}
+
 impl DisplayWith<ModuleInfo> for Stmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, m: &ModuleInfo) -> fmt::Result {
         write!(f, "{}", m.code_at(self.range()))
@@ -67,12 +81,12 @@ impl DisplayWith<ModuleInfo> for Stmt {
 
 impl DisplayWith<ModuleInfo> for TextRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, m: &ModuleInfo) -> fmt::Result {
-        write!(f, "{}", m.source_range(*self))
+        write!(f, "{}", m.display_range(*self))
     }
 }
 
 impl DisplayWith<ModuleInfo> for TextSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, m: &ModuleInfo) -> fmt::Result {
-        write!(f, "{}", m.line_column(*self))
+        write!(f, "{}", m.display_pos(*self))
     }
 }

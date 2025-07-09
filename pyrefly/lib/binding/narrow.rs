@@ -7,8 +7,11 @@
 
 use std::fmt;
 
-use pyrefly_derive::TypeEq;
+use pyrefly_python::ast::Ast;
 use pyrefly_util::assert_words;
+use pyrefly_util::display::DisplayWith;
+use pyrefly_util::display::DisplayWithCtx;
+use pyrefly_util::display::commas_iter;
 use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::Arguments;
 use ruff_python_ast::BoolOp;
@@ -33,11 +36,13 @@ use vec1::Vec1;
 
 use crate::binding::bindings::BindingsBuilder;
 use crate::export::special::SpecialExport;
-use crate::ruff::ast::Ast;
+use crate::module::module_info::ModuleInfo;
+use crate::types::facet::FacetChain;
+use crate::types::facet::FacetKind;
 use crate::types::types::Type;
 
-assert_words!(AtomicNarrowOp, 10);
-assert_words!(NarrowOp, 11);
+assert_words!(AtomicNarrowOp, 11);
+assert_words!(NarrowOp, 12);
 
 #[derive(Clone, Debug)]
 pub enum AtomicNarrowOp {
@@ -58,6 +63,10 @@ pub enum AtomicNarrowOp {
     /// Used to narrow tuple types based on length
     LenEq(Expr),
     LenNotEq(Expr),
+    LenGt(Expr),
+    LenGte(Expr),
+    LenLt(Expr),
+    LenLte(Expr),
     /// (func, args) for a function call that may narrow the type of its first argument.
     Call(Box<Expr>, Arguments),
     NotCall(Box<Expr>, Arguments),
@@ -72,63 +81,90 @@ pub enum AtomicNarrowOp {
     Placeholder,
 }
 
-/// The idea of "facet narrowing" is that for attribute narrowing, index narrowing,
-/// and some other cases we maintain a tree of "facets" (things like attributes, etc)
-/// for which we have narrowed types and we'll use these both for narrowing and for
-/// reading along "facet chains".
-///
-/// For example if I write
-/// `if x.y is not None and x.z is not None and x.y[0]["w"] is not None: ...`
-/// then we'll wind up with two facet chains narrowed in our tree, one at
-///   [Attribute(y), Index(0), Key("w")]
-/// and another at
-///   [Attribute(z)]
-#[derive(Debug, Clone, PartialEq, Eq, TypeEq, Hash)]
-pub enum FacetKind {
-    Attribute(Name),
-    Index(usize),
-    Key(String),
-}
-
-impl fmt::Display for FacetKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Attribute(name) => write!(f, ".{}", name),
-            Self::Index(idx) => write!(f, "[{}]", idx),
-            Self::Key(key) => write!(f, "[\"{}\"]", key),
-        }
-    }
-}
-
-impl FacetKind {
-    pub fn invalidate_on_unknown_assignment(&self) -> bool {
-        match self {
-            Self::Attribute(_) => false,
-            Self::Index(_) | Self::Key(_) => true,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FacetChain(pub Box<Vec1<FacetKind>>);
-
-impl FacetChain {
-    pub fn new(chain: Vec1<FacetKind>) -> Self {
-        Self(Box::new(chain))
-    }
-
-    pub fn facets(&self) -> &Vec1<FacetKind> {
-        match self {
-            Self(chain) => chain,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum NarrowOp {
     Atomic(Option<FacetChain>, AtomicNarrowOp),
     And(Vec<NarrowOp>),
     Or(Vec<NarrowOp>),
+}
+
+impl DisplayWith<ModuleInfo> for AtomicNarrowOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &ModuleInfo) -> fmt::Result {
+        match self {
+            AtomicNarrowOp::Is(expr) => write!(f, "Is({})", expr.display_with(ctx)),
+            AtomicNarrowOp::IsNot(expr) => write!(f, "IsNot({})", expr.display_with(ctx)),
+            AtomicNarrowOp::Eq(expr) => write!(f, "Eq({})", expr.display_with(ctx)),
+            AtomicNarrowOp::NotEq(expr) => write!(f, "NotEq({})", expr.display_with(ctx)),
+            AtomicNarrowOp::IsInstance(expr) => write!(f, "IsInstance({})", expr.display_with(ctx)),
+            AtomicNarrowOp::IsNotInstance(expr) => {
+                write!(f, "IsNotInstance({})", expr.display_with(ctx))
+            }
+            AtomicNarrowOp::IsSubclass(expr) => write!(f, "IsSubclass({})", expr.display_with(ctx)),
+            AtomicNarrowOp::IsNotSubclass(expr) => {
+                write!(f, "IsNotSubclass({})", expr.display_with(ctx))
+            }
+            AtomicNarrowOp::TypeGuard(t, arguments) => {
+                write!(f, "TypeGuard({t}, {})", arguments.display_with(ctx))
+            }
+            AtomicNarrowOp::NotTypeGuard(t, arguments) => {
+                write!(f, "NotTypeGuard({t}, {})", arguments.display_with(ctx))
+            }
+            AtomicNarrowOp::TypeIs(t, arguments) => {
+                write!(f, "TypeIs({t}, {})", arguments.display_with(ctx))
+            }
+            AtomicNarrowOp::NotTypeIs(t, arguments) => {
+                write!(f, "NotTypeIs({t}, {})", arguments.display_with(ctx))
+            }
+            AtomicNarrowOp::In(expr) => write!(f, "In({})", expr.display_with(ctx)),
+            AtomicNarrowOp::NotIn(expr) => write!(f, "NotIn({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenEq(expr) => write!(f, "LenEq({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenNotEq(expr) => write!(f, "LenNotEq({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenGt(expr) => write!(f, "LenGt({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenGte(expr) => write!(f, "LenGte({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenLt(expr) => write!(f, "LenLt({})", expr.display_with(ctx)),
+            AtomicNarrowOp::LenLte(expr) => write!(f, "LenLte({})", expr.display_with(ctx)),
+            AtomicNarrowOp::Call(expr, arguments) => write!(
+                f,
+                "Call({}, {})",
+                expr.display_with(ctx),
+                arguments.display_with(ctx)
+            ),
+            AtomicNarrowOp::NotCall(expr, arguments) => write!(
+                f,
+                "NotCall({}, {})",
+                expr.display_with(ctx),
+                arguments.display_with(ctx)
+            ),
+            AtomicNarrowOp::IsTruthy => write!(f, "IsTruthy"),
+            AtomicNarrowOp::IsFalsy => write!(f, "IsFalsy"),
+            AtomicNarrowOp::Placeholder => write!(f, "Placeholder"),
+        }
+    }
+}
+
+impl DisplayWith<ModuleInfo> for NarrowOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &ModuleInfo) -> fmt::Result {
+        match self {
+            Self::Atomic(prop, op) => match prop {
+                None => write!(f, "{}", op.display_with(ctx)),
+                Some(prop) => write!(f, "[{prop}] {}", op.display_with(ctx)),
+            },
+            Self::And(ops) => {
+                write!(
+                    f,
+                    "And({})",
+                    commas_iter(|| ops.iter().map(|op| op.display_with(ctx)))
+                )
+            }
+            Self::Or(ops) => {
+                write!(
+                    f,
+                    "Or({})",
+                    commas_iter(|| ops.iter().map(|op| op.display_with(ctx)))
+                )
+            }
+        }
+    }
 }
 
 impl AtomicNarrowOp {
@@ -145,6 +181,10 @@ impl AtomicNarrowOp {
             Self::In(v) => Self::NotIn(v.clone()),
             Self::NotIn(v) => Self::In(v.clone()),
             Self::LenEq(v) => Self::LenNotEq(v.clone()),
+            Self::LenGt(v) => Self::LenLte(v.clone()),
+            Self::LenGte(v) => Self::LenLt(v.clone()),
+            Self::LenLte(v) => Self::LenGt(v.clone()),
+            Self::LenLt(v) => Self::LenGte(v.clone()),
             Self::LenNotEq(v) => Self::LenEq(v.clone()),
             Self::TypeGuard(ty, args) => Self::NotTypeGuard(ty.clone(), args.clone()),
             Self::NotTypeGuard(ty, args) => Self::TypeGuard(ty.clone(), args.clone()),
@@ -289,6 +329,7 @@ impl NarrowOps {
     pub fn from_expr(builder: &BindingsBuilder, test: Option<&Expr>) -> Self {
         match test {
             Some(Expr::Compare(ExprCompare {
+                node_index: _,
                 range: _,
                 left,
                 ops: cmp_ops,
@@ -317,6 +358,10 @@ impl NarrowOps {
                             CmpOp::IsNot if !lhs_is_len => AtomicNarrowOp::IsNot(right.clone()),
                             CmpOp::Eq if lhs_is_len => AtomicNarrowOp::LenEq(right.clone()),
                             CmpOp::NotEq if lhs_is_len => AtomicNarrowOp::LenNotEq(right.clone()),
+                            CmpOp::Gt if lhs_is_len => AtomicNarrowOp::LenGt(right.clone()),
+                            CmpOp::GtE if lhs_is_len => AtomicNarrowOp::LenGte(right.clone()),
+                            CmpOp::Lt if lhs_is_len => AtomicNarrowOp::LenLt(right.clone()),
+                            CmpOp::LtE if lhs_is_len => AtomicNarrowOp::LenLte(right.clone()),
                             CmpOp::Eq => AtomicNarrowOp::Eq(right.clone()),
                             CmpOp::NotEq => AtomicNarrowOp::NotEq(right.clone()),
                             CmpOp::In if !lhs_is_len => AtomicNarrowOp::In(right.clone()),
@@ -339,6 +384,7 @@ impl NarrowOps {
                 }
             }
             Some(Expr::BoolOp(ExprBoolOp {
+                node_index: _,
                 range: _,
                 op,
                 values,
@@ -355,19 +401,16 @@ impl NarrowOps {
                 narrow_ops
             }
             Some(Expr::UnaryOp(ExprUnaryOp {
+                node_index: _,
                 range: _,
                 op: UnaryOp::Not,
                 operand: e,
             })) => Self::from_expr(builder, Some(e)).negate(),
             Some(Expr::Call(ExprCall {
+                node_index: _,
                 range,
                 func,
-                arguments:
-                    args @ Arguments {
-                        range: _,
-                        args: posargs,
-                        keywords: _,
-                    },
+                arguments: args @ Arguments { args: posargs, .. },
             })) if !posargs.is_empty() => {
                 // This may be a function call that narrows the type of its first argument. Record
                 // it as a possible narrowing operation that we'll resolve in the answers phase.
@@ -405,16 +448,11 @@ pub fn identifier_and_chain_for_expr(expr: &Expr) -> Option<(Identifier, FacetCh
                 }
                 _ => None,
             }
-        } else if let Expr::Subscript(
-            subscript @ ExprSubscript {
-                slice:
-                    box Expr::NumberLiteral(ExprNumberLiteral {
-                        value: Number::Int(idx),
-                        ..
-                    }),
+        } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
+            && let Expr::NumberLiteral(ExprNumberLiteral {
+                value: Number::Int(idx),
                 ..
-            },
-        ) = expr
+            }) = &**slice
             && let Some(idx) = idx.as_usize()
         {
             match &*subscript.value {
@@ -432,12 +470,8 @@ pub fn identifier_and_chain_for_expr(expr: &Expr) -> Option<(Identifier, FacetCh
                 }
                 _ => None,
             }
-        } else if let Expr::Subscript(
-            subscript @ ExprSubscript {
-                slice: box Expr::StringLiteral(ExprStringLiteral { value: key, .. }),
-                ..
-            },
-        ) = expr
+        } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
+            && let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = &**slice
         {
             match &*subscript.value {
                 Expr::Name(name) => {
@@ -480,16 +514,11 @@ pub fn identifier_and_chain_prefix_for_expr(expr: &Expr) -> Option<(Identifier, 
                 }
                 _ => None,
             }
-        } else if let Expr::Subscript(
-            subscript @ ExprSubscript {
-                slice:
-                    box Expr::NumberLiteral(ExprNumberLiteral {
-                        value: Number::Int(idx),
-                        ..
-                    }),
+        } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
+            && let Expr::NumberLiteral(ExprNumberLiteral {
+                value: Number::Int(idx),
                 ..
-            },
-        ) = expr
+            }) = &**slice
             && let Some(idx) = idx.as_usize()
         {
             match &*subscript.value {
@@ -504,12 +533,8 @@ pub fn identifier_and_chain_prefix_for_expr(expr: &Expr) -> Option<(Identifier, 
                 }
                 _ => None,
             }
-        } else if let Expr::Subscript(
-            subscript @ ExprSubscript {
-                slice: box Expr::StringLiteral(ExprStringLiteral { value: key, .. }),
-                ..
-            },
-        ) = expr
+        } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
+            && let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = &**slice
         {
             match &*subscript.value {
                 Expr::Name(name) => {

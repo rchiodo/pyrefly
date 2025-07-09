@@ -29,7 +29,6 @@ assert_type(x, list[Any])
 );
 
 testcase!(
-    bug = "This test broke when we introduced `Pin`, but *before* we did any actual pinning",
     test_simple_int_operation_in_loop,
     r#"
 from typing import assert_type, Literal
@@ -37,7 +36,7 @@ x = 5
 while True:
   x = x + 1
 y = x
-assert_type(y, int)  # E: assert_type(Literal[5] | Any, int)
+assert_type(y, int)
 "#,
 );
 
@@ -173,7 +172,7 @@ fn env_two_exported_pins() -> TestEnv {
         r#"
 x = []
 y = x.append(1)
-z = x.append("1")
+z = x.append("1") # E: `Literal['1']` is not assignable to parameter `object` with type `int`
 "#,
     )
 }

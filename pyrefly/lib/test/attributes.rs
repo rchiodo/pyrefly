@@ -637,6 +637,64 @@ def test(foo: Foo) -> None:
 );
 
 testcase!(
+    test_object_setattr,
+    r#"
+from typing import assert_type
+
+class Foo:
+    def __getattr__(self, name: str) -> int: ...
+    def __setattr__(self, name: str, value: int) -> None: ...
+
+def test(foo: Foo) -> None:
+    foo.x = 1
+    foo.x = ""  # E: Argument `Literal['']` is not assignable to parameter `value` with type `int`
+    "#,
+);
+
+testcase!(
+    test_object_delattr,
+    r#"
+from typing import assert_type
+
+class Foo:
+    def __getattr__(self, name: str) -> int: ...
+    def __delattr__(self, name: str) -> None: ...
+
+def test(foo: Foo) -> None:
+    del foo.x
+    "#,
+);
+
+testcase!(
+    test_object_setattr_wrong_signature,
+    r#"
+from typing import assert_type
+
+class Foo:
+    def __getattr__(self, name: int) -> int: ...
+    def __setattr__(self, name: int, value: int) -> None: ...
+
+def test(foo: Foo) -> None:
+    foo.x = 1  # E: Argument `Literal['x']` is not assignable to parameter `name` with type `int`
+    "#,
+);
+
+testcase!(
+    test_argparse_namespace_setattr,
+    r#"
+from argparse import ArgumentParser, Namespace
+
+ap: ArgumentParser = ArgumentParser()
+ap.add_argument("-b", "--bool-flag", default=False, action='store_true')
+ap.add_argument("-i", "--integer", default=1, type=int)
+ap.add_argument("-s", "--string-arg", type=str, default="")
+args: Namespace = ap.parse_args()
+if not args.string_arg:
+    args.string_arg = "string-goes-here"
+    "#,
+);
+
+testcase!(
     test_module_getattr,
     TestEnv::one("foo", "def __getattr__(name: str) -> int: ..."),
     r#"
@@ -940,5 +998,82 @@ testcase!(
 class C:
     def __init__(self):
         self.x += 5  # E: Object of class `C` has no attribute `x`
+    "#,
+);
+
+testcase!(
+    test_attributes_when_raw_class_field_type_contains_var,
+    r#"
+from typing import assert_type, Any
+# This test is making sure we don't leak a `Var` into a ClassField, which can lead to nondeterminism.
+class A:
+    x = []
+    y = []
+assert_type(A().x, list[Any])
+A().x = [42]
+A().y = [42]
+assert_type(A().y, list[Any])
+    "#,
+);
+
+testcase!(
+    test_read_only_frozen_dataclass,
+    r#"
+import dataclasses
+
+@dataclasses.dataclass(frozen=True)
+class FrozenData:
+    x: int
+    y: str
+
+def f(d: FrozenData):
+    d.x = 42  # E: Cannot set field `x`
+    d.y = "new"  # E: Cannot set field `y`
+    "#,
+);
+
+testcase!(
+    test_read_only_namedtuple,
+    r#"
+from typing import NamedTuple
+
+class Point(NamedTuple):
+    x: int
+    y: int
+
+def f(p: Point):
+    p.x = 10  # E: Cannot set field `x`
+    p.y = 20  # E: Cannot set field `y`
+    "#,
+);
+
+testcase!(
+    test_read_only_annotation_typeddict,
+    r#"
+from typing_extensions import TypedDict, ReadOnly
+
+class Config(TypedDict):
+    name: ReadOnly[str]
+    value: int
+
+def f(c: Config):
+    c["value"] = 42  # OK
+    c["name"] = "new"  # E: Key `name` in TypedDict `Config` is read-only
+    "#,
+);
+
+testcase!(
+    bug = "other.output type is too general. Also, there should be no errors.",
+    test_attr_cast,
+    r#"
+from typing import Self, cast, Any, assert_type
+
+class C:
+    outputs: list[Any]
+    def f(self, other):
+        other = cast(Self, other)  
+        assert_type(other, Self)
+        assert_type(other.outputs, Any) # E: TODO: Expr::attr_infer_for_type
+        len(self.outputs) == len(other.outputs) # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: Self 
     "#,
 );

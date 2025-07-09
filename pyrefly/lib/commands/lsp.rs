@@ -80,6 +80,9 @@ use lsp_types::MarkupContent;
 use lsp_types::MarkupKind;
 use lsp_types::NumberOrString;
 use lsp_types::OneOf;
+use lsp_types::Position;
+use lsp_types::PositionEncodingKind;
+use lsp_types::PrepareRenameResponse;
 use lsp_types::PublishDiagnosticsParams;
 use lsp_types::Range;
 use lsp_types::ReferenceParams;
@@ -87,6 +90,8 @@ use lsp_types::Registration;
 use lsp_types::RegistrationParams;
 use lsp_types::RelatedFullDocumentDiagnosticReport;
 use lsp_types::RelativePattern;
+use lsp_types::RenameOptions;
+use lsp_types::RenameParams;
 use lsp_types::SemanticTokens;
 use lsp_types::SemanticTokensFullOptions;
 use lsp_types::SemanticTokensOptions;
@@ -99,12 +104,15 @@ use lsp_types::ServerCapabilities;
 use lsp_types::SignatureHelp;
 use lsp_types::SignatureHelpOptions;
 use lsp_types::SignatureHelpParams;
+use lsp_types::TextDocumentContentChangeEvent;
+use lsp_types::TextDocumentPositionParams;
 use lsp_types::TextDocumentSyncCapability;
 use lsp_types::TextDocumentSyncKind;
 use lsp_types::TextEdit;
 use lsp_types::Unregistration;
 use lsp_types::UnregistrationParams;
 use lsp_types::Url;
+use lsp_types::VersionedTextDocumentIdentifier;
 use lsp_types::WatchKind;
 use lsp_types::WorkspaceClientCapabilities;
 use lsp_types::WorkspaceEdit;
@@ -129,14 +137,19 @@ use lsp_types::request::DocumentSymbolRequest;
 use lsp_types::request::GotoDefinition;
 use lsp_types::request::HoverRequest;
 use lsp_types::request::InlayHintRequest;
+use lsp_types::request::PrepareRenameRequest;
 use lsp_types::request::References;
 use lsp_types::request::RegisterCapability;
+use lsp_types::request::Rename;
 use lsp_types::request::SemanticTokensFullRequest;
 use lsp_types::request::SemanticTokensRangeRequest;
 use lsp_types::request::SignatureHelpRequest;
 use lsp_types::request::UnregisterCapability;
 use lsp_types::request::WorkspaceConfiguration;
 use path_absolutize::Absolutize;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::arc_id::WeakArcId;
 use pyrefly_util::args::clap_env;
@@ -148,8 +161,11 @@ use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
 use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
-use ruff_text_size::TextRange;
-use ruff_text_size::TextSize;
+use ruff_source_file::LineIndex;
+use ruff_source_file::OneIndexed;
+use ruff_source_file::SourceLocation;
+use ruff_text_size::Ranged;
+use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
@@ -172,24 +188,23 @@ use crate::config::config::ConfigFile;
 use crate::config::config::ConfigSource;
 use crate::config::environment::environment::PythonEnvironment;
 use crate::config::finder::ConfigFinder;
+use crate::config::util::ConfigOrigin;
 use crate::error::error::Error;
 use crate::error::kind::Severity;
 use crate::module::module_info::ModuleInfo;
 use crate::module::module_info::TextRangeWithModuleInfo;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
-use crate::module::module_path::ModulePathDetails;
 use crate::state::handle::Handle;
+use crate::state::lsp::FindDefinitionItem;
 use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::CommittingTransaction;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 use crate::state::state::TransactionData;
-use crate::types::lsp::position_to_text_size;
-use crate::types::lsp::source_range_to_range;
-use crate::types::lsp::text_size_to_position;
 
+/// Pyrefly's indexing strategy for open projects when performing go-to-definition
+/// requests.
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq, Default)]
 pub(crate) enum IndexingMode {
     /// Do not index anything. Features that depend on indexing (e.g. find-refs) will be disabled.
@@ -204,8 +219,11 @@ pub(crate) enum IndexingMode {
     LazyBlocking,
 }
 
+/// Arguments for LSP server
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
 pub struct Args {
+    /// Find the struct that contains this field and add the indexing mode used by the language server
     #[arg(long, value_enum, default_value_t, env = clap_env("INDEXING_MODE"))]
     pub(crate) indexing_mode: IndexingMode,
 }
@@ -331,6 +349,7 @@ struct Server {
     outgoing_request_id: Arc<AtomicI32>,
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
+    version_info: Mutex<HashMap<PathBuf, i32>>,
 }
 
 /// Information about the Python environment p
@@ -348,7 +367,8 @@ struct PythonInfo {
 
 impl PythonInfo {
     fn new(interpreter: PathBuf) -> Self {
-        let env = PythonEnvironment::get_interpreter_env(&interpreter);
+        // TODO(connernilsen): propagate the error somehow
+        let env = PythonEnvironment::get_interpreter_env(&interpreter).0;
         Self { interpreter, env }
     }
 }
@@ -359,6 +379,7 @@ struct Workspace {
     #[expect(dead_code)]
     root: PathBuf,
     python_info: Option<PythonInfo>,
+    search_path: Option<Vec<PathBuf>>,
     disable_language_services: bool,
     disable_type_errors: bool,
 }
@@ -368,6 +389,7 @@ impl Workspace {
         Self {
             root: workspace_root.to_path_buf(),
             python_info,
+            search_path: None,
             disable_language_services: false,
             disable_type_errors: false,
         }
@@ -383,6 +405,7 @@ impl Default for Workspace {
         Self {
             root: PathBuf::from("/"),
             python_info: None,
+            search_path: None,
             disable_language_services: Default::default(),
             disable_type_errors: false,
         }
@@ -488,23 +511,23 @@ impl Workspaces {
         let workspaces = workspaces.dupe();
         standard_config_finder(Arc::new(move |dir, mut config| {
             if let Some(dir) = dir
-                && config.python_interpreter.is_none()
+                && config.interpreters.python_interpreter.is_none()
+                && config.interpreters.conda_environment.is_none()
             {
                 workspaces.get_with(dir.to_owned(), |w| {
-                    let Some(PythonInfo { interpreter, env }) = w.python_info.clone() else {
-                        return;
-                    };
-                    let site_package_path = config.python_environment.site_package_path.take();
-                    config.python_interpreter = Some(interpreter);
-                    config.python_environment = env;
-                    if let Some(new) = site_package_path {
-                        let mut workspace = config
-                            .python_environment
-                            .site_package_path
-                            .take()
-                            .unwrap_or_default();
-                        workspace.extend(new);
-                        config.python_environment.site_package_path = Some(workspace);
+                    if let Some(search_path) = w.search_path.clone() {
+                        config.search_path_from_args = search_path;
+                    }
+                    if let Some(PythonInfo {
+                        interpreter,
+                        mut env,
+                    }) = w.python_info.clone()
+                    {
+                        let site_package_path = config.python_environment.site_package_path.take();
+                        env.site_package_path = site_package_path;
+                        config.interpreters.python_interpreter =
+                            Some(ConfigOrigin::auto(interpreter));
+                        config.python_environment = env;
                     }
                 })
             };
@@ -611,7 +634,10 @@ fn initialize_connection(
         .unwrap_or(false);
     // Run the server and wait for the two threads to end (typically by trigger LSP Exit event).
     let server_capabilities = serde_json::to_value(&ServerCapabilities {
-        text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        position_encoding: Some(PositionEncodingKind::UTF16),
+        text_document_sync: Some(TextDocumentSyncCapability::Kind(
+            TextDocumentSyncKind::INCREMENTAL,
+        )),
         definition_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
             code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
@@ -627,6 +653,15 @@ fn initialize_connection(
             IndexingMode::None => None,
             IndexingMode::LazyNonBlockingBackground | IndexingMode::LazyBlocking => {
                 Some(OneOf::Left(true))
+            }
+        },
+        rename_provider: match args.indexing_mode {
+            IndexingMode::None => None,
+            IndexingMode::LazyNonBlockingBackground | IndexingMode::LazyBlocking => {
+                Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: Default::default(),
+                }))
             }
         },
         signature_help_provider: Some(SignatureHelpOptions {
@@ -876,8 +911,23 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
             result = format!("{}.{}", module_path, result);
         }
     }
-    
+
     result
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PyreflyClientConfig {
+    disable_type_errors: Option<bool>,
+    disable_language_services: Option<bool>,
+    extra_paths: Option<Vec<PathBuf>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LspConfig {
+    python_path: Option<String>,
+    pyrefly: Option<PyreflyClientConfig>,
 }
 
 impl Server {
@@ -978,6 +1028,16 @@ impl Server {
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<References>(&x) {
                     self.references(x.id, ide_transaction_manager, params);
+                } else if let Some(params) = as_request::<PrepareRenameRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(
+                        x.id,
+                        Ok(self.prepare_rename(&transaction, params)),
+                    ));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<Rename>(&x) {
+                    self.rename(x.id, ide_transaction_manager, params);
                 } else if let Some(params) = as_request::<SignatureHelpRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
@@ -1132,6 +1192,7 @@ impl Server {
             outgoing_request_id: Arc::new(AtomicI32::new(1)),
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: Arc::new(AtomicBool::new(false)),
+            version_info: Mutex::new(HashMap::new()),
         };
         s.configure(&folders, &[]);
 
@@ -1198,7 +1259,7 @@ impl Server {
                 return Some((
                     path.to_path_buf(),
                     Diagnostic {
-                        range: source_range_to_range(e.source_range()),
+                        range: e.lined_buffer().to_lsp_range(e.range()),
                         severity: Some(match e.error_kind().severity() {
                             Severity::Error => lsp_types::DiagnosticSeverity::ERROR,
                             Severity::Warn => lsp_types::DiagnosticSeverity::WARNING,
@@ -1389,6 +1450,9 @@ impl Server {
         } else {
             None
         };
+        self.version_info
+            .lock()
+            .insert(uri.clone(), params.text_document.version);
         self.open_files
             .write()
             .insert(uri, Arc::new(params.text_document.text));
@@ -1413,11 +1477,51 @@ impl Server {
         ide_transaction_manager: &mut IDETransactionManager<'a>,
         params: DidChangeTextDocumentParams,
     ) -> anyhow::Result<()> {
-        // We asked for Sync full, so can just grab all the text from params
-        let change = params.content_changes.into_iter().next().unwrap();
-        let uri = params.text_document.uri.to_file_path().unwrap();
-        self.open_files.write().insert(uri, Arc::new(change.text));
-        self.state.increment_snapshot(); // Increment snapshot on file change
+        /// Convert lsp_types::Position to usize index for a given text.
+        fn position_to_usize(
+            position: lsp_types::Position,
+            index: &LineIndex,
+            source_text: &str,
+        ) -> usize {
+            let source_location = SourceLocation {
+                line: OneIndexed::from_zero_indexed(position.line as usize),
+                character_offset: OneIndexed::from_zero_indexed(position.character as usize),
+            };
+            let text_size = index.offset(
+                source_location,
+                source_text,
+                ruff_source_file::PositionEncoding::Utf16,
+            );
+            text_size.to_usize()
+        }
+
+        let VersionedTextDocumentIdentifier { uri, version } = params.text_document;
+        let file_path = uri.to_file_path().unwrap();
+
+        let mut version_info = self.version_info.lock();
+        let old_version = version_info.get(&file_path).unwrap_or(&0);
+        if version < *old_version {
+            return Err(anyhow::anyhow!(
+                "Unexpected version in didChange notification: {version:?} is less than {old_version:?}"
+            ));
+        }
+        version_info.insert(file_path.clone(), version);
+        let mut new_text = String::from(self.open_files.read().get(&file_path).unwrap().as_ref());
+        for change in params.content_changes {
+            let TextDocumentContentChangeEvent { range, text, .. } = change;
+            // If no range is given, we can full text replace.
+            let Some(range) = range else {
+                new_text = text;
+                continue;
+            };
+            let index = LineIndex::from_source_text(&new_text);
+            let start = position_to_usize(range.start, &index, &new_text);
+            let end = position_to_usize(range.end, &index, &new_text);
+            new_text.replace_range(start..end, &text);
+        }
+        self.open_files
+            .write()
+            .insert(file_path.clone(), Arc::new(new_text));
         self.validate_in_memory(ide_transaction_manager)
     }
 
@@ -1524,7 +1628,7 @@ impl Server {
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
             if let Some((definition_metadata, definition, _docstring)) = 
-                transaction.find_definition(&handle, position) {
+                transaction.find_definition(&handle, position, true) {
                 
                 // Use provided name or extract from definition
                 let name = params.name.unwrap_or_else(|| {
@@ -1845,7 +1949,7 @@ impl Server {
         // If we found the symbol, try to get its definition info
         if let Some(pos) = found_position {
             let text_pos = TextSize::new(pos as u32);
-            if let Some((def_metadata, def_info, _docstring)) = transaction.find_definition(&target_handle, text_pos) {
+            if let Some((def_metadata, def_info, _docstring)) = transaction.find_definition(&target_handle, text_pos, true) {
                 // Create a resolved declaration with proper category and flags
                 let (category, flags) = match &def_metadata {
                     crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
@@ -2204,7 +2308,7 @@ impl Server {
 
         // Try to find definition at the position - this is the same logic as hover
         if let Some((_definition_metadata, _text_range_with_module_info, docstring)) =
-            transaction.find_definition(handle, position)
+            transaction.find_definition(handle, position, true)
         {
             if let Some(docstring) = docstring {
                 return Ok(Some(docstring.as_string().trim().to_string()));
@@ -2271,6 +2375,7 @@ impl Server {
 
     fn did_close(&self, params: DidCloseTextDocumentParams) -> anyhow::Result<()> {
         let uri = params.text_document.uri.to_file_path().unwrap();
+        self.version_info.lock().remove(&uri);
         self.open_files.write().remove(&uri);
         self.connection
             .publish_diagnostics_for_uri(params.text_document.uri, Vec::new(), None);
@@ -2333,6 +2438,7 @@ impl Server {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
+                eprintln!("Skipping request - language services disabled");
                 None
             } else {
                 let module_path = if self.open_files.read().contains_key(&path) {
@@ -2345,6 +2451,25 @@ impl Server {
         })
     }
 
+    fn to_lsp_location(&self, location: &TextRangeWithModuleInfo) -> Option<Location> {
+        let TextRangeWithModuleInfo {
+            module_info: definition_module_info,
+            range,
+        } = location;
+        let uri = match &self.initialize_params.initialization_options {
+            Some(serde_json::Value::Object(map))
+                if (map.get("supportContentsAsUri") == Some(&serde_json::Value::Bool(true))) =>
+            {
+                module_info_to_uri_with_document_content_provider(definition_module_info)?
+            }
+            Some(_) | None => module_info_to_uri(definition_module_info)?,
+        };
+        Some(Location {
+            uri,
+            range: definition_module_info.lined_buffer().to_lsp_range(*range),
+        })
+    }
+
     fn goto_definition(
         &self,
         transaction: &Transaction<'_>,
@@ -2353,23 +2478,21 @@ impl Server {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let info = transaction.get_module_info(&handle)?;
-        let range = position_to_text_size(&info, params.text_document_position_params.position);
-        let TextRangeWithModuleInfo {
-            module_info: definition_module_info,
-            range,
-        } = transaction.goto_definition(&handle, range)?;
-        let uri = match &self.initialize_params.initialization_options {
-            Some(serde_json::Value::Object(map))
-                if (map.get("supportContentsAsUri") == Some(&serde_json::Value::Bool(true))) =>
-            {
-                module_info_to_uri_with_document_content_provider(&definition_module_info)?
-            }
-            Some(_) | None => module_info_to_uri(&definition_module_info)?,
-        };
-        Some(GotoDefinitionResponse::Scalar(Location {
-            uri,
-            range: source_range_to_range(&definition_module_info.source_range(range)),
-        }))
+        let range = info
+            .lined_buffer()
+            .from_lsp_position(params.text_document_position_params.position);
+        let targets = transaction.goto_definition(&handle, range);
+        let mut lsp_targets = targets
+            .into_iter()
+            .filter_map(|t| self.to_lsp_location(&t))
+            .collect::<Vec<_>>();
+        if lsp_targets.is_empty() {
+            None
+        } else if lsp_targets.len() == 1 {
+            Some(GotoDefinitionResponse::Scalar(lsp_targets.pop().unwrap()))
+        } else {
+            Some(GotoDefinitionResponse::Array(lsp_targets))
+        }
     }
 
     fn completion(
@@ -2392,7 +2515,8 @@ impl Server {
             .map(|info| {
                 transaction.completion(
                     &handle,
-                    position_to_text_size(&info, params.text_document_position.position),
+                    info.lined_buffer()
+                        .from_lsp_position(params.text_document_position.position),
                 )
             })
             .unwrap_or_default();
@@ -2410,13 +2534,10 @@ impl Server {
         let uri = &params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let module_info = transaction.get_module_info(&handle)?;
-        let range = TextRange::new(
-            position_to_text_size(&module_info, params.range.start),
-            position_to_text_size(&module_info, params.range.end),
-        );
+        let range = module_info.lined_buffer().from_lsp_range(params.range);
         let code_actions = transaction
             .local_quickfix_code_actions(&handle, range)?
-            .into_map(|(title, range, insert_text)| {
+            .into_map(|(title, info, range, insert_text)| {
                 CodeActionOrCommand::CodeAction(CodeAction {
                     title,
                     kind: Some(CodeActionKind::QUICKFIX),
@@ -2424,7 +2545,7 @@ impl Server {
                         changes: Some(HashMap::from([(
                             uri.clone(),
                             vec![TextEdit {
-                                range: source_range_to_range(&range),
+                                range: info.lined_buffer().to_lsp_range(range),
                                 new_text: insert_text,
                             }],
                         )])),
@@ -2444,38 +2565,51 @@ impl Server {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let info = transaction.get_module_info(&handle)?;
-        let position = position_to_text_size(&info, params.text_document_position_params.position);
+        let position = info
+            .lined_buffer()
+            .from_lsp_position(params.text_document_position_params.position);
         Some(
             transaction
                 .find_local_references(&handle, position)
                 .into_map(|range| DocumentHighlight {
-                    range: source_range_to_range(&info.source_range(range)),
+                    range: info.lined_buffer().to_lsp_range(range),
                     kind: None,
                 }),
         )
     }
 
-    fn references<'a>(
+    /// Compute references of a symbol at a given position. This is a non-blocking function, the
+    /// it will send a response to the LSP client once the results are found and transformed by
+    /// `map_result`.
+    fn async_find_references_helper<'a, V: serde::Serialize>(
         &'a self,
         request_id: RequestId,
         ide_transaction_manager: &mut IDETransactionManager<'a>,
-        params: ReferenceParams,
+        uri: &Url,
+        position: Position,
+        map_result: impl FnOnce(Vec<(Url, Vec<Range>)>) -> V + Send + 'static,
     ) {
-        let uri = &params.text_document_position.text_document.uri;
         let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return self.send_response(new_response::<Option<Vec<Location>>>(request_id, Ok(None)));
+            return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
         };
         let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
         let Some(info) = transaction.get_module_info(&handle) else {
             ide_transaction_manager.save(transaction);
-            return self.send_response(new_response::<Option<Vec<Location>>>(request_id, Ok(None)));
+            return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
         };
-        let position = position_to_text_size(&info, params.text_document_position.position);
-        let Some((definition_kind, definition, _docstring)) =
-            transaction.find_definition(&handle, position)
+        let position = info.lined_buffer().from_lsp_position(position);
+        let Some(FindDefinitionItem {
+            metadata,
+            location,
+            docstring: _,
+        }) = transaction
+            .find_definition(&handle, position, false)
+            // TODO: handle more than 1 definition
+            .into_iter()
+            .next()
         else {
             ide_transaction_manager.save(transaction);
-            return self.send_response(new_response::<Option<Vec<Location>>>(request_id, Ok(None)));
+            return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
         };
         ide_transaction_manager.save(transaction);
         let state = self.state.dupe();
@@ -2491,25 +2625,23 @@ impl Server {
             Self::validate_in_memory_for_transaction(&state, &open_files, transaction.as_mut());
             match transaction.find_global_references_from_definition(
                 handle.sys_info(),
-                definition_kind,
-                definition,
+                metadata,
+                location,
             ) {
                 Ok(global_references) => {
                     let mut locations = Vec::new();
                     for (info, ranges) in global_references {
                         if let Some(uri) = module_info_to_uri(&info) {
-                            for range in ranges {
-                                locations.push(Location {
-                                    uri: uri.clone(),
-                                    range: source_range_to_range(&info.source_range(range)),
-                                });
-                            }
+                            locations.push((
+                                uri,
+                                ranges.into_map(|range| info.lined_buffer().to_lsp_range(range)),
+                            ));
                         };
                     }
                     connection.send(Message::Response(new_response(
                         request_id,
-                        Ok(Some(locations)),
-                    )))
+                        Ok(Some(map_result(locations))),
+                    )));
                 }
                 Err(Cancelled) => {
                     let message = format!("Find reference request {} is canceled", request_id);
@@ -2524,6 +2656,76 @@ impl Server {
         });
     }
 
+    fn references<'a>(
+        &'a self,
+        request_id: RequestId,
+        ide_transaction_manager: &mut IDETransactionManager<'a>,
+        params: ReferenceParams,
+    ) {
+        self.async_find_references_helper(
+            request_id,
+            ide_transaction_manager,
+            &params.text_document_position.text_document.uri,
+            params.text_document_position.position,
+            move |results| {
+                let mut locations = Vec::new();
+                for (uri, ranges) in results {
+                    for range in ranges {
+                        locations.push(Location {
+                            uri: uri.clone(),
+                            range,
+                        })
+                    }
+                }
+                locations
+            },
+        );
+    }
+
+    fn rename<'a>(
+        &'a self,
+        request_id: RequestId,
+        ide_transaction_manager: &mut IDETransactionManager<'a>,
+        params: RenameParams,
+    ) {
+        self.async_find_references_helper(
+            request_id,
+            ide_transaction_manager,
+            &params.text_document_position.text_document.uri,
+            params.text_document_position.position,
+            move |results| {
+                let mut changes = HashMap::new();
+                for (uri, ranges) in results {
+                    changes.insert(
+                        uri,
+                        ranges.into_map(|range| TextEdit {
+                            range,
+                            new_text: params.new_name.clone(),
+                        }),
+                    );
+                }
+                WorkspaceEdit {
+                    changes: Some(changes),
+                    ..Default::default()
+                }
+            },
+        );
+    }
+
+    fn prepare_rename(
+        &self,
+        transaction: &Transaction<'_>,
+        params: TextDocumentPositionParams,
+    ) -> Option<PrepareRenameResponse> {
+        let uri = &params.text_document.uri;
+        let handle = self.make_handle_if_enabled(uri)?;
+        let info = transaction.get_module_info(&handle)?;
+        let position = info.lined_buffer().from_lsp_position(params.position);
+        transaction
+            .prepare_rename(&handle, position)
+            .map(|range| PrepareRenameResponse::Range(info.lined_buffer().to_lsp_range(range)))
+    }
+
     fn signature_help(
         &self,
         transaction: &Transaction<'_>,
@@ -2532,7 +2734,9 @@ impl Server {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let info = transaction.get_module_info(&handle)?;
-        let position = position_to_text_size(&info, params.text_document_position_params.position);
+        let position = info
+            .lined_buffer()
+            .from_lsp_position(params.text_document_position_params.position);
         transaction.get_signature_help_at(&handle, position)
     }
 
@@ -2540,20 +2744,27 @@ impl Server {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let info = transaction.get_module_info(&handle)?;
-        let range = position_to_text_size(&info, params.text_document_position_params.position);
+        let range = info
+            .lined_buffer()
+            .from_lsp_position(params.text_document_position_params.position);
         let t = transaction.get_type_at(&handle, range)?;
         let mut kind_formatted: String = "".to_owned();
         let mut docstring_formatted: String = "".to_owned();
-        if let Some((definition_metadata, text_range_with_module_info, docstring)) =
-            transaction.find_definition(&handle, range)
+        if let Some(FindDefinitionItem {
+            metadata,
+            location,
+            docstring,
+        }) = transaction
+            .find_definition(&handle, range, true)
+            // TODO: handle more than 1 definition
+            .into_iter()
+            .next()
         {
-            if let Some(symbol_kind) = definition_metadata.symbol_kind() {
+            if let Some(symbol_kind) = metadata.symbol_kind() {
                 kind_formatted = format!(
                     "{} {}: ",
                     &symbol_kind.display_for_hover(),
-                    text_range_with_module_info
-                        .module_info
-                        .code_at(text_range_with_module_info.range)
+                    location.module_info.code_at(location.range)
                 );
             }
             if let Some(docstring) = docstring {
@@ -2582,7 +2793,7 @@ impl Server {
         let info = transaction.get_module_info(&handle)?;
         let t = transaction.inlay_hints(&handle)?;
         Some(t.into_map(|x| {
-            let position = text_size_to_position(&info, x.0);
+            let position = info.lined_buffer().to_lsp_position(x.0);
             InlayHint {
                 position,
                 label: InlayHintLabel::String(x.1.clone()),
@@ -2622,10 +2833,7 @@ impl Server {
         let uri = &params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri)?;
         let module_info = transaction.get_module_info(&handle)?;
-        let range = TextRange::new(
-            position_to_text_size(&module_info, params.range.start),
-            position_to_text_size(&module_info, params.range.end),
-        );
+        let range = module_info.lined_buffer().from_lsp_range(params.range);
         Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data: transaction
@@ -2812,43 +3020,45 @@ impl Server {
         {
             let mut modified = false;
             for (i, id) in request.items.iter().enumerate() {
-                match response.get(i) {
-                    Some(serde_json::Value::Object(map)) => {
-                        if let Some(serde_json::Value::String(python_path)) = map.get("pythonPath")
-                        {
-                            self.update_pythonpath(&mut modified, &id.scope_uri, python_path);
-                        }
-                        if let Some(serde_json::Value::Object(pyrefly_settings)) =
-                            map.get("pyrefly")
-                        {
-                            if let Some(serde_json::Value::Bool(disable_language_services)) =
-                                pyrefly_settings.get("disableLanguageServices")
-                            {
-                                self.update_disable_language_services(
-                                    &id.scope_uri,
-                                    *disable_language_services,
-                                );
-                            }
-                            if let Some(serde_json::Value::Bool(disable_language_services)) =
-                                pyrefly_settings.get("disableTypeErrors")
-                            {
-                                self.update_disable_type_errors(
-                                    &id.scope_uri,
-                                    *disable_language_services,
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        // Non-map value or no configuration returned for request
-                    }
-                }
+                let config: LspConfig = if let Some(value) = response.get(i) {
+                    serde_json::from_value(value.clone()).unwrap_or_default()
+                } else {
+                    continue;
+                };
+                self.apply_client_configuration(&mut modified, &id.scope_uri, config);
             }
             if modified {
                 return self.validate_in_memory(ide_transaction_manager);
             }
         }
         Ok(())
+    }
+
+    /// Applies the LSP client configuration to the `scope_uri` (workspace) given.
+    ///
+    /// The `modified` flag is changed to `true` when the configuration gets applied to the
+    /// `scope_uri` matching a valid workspace
+    fn apply_client_configuration(
+        &self,
+        modified: &mut bool,
+        scope_uri: &Option<Url>,
+        config: LspConfig,
+    ) {
+        if let Some(python_path) = config.python_path {
+            self.update_pythonpath(modified, scope_uri, &python_path);
+        }
+
+        if let Some(pyrefly) = config.pyrefly {
+            if let Some(extra_paths) = pyrefly.extra_paths {
+                self.update_search_paths(modified, scope_uri, extra_paths);
+            }
+            if let Some(disable_language_services) = pyrefly.disable_language_services {
+                self.update_disable_language_services(scope_uri, disable_language_services);
+            }
+            if let Some(disable_type_errors) = pyrefly.disable_type_errors {
+                self.update_disable_type_errors(scope_uri, disable_type_errors);
+            }
+        }
     }
 
     /// Update disableLanguageServices setting for scope_uri, None if default workspace
@@ -2910,6 +3120,30 @@ impl Server {
         }
         if *modified {
             self.state.increment_snapshot(); // Increment snapshot on python path change
+        }
+        self.invalidate_config();
+    }
+
+    // Updates search paths for scope uri.
+    fn update_search_paths(
+        &self,
+        modified: &mut bool,
+        scope_uri: &Option<Url>,
+        search_paths: Vec<PathBuf>,
+    ) {
+        let mut workspaces = self.workspaces.workspaces.write();
+        match scope_uri {
+            Some(scope_uri) => {
+                let workspace_path = scope_uri.to_file_path().unwrap();
+                if let Some(workspace) = workspaces.get_mut(&workspace_path) {
+                    *modified = true;
+                    workspace.search_path = Some(search_paths);
+                }
+            }
+            None => {
+                *modified = true;
+                self.workspaces.default.write().search_path = Some(search_paths);
+            }
         }
         self.invalidate_config();
     }
@@ -3026,3 +3260,4 @@ where
         },
     }
 }
+

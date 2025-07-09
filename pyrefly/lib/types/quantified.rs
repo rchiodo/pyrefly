@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Display;
 
@@ -17,7 +18,6 @@ use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::name::Name;
 
 use crate::alt::solve::TypeFormContext;
-use crate::error::kind::ErrorKind;
 use crate::types::class::ClassType;
 use crate::types::stdlib::Stdlib;
 use crate::types::type_var::Restriction;
@@ -96,12 +96,27 @@ impl QuantifiedInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub struct Quantified {
     /// Unique identifier
     unique: Unique,
     info: Box<QuantifiedInfo>,
+}
+
+impl Ord for Quantified {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // This is a bit dubious, as now the Ord and Eq instances don't quite align.
+        // But we happen to know that we only use the Ord for sorting union,
+        // and we'd really like to have a deterministic sort order between runs.
+        self.info.cmp(&other.info)
+    }
+}
+
+impl PartialOrd for Quantified {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
@@ -118,14 +133,6 @@ impl QuantifiedKind {
             QuantifiedKind::TypeVar => Type::any_implicit(),
             QuantifiedKind::ParamSpec => Type::Ellipsis,
             QuantifiedKind::TypeVarTuple => Type::any_tuple(),
-        }
-    }
-
-    pub fn error_kind(self) -> ErrorKind {
-        match self {
-            QuantifiedKind::TypeVar => ErrorKind::InvalidTypeVar,
-            QuantifiedKind::ParamSpec => ErrorKind::InvalidParamSpec,
-            QuantifiedKind::TypeVarTuple => ErrorKind::InvalidTypeVarTuple,
         }
     }
 

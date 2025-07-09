@@ -550,10 +550,10 @@
     {
       "code": -2,
       "column": 26,
-      "concise_description": "`|` is not supported between `Literal['GenericTypeAlias1[T1]']` and `type[TypeVar[T1]]`",
-      "description": "`|` is not supported between `Literal['GenericTypeAlias1[T1]']` and `type[TypeVar[T1]]`\n  TODO: Expr::binop_infer attribute base undefined for type: type[TypeVar[T1]] (trying to access __ror__)",
+      "concise_description": "Expected a type form, got instance of `_SpecialForm`",
+      "description": "Expected a type form, got instance of `_SpecialForm`",
       "line": 58,
-      "name": "internal-error",
+      "name": "not-a-type",
       "stop_column": 54,
       "stop_line": 58
     },
@@ -590,11 +590,11 @@
     {
       "code": -2,
       "column": 26,
-      "concise_description": "`|` is not supported between `Literal['GenericTypeAlias2[T1, T2]']` and `type[TypeVar[T1]]`",
-      "description": "`|` is not supported between `Literal['GenericTypeAlias2[T1, T2]']` and `type[TypeVar[T1]]`\n  TODO: Expr::binop_infer attribute base undefined for type: type[TypeVar[T1]] (trying to access __ror__)",
+      "concise_description": "Expected a type form, got instance of `_SpecialForm`",
+      "description": "Expected a type form, got instance of `_SpecialForm`",
       "line": 65,
-      "name": "internal-error",
-      "stop_column": 58,
+      "name": "not-a-type",
+      "stop_column": 63,
       "stop_line": 65
     },
     {
@@ -662,8 +662,8 @@
     {
       "code": -2,
       "column": 22,
-      "concise_description": "Expected class object, got `TypeAlias[GoodAlias1, type[int]]`",
-      "description": "Expected class object, got `TypeAlias[GoodAlias1, type[int]]`",
+      "concise_description": "Expected class object, got `TypeAliasType`",
+      "description": "Expected class object, got `TypeAliasType`",
       "line": 31,
       "name": "invalid-argument",
       "stop_column": 32,
@@ -1510,7 +1510,7 @@
       "description": "Unexpected keyword argument `a`",
       "line": 29,
       "name": "unexpected-keyword",
-      "stop_column": 11,
+      "stop_column": 9,
       "stop_line": 29
     },
     {
@@ -1530,7 +1530,7 @@
       "description": "Unexpected keyword argument `b`",
       "line": 29,
       "name": "unexpected-keyword",
-      "stop_column": 17,
+      "stop_column": 14,
       "stop_line": 29
     },
     {
@@ -1702,7 +1702,7 @@
       "description": "Unexpected keyword argument `v4` in function `func1`",
       "line": 51,
       "name": "unexpected-keyword",
-      "stop_column": 36,
+      "stop_column": 34,
       "stop_line": 51
     },
     {
@@ -2484,8 +2484,8 @@
     {
       "code": -2,
       "column": 9,
-      "concise_description": "Cannot assign to read-only attribute `xx`",
-      "description": "Cannot assign to read-only attribute `xx`",
+      "concise_description": "Cannot set field `xx`",
+      "description": "Cannot set field `xx`\n  A ClassVar may not be mutated from an instance of the class",
       "line": 65,
       "name": "read-only",
       "stop_column": 16,
@@ -2554,8 +2554,8 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "Cannot assign to read-only attribute `stats`",
-      "description": "Cannot assign to read-only attribute `stats`",
+      "concise_description": "Cannot set field `stats`",
+      "description": "Cannot set field `stats`\n  A ClassVar may not be mutated from an instance of the class",
       "line": 105,
       "name": "read-only",
       "stop_column": 19,
@@ -2850,7 +2850,7 @@
       "description": "Unexpected keyword argument `y`",
       "line": 39,
       "name": "unexpected-keyword",
-      "stop_column": 7,
+      "stop_column": 5,
       "stop_line": 39
     },
     {
@@ -2940,7 +2940,7 @@
       "description": "Unexpected keyword argument `y`",
       "line": 80,
       "name": "unexpected-keyword",
-      "stop_column": 7,
+      "stop_column": 5,
       "stop_line": 80
     },
     {
@@ -3101,8 +3101,8 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "Cannot assign to read-only attribute `final_with_default`",
-      "description": "Cannot assign to read-only attribute `final_with_default`",
+      "concise_description": "Cannot set field `final_with_default`",
+      "description": "Cannot set field `final_with_default`\n  This field is marked as Final",
       "line": 36,
       "name": "read-only",
       "stop_column": 21,
@@ -3123,8 +3123,8 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "Cannot assign to read-only attribute `a`",
-      "description": "Cannot assign to read-only attribute `a`",
+      "concise_description": "Cannot set field `a`",
+      "description": "Cannot set field `a`\n  This field is a frozen dataclass member",
       "line": 16,
       "name": "read-only",
       "stop_column": 6,
@@ -3133,8 +3133,8 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "Cannot assign to read-only attribute `b`",
-      "description": "Cannot assign to read-only attribute `b`",
+      "concise_description": "Cannot set field `b`",
+      "description": "Cannot set field `b`\n  This field is a frozen dataclass member",
       "line": 17,
       "name": "read-only",
       "stop_column": 6,
@@ -3143,8 +3143,8 @@
     {
       "code": -2,
       "column": 7,
-      "concise_description": "Cannot inherit non-frozen dataclass `dataclasses_frozen.DC2` from frozen dataclass `dataclasses_frozen.DC1`",
-      "description": "Cannot inherit non-frozen dataclass `dataclasses_frozen.DC2` from frozen dataclass `dataclasses_frozen.DC1`",
+      "concise_description": "Cannot inherit non-frozen dataclass `DC2` from frozen dataclass `DC1`",
+      "description": "Cannot inherit non-frozen dataclass `DC2` from frozen dataclass `DC1`",
       "line": 23,
       "name": "invalid-inheritance",
       "stop_column": 10,
@@ -3153,8 +3153,8 @@
     {
       "code": -2,
       "column": 7,
-      "concise_description": "Cannot inherit frozen dataclass `dataclasses_frozen.DC4` from non-frozen dataclass `dataclasses_frozen.DC3`",
-      "description": "Cannot inherit frozen dataclass `dataclasses_frozen.DC4` from non-frozen dataclass `dataclasses_frozen.DC3`",
+      "concise_description": "Cannot inherit frozen dataclass `DC4` from non-frozen dataclass `DC3`",
+      "description": "Cannot inherit frozen dataclass `DC4` from non-frozen dataclass `DC3`",
       "line": 33,
       "name": "invalid-inheritance",
       "stop_column": 10,
@@ -3218,123 +3218,33 @@
     },
     {
       "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC2.__init__`",
-      "description": "Missing argument `a` in function `DC2.__init__`",
-      "line": 32,
-      "name": "missing-argument",
-      "stop_column": 10,
-      "stop_line": 32
-    },
-    {
-      "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `DC2.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `DC2.__init__`",
-      "line": 32,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 32
-    },
-    {
-      "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC2.__init__`",
-      "description": "Missing argument `a` in function `DC2.__init__`",
-      "line": 35,
-      "name": "missing-argument",
-      "stop_column": 15,
-      "stop_line": 35
-    },
-    {
-      "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `DC2.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `DC2.__init__`",
-      "line": 35,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 35
-    },
-    {
-      "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC2.__init__`",
-      "description": "Missing argument `a` in function `DC2.__init__`",
+      "column": 11,
+      "concise_description": "Expected 1 positional argument, got 2 in function `DC2.__init__`",
+      "description": "Expected 1 positional argument, got 2 in function `DC2.__init__`",
       "line": 38,
-      "name": "missing-argument",
-      "stop_column": 13,
+      "name": "bad-argument-type",
+      "stop_column": 12,
       "stop_line": 38
     },
     {
       "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `DC2.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `DC2.__init__`",
-      "line": 38,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 38
-    },
-    {
-      "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC3.__init__`",
-      "description": "Missing argument `a` in function `DC3.__init__`",
-      "line": 47,
-      "name": "missing-argument",
-      "stop_column": 10,
-      "stop_line": 47
-    },
-    {
-      "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `DC3.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `DC3.__init__`",
-      "line": 47,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 47
-    },
-    {
-      "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC3.__init__`",
-      "description": "Missing argument `a` in function `DC3.__init__`",
-      "line": 50,
-      "name": "missing-argument",
-      "stop_column": 15,
-      "stop_line": 50
-    },
-    {
-      "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `DC3.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `DC3.__init__`",
-      "line": 50,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 50
-    },
-    {
-      "code": -2,
-      "column": 4,
-      "concise_description": "Missing argument `a` in function `DC3.__init__`",
-      "description": "Missing argument `a` in function `DC3.__init__`",
+      "column": 11,
+      "concise_description": "Expected 1 positional argument, got 2 in function `DC3.__init__`",
+      "description": "Expected 1 positional argument, got 2 in function `DC3.__init__`",
       "line": 53,
-      "name": "missing-argument",
-      "stop_column": 13,
+      "name": "bad-argument-type",
+      "stop_column": 12,
       "stop_line": 53
     },
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `DC3.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `DC3.__init__`",
-      "line": 53,
-      "name": "bad-argument-type",
-      "stop_column": 9,
-      "stop_line": 53
+      "concise_description": "Dataclass field `c` without a default may not follow dataclass field with a default",
+      "description": "Dataclass field `c` without a default may not follow dataclass field with a default",
+      "line": 58,
+      "name": "bad-class-definition",
+      "stop_column": 6,
+      "stop_line": 58
     },
     {
       "code": -2,
@@ -3404,23 +3314,13 @@
   "dataclasses_slots.py": [
     {
       "code": -2,
-      "column": 1,
-      "concise_description": "Class `DC5` has no class attribute `__slots__`",
-      "description": "Class `DC5` has no class attribute `__slots__`",
-      "line": 56,
-      "name": "missing-attribute",
-      "stop_column": 14,
-      "stop_line": 56
-    },
-    {
-      "code": -2,
-      "column": 1,
-      "concise_description": "Object of class `DC5` has no attribute `__slots__`",
-      "description": "Object of class `DC5` has no attribute `__slots__`",
-      "line": 57,
-      "name": "missing-attribute",
-      "stop_column": 17,
-      "stop_line": 57
+      "column": 7,
+      "concise_description": "Cannot specify both `slots=True` and `__slots__`",
+      "description": "Cannot specify both `slots=True` and `__slots__`",
+      "line": 11,
+      "name": "bad-class-definition",
+      "stop_column": 10,
+      "stop_line": 11
     },
     {
       "code": -2,
@@ -3446,93 +3346,53 @@
   "dataclasses_transform_class.py": [
     {
       "code": -2,
+      "column": 7,
+      "concise_description": "Cannot inherit non-frozen dataclass `Customer1Subclass` from frozen dataclass `Customer1`",
+      "description": "Cannot inherit non-frozen dataclass `Customer1Subclass` from frozen dataclass `Customer1`",
+      "line": 51,
+      "name": "invalid-inheritance",
+      "stop_column": 24,
+      "stop_line": 51
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Cannot set field `id`",
+      "description": "Cannot set field `id`\n  This field is a frozen dataclass member",
+      "line": 63,
+      "name": "read-only",
+      "stop_column": 8,
+      "stop_line": 63
+    },
+    {
+      "code": -2,
       "column": 17,
-      "concise_description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "line": 60,
+      "concise_description": "Missing argument `id` in function `Customer1.__init__`",
+      "description": "Missing argument `id` in function `Customer1.__init__`",
+      "line": 66,
       "name": "missing-argument",
-      "stop_column": 55,
-      "stop_line": 60
+      "stop_column": 27,
+      "stop_line": 66
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Missing argument `name` in function `Customer1.__init__`",
+      "description": "Missing argument `name` in function `Customer1.__init__`",
+      "line": 66,
+      "name": "missing-argument",
+      "stop_column": 27,
+      "stop_line": 66
     },
     {
       "code": -2,
       "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 60
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 34,
-      "stop_line": 60
-    },
-    {
-      "code": -2,
-      "column": 36,
-      "concise_description": "Unexpected keyword argument `other_name` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `other_name` in function `ModelBase.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 54,
-      "stop_line": 60
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Argument `Literal[3]` is not assignable to parameter `not_a_field` with type `str` in function `ModelBase.__init__`",
-      "description": "Argument `Literal[3]` is not assignable to parameter `not_a_field` with type `str` in function `ModelBase.__init__`",
+      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
+      "description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
       "line": 66,
       "name": "bad-argument-type",
       "stop_column": 19,
       "stop_line": 66
-    },
-    {
-      "code": -2,
-      "column": 21,
-      "concise_description": "Expected 1 positional argument, got 2 in function `ModelBase.__init__`",
-      "description": "Expected 1 positional argument, got 2 in function `ModelBase.__init__`",
-      "line": 66,
-      "name": "bad-argument-type",
-      "stop_column": 26,
-      "stop_line": 66
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "line": 68,
-      "name": "missing-argument",
-      "stop_column": 36,
-      "stop_line": 68
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "line": 68,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 68
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "line": 68,
-      "name": "unexpected-keyword",
-      "stop_column": 35,
-      "stop_line": 68
     },
     {
       "code": -2,
@@ -3547,68 +3407,18 @@
     {
       "code": -2,
       "column": 17,
-      "concise_description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "line": 74,
+      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
+      "description": "Missing argument `id` in function `Customer2.__init__`",
+      "line": 82,
       "name": "missing-argument",
-      "stop_column": 36,
-      "stop_line": 74
+      "stop_column": 28,
+      "stop_line": 82
     },
     {
       "code": -2,
       "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "line": 74,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 74
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `name` in function `ModelBase.__init__`",
-      "line": 74,
-      "name": "unexpected-keyword",
-      "stop_column": 35,
-      "stop_line": 74
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "description": "Missing argument `not_a_field` in function `ModelBase.__init__`",
-      "line": 76,
-      "name": "missing-argument",
-      "stop_column": 23,
-      "stop_line": 76
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "description": "Unexpected keyword argument `id` in function `ModelBase.__init__`",
-      "line": 76,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 76
-    },
-    {
-      "code": -2,
-      "column": 6,
-      "concise_description": "`<` is not supported between `Customer2` and `Customer2`",
-      "description": "`<` is not supported between `Customer2` and `Customer2`\n  Cannot find `__lt__` or `__gt__`",
-      "line": 78,
-      "name": "missing-attribute",
-      "stop_column": 17,
-      "stop_line": 78
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Argument `Literal[0]` is not assignable to parameter `not_a_field` with type `str` in function `ModelBase.__init__`",
-      "description": "Argument `Literal[0]` is not assignable to parameter `not_a_field` with type `str` in function `ModelBase.__init__`",
+      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
+      "description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
       "line": 82,
       "name": "bad-argument-type",
       "stop_column": 19,
@@ -3616,43 +3426,13 @@
     },
     {
       "code": -2,
-      "column": 21,
-      "concise_description": "Expected 1 positional argument, got 2 in function `ModelBase.__init__`",
-      "description": "Expected 1 positional argument, got 2 in function `ModelBase.__init__`",
-      "line": 82,
-      "name": "bad-argument-type",
-      "stop_column": 27,
-      "stop_line": 82
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 106,
-      "name": "unexpected-keyword",
-      "stop_column": 28,
-      "stop_line": 106
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 119,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 119
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 119,
-      "name": "unexpected-keyword",
-      "stop_column": 33,
-      "stop_line": 119
+      "column": 1,
+      "concise_description": "Cannot set field `id`",
+      "description": "Cannot set field `id`\n  This field is a frozen dataclass member",
+      "line": 122,
+      "name": "read-only",
+      "stop_column": 8,
+      "stop_line": 122
     }
   ],
   "dataclasses_transform_converter.py": [
@@ -3688,19 +3468,49 @@
     },
     {
       "code": -2,
-      "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
+      "column": 8,
+      "concise_description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
       "line": 107,
       "name": "bad-argument-type",
-      "stop_column": 6,
+      "stop_column": 12,
+      "stop_line": 107
+    },
+    {
+      "code": -2,
+      "column": 14,
+      "concise_description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "line": 107,
+      "name": "bad-argument-type",
+      "stop_column": 18,
+      "stop_line": 107
+    },
+    {
+      "code": -2,
+      "column": 20,
+      "concise_description": "Argument `Literal[b'f3']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "description": "Argument `Literal[b'f3']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "line": 107,
+      "name": "bad-argument-type",
+      "stop_column": 25,
+      "stop_line": 107
+    },
+    {
+      "code": -2,
+      "column": 27,
+      "concise_description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "line": 107,
+      "name": "bad-argument-type",
+      "stop_column": 29,
       "stop_line": 107
     },
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
+      "concise_description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
       "line": 108,
       "name": "bad-argument-type",
       "stop_column": 9,
@@ -3708,9 +3518,49 @@
     },
     {
       "code": -2,
+      "column": 11,
+      "concise_description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "line": 108,
+      "name": "bad-argument-type",
+      "stop_column": 15,
+      "stop_line": 108
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "line": 108,
+      "name": "bad-argument-type",
+      "stop_column": 21,
+      "stop_line": 108
+    },
+    {
+      "code": -2,
+      "column": 23,
+      "concise_description": "Argument `Literal[1]` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "description": "Argument `Literal[1]` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "line": 108,
+      "name": "bad-argument-type",
+      "stop_column": 24,
+      "stop_line": 108
+    },
+    {
+      "code": -2,
+      "column": 26,
+      "concise_description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "line": 108,
+      "name": "bad-argument-type",
+      "stop_column": 28,
+      "stop_line": 108
+    },
+    {
+      "code": -2,
       "column": 5,
-      "concise_description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
+      "concise_description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
       "line": 109,
       "name": "bad-argument-type",
       "stop_column": 9,
@@ -3719,11 +3569,91 @@
     {
       "code": -2,
       "column": 11,
-      "concise_description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 5 in function `object.__init__`",
+      "concise_description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "line": 109,
+      "name": "bad-argument-type",
+      "stop_column": 15,
+      "stop_line": 109
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "line": 109,
+      "name": "bad-argument-type",
+      "stop_column": 21,
+      "stop_line": 109
+    },
+    {
+      "code": -2,
+      "column": 23,
+      "concise_description": "Argument `Literal['f3']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "description": "Argument `Literal['f3']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "line": 109,
+      "name": "bad-argument-type",
+      "stop_column": 27,
+      "stop_line": 109
+    },
+    {
+      "code": -2,
+      "column": 29,
+      "concise_description": "Argument `complex` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "description": "Argument `complex` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "line": 109,
+      "name": "bad-argument-type",
+      "stop_column": 31,
+      "stop_line": 109
+    },
+    {
+      "code": -2,
+      "column": 11,
+      "concise_description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
       "line": 112,
       "name": "bad-argument-type",
       "stop_column": 15,
+      "stop_line": 112
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "line": 112,
+      "name": "bad-argument-type",
+      "stop_column": 21,
+      "stop_line": 112
+    },
+    {
+      "code": -2,
+      "column": 23,
+      "concise_description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "line": 112,
+      "name": "bad-argument-type",
+      "stop_column": 27,
+      "stop_line": 112
+    },
+    {
+      "code": -2,
+      "column": 29,
+      "concise_description": "Argument `Literal[b'f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "description": "Argument `Literal[b'f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "line": 112,
+      "name": "bad-argument-type",
+      "stop_column": 34,
+      "stop_line": 112
+    },
+    {
+      "code": -2,
+      "column": 36,
+      "concise_description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "description": "Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "line": 112,
+      "name": "bad-argument-type",
+      "stop_column": 38,
       "stop_line": 112
     },
     {
@@ -3769,11 +3699,61 @@
     {
       "code": -2,
       "column": 11,
-      "concise_description": "Expected 0 positional arguments, got 6 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 6 in function `object.__init__`",
+      "concise_description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`",
       "line": 121,
       "name": "bad-argument-type",
       "stop_column": 15,
+      "stop_line": 121
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`",
+      "line": 121,
+      "name": "bad-argument-type",
+      "stop_column": 21,
+      "stop_line": 121
+    },
+    {
+      "code": -2,
+      "column": 23,
+      "concise_description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`",
+      "line": 121,
+      "name": "bad-argument-type",
+      "stop_column": 27,
+      "stop_line": 121
+    },
+    {
+      "code": -2,
+      "column": 29,
+      "concise_description": "Argument `Literal['f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "description": "Argument `Literal['f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`",
+      "line": 121,
+      "name": "bad-argument-type",
+      "stop_column": 33,
+      "stop_line": 121
+    },
+    {
+      "code": -2,
+      "column": 35,
+      "concise_description": "Argument `Literal['1']` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "description": "Argument `Literal['1']` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`",
+      "line": 121,
+      "name": "bad-argument-type",
+      "stop_column": 38,
+      "stop_line": 121
+    },
+    {
+      "code": -2,
+      "column": 40,
+      "concise_description": "Argument `tuple[tuple[Literal['a'], Literal['1']], tuple[Literal['b'], Literal['2']]]` is not assignable to parameter `field5` with type `dict[str, str]` in function `DC2.__init__`",
+      "description": "Argument `tuple[tuple[Literal['a'], Literal['1']], tuple[Literal['b'], Literal['2']]]` is not assignable to parameter `field5` with type `dict[str, str]` in function `DC2.__init__`",
+      "line": 121,
+      "name": "bad-argument-type",
+      "stop_column": 64,
       "stop_line": 121
     },
     {
@@ -3800,39 +3780,49 @@
   "dataclasses_transform_field.py": [
     {
       "code": -2,
-      "column": 16,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
+      "column": 15,
+      "concise_description": "Missing argument `id` in function `CustomerModel1.__init__`",
+      "description": "Missing argument `id` in function `CustomerModel1.__init__`",
+      "line": 59,
+      "name": "missing-argument",
+      "stop_column": 17,
+      "stop_line": 59
+    },
+    {
+      "code": -2,
+      "column": 15,
+      "concise_description": "Missing argument `id` in function `CustomerModel1.__init__`",
+      "description": "Missing argument `id` in function `CustomerModel1.__init__`",
       "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 25,
+      "name": "missing-argument",
+      "stop_column": 26,
       "stop_line": 60
     },
     {
       "code": -2,
-      "column": 16,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 64,
-      "name": "unexpected-keyword",
-      "stop_column": 20,
-      "stop_line": 64
+      "column": 15,
+      "concise_description": "Missing argument `id` in function `CustomerModel2.__init__`",
+      "description": "Missing argument `id` in function `CustomerModel2.__init__`",
+      "line": 75,
+      "name": "missing-argument",
+      "stop_column": 18,
+      "stop_line": 75
     },
     {
       "code": -2,
-      "column": 22,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 64,
-      "name": "unexpected-keyword",
-      "stop_column": 31,
-      "stop_line": 64
+      "column": 15,
+      "concise_description": "Missing argument `name` in function `CustomerModel2.__init__`",
+      "description": "Missing argument `name` in function `CustomerModel2.__init__`",
+      "line": 75,
+      "name": "missing-argument",
+      "stop_column": 18,
+      "stop_line": 75
     },
     {
       "code": -2,
       "column": 16,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `object.__init__`",
+      "concise_description": "Expected 0 positional arguments, got 1 in function `CustomerModel2.__init__`",
+      "description": "Expected 0 positional arguments, got 1 in function `CustomerModel2.__init__`",
       "line": 75,
       "name": "bad-argument-type",
       "stop_column": 17,
@@ -3840,46 +3830,16 @@
     },
     {
       "code": -2,
-      "column": 16,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
+      "column": 15,
+      "concise_description": "Missing argument `id` in function `CustomerModel2.__init__`",
+      "description": "Missing argument `id` in function `CustomerModel2.__init__`",
       "line": 77,
-      "name": "unexpected-keyword",
-      "stop_column": 27,
+      "name": "missing-argument",
+      "stop_column": 28,
       "stop_line": 77
     }
   ],
   "dataclasses_transform_func.py": [
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 50,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 50
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 50,
-      "name": "unexpected-keyword",
-      "stop_column": 34,
-      "stop_line": 50
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
-      "line": 53,
-      "name": "bad-argument-type",
-      "stop_column": 19,
-      "stop_line": 53
-    },
     {
       "code": -2,
       "column": 13,
@@ -3902,59 +3862,39 @@
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 65,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 65
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 65,
-      "name": "unexpected-keyword",
-      "stop_column": 34,
-      "stop_line": 65
-    },
-    {
-      "code": -2,
       "column": 36,
-      "concise_description": "Unexpected keyword argument `salary` in function `object.__init__`",
-      "description": "Unexpected keyword argument `salary` in function `object.__init__`",
+      "concise_description": "Unexpected keyword argument `salary` in function `Customer1.__init__`",
+      "description": "Unexpected keyword argument `salary` in function `Customer1.__init__`",
       "line": 65,
       "name": "unexpected-keyword",
-      "stop_column": 48,
+      "stop_column": 42,
       "stop_line": 65
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 67,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 67
+      "column": 17,
+      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
+      "description": "Missing argument `id` in function `Customer2.__init__`",
+      "line": 71,
+      "name": "missing-argument",
+      "stop_column": 28,
+      "stop_line": 71
     },
     {
       "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 67,
-      "name": "unexpected-keyword",
-      "stop_column": 35,
-      "stop_line": 67
+      "column": 17,
+      "concise_description": "Missing argument `name` in function `Customer2.__init__`",
+      "description": "Missing argument `name` in function `Customer2.__init__`",
+      "line": 71,
+      "name": "missing-argument",
+      "stop_column": 28,
+      "stop_line": 71
     },
     {
       "code": -2,
       "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
+      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
+      "description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
       "line": 71,
       "name": "bad-argument-type",
       "stop_column": 19,
@@ -3962,95 +3902,75 @@
     },
     {
       "code": -2,
-      "column": 6,
-      "concise_description": "`<` is not supported between `Customer2` and `Customer2`",
-      "description": "`<` is not supported between `Customer2` and `Customer2`\n  Cannot find `__lt__` or `__gt__`",
-      "line": 73,
-      "name": "missing-attribute",
-      "stop_column": 17,
-      "stop_line": 73
+      "column": 7,
+      "concise_description": "Cannot inherit non-frozen dataclass `Customer3Subclass` from frozen dataclass `Customer3`",
+      "description": "Cannot inherit non-frozen dataclass `Customer3Subclass` from frozen dataclass `Customer3`",
+      "line": 90,
+      "name": "invalid-inheritance",
+      "stop_column": 24,
+      "stop_line": 90
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 94,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 94
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 94,
-      "name": "unexpected-keyword",
-      "stop_column": 33,
-      "stop_line": 94
+      "column": 1,
+      "concise_description": "Cannot set field `id`",
+      "description": "Cannot set field `id`\n  This field is a frozen dataclass member",
+      "line": 97,
+      "name": "read-only",
+      "stop_column": 8,
+      "stop_line": 97
     }
   ],
   "dataclasses_transform_meta.py": [
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 60
+      "column": 7,
+      "concise_description": "Cannot inherit non-frozen dataclass `Customer1Subclass` from frozen dataclass `Customer1`",
+      "description": "Cannot inherit non-frozen dataclass `Customer1Subclass` from frozen dataclass `Customer1`",
+      "line": 51,
+      "name": "invalid-inheritance",
+      "stop_column": 24,
+      "stop_line": 51
     },
     {
       "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 34,
-      "stop_line": 60
+      "column": 1,
+      "concise_description": "Cannot set field `id`",
+      "description": "Cannot set field `id`\n  This field is a frozen dataclass member",
+      "line": 63,
+      "name": "read-only",
+      "stop_column": 8,
+      "stop_line": 63
     },
     {
       "code": -2,
-      "column": 36,
-      "concise_description": "Unexpected keyword argument `other_name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `other_name` in function `object.__init__`",
-      "line": 60,
-      "name": "unexpected-keyword",
-      "stop_column": 54,
-      "stop_line": 60
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
+      "column": 17,
+      "concise_description": "Missing argument `id` in function `Customer1.__init__`",
+      "description": "Missing argument `id` in function `Customer1.__init__`",
       "line": 66,
-      "name": "bad-argument-type",
-      "stop_column": 19,
+      "name": "missing-argument",
+      "stop_column": 27,
+      "stop_line": 66
+    },
+    {
+      "code": -2,
+      "column": 17,
+      "concise_description": "Missing argument `name` in function `Customer1.__init__`",
+      "description": "Missing argument `name` in function `Customer1.__init__`",
+      "line": 66,
+      "name": "missing-argument",
+      "stop_column": 27,
       "stop_line": 66
     },
     {
       "code": -2,
       "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 69,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 69
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 69,
-      "name": "unexpected-keyword",
-      "stop_column": 35,
-      "stop_line": 69
+      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
+      "description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
+      "line": 66,
+      "name": "bad-argument-type",
+      "stop_column": 19,
+      "stop_line": 66
     },
     {
       "code": -2,
@@ -4064,49 +3984,19 @@
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 75,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 75
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 75,
-      "name": "unexpected-keyword",
-      "stop_column": 35,
-      "stop_line": 75
+      "column": 17,
+      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
+      "description": "Missing argument `id` in function `Customer2.__init__`",
+      "line": 83,
+      "name": "missing-argument",
+      "stop_column": 28,
+      "stop_line": 83
     },
     {
       "code": -2,
       "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 77,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 77
-    },
-    {
-      "code": -2,
-      "column": 6,
-      "concise_description": "`<` is not supported between `Customer2` and `Customer2`",
-      "description": "`<` is not supported between `Customer2` and `Customer2`\n  Cannot find `__lt__` or `__gt__`",
-      "line": 79,
-      "name": "missing-attribute",
-      "stop_column": 17,
-      "stop_line": 79
-    },
-    {
-      "code": -2,
-      "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `object.__init__`",
+      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
+      "description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
       "line": 83,
       "name": "bad-argument-type",
       "stop_column": 19,
@@ -4114,23 +4004,13 @@
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "description": "Unexpected keyword argument `id` in function `object.__init__`",
-      "line": 100,
-      "name": "unexpected-keyword",
-      "stop_column": 22,
-      "stop_line": 100
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "description": "Unexpected keyword argument `name` in function `object.__init__`",
-      "line": 100,
-      "name": "unexpected-keyword",
-      "stop_column": 33,
-      "stop_line": 100
+      "column": 1,
+      "concise_description": "Cannot set field `id`",
+      "description": "Cannot set field `id`\n  This field is a frozen dataclass member",
+      "line": 103,
+      "name": "read-only",
+      "stop_column": 8,
+      "stop_line": 103
     }
   ],
   "dataclasses_usage.py": [
@@ -4163,6 +4043,36 @@
       "name": "bad-argument-type",
       "stop_column": 37,
       "stop_line": 52
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "line": 61,
+      "name": "bad-class-definition",
+      "stop_column": 6,
+      "stop_line": 61
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "line": 67,
+      "name": "bad-class-definition",
+      "stop_column": 6,
+      "stop_line": 67
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "description": "Dataclass field `b` without a default may not follow dataclass field with a default",
+      "line": 73,
+      "name": "bad-class-definition",
+      "stop_column": 6,
+      "stop_line": 73
     },
     {
       "code": -2,
@@ -4613,8 +4523,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "The value for enum member `GREEN` must match the annotation of the _value_ attribute",
-      "description": "The value for enum member `GREEN` must match the annotation of the _value_ attribute",
+      "concise_description": "Enum member `GREEN` has type `str`, must match the `_value_` attribute annotation of `int`",
+      "description": "Enum member `GREEN` has type `str`, must match the `_value_` attribute annotation of `int`",
       "line": 78,
       "name": "bad-assignment",
       "stop_column": 10,
@@ -4685,8 +4595,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Enum member `DOG` may not be annotated directly. Instead, annotate the _value_ attribute.",
-      "description": "Enum member `DOG` may not be annotated directly. Instead, annotate the _value_ attribute.",
+      "concise_description": "Enum member `DOG` may not be annotated directly. Instead, annotate the `_value_` attribute.",
+      "description": "Enum member `DOG` may not be annotated directly. Instead, annotate the `_value_` attribute.",
       "line": 50,
       "name": "invalid-annotation",
       "stop_column": 8,
@@ -4942,9 +4852,39 @@
       "code": -2,
       "column": 12,
       "concise_description": "`+` is not supported between `AnyStr` and `AnyStr`",
-      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  TODO: Expr::binop_infer attribute base undefined for type: AnyStr (trying to access __add__)",
+      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  Argument `AnyStr` is not assignable to parameter `self` with type `Self@bytes` in function `bytes.__add__`",
       "line": 34,
-      "name": "internal-error",
+      "name": "bad-argument-type",
+      "stop_column": 17,
+      "stop_line": 34
+    },
+    {
+      "code": -2,
+      "column": 12,
+      "concise_description": "`+` is not supported between `AnyStr` and `AnyStr`",
+      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  Argument `AnyStr` is not assignable to parameter `value` with type `Buffer` in function `bytes.__add__`",
+      "line": 34,
+      "name": "bad-argument-type",
+      "stop_column": 17,
+      "stop_line": 34
+    },
+    {
+      "code": -2,
+      "column": 12,
+      "concise_description": "`+` is not supported between `AnyStr` and `AnyStr`",
+      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  No matching overload found for function `str.__add__`\n  Possible overloads:\n  (value: LiteralString, /) -> LiteralString [closest match]\n  (value: str, /) -> str",
+      "line": 34,
+      "name": "no-matching-overload",
+      "stop_column": 17,
+      "stop_line": 34
+    },
+    {
+      "code": -2,
+      "column": 12,
+      "concise_description": "Returned type `bytes | Unknown` is not assignable to declared return type `AnyStr`",
+      "description": "Returned type `bytes | Unknown` is not assignable to declared return type `AnyStr`",
+      "line": 34,
+      "name": "bad-return",
       "stop_column": 17,
       "stop_line": 34
     },
@@ -5555,7 +5495,7 @@
       "description": "Unexpected keyword argument `x` in function `foo`",
       "line": 83,
       "name": "unexpected-keyword",
-      "stop_column": 16,
+      "stop_column": 14,
       "stop_line": 83
     },
     {
@@ -5597,7 +5537,7 @@
       "description": "Expected argument `a` to be positional",
       "line": 26,
       "name": "unexpected-keyword",
-      "stop_column": 9,
+      "stop_column": 5,
       "stop_line": 26
     },
     {
@@ -5607,7 +5547,7 @@
       "description": "Expected argument `b` to be positional",
       "line": 26,
       "name": "unexpected-keyword",
-      "stop_column": 17,
+      "stop_column": 12,
       "stop_line": 26
     },
     {
@@ -6695,8 +6635,8 @@
     {
       "code": -2,
       "column": 12,
-      "concise_description": "Returned type `tuple[*tuple[Unknown, ...], Unknown]` is not assignable to declared return type `tuple[*Ts, T]`",
-      "description": "Returned type `tuple[*tuple[Unknown, ...], Unknown]` is not assignable to declared return type `tuple[*Ts, T]`",
+      "concise_description": "Returned type `tuple[*tuple[object | T, ...], object | T]` is not assignable to declared return type `tuple[*Ts, T]`",
+      "description": "Returned type `tuple[*tuple[object | T, ...], object | T]` is not assignable to declared return type `tuple[*Ts, T]`",
       "line": 56,
       "name": "bad-return",
       "stop_column": 30,
@@ -7104,7 +7044,48 @@
       "stop_line": 194
     }
   ],
-  "historical_positional.py": [],
+  "historical_positional.py": [
+    {
+      "code": -2,
+      "column": 4,
+      "concise_description": "Expected argument `__x` to be positional in function `f1`",
+      "description": "Expected argument `__x` to be positional in function `f1`",
+      "line": 18,
+      "name": "unexpected-keyword",
+      "stop_column": 7,
+      "stop_line": 18
+    },
+    {
+      "code": -2,
+      "column": 16,
+      "concise_description": "Positional-only parameter `__y` cannot appear after keyword parameters",
+      "description": "Positional-only parameter `__y` cannot appear after keyword parameters",
+      "line": 26,
+      "name": "bad-function-definition",
+      "stop_column": 19,
+      "stop_line": 26
+    },
+    {
+      "code": -2,
+      "column": 26,
+      "concise_description": "Positional-only parameter `__y` cannot appear after keyword parameters",
+      "description": "Positional-only parameter `__y` cannot appear after keyword parameters",
+      "line": 38,
+      "name": "bad-function-definition",
+      "stop_column": 29,
+      "stop_line": 38
+    },
+    {
+      "code": -2,
+      "column": 6,
+      "concise_description": "Expected argument `__x` to be positional in function `A.m1`",
+      "description": "Expected argument `__x` to be positional in function `A.m1`",
+      "line": 43,
+      "name": "unexpected-keyword",
+      "stop_column": 9,
+      "stop_line": 43
+    }
+  ],
   "literals_interactions.py": [
     {
       "code": -2,
@@ -7561,8 +7542,28 @@
       "description": "Unexpected keyword argument `other` in function `Point.__new__`",
       "line": 49,
       "name": "unexpected-keyword",
-      "stop_column": 31,
+      "stop_column": 28,
       "stop_line": 49
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "NamedTuple field 'latitude' without a default may not follow NamedTuple field with a default",
+      "description": "NamedTuple field 'latitude' without a default may not follow NamedTuple field with a default",
+      "line": 59,
+      "name": "bad-class-definition",
+      "stop_column": 13,
+      "stop_line": 59
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Cannot override named tuple element `x`",
+      "description": "Cannot override named tuple element `x`",
+      "line": 79,
+      "name": "bad-override",
+      "stop_column": 6,
+      "stop_line": 79
     },
     {
       "code": -2,
@@ -7643,7 +7644,7 @@
       "description": "Unexpected keyword argument `z` in function `Point4.__new__`",
       "line": 31,
       "name": "unexpected-keyword",
-      "stop_column": 21,
+      "stop_column": 19,
       "stop_line": 31
     },
     {
@@ -7773,8 +7774,8 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "Cannot assign to read-only attribute `x`",
-      "description": "Cannot assign to read-only attribute `x`",
+      "concise_description": "Cannot set field `x`",
+      "description": "Cannot set field `x`\n  This field is a NamedTuple member",
       "line": 40,
       "name": "read-only",
       "stop_column": 4,
@@ -7793,8 +7794,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot delete read-only attribute `x`",
-      "description": "Cannot delete read-only attribute `x`",
+      "concise_description": "Cannot delete field `x`",
+      "description": "Cannot delete field `x`\n  This field is a NamedTuple member",
       "line": 42,
       "name": "read-only",
       "stop_column": 8,
@@ -7910,7 +7911,7 @@
       "code": -2,
       "column": 1,
       "concise_description": "Cannot index into `Bytes`",
-      "description": "Cannot index into `Bytes`\n  No matching overload found for function `Bytes.__getitem__`\n  Possible overloads:\n  (__i: int) -> int [closest match]\n  (__s: slice[Any, Any, Any]) -> bytes",
+      "description": "Cannot index into `Bytes`\n  No matching overload found for function `Bytes.__getitem__`\n  Possible overloads:\n  (__i: int, /) -> int [closest match]\n  (__s: slice[Any, Any, Any], /) -> bytes",
       "line": 39,
       "name": "no-matching-overload",
       "stop_column": 6,
@@ -7922,8 +7923,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Overloaded function needs at least two signatures",
-      "description": "Overloaded function needs at least two signatures",
+      "concise_description": "Overloaded function needs at least two @overload declarations",
+      "description": "Overloaded function needs at least two @overload declarations",
       "line": 16,
       "name": "invalid-overload",
       "stop_column": 10,
@@ -8294,16 +8295,6 @@
       "name": "bad-assignment",
       "stop_column": 38,
       "stop_line": 219
-    },
-    {
-      "code": -2,
-      "column": 23,
-      "concise_description": "`Concrete5_Good2` is not assignable to `Template5`",
-      "description": "`Concrete5_Good2` is not assignable to `Template5`",
-      "line": 281,
-      "name": "bad-assignment",
-      "stop_column": 40,
-      "stop_line": 281
     },
     {
       "code": -2,
@@ -8929,8 +8920,8 @@
     {
       "code": -2,
       "column": 9,
-      "concise_description": "Cannot assign to read-only attribute `ID5`",
-      "description": "Cannot assign to read-only attribute `ID5`",
+      "concise_description": "Cannot set field `ID5`",
+      "description": "Cannot set field `ID5`\n  This field is marked as Final",
       "line": 54,
       "name": "read-only",
       "stop_column": 17,
@@ -8959,8 +8950,8 @@
     {
       "code": -2,
       "column": 9,
-      "concise_description": "Cannot assign to read-only attribute `ID7`",
-      "description": "Cannot assign to read-only attribute `ID7`",
+      "concise_description": "Cannot set field `ID7`",
+      "description": "Cannot set field `ID7`\n  This field is marked as Final",
       "line": 65,
       "name": "read-only",
       "stop_column": 17,
@@ -8969,8 +8960,8 @@
     {
       "code": -2,
       "column": 9,
-      "concise_description": "Cannot assign to read-only attribute `ID7`",
-      "description": "Cannot assign to read-only attribute `ID7`",
+      "concise_description": "Cannot set field `ID7`",
+      "description": "Cannot set field `ID7`\n  This field is marked as Final",
       "line": 67,
       "name": "read-only",
       "stop_column": 17,
@@ -9063,7 +9054,7 @@
       "description": "Unexpected keyword argument `x` in function `N.__new__`",
       "line": 133,
       "name": "unexpected-keyword",
-      "stop_column": 6,
+      "stop_column": 4,
       "stop_line": 133
     },
     {
@@ -9073,7 +9064,7 @@
       "description": "Unexpected keyword argument `y` in function `N.__new__`",
       "line": 133,
       "name": "unexpected-keyword",
-      "stop_column": 11,
+      "stop_column": 9,
       "stop_line": 133
     },
     {
@@ -9083,7 +9074,7 @@
       "description": "Unexpected keyword argument `a` in function `N.__new__`",
       "line": 134,
       "name": "unexpected-keyword",
-      "stop_column": 6,
+      "stop_column": 4,
       "stop_line": 134
     },
     {
@@ -9093,7 +9084,7 @@
       "description": "Unexpected keyword argument `x` in function `N.__new__`",
       "line": 135,
       "name": "unexpected-keyword",
-      "stop_column": 7,
+      "stop_column": 4,
       "stop_line": 135
     },
     {
@@ -9103,7 +9094,7 @@
       "description": "Unexpected keyword argument `y` in function `N.__new__`",
       "line": 135,
       "name": "unexpected-keyword",
-      "stop_column": 13,
+      "stop_column": 10,
       "stop_line": 135
     },
     {
@@ -9508,76 +9499,6 @@
       "name": "bad-assignment",
       "stop_column": 35,
       "stop_line": 62
-    },
-    {
-      "code": -2,
-      "column": 14,
-      "concise_description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 1 value",
-      "description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 1 value",
-      "line": 93,
-      "name": "bad-unpacking",
-      "stop_column": 18,
-      "stop_line": 93
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int]) failed",
-      "description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int]) failed",
-      "line": 95,
-      "name": "assert-type",
-      "stop_column": 41,
-      "stop_line": 95
-    },
-    {
-      "code": -2,
-      "column": 14,
-      "concise_description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 2 values",
-      "description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 2 values",
-      "line": 97,
-      "name": "bad-unpacking",
-      "stop_column": 20,
-      "stop_line": 97
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, int] | tuple[str, str]) failed",
-      "description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, int] | tuple[str, str]) failed",
-      "line": 99,
-      "name": "assert-type",
-      "stop_column": 64,
-      "stop_line": 99
-    },
-    {
-      "code": -2,
-      "column": 14,
-      "concise_description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 3 values",
-      "description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 1) into 3 values",
-      "line": 101,
-      "name": "bad-unpacking",
-      "stop_column": 23,
-      "stop_line": 101
-    },
-    {
-      "code": -2,
-      "column": 14,
-      "concise_description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 3 values",
-      "description": "Cannot unpack tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int] (of size 2) into 3 values",
-      "line": 101,
-      "name": "bad-unpacking",
-      "stop_column": 23,
-      "stop_line": 101
-    },
-    {
-      "code": -2,
-      "column": 24,
-      "concise_description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, str, int]) failed",
-      "description": "assert_type(tuple[int] | tuple[str, str] | tuple[int, *tuple[str, ...], int], tuple[int, str, int]) failed",
-      "line": 103,
-      "name": "assert-type",
-      "stop_column": 51,
-      "stop_line": 103
     },
     {
       "code": -2,
@@ -10016,6 +9937,16 @@
       "name": "invalid-inheritance",
       "stop_column": 20,
       "stop_line": 44
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "TypedDict does not support keyword argument `other`",
+      "description": "TypedDict does not support keyword argument `other`",
+      "line": 49,
+      "name": "bad-typed-dict",
+      "stop_column": 20,
+      "stop_line": 49
     }
   ],
   "typeddicts_final.py": [],
@@ -10321,18 +10252,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Class member `RecordShop.albums` overrides parent class `AlbumCollection` in an inconsistent manner",
-      "description": "Class member `RecordShop.albums` overrides parent class `AlbumCollection` in an inconsistent manner\n  `RecordShop.albums` has type `list[TypedDict[Album1]]`, which is not consistent with `Collection[TypedDict[Album1]]` in `AlbumCollection.albums` (the type of read-write attributes cannot be changed)",
-      "line": 49,
-      "name": "bad-override",
-      "stop_column": 11,
-      "stop_line": 49
-    },
-    {
-      "code": -2,
-      "column": 5,
       "concise_description": "Class member `RecordShop.alt` overrides parent class `AlbumCollection` in an inconsistent manner",
-      "description": "Class member `RecordShop.alt` overrides parent class `AlbumCollection` in an inconsistent manner\n  `RecordShop.alt` has type `list[str]`, which is not consistent with `list[int | str]` in `AlbumCollection.alt` (the type of read-write attributes cannot be changed)",
+      "description": "Class member `RecordShop.alt` overrides parent class `AlbumCollection` in an inconsistent manner\n  `RecordShop.alt` has type `list[str]`, which is not assignable to `list[int | str]`, the type of `AlbumCollection.alt`",
       "line": 50,
       "name": "bad-override",
       "stop_column": 8,
@@ -10347,16 +10268,6 @@
       "name": "typed-dict-key-error",
       "stop_column": 21,
       "stop_line": 65
-    },
-    {
-      "code": -2,
-      "column": 5,
-      "concise_description": "Class member `User.ident` overrides parent class `OptionalIdent` in an inconsistent manner",
-      "description": "Class member `User.ident` overrides parent class `OptionalIdent` in an inconsistent manner\n  `User.ident` has type `str`, which is not consistent with `int | str` in `OptionalIdent.ident` (the type of read-write attributes cannot be changed)",
-      "line": 76,
-      "name": "bad-override",
-      "stop_column": 10,
-      "stop_line": 76
     },
     {
       "code": -2,
@@ -10387,6 +10298,16 @@
       "name": "typed-dict-key-error",
       "stop_column": 7,
       "stop_line": 84
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Class member `F3.a` overrides parent class `F1` in an inconsistent manner",
+      "description": "Class member `F3.a` overrides parent class `F1` in an inconsistent manner\n  `F3.a` is read-only, but `F1.a` is read-write",
+      "line": 94,
+      "name": "bad-override",
+      "stop_column": 6,
+      "stop_line": 94
     }
   ],
   "typeddicts_readonly_kwargs.py": [
@@ -10404,12 +10325,12 @@
   "typeddicts_readonly_update.py": [
     {
       "code": -2,
-      "column": 14,
-      "concise_description": "Argument `TypedDict[B]` is not assignable to parameter `m` with type `TypedDict[A]` in function `_typeshed._type_checker_internals.TypedDictFallback.update`",
-      "description": "Argument `TypedDict[B]` is not assignable to parameter `m` with type `TypedDict[A]` in function `_typeshed._type_checker_internals.TypedDictFallback.update`",
+      "column": 13,
+      "concise_description": "No matching overload found for function `A.update`",
+      "description": "No matching overload found for function `A.update`\n  Possible overloads:\n  (__m: Partial[typeddicts_readonly_update.A@16:7-8], /) -> None [closest match]\n  (__m: Iterable[tuple[Literal['y'], int]], /) -> None\n  (*, y: int) -> None",
       "line": 34,
-      "name": "bad-argument-type",
-      "stop_column": 15,
+      "name": "no-matching-overload",
+      "stop_column": 16,
       "stop_line": 34
     }
   ],

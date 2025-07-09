@@ -5,6 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::sys_info::PythonVersion;
+
+use crate::test::util::TestEnv;
 use crate::testcase;
 
 testcase!(
@@ -243,7 +246,7 @@ class D:
 
 def f(c: C, d: D):
     c.x = 0
-    d.x = 0  # E: Cannot assign to read-only attribute `x`
+    d.x = 0  # E: Cannot set field `x`
     "#,
 );
 
@@ -608,7 +611,7 @@ class FrozenBase:
     x: int
 
 @dataclass
-class MutableChild(FrozenBase):  # E: Cannot inherit non-frozen dataclass `main.MutableChild` from frozen dataclass `main.FrozenBase`
+class MutableChild(FrozenBase):  # E: Cannot inherit non-frozen dataclass `MutableChild` from frozen dataclass `FrozenBase`
     y: str
     "#,
 );
@@ -623,7 +626,7 @@ class MutableBase:
     x: int
 
 @dataclass(frozen=True)
-class FrozenChild(MutableBase):  # E: Cannot inherit frozen dataclass `main.FrozenChild` from non-frozen dataclass `main.MutableBase`
+class FrozenChild(MutableBase):  # E: Cannot inherit frozen dataclass `FrozenChild` from non-frozen dataclass `MutableBase`
     y: str
     "#,
 );
@@ -678,5 +681,482 @@ instance.mode  # E: Object of class `InitVarTest` has no attribute `mode`
 instance.count  # E: Object of class `InitVarTest` has no attribute `count`
 # Regular fields should be accessible
 instance.value  # OK
+    "#,
+);
+
+testcase!(
+    test_dataclass_kw_only,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(kw_only=False)
+class SomeClass:
+    x: int
+
+SomeClass(x=1) # OK
+SomeClass(1) # OK
+    "#,
+);
+
+testcase!(
+    test_dataclass_field_kw_only_override_class_true,
+    r#"
+from dataclasses import dataclass, field
+
+@dataclass(kw_only=True)
+class SomeClass:
+    x: int = field(kw_only=False)
+
+SomeClass(x=1) # OK
+SomeClass(1) # OK
+    "#,
+);
+
+testcase!(
+    test_alias,
+    r#"
+from dataclasses import dataclass
+
+mutable = dataclass
+@mutable
+class Mut:
+    x: int
+m = Mut(x=0)
+m.x = 42
+
+frozen = dataclass(frozen=True)
+@mutable(frozen=True)
+class Froz1:
+    x: int
+@frozen
+class Froz2:
+    x: int
+froz1 = Froz1(x=0)
+froz1.x = 42  # E: frozen dataclass member
+froz2 = Froz2(x=0)
+froz2.x = 42  # E: frozen dataclass member
+    "#,
+);
+
+fn dataclass_alias_env() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from dataclasses import dataclass
+mutable = dataclass
+frozen = dataclass(frozen=True)
+    "#,
+    )
+}
+
+testcase!(
+    test_imported_alias,
+    dataclass_alias_env(),
+    r#"
+import foo
+
+@foo.mutable
+class Mut:
+    x: int
+m = Mut(x=0)
+m.x = 42
+
+@foo.mutable(frozen=True)
+class Froz1:
+    x: int
+@foo.frozen
+class Froz2:
+    x: int
+froz1 = Froz1(x=0)
+froz1.x = 42  # E: frozen dataclass member
+froz2 = Froz2(x=0)
+froz2.x = 42  # E: frozen dataclass member
+    "#,
+);
+
+testcase!(
+    test_field_ordering_valid_no_defaults,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class C:
+    x: int
+    y: str
+    z: float
+C(1, "hello", 3.14)  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_valid_all_defaults,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class C:
+    x: int = 1
+    y: str = "hello"
+    z: float = 3.14
+C()  # OK
+C(x=2)  # OK
+C(x=2, y="world", z=2.71)  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_valid_required_then_defaults,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class C:
+    x: int
+    y: str
+    z: float = 3.14
+C(1, "hello")  # OK
+C(1, "hello", 2.71)  # OK
+    "#,
+);
+
+testcase!(
+    test_post_init_defining_attrs,
+    r#"
+from dataclasses import dataclass
+from typing import assert_type
+
+@dataclass
+class Magic:
+    foo: int
+    def __post_init__(self):
+        self.bar: int = 1
+magic = Magic(foo=1)
+assert_type(magic.foo, int)
+assert_type(magic.bar, int)
+    "#,
+);
+
+testcase!(
+    test_field_ordering_basic_violation,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class C:
+    x: int = 1
+    y: str  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_multiple_violations,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class C:
+    a: int = 1
+    b: str  # E: Dataclass field `b` without a default may not follow dataclass field with a default
+    c: int = 2
+    d: float  # E: Dataclass field `d` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_with_field_function,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = field(default=1)
+    y: str  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_with_empty_field_function,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = field(default=1)  # Has DEFAULT flag AND is initialized on class
+    y: int = field()           # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    z: int                     # E: Dataclass field `z` without a default may not follow dataclass field with a default
+C(y=2, z=3)  # OK - y is not considered to have a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_with_default_factory,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: list[int] = field(default_factory=list)
+    y: str  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_bypass,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = 1
+    y: str = field(kw_only=True)  # OK - kw_only fields bypass ordering validation
+    z: int = field(kw_only=True)  # OK - kw_only fields bypass ordering validation
+C(1, y="hello", z=2)  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_sentinel,
+    r#"
+from dataclasses import dataclass, KW_ONLY
+@dataclass
+class C:
+    x: int = 1
+    _: KW_ONLY
+    y: str  # OK - fields after KW_ONLY marker are keyword-only
+    z: int  # OK - fields after KW_ONLY marker are keyword-only
+C(1, y="hello", z=2)  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_global,
+    r#"
+from dataclasses import dataclass
+@dataclass(kw_only=True)
+class C:
+    x: int = 1
+    y: str  # OK - all fields are keyword-only when kw_only=True
+C(x=1, y="hello")  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_init_false_bypass,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = 1
+    y: str = field(init=False)  # OK - init=False fields bypass ordering validation
+    z: int  # E: Dataclass field `z` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_mixed_bypass_flags,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    a: int
+    b: str = "default"
+    c: float = field(kw_only=True)  # OK - kw_only field
+    d: int = field(init=False)      # OK - init=False field
+    e: bool  # E: Dataclass field `e` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_inheritance_violation,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class Base:
+    x: int = 1
+
+@dataclass
+class Child(Base):
+    y: str  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_inheritance_valid,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class Base:
+    x: int
+
+@dataclass
+class Child(Base):
+    y: str = "default"  # OK
+Child(1, y="hello")  # OK
+    "#,
+);
+
+testcase!(
+    test_field_ordering_multiple_inheritance,
+    r#"
+from dataclasses import dataclass
+@dataclass
+class Base1:
+    x: int = 1
+
+@dataclass
+class Base2:
+    y: str = "default"
+
+@dataclass
+class Child(Base1, Base2):
+    z: float  # E: Dataclass field `z` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_inheritance_with_kw_only,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class A:
+    a: int
+
+@dataclass
+class B:
+    b: str = "default"
+
+@dataclass
+class C(A, B):
+    c: float = field(kw_only=True)  # OK - kw_only
+    d: bool  # E: Dataclass field `d` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_initvar_violation,
+    r#"
+from dataclasses import dataclass, InitVar
+@dataclass
+class C:
+    x: int = 1
+    init_var: InitVar[str]  # E: Dataclass field `init_var` without a default may not follow dataclass field with a default
+    y: int  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_classvar_bypass,
+    r#"
+from typing import ClassVar
+from dataclasses import dataclass
+@dataclass
+class C:
+    x: int = 1
+    class_var: ClassVar[str] = "ignored"  # OK - ClassVar fields bypass ordering validation
+    y: int  # E: Dataclass field `y` without a default may not follow dataclass field with a default
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_positional_override,
+    r#"
+from dataclasses import dataclass, field
+@dataclass(kw_only=True)
+class C:
+    a: int = 1
+    b: str = field(kw_only=False)                 # positional override, no default
+    c: float = field(kw_only=False, default=3.14) # positional override, has default
+    d: bool = field(kw_only=False)                # E: Dataclass field `d` without a default may not follow dataclass field with a default
+C("hello", 3.14, a=1, d=True)
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_mixed_overrides,
+    r#"
+from dataclasses import dataclass, field
+@dataclass(kw_only=True)
+class C:
+    w: int
+    x: str = field(kw_only=False)     # positional override
+    y: float = field(kw_only=False)   # positional override
+    z: bool
+C("hello", 3.14, w=1, z=True)
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_field_override,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    a: int
+    b: str = field(kw_only=True)      # keyword-only field
+    c: float = 3.14                   # positional field with default
+    d: bool = field(kw_only=False)    # E: Dataclass field `d` without a default may not follow dataclass field with a default
+C(1, 2.71, b="hello", d=True)
+    "#,
+);
+
+testcase!(
+    test_field_kw_only_unsupported,
+    TestEnv::new_with_version(PythonVersion::new(3, 9, 0)),
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = 1
+    y: int = field(kw_only=True) # E: No matching overload found for function `dataclasses.field`
+    z: int # E: Dataclass field `z` without a default may not follow dataclass field with a default
+C(5, y=2) # E: Missing argument `z` in function `C.__init__`
+C(5, y=2, z=3)
+    "#,
+);
+
+testcase!(
+    test_field_ordering_kw_only_field_bypass,
+    r#"
+from dataclasses import dataclass, field
+@dataclass
+class C:
+    x: int = 1
+    y: int = field(kw_only=True)  # OK - kw_only field bypasses ordering validation
+    z: int # E: Dataclass field `z` without a default may not follow dataclass field with a default
+C(5, y=2) # E: Missing argument `z` in function `C.__init__`
+C(5, 1, y=2)
+    "#,
+);
+
+testcase!(
+    test_slots,
+    r#"
+from dataclasses import dataclass
+from typing import assert_type, Literal
+@dataclass
+class NoSlots:
+    x: int
+@dataclass(slots=True)
+class Slots:
+    x: int
+no_slots = NoSlots(x=0)
+no_slots.__slots__ # E: no attribute `__slots__`
+slots = Slots(x=0)
+assert_type(slots.__slots__, tuple[Literal['x']])
+    "#,
+);
+
+testcase!(
+    test_match_args_no_init,
+    r#"
+from dataclasses import dataclass, field
+from typing import assert_type
+@dataclass
+class C:
+    x: int = field(init=False)
+assert_type(C.__match_args__, tuple[()])
+    "#,
+);
+
+testcase!(
+    test_match_args_initvar,
+    r#"
+from dataclasses import dataclass, InitVar
+from typing import assert_type, Literal
+@dataclass
+class C:
+    x: InitVar[int]
+assert_type(C.__match_args__, tuple[Literal['x']])
     "#,
 );

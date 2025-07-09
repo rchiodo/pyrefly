@@ -5,27 +5,31 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dupe::Dupe;
 use lsp_types::CompletionItem;
 use lsp_types::CompletionItemKind;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
+use pyrefly_util::lined_buffer::DisplayPos;
+use pyrefly_util::lined_buffer::DisplayRange;
+use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::prelude::VecExt;
-use ruff_source_file::LineColumn;
+use ruff_text_size::TextSize;
 use serde::Serialize;
 
 use crate::config::config::ConfigFile;
 use crate::config::finder::ConfigFinder;
 use crate::error::kind::Severity;
-use crate::module::module_info::SourceRange;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::State;
-use crate::sys_info::SysInfo;
+use crate::state::state::Transaction;
 
 #[derive(Serialize)]
 pub struct Position {
@@ -36,11 +40,23 @@ pub struct Position {
 }
 
 impl Position {
-    fn new(position: LineColumn) -> Self {
+    pub fn new(line: i32, column: i32) -> Self {
+        Self { line, column }
+    }
+
+    fn from_display_pos(position: DisplayPos) -> Self {
         Self {
-            line: position.line.to_zero_indexed() as i32 + 1,
-            column: position.column.to_zero_indexed() as i32 + 1,
+            line: position.line.get() as i32,
+            column: position.column.get() as i32,
         }
+    }
+
+    // This should always succeed, but we are being convervative
+    fn to_display_pos(&self) -> Option<DisplayPos> {
+        Some(DisplayPos {
+            line: LineNumber::new(u32::try_from(self.line).ok()?)?,
+            column: NonZeroU32::new(u32::try_from(self.column).ok()?)?,
+        })
     }
 }
 
@@ -57,12 +73,12 @@ pub struct Range {
 }
 
 impl Range {
-    fn new(range: SourceRange) -> Self {
+    fn new(range: DisplayRange) -> Self {
         Self {
-            start_line: range.start.line.to_zero_indexed() as i32 + 1,
-            start_col: range.start.column.to_zero_indexed() as i32 + 1,
-            end_line: range.end.line.to_zero_indexed() as i32 + 1,
-            end_col: range.end.column.to_zero_indexed() as i32 + 1,
+            start_line: range.start.line.get() as i32,
+            start_col: range.start.column.get() as i32,
+            end_line: range.end.line.get() as i32,
+            end_col: range.end.column.get() as i32,
         }
     }
 }
@@ -117,6 +133,7 @@ impl Playground {
     pub fn new() -> Self {
         let mut config = ConfigFile::default();
         config.python_environment.set_empty_to_default();
+        config.interpreters.skip_interpreter_query = true;
         config.configure();
         let config = ArcId::new(config);
 
@@ -151,14 +168,13 @@ impl Playground {
             .get_errors([&self.handle])
             .collect_errors()
             .shown
-            .into_iter()
-            .map(|e| {
-                let range = e.source_range();
+            .into_map(|e| {
+                let range = e.display_range();
                 Diagnostic {
-                    start_line: range.start.line.to_zero_indexed() as i32 + 1,
-                    start_col: range.start.column.to_zero_indexed() as i32 + 1,
-                    end_line: range.end.line.to_zero_indexed() as i32 + 1,
-                    end_col: range.end.column.to_zero_indexed() as i32 + 1,
+                    start_line: range.start.line.get() as i32,
+                    start_col: range.start.column.get() as i32,
+                    end_line: range.end.line.get() as i32,
+                    end_col: range.end.column.get() as i32,
                     message: e.msg().to_owned(),
                     kind: e.error_kind().to_name().to_owned(),
                     // Severity values defined here: https://microsoft.github.io/monaco-editor/typedoc/enums/MarkerSeverity.html
@@ -169,52 +185,43 @@ impl Playground {
                     },
                 }
             })
-            .collect()
     }
 
-    pub fn query_type(&mut self, line: i32, column: i32) -> Option<TypeQueryResult> {
-        let handle = self.handle.dupe();
-        let transaction = self.state.transaction();
-        transaction
-            .get_module_info(&handle)
-            .map(|info| info.to_text_size((line - 1) as u32, (column - 1) as u32))
-            .and_then(|position| transaction.get_type_at(&handle, position))
-            .map(|t| t.to_string())
-            .map(|result| TypeQueryResult {
-                contents: vec![TypeQueryContent {
-                    language: "python".to_owned(),
-                    value: result,
-                }],
-            })
+    fn to_text_size(&self, transaction: &Transaction, pos: Position) -> Option<TextSize> {
+        let info = transaction.get_module_info(&self.handle)?;
+        Some(info.lined_buffer().from_display_pos(pos.to_display_pos()?))
     }
 
-    pub fn goto_definition(&mut self, line: i32, column: i32) -> Option<Range> {
-        let handle = self.handle.dupe();
+    pub fn query_type(&self, pos: Position) -> Option<TypeQueryResult> {
         let transaction = self.state.transaction();
-        transaction
-            .get_module_info(&handle)
-            .map(|info| info.to_text_size((line - 1) as u32, (column - 1) as u32))
-            .and_then(|position| transaction.goto_definition(&handle, position))
-            .map(|range_with_mod_info| {
-                Range::new(
-                    range_with_mod_info
-                        .module_info
-                        .source_range(range_with_mod_info.range),
-                )
-            })
+        let position = self.to_text_size(&transaction, pos)?;
+        let t = transaction.get_type_at(&self.handle, position)?;
+        Some(TypeQueryResult {
+            contents: vec![TypeQueryContent {
+                language: "python".to_owned(),
+                value: t.to_string(),
+            }],
+        })
     }
 
-    pub fn autocomplete(&mut self, line: i32, column: i32) -> Vec<AutoCompletionItem> {
-        let handle = self.handle.dupe();
+    pub fn goto_definition(&mut self, pos: Position) -> Option<Range> {
         let transaction = self.state.transaction();
+        let position = self.to_text_size(&transaction, pos)?;
+        // TODO: Support goto multiple definitions
         transaction
-            .get_module_info(&handle)
-            .map(|info| info.to_text_size((line - 1) as u32, (column - 1) as u32))
-            .map_or(Vec::new(), |position| {
-                transaction.completion(&handle, position)
-            })
+            .goto_definition(&self.handle, position)
             .into_iter()
-            .map(
+            .next()
+            .map(|r| Range::new(r.module_info.display_range(r.range)))
+    }
+
+    pub fn autocomplete(&self, pos: Position) -> Vec<AutoCompletionItem> {
+        let transaction = self.state.transaction();
+        self.to_text_size(&transaction, pos)
+            .map_or(Vec::new(), |position| {
+                transaction.completion(&self.handle, position)
+            })
+            .into_map(
                 |CompletionItem {
                      label,
                      detail,
@@ -228,18 +235,16 @@ impl Playground {
                     sort_text,
                 },
             )
-            .collect::<Vec<_>>()
     }
 
-    pub fn inlay_hint(&mut self) -> Vec<InlayHint> {
-        let handle = self.handle.dupe();
+    pub fn inlay_hint(&self) -> Vec<InlayHint> {
         let transaction = self.state.transaction();
         transaction
-            .get_module_info(&handle)
-            .zip(transaction.inlay_hints(&handle))
+            .get_module_info(&self.handle)
+            .zip(transaction.inlay_hints(&self.handle))
             .map(|(info, hints)| {
                 hints.into_map(|(position, label)| {
-                    let position = Position::new(info.line_column(position));
+                    let position = Position::from_display_pos(info.display_pos(position));
                     InlayHint { label, position }
                 })
             })

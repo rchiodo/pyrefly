@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use pyrefly_python::sys_info::PythonPlatform;
+use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_util::globs::Glob;
 use pyrefly_util::globs::Globs;
 use serde::Deserialize;
@@ -19,8 +21,6 @@ use crate::config::config::ConfigFile;
 use crate::config::config::SubConfig;
 use crate::config::error::ErrorDisplayConfig;
 use crate::error::kind::ErrorKind;
-use crate::sys_info::PythonPlatform;
-use crate::sys_info::PythonVersion;
 
 /// Represents a pyright executionEnvironment.
 /// pyright's ExecutionEnvironments allow you to specify a different Python environment for a subdirectory,
@@ -209,7 +209,6 @@ mod tests {
 
     use super::*;
     use crate::config::environment::environment::PythonEnvironment;
-    use crate::config::environment::environment::SitePackagePathSource;
 
     #[test]
     fn test_convert_pyright_config() -> anyhow::Result<()> {
@@ -244,7 +243,10 @@ mod tests {
                     python_platform: Some(PythonPlatform::linux()),
                     python_version: Some(PythonVersion::new(3, 10, 0)),
                     site_package_path: None,
-                    site_package_path_source: SitePackagePathSource::ConfigFile,
+                    interpreter_site_package_path: config
+                        .python_environment
+                        .interpreter_site_package_path
+                        .clone(),
                 },
                 ..Default::default()
             }
@@ -276,7 +278,10 @@ mod tests {
                     python_version: Some(PythonVersion::new(3, 11, 0)),
                     python_platform: None,
                     site_package_path: None,
-                    site_package_path_source: SitePackagePathSource::ConfigFile,
+                    interpreter_site_package_path: config
+                        .python_environment
+                        .interpreter_site_package_path
+                        .clone(),
                 },
                 ..Default::default()
             }

@@ -7,6 +7,8 @@
 
 use std::mem;
 
+use pyrefly_python::ast::Ast;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::AnyParameterRef;
@@ -34,12 +36,12 @@ use crate::binding::binding::IsAsync;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
-use crate::binding::binding::KeyFunction;
 use crate::binding::binding::KeyLegacyTypeParam;
 use crate::binding::binding::LastStmt;
 use crate::binding::binding::ReturnExplicit;
 use crate::binding::binding::ReturnImplicit;
 use crate::binding::binding::ReturnType;
+use crate::binding::binding::ReturnTypeKind;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::LegacyTParamBuilder;
 use crate::binding::expr::Usage;
@@ -51,12 +53,11 @@ use crate::config::base::UntypedDefBehavior;
 use crate::export::special::SpecialExport;
 use crate::graph::index::Idx;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
-use crate::sys_info::SysInfo;
 use crate::types::types::Type;
 
 struct Decorators {
     has_no_type_check: bool,
+    is_overload: bool,
     decorators: Box<[Idx<Key>]>,
 }
 
@@ -166,12 +167,7 @@ impl<'a> SelfAttrNames<'a> {
 }
 
 impl<'a> BindingsBuilder<'a> {
-    fn parameters(
-        &mut self,
-        x: &mut Parameters,
-        function_idx: Idx<KeyFunction>,
-        class_key: Option<Idx<KeyClass>>,
-    ) {
+    fn parameters(&mut self, x: &mut Parameters, class_key: Option<Idx<KeyClass>>) {
         let mut self_name = None;
         for x in x.iter_non_variadic_params() {
             if class_key.is_some() && self_name.is_none() {
@@ -180,7 +176,6 @@ impl<'a> BindingsBuilder<'a> {
             self.bind_function_param(
                 AnnotationTarget::Param(x.parameter.name.id.clone()),
                 AnyParameterRef::NonVariadic(x),
-                function_idx,
                 class_key,
             );
         }
@@ -188,7 +183,6 @@ impl<'a> BindingsBuilder<'a> {
             self.bind_function_param(
                 AnnotationTarget::ArgsParam(args.name.id.clone()),
                 AnyParameterRef::Variadic(args),
-                function_idx,
                 class_key,
             );
         }
@@ -196,7 +190,6 @@ impl<'a> BindingsBuilder<'a> {
             self.bind_function_param(
                 AnnotationTarget::KwargsParam(kwargs.name.id.clone()),
                 AnyParameterRef::Variadic(kwargs),
-                function_idx,
                 class_key,
             );
         }
@@ -269,12 +262,11 @@ impl<'a> BindingsBuilder<'a> {
         body: Vec<Stmt>,
         range: TextRange,
         func_name: &Identifier,
-        function_idx: Idx<KeyFunction>,
         class_key: Option<Idx<KeyClass>>,
     ) -> (YieldsAndReturns, Option<SelfAssignments>) {
         self.scopes
             .push_function_scope(range, func_name, class_key.is_some());
-        self.parameters(parameters, function_idx, class_key);
+        self.parameters(parameters, class_key);
         self.init_static_scope(&body, false);
         self.stmts(body);
         self.scopes.pop_function_scope()
@@ -286,13 +278,12 @@ impl<'a> BindingsBuilder<'a> {
         body: Vec<Stmt>,
         range: TextRange,
         func_name: &Identifier,
-        function_idx: Idx<KeyFunction>,
         class_key: Option<Idx<KeyClass>>,
     ) -> Option<SelfAssignments> {
         // Push a scope to create the parameter keys (but do nothing else with it).
         self.scopes
             .push_function_scope(range, func_name, class_key.is_some());
-        self.parameters(parameters, function_idx, class_key);
+        self.parameters(parameters, class_key);
         self.scopes.pop();
         // If we are in a class, use a simple visiter to find `self.<attr>` assignments.
         if class_key.is_some() {
@@ -365,25 +356,48 @@ impl<'a> BindingsBuilder<'a> {
             })
             .into_boxed_slice();
 
-        let return_type_binding =
-            if let Some(implicit_return) = implicit_return_if_inferring_return_type {
-                Binding::ReturnType(Box::new(ReturnType {
-                    annot: return_ann_with_range,
-                    returns: return_keys,
-                    implicit_return,
-                    yields: yield_keys,
-                    yield_froms: yield_from_keys,
-                    is_async,
-                    stub_or_impl,
-                    decorators,
-                }))
-            } else {
-                let inferred_any = Binding::Type(Type::any_implicit());
-                match return_ann {
-                    Some(ann) => Binding::AnnotatedType(ann, Box::new(inferred_any)),
-                    None => inferred_any,
+        let return_type_binding = {
+            let kind = match (
+                return_ann_with_range,
+                implicit_return_if_inferring_return_type,
+            ) {
+                (Some((range, annotation)), Some(implicit_return)) => {
+                    // We have an explicit return annotation and we want to validate it.
+                    ReturnTypeKind::ShouldValidateAnnotation {
+                        range,
+                        annotation,
+                        stub_or_impl,
+                        decorators,
+                        implicit_return,
+                        is_generator: !(yield_keys.is_empty() && yield_from_keys.is_empty()),
+                        has_explicit_return: !return_keys.is_empty(),
+                    }
+                }
+                (Some((_, annotation)), None) => {
+                    // We have an explicit return annotation and we just want to trust it.
+                    ReturnTypeKind::ShouldTrustAnnotation {
+                        annotation,
+                        is_generator: !(yield_keys.is_empty() && yield_from_keys.is_empty()),
+                    }
+                }
+                (None, Some(implicit_return)) => {
+                    // We don't have an explicit return annotation, but we want to infer it.
+                    ReturnTypeKind::ShouldInferType {
+                        returns: return_keys,
+                        implicit_return,
+                        yields: yield_keys,
+                        yield_froms: yield_from_keys,
+                    }
+                }
+                (None, None) => {
+                    // We don't have an explicit return annotation, and we want to just treat it as returning `Any`.
+                    ReturnTypeKind::ShouldReturnAny {
+                        is_generator: !(yield_keys.is_empty() && yield_from_keys.is_empty()),
+                    }
                 }
             };
+            Binding::ReturnType(Box::new(ReturnType { kind, is_async }))
+        };
         self.insert_binding(
             Key::ReturnType(ShortIdentifier::new(func_name)),
             return_type_binding,
@@ -393,20 +407,27 @@ impl<'a> BindingsBuilder<'a> {
     fn mark_as_returns_any(&mut self, func_name: &Identifier) {
         self.insert_binding(
             Key::ReturnType(ShortIdentifier::new(func_name)),
+            // TODO(grievejia): traverse the function body and calculate the `is_generator` flag, then
+            // use ReturnTypeKind::ShouldReturnAny to get more precision here.
             Binding::Type(Type::any_implicit()),
         );
     }
 
     fn decorators(&mut self, decorator_list: Vec<Decorator>, usage: &mut Usage) -> Decorators {
-        let has_no_type_check = decorator_list
-            .iter()
-            .any(|d| self.as_special_export(&d.expression) == Some(SpecialExport::NoTypeCheck));
-
+        let mut is_overload = false;
+        let mut has_no_type_check = false;
+        for d in &decorator_list {
+            let special_export = self.as_special_export(&d.expression);
+            is_overload = is_overload || matches!(special_export, Some(SpecialExport::Overload));
+            has_no_type_check =
+                has_no_type_check || matches!(special_export, Some(SpecialExport::NoTypeCheck));
+        }
         let decorators = self
             .ensure_and_bind_decorators(decorator_list, usage)
             .into_boxed_slice();
         Decorators {
             has_no_type_check,
+            is_overload,
             decorators,
         }
     }
@@ -420,10 +441,11 @@ impl<'a> BindingsBuilder<'a> {
         is_async: bool,
         return_ann_with_range: Option<(TextRange, Idx<KeyAnnotation>)>,
         func_name: &Identifier,
-        function_idx: Idx<KeyFunction>,
         class_key: Option<Idx<KeyClass>>,
     ) -> (FunctionStubOrImpl, Option<SelfAssignments>) {
-        let stub_or_impl = if is_ellipse(&body) {
+        let stub_or_impl = if is_ellipse(&body)
+            || (body.first().is_some_and(is_docstring) && decorators.is_overload)
+        {
             FunctionStubOrImpl::Stub
         } else {
             FunctionStubOrImpl::Impl
@@ -434,26 +456,13 @@ impl<'a> BindingsBuilder<'a> {
                 && !is_annotated(&return_ann_with_range, parameters))
         {
             self.mark_as_returns_any(func_name);
-            self.unchecked_function_body_scope(
-                parameters,
-                body,
-                range,
-                func_name,
-                function_idx,
-                class_key,
-            )
+            self.unchecked_function_body_scope(parameters, body, range, func_name, class_key)
         } else {
             match self.untyped_def_behavior {
                 UntypedDefBehavior::SkipAndInferReturnAny
                 | UntypedDefBehavior::CheckAndInferReturnAny => {
-                    let (yields_and_returns, self_assignments) = self.function_body_scope(
-                        parameters,
-                        body,
-                        range,
-                        func_name,
-                        function_idx,
-                        class_key,
-                    );
+                    let (yields_and_returns, self_assignments) =
+                        self.function_body_scope(parameters, body, range, func_name, class_key);
                     self.analyze_return_type(
                         func_name,
                         is_async,
@@ -467,14 +476,8 @@ impl<'a> BindingsBuilder<'a> {
                 }
                 UntypedDefBehavior::CheckAndInferReturnType => {
                     let implicit_return = self.implicit_return(&body, func_name);
-                    let (yields_and_returns, self_assignments) = self.function_body_scope(
-                        parameters,
-                        body,
-                        range,
-                        func_name,
-                        function_idx,
-                        class_key,
-                    );
+                    let (yields_and_returns, self_assignments) =
+                        self.function_body_scope(parameters, body, range, func_name, class_key);
                     self.analyze_return_type(
                         func_name,
                         is_async,
@@ -494,7 +497,8 @@ impl<'a> BindingsBuilder<'a> {
 
     pub fn function_def(&mut self, mut x: StmtFunctionDef) {
         let func_name = x.name.clone();
-        let mut def_user = self.declare_user(Key::Definition(ShortIdentifier::new(&func_name)));
+        let mut def_idx =
+            self.declare_current_idx(Key::Definition(ShortIdentifier::new(&func_name)));
 
         // Get preceding function definition, if any. Used for building an overload type.
         let (function_idx, pred_idx) = self.create_function_index(&x.name);
@@ -506,9 +510,9 @@ impl<'a> BindingsBuilder<'a> {
 
         self.scopes.push(Scope::annotation(x.range));
         let (return_ann_with_range, legacy_tparams) =
-            self.function_header(&mut x, &func_name, class_key, def_user.usage());
+            self.function_header(&mut x, &func_name, class_key, def_idx.usage());
 
-        let decorators = self.decorators(mem::take(&mut x.decorator_list), def_user.usage());
+        let decorators = self.decorators(mem::take(&mut x.decorator_list), def_idx.usage());
 
         let (stub_or_impl, self_assignments) = self.function_body(
             &mut x.parameters,
@@ -518,7 +522,6 @@ impl<'a> BindingsBuilder<'a> {
             x.is_async,
             return_ann_with_range,
             &func_name,
-            function_idx,
             class_key,
         );
 
@@ -540,9 +543,9 @@ impl<'a> BindingsBuilder<'a> {
             },
         );
 
-        self.bind_definition_user(
+        self.bind_definition_current(
             &func_name,
-            def_user,
+            def_idx,
             Binding::Function(function_idx, pred_idx, metadata_key),
             FlowStyle::FunctionDef(function_idx, return_ann_with_range.is_some()),
         );
@@ -623,20 +626,14 @@ fn function_last_expressions<'a>(
 
 fn is_docstring(x: &Stmt) -> bool {
     match x {
-        Stmt::Expr(StmtExpr {
-            value: box Expr::StringLiteral(..),
-            ..
-        }) => true,
+        Stmt::Expr(StmtExpr { value, .. }) => value.is_string_literal_expr(),
         _ => false,
     }
 }
 
 fn is_ellipse(x: &[Stmt]) -> bool {
     match x.iter().find(|x| !is_docstring(x)) {
-        Some(Stmt::Expr(StmtExpr {
-            value: box Expr::EllipsisLiteral(_),
-            ..
-        })) => true,
+        Some(Stmt::Expr(StmtExpr { value, .. })) => value.is_ellipsis_literal_expr(),
         _ => false,
     }
 }

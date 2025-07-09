@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use itertools::Itertools as _;
 use pretty_assertions::assert_eq;
 use ruff_text_size::TextSize;
 
@@ -16,8 +17,29 @@ use crate::test::util::get_batched_lsp_operations_report;
 use crate::test::util::get_batched_lsp_operations_report_allow_error;
 
 fn get_test_report(state: &State, handle: &Handle, position: TextSize) -> String {
-    if let Some(TextRangeWithModuleInfo { module_info, range }) =
-        state.transaction().goto_definition(handle, position)
+    let defs = state.transaction().goto_definition(handle, position);
+    if !defs.is_empty() {
+        defs.into_iter()
+            .map(|TextRangeWithModuleInfo { module_info, range }| {
+                format!(
+                    "Definition Result:\n{}",
+                    code_frame_of_source_at_range(module_info.contents(), range)
+                )
+            })
+            .join("\n")
+    } else {
+        "Definition Result: None".to_owned()
+    }
+}
+
+fn get_test_report_do_not_jump_through_renamed_import(
+    state: &State,
+    handle: &Handle,
+    position: TextSize,
+) -> String {
+    if let Some(TextRangeWithModuleInfo { module_info, range }) = state
+        .transaction()
+        .goto_definition_do_not_jump_through_renamed_import(handle, position)
     {
         format!(
             "Definition Result:\n{}",
@@ -105,7 +127,7 @@ Definition Result:
 4 | def f(x: list[int], y: str, z: Literal[42]):
                                     ^
 Definition Result:
-250 | Literal: _SpecialForm
+249 | Literal: _SpecialForm
       ^^^^^^^
 
 8 | yyy = f([1, 2, 3], "test", 42)
@@ -422,6 +444,38 @@ Definition Result:
 }
 
 #[test]
+fn keyword_argument_test_multiple_methods() {
+    let code = r#"
+class A:
+    def foo(self, x: int, y: str) -> None:
+        pass
+class B:
+    def foo(self, y: str, x: int) -> None:
+        pass
+
+def test(u: A | B) -> None:
+    u.foo(x=0, y="foo")
+#              ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+10 |     u.foo(x=0, y="foo")
+                    ^
+Definition Result:
+3 |     def foo(self, x: int, y: str) -> None:
+                              ^
+Definition Result:
+6 |     def foo(self, y: str, x: int) -> None:
+                      ^       
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn keyword_argument_multi_file() {
     let code_fuction_provider = r#"
 def foo(x: int, y: str) -> None:
@@ -501,7 +555,7 @@ Definition Result:
 6 | foo: Literal[1] = 1
              ^
 Definition Result:
-250 | Literal: _SpecialForm
+249 | Literal: _SpecialForm
       ^^^^^^^
 
 8 | bar = f([1], "", 42)
@@ -568,6 +622,47 @@ Definition Result:
 Definition Result:
 3 | class Foo: pass
           ^^^
+
+
+# import_provider.py
+"#
+        .trim(),
+        report.trim()
+    );
+
+    let report = get_batched_lsp_operations_report(
+        &[
+            ("main", code_test),
+            ("import_provider", code_import_provider),
+        ],
+        get_test_report_do_not_jump_through_renamed_import,
+    );
+    assert_eq!(
+        r#"
+# main.py
+2 | from import_provider import Foo as F
+                                       ^
+Definition Result:
+2 | from import_provider import Foo as F
+                                       ^
+
+4 | import import_provider as ip
+                              ^
+Definition Result:
+1 | 
+    ^
+
+7 | def f(x: ip.Foo, y: F):
+             ^
+Definition Result:
+1 | 
+    ^
+
+7 | def f(x: ip.Foo, y: F):
+                        ^
+Definition Result:
+2 | from import_provider import Foo as F
+                                       ^
 
 
 # import_provider.py
@@ -977,16 +1072,6 @@ c3.x
 c3.y
 #  ^
 
-class Union1:
-  x = 5
-
-class Union2:
-  x = 6
-
-c4: Union1 | Union2 = Union1()
-c4.x
-#  ^
-
 dict = {"foo": '', "bar": 3}
 dict["foo"]
 #      ^
@@ -1022,15 +1107,11 @@ Definition Result:
 17 |   y = 6
        ^
 
-31 | c4.x
-        ^
-Definition Result: None
-
-35 | dict["foo"]
+25 | dict["foo"]
             ^
 Definition Result: None
 
-37 | dict["bar"]
+27 | dict["bar"]
             ^
 Definition Result: None
 "#
@@ -1098,6 +1179,37 @@ Definition Result:
 
 
 # my_class.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn union_attribute_access_test() {
+    let code = r#"
+class A:
+    x: int = 0
+
+class B:
+    x: str = "abc"
+
+def test(y: A | B) -> int | str:
+    return y.x
+           # ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+9 |     return y.x
+                 ^
+Definition Result:
+3 |     x: int = 0
+        ^
+Definition Result:
+6 |     x: str = "abc"
+        ^
 "#
         .trim(),
         report.trim(),

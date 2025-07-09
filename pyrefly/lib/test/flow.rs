@@ -659,6 +659,31 @@ match y:
 );
 
 testcase!(
+    bug = "does not detect unreachable branches based on nested patterns",
+    test_match_narrow_len,
+    r#"
+from typing import assert_type, Never
+
+def foo(x: tuple[int, int] | tuple[str]):
+    match x:
+        case [x0]:
+            assert_type(x, tuple[str])
+            assert_type(x0, str)
+    match x:
+        case [x0, x1]:
+            assert_type(x, tuple[int, int])
+            assert_type(x0, int)
+            assert_type(x1, int)
+    match x:
+        # these two cases should be impossible to match
+        case [str(), str()]:
+            assert_type(x, tuple[int, int])
+        case [int()]:
+            assert_type(x, tuple[str])
+"#,
+);
+
+testcase!(
     test_match_mapping,
     r#"
 from typing import assert_type
@@ -785,14 +810,41 @@ def fun(foo: Foo, bar: Bar, baz: Baz) -> None:
 );
 
 testcase!(
+    test_match_sequence_len,
+    r#"
+from typing import assert_type
+def test(x: tuple[object] | tuple[object, object] | list[object]) -> None:
+    match x:
+        case [int()]:
+            assert_type(x[0], int)
+        case [a]:
+            assert_type(x, tuple[object] | list[object])
+        case [a, b]:
+            assert_type(x, tuple[object, object] | list[object])
+"#,
+);
+
+testcase!(
+    test_match_sequence_len_starred,
+    r#"
+from typing import assert_type
+def test(x: tuple[int, ...] | tuple[int, *tuple[int, ...], int] | tuple[int, int, int]) -> None:
+    match x:
+        case [first, second, third, *middle, last]:
+            # tuple[int, int, int] is narrowed away because the case requires least 4 elements
+            assert_type(x, tuple[int, ...] | tuple[int, *tuple[int, ...], int])
+"#,
+);
+
+testcase!(
     test_match_sequence_concrete,
     r#"
 from typing import assert_type, Never
 
 def foo(x: tuple[int, str, bool, int]) -> None:
     match x:
-        case [a, b, c, d]:
-            assert_type(a, int)
+        case [bool(), b, c, d]:
+            assert_type(x[0], bool)
             assert_type(b, str)
             assert_type(c, bool)
             assert_type(d, int)
@@ -803,8 +855,8 @@ def foo(x: tuple[int, str, bool, int]) -> None:
             assert_type(a, int)
             assert_type(b, int)
             assert_type(middle, list[str | bool])
-        case [a, b, c, d, e]:  # E: Cannot unpack tuple[int, str, bool, int] (of size 4) into 5 values
-            pass
+        case [a, b, c, d, e]:
+            assert_type(x, Never)
         case [a, b, *middle, c, d]:
             assert_type(a, int)
             assert_type(b, str)
@@ -983,23 +1035,12 @@ assert_type(f(True), int)
 );
 
 testcase!(
-    test_nested_loops,
+    test_nested_loops_simple,
     r#"
 def f(cond1: bool, cond2: bool):
     n = 0
     while cond1:
         while cond2:
-            n += 1
-"#,
-);
-
-testcase!(
-    test_augassign_in_loop,
-    r#"
-def f(args, cond):
-    n = 0
-    for arg in args:
-        if cond:
             n += 1
 "#,
 );
@@ -1017,6 +1058,17 @@ def f(cond1: bool, cond2: bool):
     return n
 
 assert_type(f(True, True), int)
+"#,
+);
+
+testcase!(
+    test_augassign_in_loop_simple,
+    r#"
+def f(args, cond):
+    n = 0
+    for arg in args:
+        if cond:
+            n += 1
 "#,
 );
 

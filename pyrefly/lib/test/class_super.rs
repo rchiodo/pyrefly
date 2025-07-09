@@ -195,7 +195,6 @@ class A:
 );
 
 testcase!(
-    bug = "Static methods are treating super as if they were instance methods. A hint: behavior changed in D75722156",
     test_staticmethod,
     r#"
 from typing import assert_type
@@ -213,7 +212,7 @@ class B(A):
     @staticmethod
     def h():
         # No-argument super() is a runtime error
-        super().f()  # Missing error here!
+        super().f()  # E: `super` call with no arguments is not valid inside a staticmethod
     "#,
 );
 
@@ -236,7 +235,6 @@ class B(A):
 );
 
 testcase!(
-    bug = "Classmethods are treating super as if they were instance methods. A hint: behavior changed in D75722156",
     test_call_instance_method_from_classmethod,
     r#"
 class A:
@@ -246,7 +244,7 @@ class A:
 class B(A):
     @classmethod
     def g(cls):
-        super().f(B())  # E: Expected 0 positional arguments, got 1 in function `A.f`
+        super().f(B())
     "#,
 );
 

@@ -7,21 +7,23 @@
 
 use std::sync::Arc;
 
+use pyrefly_python::dunder;
 use ruff_python_ast::name::Name;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::class_field::ClassField;
 use crate::alt::class::class_field::DataclassMember;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassSynthesizedField;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
-use crate::dunder;
-use crate::types::callable::BoolKeywords;
+use crate::alt::types::class_metadata::DataclassMetadata;
+use crate::error;
+use crate::error::collector::ErrorCollector;
+use crate::error::kind::ErrorKind;
 use crate::types::callable::Callable;
-use crate::types::callable::DataclassKeywords;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
 use crate::types::callable::Param;
@@ -29,6 +31,7 @@ use crate::types::callable::ParamList;
 use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassType;
+use crate::types::keywords::DataclassFieldKeywords;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::types::AnyStyle;
@@ -55,18 +58,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         all_fields
     }
 
-    pub fn get_dataclass_synthesized_fields(&self, cls: &Class) -> Option<ClassSynthesizedFields> {
+    pub fn get_dataclass_synthesized_fields(
+        &self,
+        cls: &Class,
+        errors: &ErrorCollector,
+    ) -> Option<ClassSynthesizedFields> {
         let metadata = self.get_metadata_for_class(cls);
         let dataclass = metadata.dataclass_metadata()?;
         let mut fields = SmallMap::new();
-        if dataclass.kws.is_set(&DataclassKeywords::INIT) {
+        if dataclass.kws.init {
             fields.insert(
                 dunder::INIT,
-                self.get_dataclass_init(
-                    cls,
-                    &dataclass.fields,
-                    dataclass.kws.is_set(&DataclassKeywords::KW_ONLY),
-                ),
+                self.get_dataclass_init(cls, dataclass, errors),
             );
         }
         let dataclass_fields_type = self.stdlib.dict(
@@ -78,27 +81,35 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ClassSynthesizedField::new(dataclass_fields_type.to_type()),
         );
 
-        if dataclass.kws.is_set(&DataclassKeywords::ORDER) {
+        if dataclass.kws.order {
             fields.extend(self.get_dataclass_rich_comparison_methods(cls));
         }
-        if dataclass.kws.is_set(&DataclassKeywords::MATCH_ARGS) {
+        if dataclass.kws.match_args {
             fields.insert(
                 dunder::MATCH_ARGS,
-                self.get_dataclass_match_args(
-                    cls,
-                    &dataclass.fields,
-                    dataclass.kws.is_set(&DataclassKeywords::KW_ONLY),
-                ),
+                self.get_dataclass_match_args(cls, dataclass),
             );
+        }
+        if dataclass.kws.slots {
+            // It's a runtime error to set slots=True on a class that already defines __slots__.
+            // Note that inheriting __slots__ from a base class is fine.
+            if cls.contains(&dunder::SLOTS) {
+                self.error(
+                    errors,
+                    cls.range(),
+                    ErrorKind::BadClassDefinition,
+                    None,
+                    "Cannot specify both `slots=True` and `__slots__`".to_owned(),
+                );
+            } else {
+                fields.insert(dunder::SLOTS, self.get_dataclass_slots(cls, dataclass));
+            }
         }
         // See rules for `__hash__` creation under "unsafe_hash":
         // https://docs.python.org/3/library/dataclasses.html#module-contents
-        if dataclass.kws.is_set(&DataclassKeywords::UNSAFE_HASH)
-            || (dataclass.kws.is_set(&DataclassKeywords::EQ)
-                && dataclass.kws.is_set(&DataclassKeywords::FROZEN))
-        {
+        if dataclass.kws.unsafe_hash || (dataclass.kws.eq && dataclass.kws.frozen) {
             fields.insert(dunder::HASH, self.get_dataclass_hash(cls));
-        } else if dataclass.kws.is_set(&DataclassKeywords::EQ) {
+        } else if dataclass.kws.eq {
             fields.insert(dunder::HASH, ClassSynthesizedField::new(Type::None));
         }
         Some(ClassSynthesizedFields::new(fields))
@@ -107,47 +118,80 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn iter_fields(
         &self,
         cls: &Class,
-        fields: &SmallSet<Name>,
+        dataclass: &DataclassMetadata,
         include_initvar: bool,
-    ) -> Vec<(Name, ClassField, BoolKeywords)> {
-        let mut kw_only = false;
-        fields
-            .iter()
-            .filter_map(|name| match self.get_dataclass_member(cls, name, kw_only) {
+    ) -> Vec<(Name, ClassField, DataclassFieldKeywords)> {
+        let mut seen_kw_only_marker = false;
+        let mut positional_fields = Vec::new();
+        let mut kwonly_fields = Vec::new();
+        let cls_is_kw_only = dataclass.kws.kw_only;
+        for name in dataclass.fields.iter() {
+            match self.get_dataclass_member(cls, name, cls_is_kw_only, seen_kw_only_marker) {
                 DataclassMember::KwOnlyMarker => {
-                    kw_only = true;
-                    None
+                    seen_kw_only_marker = true;
                 }
-                DataclassMember::NotAField => None,
-                DataclassMember::Field(field, keywords) => Some((name.clone(), field, keywords)),
-                DataclassMember::InitVar(field) => {
-                    if include_initvar {
-                        Some((name.clone(), field, BoolKeywords::new()))
+                DataclassMember::NotAField => {}
+                DataclassMember::Field(field, keywords) => {
+                    if keywords.is_kw_only() {
+                        kwonly_fields.push((name.clone(), field, keywords))
                     } else {
-                        None
+                        positional_fields.push((name.clone(), field, keywords))
                     }
                 }
-            })
-            .collect()
+                DataclassMember::InitVar(field, keywords) => {
+                    if include_initvar {
+                        if keywords.is_kw_only() {
+                            kwonly_fields.push((name.clone(), field, keywords))
+                        } else {
+                            positional_fields.push((name.clone(), field, keywords))
+                        }
+                    }
+                }
+            }
+        }
+        positional_fields.extend(kwonly_fields);
+        positional_fields
     }
 
     /// Gets __init__ method for an `@dataclass`-decorated class.
     fn get_dataclass_init(
         &self,
         cls: &Class,
-        fields: &SmallSet<Name>,
-        kw_only: bool,
+        dataclass: &DataclassMetadata,
+        errors: &ErrorCollector,
     ) -> ClassSynthesizedField {
         let mut params = vec![self.class_self_param(cls, false)];
-        for (name, field, field_flags) in self.iter_fields(cls, fields, true) {
-            if field_flags.is_set(&DataclassKeywords::INIT) {
+        let mut has_seen_default = false;
+        for (name, field, field_flags) in self.iter_fields(cls, dataclass, true) {
+            if field_flags.init {
+                let has_default = field_flags.default;
+                let is_kw_only = field_flags.is_kw_only();
+                if !is_kw_only {
+                    if !has_default && has_seen_default {
+                        if let Some(range) = cls.field_decl_range(&name) {
+                            self.error(
+                                errors,
+                                range,
+                                error::kind::ErrorKind::BadClassDefinition,
+                                None,
+                                format!(
+                                    "Dataclass field `{name}` without a default may not follow dataclass field with a default"
+                                ),
+                            );
+                        }
+                    }
+                    if has_default {
+                        has_seen_default = true;
+                    }
+                }
                 params.push(field.as_param(
-                    &name,
-                    field_flags.is_set(&DataclassKeywords::DEFAULT),
-                    kw_only || field_flags.is_set(&DataclassKeywords::KW_ONLY),
+                    &field_flags.alias.unwrap_or(name),
+                    has_default,
+                    is_kw_only,
                 ));
             }
         }
+
         let ty = Type::Function(Box::new(Function {
             signature: Callable::list(ParamList::new(params), Type::None),
             metadata: FuncMetadata::def(
@@ -162,18 +206,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn get_dataclass_match_args(
         &self,
         cls: &Class,
-        fields: &SmallSet<Name>,
-        kw_only: bool,
+        dataclass: &DataclassMetadata,
     ) -> ClassSynthesizedField {
         // Keyword-only fields do not appear in __match_args__.
+        let kw_only = dataclass.kws.kw_only;
         let ts = if kw_only {
             Vec::new()
         } else {
-            let filtered_fields = self.iter_fields(cls, fields, false);
+            let filtered_fields = self.iter_fields(cls, dataclass, true);
             filtered_fields
                 .iter()
                 .filter_map(|(name, _, field_flags)| {
-                    if field_flags.is_set(&DataclassKeywords::KW_ONLY) {
+                    if field_flags.is_kw_only() || !field_flags.init {
                         None
                     } else {
                         Some(Type::Literal(Lit::Str(name.as_str().into())))
@@ -181,6 +225,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 })
                 .collect()
         };
+        let ty = Type::Tuple(Tuple::Concrete(ts));
+        ClassSynthesizedField::new(ty)
+    }
+
+    fn get_dataclass_slots(
+        &self,
+        cls: &Class,
+        dataclass: &DataclassMetadata,
+    ) -> ClassSynthesizedField {
+        let filtered_fields = self.iter_fields(cls, dataclass, false);
+        let ts = filtered_fields
+            .iter()
+            .map(|(name, _, _)| Type::Literal(Lit::Str(name.as_str().into())))
+            .collect();
         let ty = Type::Tuple(Tuple::Concrete(ts));
         ClassSynthesizedField::new(ty)
     }

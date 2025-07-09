@@ -178,16 +178,16 @@ testcase!(
 from typing import overload, Protocol
 
 @overload
-def f(x: int) -> int: ...  # E: Overloaded function needs at least two signatures
+def f(x: int) -> int: ...  # E: Overloaded function needs at least two @overload declarations
 def f(x: int) -> int:
     return x
 
 @overload
-def g(x: int) -> int: ...  # E: Overloaded function must have an implementation  # E: Overloaded function needs at least two signatures
+def g(x: int) -> int: ...  # E: Overloaded function must have an implementation  # E: Overloaded function needs at least two @overload declarations
 
 class P(Protocol):
     @overload
-    def m(x: int) -> int: ...  # E: Overloaded function needs at least two signatures
+    def m(x: int) -> int: ...  # E: Overloaded function needs at least two @overload declarations
 "#,
 );
 
@@ -404,4 +404,76 @@ def f(a: Any) -> X: return X()
 def exponential() -> Any:
     f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(f(X())))))))))))))))))))))))) # E: # E: # E: # E: # E: # E: # E: # E: # E: # E: # E: # E:
 "#,
+);
+
+testcase!(
+    test_implementation_with_overload,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int) -> int: ...
+
+@overload
+def f(x: str) -> str: ...
+
+@overload
+def f(x: int | str) -> int | str: # E: @overload decorator should not be used on function implementation
+    return x
+    "#,
+);
+
+testcase!(
+    test_implementation_before_overload,
+    r#"
+from typing import overload
+
+def f(x: int | str) -> int | str: # E: @overload declarations must come before function implementation
+    return x
+
+@overload
+def f(x: int) -> int: ...
+
+@overload
+def f(x: str) -> str: ...
+    "#,
+);
+
+testcase!(
+    test_overload_with_docstring,
+    r#"
+from typing import overload, Any
+
+@overload
+def foo(a: int) -> int: ...  
+@overload
+def foo(a: str) -> str:
+    """Docstring"""
+def foo(*args, **kwargs) -> Any:
+    pass
+    "#,
+);
+
+testcase!(
+    test_overload_with_docstring2,
+    r#"
+from typing import overload, Any
+
+@overload
+def foo(a: int) -> int: ...  
+@overload
+def foo(a: str) -> str: 
+    """Docstring"""
+    return 123             # E: Returned type `Literal[123]` is not assignable to declared return type `str`
+def foo(*args, **kwargs) -> Any:
+    pass
+    "#,
+);
+
+testcase!(
+    test_overload_with_docstring3,
+    r#"
+def foo() -> int: # E: Function declared to return `int` but is missing an explicit `return`
+    """hello"""
+    "#,
 );

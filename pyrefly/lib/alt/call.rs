@@ -5,31 +5,35 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::iter;
+
 use dupe::Dupe;
+use pyrefly_python::dunder;
+use pyrefly_util::prelude::VecExt;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
 use vec1::vec1;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::attr::DescriptorBase;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::alt::callable::CallWithTypes;
-use crate::dunder;
+use crate::alt::expr::TypeOrExpr;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::kind::ErrorKind;
-use crate::types::callable::BoolKeywords;
 use crate::types::callable::Callable;
-use crate::types::callable::FuncFlags;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
 use crate::types::callable::FunctionKind;
 use crate::types::callable::Params;
 use crate::types::class::ClassType;
+use crate::types::keywords::KwCall;
+use crate::types::keywords::TypeMap;
 use crate::types::literal::Lit;
 use crate::types::type_var::Restriction;
 use crate::types::typed_dict::TypedDict;
@@ -84,7 +88,22 @@ enum Target {
     FunctionOverload(Vec1<Callable>, FuncMetadata),
     /// An overloaded method.
     BoundMethodOverload(Type, Vec1<Callable>, FuncMetadata),
+    /// A union of call targets.
+    Union(Vec<Target>),
+    /// Any, as a call target.
     Any(AnyStyle),
+}
+
+impl Target {
+    fn function_metadata(&self) -> Option<&FuncMetadata> {
+        match self {
+            Self::Function(func) | Self::BoundMethod(_, func) => Some(&func.metadata),
+            Self::FunctionOverload(_, metadata) | Self::BoundMethodOverload(_, _, metadata) => {
+                Some(metadata)
+            }
+            _ => None,
+        }
+    }
 }
 
 struct CalledOverload {
@@ -169,6 +188,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::Type(box Type::ClassType(cls)) | Type::Type(box Type::SelfType(cls)) => {
                 Some(CallTarget::new(Target::Class(cls)))
             }
+            Type::Type(box Type::Tuple(tuple)) => {
+                Some(CallTarget::new(Target::Class(self.erase_tuple_type(tuple))))
+            }
             Type::Type(box Type::Quantified(quantified)) => {
                 Some(CallTarget::new(Target::Callable(Callable {
                     // TODO: use upper bound to determine input parameters
@@ -176,6 +198,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ret: Type::Quantified(quantified),
                 })))
             }
+            Type::Type(box Type::Any(style)) => Some(CallTarget::new(Target::Any(style))),
             Type::Forall(forall) => {
                 let (qs, t) = self.solver().fresh_quantified(
                     &forall.tparams,
@@ -196,7 +219,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if res.len() == 1 {
                     Some(res.into_iter().next().unwrap())
                 } else {
-                    None
+                    let (qs, ts): (Vec<Vec<Var>>, Vec<Target>) =
+                        res.into_iter().map(|x| (x.qs, x.target)).unzip();
+                    let qs = qs.into_iter().flatten().collect();
+                    Some(CallTarget::forall(qs, Target::Union(ts)))
                 }
             }
             Type::Any(style) => Some(CallTarget::new(Target::Any(style))),
@@ -207,11 +233,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::Type(box Type::TypedDict(typed_dict)) => {
                 Some(CallTarget::new(Target::TypedDict(typed_dict)))
             }
+            // TODO: this is wrong, because we lose the information that this is a type variable
+            // TODO: handle type[T]
             Type::Quantified(q) if q.is_type_var() => match q.restriction() {
                 Restriction::Bound(bound) => self.as_call_target(bound.clone()),
                 // TODO: handle constraints
                 Restriction::Constraints(_) | Restriction::Unrestricted => None,
             },
+            Type::KwCall(call) => self.as_call_target(call.return_ty),
             _ => None,
         }
     }
@@ -386,8 +415,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let (overrides_new, dunder_new_has_errors) =
             if let Some(new_method) = self.get_dunder_new(&cls) {
                 let cls_ty = Type::type_form(instance_ty.clone());
-                let mut full_args = vec![CallArg::ty(&cls_ty, range)];
-                full_args.extend_from_slice(args);
+                let full_args = iter::once(CallArg::ty(&cls_ty, range))
+                    .chain(args.iter().cloned())
+                    .collect::<Vec<_>>();
                 let dunder_new_errors = self.error_collector();
                 let ret = self.call_infer(
                     self.as_call_target_or_error(
@@ -416,9 +446,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } else {
                 (false, false)
             };
+
         // If the class overrides `object.__new__` but not `object.__init__`, the `__init__` call
         // always succeeds at runtime, so we skip analyzing it.
-        if let Some(init_method) = self.get_dunder_init(&cls, !overrides_new) {
+        // If we have Any as a base class, we shouldn't fall back to `object.__init__`.
+        let get_object_init = !overrides_new
+            && !self
+                .get_metadata_for_class(cls.class_object())
+                .has_base_any();
+
+        if let Some(init_method) = self.get_dunder_init(&cls, get_object_init) {
             let dunder_init_errors = self.error_collector();
             self.call_infer(
                 self.as_call_target_or_error(
@@ -498,7 +535,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<Type>,
     ) -> Type {
-        let is_dataclass = matches!(&call_target.target, Target::FunctionOverload(_, meta) if matches!(meta.kind, FunctionKind::Dataclass(_)));
+        // Does this call target correspond to a function whose keyword arguments we should save?
+        let kw_metadata = {
+            let metadata = call_target.target.function_metadata();
+            if let Some(m) = metadata
+                && (matches!(
+                    m.kind,
+                    FunctionKind::Dataclass | FunctionKind::DataclassTransform
+                ) || m.flags.dataclass_transform_metadata.is_some())
+            {
+                Some(m.clone())
+            } else {
+                None
+            }
+        };
         let res = match call_target.target {
             Target::Class(cls) => {
                 if let Some(hint) = hint {
@@ -575,7 +625,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 let self_obj = match first_arg_type {
                     Some(Type::Type(box Type::ClassType(c))) => Some(c.to_type()),
-                    Some(Type::ClassDef(class)) => Some(class.as_class_type().to_type()),
+                    Some(Type::ClassDef(class)) => {
+                        Some(self.as_class_type_unchecked(&class).to_type())
+                    }
                     _ => None,
                 };
                 if let Some(self_obj) = self_obj {
@@ -606,6 +658,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors,
                 context,
             ),
+            Target::Union(targets) => {
+                let call = CallWithTypes::new();
+                self.unions(targets.into_map(|t| {
+                    self.call_infer(
+                        CallTarget::new(t),
+                        &call.vec_call_arg(args, self, errors),
+                        &call.vec_call_keyword(keywords, self, errors),
+                        range,
+                        errors,
+                        context,
+                        None,
+                    )
+                }))
+            }
             Target::Any(style) => {
                 // Make sure we still catch errors in the arguments.
                 for arg in args {
@@ -622,17 +688,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         self.solver().finish_quantified(&call_target.qs);
-        if is_dataclass && let Type::Callable(c) = res {
-            let mut kws = BoolKeywords::new();
+        if let Some(func_metadata) = kw_metadata {
+            let mut kws = TypeMap::new();
             for kw in keywords {
-                kws.set_keyword(kw.arg, kw.value.infer(self, errors));
+                if let Some(name) = kw.arg {
+                    kws.0.insert(name.id.clone(), kw.value.infer(self, errors));
+                }
             }
-            Type::Function(Box::new(Function {
-                signature: *c,
-                metadata: FuncMetadata {
-                    kind: FunctionKind::Dataclass(Box::new(kws)),
-                    flags: FuncFlags::default(),
-                },
+            Type::KwCall(Box::new(KwCall {
+                func_metadata,
+                keywords: kws,
+                return_ty: res,
             }))
         } else {
             res
@@ -656,7 +722,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Therefore, flatten all TypeOrExpr's into Type before we start
         let call = CallWithTypes::new();
         let self_arg = call.opt_call_arg(self_arg.as_ref(), self, errors);
-        let args = call.vec_call_arg(args, self, errors);
+        let method_name = metadata.kind.as_func_id().func;
+        // If this is an TypedDict "update" method, then preserve argument expressions so we can
+        // contextually type them using the parameter types.
+        // Specifically, skipping vec_call_arg in the `update` case means we will not turn expressions into types here
+        // We will instead turn them into types as we evaluate them against the type hints that we synthesized for the update method.
+
+        let args = if let Some(CallArg::Arg(TypeOrExpr::Type(Type::TypedDict(_), _))) = &self_arg
+            && method_name == "update"
+        {
+            args
+        } else {
+            &call.vec_call_arg(args, self, errors)
+        };
         let keywords = call.vec_call_keyword(keywords, self, errors);
 
         let mut closest_overload: Option<CalledOverload> = None;
@@ -667,7 +745,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 callable.clone(),
                 Some(metadata.kind.as_func_id()),
                 self_arg.clone(),
-                &args,
+                args,
                 &keywords,
                 range,
                 &arg_errors,
@@ -846,7 +924,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.call_infer(call_target, &args, &[], range, errors, context, None)
     }
 
-    pub fn call_getattr(
+    pub fn call_getattr_or_delattr(
         &self,
         getattr_ty: Type,
         attr_name: Name,
@@ -860,6 +938,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.call_infer(
             call_target,
             &[CallArg::ty(&attr_name_ty, range)],
+            &[],
+            range,
+            errors,
+            context,
+            None,
+        )
+    }
+
+    pub fn call_setattr(
+        &self,
+        setattr_ty: Type,
+        arg: CallArg,
+        attr_name: Name,
+        range: TextRange,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+    ) -> Type {
+        let call_target =
+            self.as_call_target_or_error(setattr_ty, CallStyle::FreeForm, range, errors, context);
+        let attr_name_ty = Type::Literal(Lit::Str(attr_name.as_str().into()));
+        self.call_infer(
+            call_target,
+            &[CallArg::ty(&attr_name_ty, range), arg],
             &[],
             range,
             errors,

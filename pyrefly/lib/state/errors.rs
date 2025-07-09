@@ -8,26 +8,26 @@
 use std::sync::Arc;
 
 use dupe::Dupe;
+use pyrefly_python::ignore::Ignore;
+use pyrefly_python::module_path::ModulePath;
 use pyrefly_util::arc_id::ArcId;
 use starlark_map::small_map::SmallMap;
 
 use crate::config::config::ConfigFile;
 use crate::error::collector::CollectedErrors;
 use crate::error::expectation::Expectation;
-use crate::module::ignore::Ignore;
-use crate::module::module_path::ModulePath;
 use crate::state::load::Load;
 
 /// The errors from a collection of modules.
 #[derive(Debug)]
 pub struct Errors {
-    // Sorted by module name (so deterministic display order)
+    // Sorted by module name and path (so deterministic display order)
     loads: Vec<(Arc<Load>, ArcId<ConfigFile>)>,
 }
 
 impl Errors {
     pub fn new(mut loads: Vec<(Arc<Load>, ArcId<ConfigFile>)>) -> Self {
-        loads.sort_by_key(|x| x.0.module_info.name());
+        loads.sort_by_key(|x| (x.0.module_info.name(), x.0.module_info.path().dupe()));
         Self { loads }
     }
 

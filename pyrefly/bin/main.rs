@@ -7,21 +7,16 @@
 
 use std::backtrace::Backtrace;
 use std::env::args_os;
-use std::path::Path;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
-use anyhow::Context as _;
 use clap::Parser;
 use clap::Subcommand;
-use dupe::Dupe;
 use library::ConfigFile;
 use library::ConfigSource;
 use library::ModulePath;
-use library::ProjectLayout;
 use library::finder::ConfigFinder;
-use library::finder::debug_log;
+use library::globs_and_config_getter;
 use library::run::AutotypeArgs;
 use library::run::BuckCheckArgs;
 use library::run::CheckArgs;
@@ -29,20 +24,13 @@ use library::run::CommandExitStatus;
 use library::run::CommonGlobalArgs;
 use library::run::InitArgs;
 use library::run::LspArgs;
-use library::standard_config_finder;
-use path_absolutize::Absolutize;
 use pyrefly::library::library::library::library;
-use pyrefly::library::library::library::library::Severity;
-use pyrefly::library::library::library::library::finder::ConfigError;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::args::clap_env;
 use pyrefly_util::args::get_args_expanded;
 use pyrefly_util::globs::FilteredGlobs;
-use pyrefly_util::globs::Globs;
 use pyrefly_util::watcher::Watcher;
 use starlark_map::small_map::SmallMap;
-use tracing::debug;
-use tracing::info;
 
 // fbcode likes to set its own allocator in fbcode.default_allocator
 // So when we set our own allocator, buck build buck2 or buck2 build buck2 often breaks.
@@ -51,9 +39,15 @@ use tracing::info;
 #[cfg(all(any(target_os = "linux", target_os = "macos"), not(fbcode_build)))]
 static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
+#[global_allocator]
+#[cfg(target_os = "windows")]
+static ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+/// Main CLI entrypoint for Pyrefly.
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser)]
 #[command(name = "pyrefly")]
-#[command(about = "Next generation of Pyre type checker", long_about = None)]
+#[command(about = "A fast Python type checker", long_about = None)]
 #[command(version)]
 struct Args {
     /// Set this to true to run profiling of fast jobs.
@@ -61,13 +55,16 @@ struct Args {
     #[arg(long = "profiling", global = true, hide = true, env = clap_env("PROFILING"))]
     profiling: bool,
 
+    /// Common global arguments shared across commands.
     #[command(flatten)]
     common: CommonGlobalArgs,
 
+    /// Subcommand execution args.
     #[command(subcommand)]
     command: Command,
 }
 
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Clone, Parser)]
 struct FullCheckArgs {
     /// Files to check (glob supported).
@@ -83,20 +80,23 @@ struct FullCheckArgs {
     #[arg(long, env = clap_env("WATCH"), conflicts_with = "check_all")]
     watch: bool,
 
-    /// Explicitly set the Pyre configuration to use when type checking or starting a language server.
+    /// Explicitly set the Pyrefly configuration to use when type checking or starting a language server.
     /// In "single-file checking mode," this config is applied to all files being checked, ignoring
     /// the config's `project_includes` and `project_excludes` and ignoring any config-finding approach
     /// that would otherwise be used.
-    /// When not set, Pyre will perform an upward-filesystem-walk approach to find the nearest
-    /// pyrefly.toml or pyproject.toml with `tool.pyre` section'. If no config is found, Pyre exits with error.
+    /// When not set, Pyrefly will perform an upward-filesystem-walk approach to find the nearest
+    /// pyrefly.toml or pyproject.toml with `tool.pyrefly` section'. If no config is found, Pyrefly exits with error.
     /// If both a pyrefly.toml and valid pyproject.toml are found, pyrefly.toml takes precedence.
     #[arg(long, short, env = clap_env("CONFIG"), value_name = "FILE")]
     config: Option<PathBuf>,
 
+    /// Type checking arguments and configuration
     #[command(flatten)]
     args: CheckArgs,
 }
 
+/// Subcommands to run Pyrefly with.
+#[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Clone, Subcommand)]
 enum Command {
     /// Full type checking on a file or a project
@@ -115,6 +115,7 @@ enum Command {
     /// Start an LSP server
     Lsp(LspArgs),
 
+    /// Automatically add type annotations to a file or directory.
     Autotype(FullCheckArgs),
 }
 
@@ -147,149 +148,10 @@ async fn run_check(
             .await?;
         Ok(CommandExitStatus::Success)
     } else {
-        args.run_once(files_to_check, config_finder, allow_forget)
-    }
-}
-
-fn config_finder(args: library::run::CheckArgs) -> ConfigFinder {
-    standard_config_finder(Arc::new(move |_, x| args.override_config(x)))
-}
-
-fn absolutize(globs: Globs) -> anyhow::Result<Globs> {
-    Ok(globs.from_root(PathBuf::new().absolutize()?.as_ref()))
-}
-
-fn get_explicit_config(
-    path: &Path,
-    args: &library::run::CheckArgs,
-) -> (ArcId<ConfigFile>, Vec<ConfigError>) {
-    let (file_config, parse_errors) = ConfigFile::from_file(path);
-    let (config, validation_errors) = args.override_config(file_config);
-    (
-        config,
-        parse_errors.into_iter().chain(validation_errors).collect(),
-    )
-}
-
-fn add_config_errors(config_finder: &ConfigFinder, errors: Vec<ConfigError>) -> anyhow::Result<()> {
-    if errors.iter().any(|e| e.severity() == Severity::Error) {
-        for e in errors {
-            e.print();
+        match args.run_once(files_to_check, config_finder, allow_forget) {
+            Ok((status, _)) => Ok(status),
+            Err(e) => Err(e),
         }
-        Err(anyhow::anyhow!("Fatal configuration error"))
-    } else {
-        config_finder.add_errors(errors);
-        Ok(())
-    }
-}
-
-/// Get inputs for a full-project check. We will look for a config file and type-check the project it defines.
-fn get_globs_and_config_for_project(
-    config: Option<PathBuf>,
-    project_excludes: Option<Globs>,
-    args: &library::run::CheckArgs,
-) -> anyhow::Result<(FilteredGlobs, ConfigFinder)> {
-    let (config, errors) = match config {
-        Some(explicit) => get_explicit_config(&explicit, args),
-        None => {
-            let current_dir = std::env::current_dir().context("cannot identify current dir")?;
-            let config_finder = config_finder(args.clone());
-            let config = config_finder.directory(&current_dir).unwrap_or_else(|| {
-                let (config, errors) = args.override_config(ConfigFile::init_at_root(
-                    &current_dir,
-                    &ProjectLayout::new(&current_dir),
-                ));
-                // Since this is a config we generated, these are likely internal errors.
-                debug_log(errors);
-                config
-            });
-            (config, config_finder.errors())
-        }
-    };
-    match &config.source {
-        ConfigSource::File(path) => {
-            info!("Checking project configured at `{}`", path.display());
-        }
-        ConfigSource::Marker(path) => {
-            info!(
-                "Found `{}` marking project root, checking root directory with default configuration",
-                path.display(),
-            );
-        }
-        ConfigSource::Synthetic => {
-            info!("Checking current directory with default configuration");
-        }
-    }
-
-    // We want our config_finder to never actually
-    let config_finder = ConfigFinder::new_constant(config.dupe());
-    add_config_errors(&config_finder, errors)?;
-
-    debug!("Config is: {}", config);
-
-    Ok((config.get_filtered_globs(project_excludes), config_finder))
-}
-
-/// Get inputs for a per-file check. If an explicit config is passed in, we use it; otherwise, we
-/// find configs via upward search from each file.
-fn get_globs_and_config_for_files(
-    config: Option<PathBuf>,
-    files_to_check: Globs,
-    project_excludes: Option<Globs>,
-    args: &library::run::CheckArgs,
-) -> anyhow::Result<(FilteredGlobs, ConfigFinder)> {
-    let project_excludes = project_excludes.unwrap_or_else(ConfigFile::default_project_excludes);
-    let files_to_check = absolutize(files_to_check)?;
-    let (config_finder, errors) = match config {
-        Some(explicit) => {
-            let (config, errors) = get_explicit_config(&explicit, args);
-            let config_finder = ConfigFinder::new_constant(config);
-            (config_finder, errors)
-        }
-        None => {
-            let config_finder = config_finder(args.clone());
-            // If there is only one input and one root, we treat config parse errors as fatal,
-            // so that `pyrefly check .` exits immediately on an unparseable config, matching the
-            // behavior of `pyrefly check` (see get_globs_and_config_for_project).
-            let solo_root = if files_to_check.len() == 1 {
-                files_to_check.roots().first().cloned()
-            } else {
-                None
-            };
-            if let Some(root) = solo_root {
-                // We don't care about the contents of the config, only if we generated any errors while parsing it.
-                config_finder.directory(&root);
-                let errors = config_finder.errors();
-                (config_finder, errors)
-            } else {
-                (config_finder, Vec::new())
-            }
-        }
-    };
-    add_config_errors(&config_finder, errors)?;
-    Ok((
-        FilteredGlobs::new(files_to_check, project_excludes),
-        config_finder,
-    ))
-}
-
-fn get_globs_and_config(
-    files: Vec<String>,
-    project_excludes: Option<Vec<String>>,
-    config: Option<PathBuf>,
-    args: &mut library::run::CheckArgs,
-) -> anyhow::Result<(FilteredGlobs, ConfigFinder)> {
-    args.absolute_search_path();
-    args.validate()?;
-    let project_excludes = if let Some(project_excludes) = project_excludes {
-        Some(absolutize(Globs::new(project_excludes))?)
-    } else {
-        None
-    };
-    if files.is_empty() {
-        get_globs_and_config_for_project(config, project_excludes, args)
-    } else {
-        get_globs_and_config_for_files(config, Globs::new(files), project_excludes, args)
     }
 }
 
@@ -303,7 +165,7 @@ async fn run_command(command: Command, allow_forget: bool) -> anyhow::Result<Com
             mut args,
         }) => {
             let (files_to_check, config_finder) =
-                get_globs_and_config(files, project_excludes, config, &mut args)?;
+                globs_and_config_getter::get(files, project_excludes, config, &mut args)?;
             run_check(args, watch, files_to_check, config_finder, allow_forget).await
         }
         Command::BuckCheck(args) => args.run(),
@@ -317,7 +179,7 @@ async fn run_command(command: Command, allow_forget: bool) -> anyhow::Result<Com
             mut args,
         }) => {
             let (files_to_check, config_finder) =
-                get_globs_and_config(files, project_excludes, config, &mut args)?;
+                globs_and_config_getter::get(files, project_excludes, config, &mut args)?;
             run_autotype(AutotypeArgs::new(), files_to_check, config_finder).await
         }
         // We intentionally make DumpConfig take the same arguments as Check so that dumping the
@@ -332,7 +194,7 @@ async fn run_command(command: Command, allow_forget: bool) -> anyhow::Result<Com
             let mut configs_to_files: SmallMap<ArcId<ConfigFile>, Vec<ModulePath>> =
                 SmallMap::new();
             let (files_to_check, config_finder) =
-                get_globs_and_config(files, project_excludes, config, &mut args)?;
+                globs_and_config_getter::get(files, project_excludes, config, &mut args)?;
             let mut handles = args
                 .get_handles(files_to_check, &config_finder)?
                 .into_iter()
@@ -365,6 +227,7 @@ async fn run_command(command: Command, allow_forget: bool) -> anyhow::Result<Com
                         println!("Configuration at `{}`", path.display());
                     }
                 }
+                println!("  Using interpreter: {}", config.interpreters);
                 println!("  Covered files:");
                 for (i, fi) in files.iter().enumerate() {
                     if i < 10 {

@@ -198,11 +198,15 @@ x: "list" "[int]" = [] # E: Expected a type form
 );
 
 testcase!(
-    test_line_file,
+    test_globals,
     r#"
-from typing import assert_type
+from typing import assert_type, Any
 assert_type(__file__, str)
 assert_type(__name__, str)
+assert_type(__debug__, bool)
+assert_type(__package__, str | None)
+assert_type(__annotations__, dict[str, Any])
+assert_type(__spec__, Any)
 "#,
 );
 
@@ -220,6 +224,14 @@ testcase!(
     r#"
 from typing import assert_type
 assert_type(__doc__, None)
+"#,
+);
+
+testcase!(
+    test_import_globals,
+    r#"
+import typing
+typing.assert_type(typing.__name__, str)
 "#,
 );
 
@@ -560,30 +572,6 @@ from typing import Iterable, assert_type
 def f(x: Iterable[int]):
     for i in x:
         assert_type(i, int)
-"#,
-);
-
-testcase!(
-    test_ignore,
-    r#"
-x: int = "1"  # type: ignore
-
-# type: ignore
-y: int = "2"
-
-z: int = "3"  # E: `Literal['3']` is not assignable to `int`
-"#,
-);
-
-testcase!(
-    bug = "An ignore comment should attach to either the current line or next line, but not both",
-    test_ignore_attachment,
-    r#"
-# type: ignore
-w: int = "0"
-
-x: int = "1"  # type: ignore
-y: int = "2"  # TODO: this error should not be suppressed
 "#,
 );
 
@@ -1287,6 +1275,14 @@ assert_type(round(0.123456789), int)
 );
 
 testcase!(
+    test_aug_assign_star_no_panic,
+    r#"
+# This used to panic: see https://github.com/facebook/pyrefly/issues/454
+*a += 0  # E: Parse error: Invalid augmented assignment target  # E: Could not find name `a`
+    "#,
+);
+
+testcase!(
     test_debug,
     r#"
 from typing import assert_type
@@ -1477,5 +1473,144 @@ else:
 
 def func() -> int:
     return 1
+"#,
+);
+
+testcase!(
+    test_nested_self_init,
+    r#"
+# From https://github.com/facebook/pyrefly/issues/444, this used to error
+class MyException:
+    def __init__(self) -> None:
+        self.x = ""
+        self
+
+
+def f(x: MyException):
+    x.__init__()
+"#,
+);
+
+testcase!(
+    test_mapping_get,
+    r#"
+from typing import assert_type
+import os
+compiler = os.environ.get("CXX", "cl")
+assert_type(compiler, str)
+"#,
+);
+
+testcase!(
+    test_call_union_any,
+    r#"
+from typing import Any
+def f(x: dict[str, str] | Any):
+    x["test"] = "test"
+"#,
+);
+
+testcase!(
+    test_call_union_two,
+    r#"
+from typing import Any, assert_type
+
+def f() -> str: return "test"
+def g() -> int: return 42
+
+def op(b: bool):
+    assert_type((f if b else g)(), str | int)
+"#,
+);
+
+testcase!(
+    test_invalid_base,
+    r#"
+class C(Invalid): # E: Could not find name `Invalid`
+    pass
+
+def f(x: C):
+    x.unknown
+    C("test")
+"#,
+);
+
+testcase!(
+    test_just_def,
+    r#"
+# Used to crash https://github.com/facebook/pyrefly/issues/620
+def # E: # E:
+"#,
+);
+
+testcase!(
+    test_surprising_builtins,
+    r#"
+# These are defined in builtins, but exposed through special rules
+print(__import__)
+print(__build_class__)
+"#,
+);
+
+testcase!(
+    test_parameter_default_bad,
+    r#"
+def f(x: int = "test"): # E: Default `Literal['test']` is not assignable to parameter `x` with type `int`
+    pass
+"#,
+);
+
+testcase!(
+    test_parameter_default_infer,
+    r#"
+from typing import reveal_type
+
+def f(x = 1):
+    reveal_type(x) # E: revealed type: int | Unknown
+    return x
+
+reveal_type(f) # E: revealed type: (x: int | Unknown = ...) -> int | Unknown
+"#,
+);
+
+testcase!(
+    test_self_field_gets_lost,
+    r#"
+# From https://github.com/facebook/pyrefly/issues/621
+from typing import reveal_type
+
+class NameTable:
+    def __init__(self):
+        self.names: list[str] = []
+
+    def getName(self):
+        last = ""
+        for name in self.names:
+            reveal_type(name) # E: revealed type: str
+            last = name
+        return last
+"#,
+);
+
+testcase!(
+    test_collapse_any,
+    r#"
+from typing import Any, reveal_type
+
+def f(a, b: Any, x1: bool, x2: bool):
+    c = error # E: Could not find name `error`
+    x = a if x1 else b if x2 else c
+    reveal_type([x]) # E: revealed type: list[Unknown]
+"#,
+);
+
+testcase!(
+    test_call_type_any,
+    r#"
+from typing import Any, assert_type
+
+def f(x: type[Any]):
+    assert_type(x(), Any)
+    assert_type(x(7, arg=8), Any)
 "#,
 );

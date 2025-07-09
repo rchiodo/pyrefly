@@ -19,8 +19,8 @@ use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
 use crate::error::collector::ErrorCollector;
@@ -791,7 +791,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         hint = Some(ty.clone());
                         has_matching_param = true;
                     } else if kwargs.is_none() {
-                        unexpected_keyword_error(&id.id, kw.range);
+                        unexpected_keyword_error(&id.id, id.range);
                     }
                     let tcc: &dyn Fn() -> TypeCheckContext = &|| TypeCheckContext {
                         kind: if has_matching_param {

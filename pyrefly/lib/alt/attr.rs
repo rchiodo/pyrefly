@@ -8,18 +8,20 @@
 use std::iter;
 
 use dupe::Dupe;
+use pyrefly_python::dunder;
+use pyrefly_python::module_name::ModuleName;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_set::SmallSet;
+use vec1::vec1;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::types::class_metadata::EnumMetadata;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::KeyExport;
-use crate::dunder;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::context::TypeCheckContext;
@@ -27,7 +29,6 @@ use crate::error::context::TypeCheckKind;
 use crate::error::kind::ErrorKind;
 use crate::export::exports::Exports;
 use crate::module::module_info::TextRangeWithModuleInfo;
-use crate::module::module_name::ModuleName;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
 use crate::types::callable::FunctionKind;
@@ -39,7 +40,7 @@ use crate::types::literal::Lit;
 use crate::types::module::Module;
 use crate::types::quantified::Quantified;
 use crate::types::quantified::QuantifiedKind;
-use crate::types::tuple::Tuple;
+use crate::types::read_only::ReadOnlyReason;
 use crate::types::type_var::Restriction;
 use crate::types::typed_dict::TypedDict;
 use crate::types::types::AnyStyle;
@@ -54,7 +55,7 @@ enum LookupResult {
     /// The attribute was not found. Callers can use fallback behavior, for
     /// example looking up a different attribute.
     NotFound(NotFound),
-    /// There was a Pyre-internal error
+    /// There was a Pyrefly-internal error
     InternalError(InternalError),
 }
 
@@ -136,12 +137,16 @@ impl AttrSubsetError {
                     ", the type of "
                 };
                 format!(
-                    "{got_desc}`{child_class}.{attr_name}` has type `{got}`, which is not assignable to `{want}`{want_desc}`{parent_class}.{attr_name}`"
+                    "{got_desc}`{child_class}.{attr_name}` has type `{}`, which is not assignable to `{}`{want_desc}`{parent_class}.{attr_name}`",
+                    got.deterministic_printing(),
+                    want.deterministic_printing()
                 )
             }
             AttrSubsetError::Invariant { got, want } => {
                 format!(
-                    "`{child_class}.{attr_name}` has type `{got}`, which is not consistent with `{want}` in `{parent_class}.{attr_name}` (the type of read-write attributes cannot be changed)"
+                    "`{child_class}.{attr_name}` has type `{}`, which is not consistent with `{}` in `{parent_class}.{attr_name}` (the type of read-write attributes cannot be changed)",
+                    got.deterministic_printing(),
+                    want.deterministic_printing()
                 )
             }
             AttrSubsetError::Contravariant {
@@ -155,7 +160,9 @@ impl AttrSubsetError {
                     ""
                 };
                 format!(
-                    "{desc}`{child_class}.{attr_name}` has type `{got}`, which is not assignable from `{want}`, the property getter for `{parent_class}.{attr_name}`"
+                    "{desc}`{child_class}.{attr_name}` has type `{}`, which is not assignable from `{}`, the property getter for `{parent_class}.{attr_name}`",
+                    got.deterministic_printing(),
+                    want.deterministic_printing()
                 )
             }
         }
@@ -181,7 +188,7 @@ pub struct Attribute {
 
 #[derive(Debug)]
 enum Visibility {
-    ReadOnly,
+    ReadOnly(ReadOnlyReason),
     ReadWrite,
 }
 
@@ -283,9 +290,9 @@ impl Attribute {
         }
     }
 
-    pub fn read_only(ty: Type) -> Self {
+    pub fn read_only(ty: Type, reason: ReadOnlyReason) -> Self {
         Attribute {
-            inner: AttributeInner::Simple(ty, Visibility::ReadOnly),
+            inner: AttributeInner::Simple(ty, Visibility::ReadOnly(reason)),
         }
     }
 
@@ -539,8 +546,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Option<Type> {
         let mut not_found = false;
         let mut attr_tys = Vec::new();
-        self.map_over_union(base, |base| {
-            match self.lookup_magic_dunder_attr_no_union(base, attr_name) {
+        let attr_bases = self.get_possible_attribute_bases(base);
+        for attr_base in attr_bases {
+            let lookup_result = match attr_base {
+                None => {
+                    LookupResult::InternalError(InternalError::AttributeBaseUndefined(base.clone()))
+                }
+                Some(base) => {
+                    let direct_lookup_result =
+                        self.lookup_magic_dunder_attr(base.clone(), attr_name);
+                    self.lookup_attr_from_base_getattr_fallback(
+                        base,
+                        attr_name,
+                        direct_lookup_result,
+                    )
+                }
+            };
+            match lookup_result {
                 LookupResult::Found(attr) => attr_tys.push(
                     self.resolve_get_access(attr, range, errors, context)
                         .unwrap_or_else(|e| {
@@ -564,7 +586,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     not_found = true;
                 }
             }
-        });
+        }
         if not_found {
             return None;
         }
@@ -621,6 +643,104 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         )
     }
 
+    fn check_setattr(
+        &self,
+        attr_base: AttributeBase,
+        attr_name: &Name,
+        got: TypeOrExpr,
+        not_found: NotFound,
+        range: TextRange,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+    ) {
+        let setattr_lookup_result = self.lookup_magic_dunder_attr(attr_base, &dunder::SETATTR);
+        match setattr_lookup_result {
+            LookupResult::NotFound(_) | LookupResult::InternalError(_) => {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::MissingAttribute,
+                    context,
+                    not_found.to_error_msg(attr_name),
+                );
+            }
+            LookupResult::Found(setattr_attr) => {
+                let result = self
+                    .resolve_get_access(Attribute::new(setattr_attr.inner), range, errors, context)
+                    .map(|setattr_attr_ty| {
+                        self.call_setattr(
+                            setattr_attr_ty,
+                            CallArg::Arg(got),
+                            attr_name.clone(),
+                            range,
+                            errors,
+                            context,
+                        )
+                    });
+                match result {
+                    Ok(_) => {}
+                    Err(no_access) => {
+                        self.error(
+                            errors,
+                            range,
+                            ErrorKind::MissingAttribute,
+                            context,
+                            no_access.to_error_msg(attr_name),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    fn check_delattr(
+        &self,
+        attr_base: AttributeBase,
+        attr_name: &Name,
+        not_found: NotFound,
+        range: TextRange,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+    ) {
+        let delattr_lookup_result = self.lookup_magic_dunder_attr(attr_base, &dunder::DELATTR);
+        match delattr_lookup_result {
+            LookupResult::NotFound(_) | LookupResult::InternalError(_) => {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::MissingAttribute,
+                    context,
+                    not_found.to_error_msg(attr_name),
+                );
+            }
+            LookupResult::Found(delattr_attr) => {
+                let result = self
+                    .resolve_get_access(Attribute::new(delattr_attr.inner), range, errors, context)
+                    .map(|delattr_attr_ty| {
+                        self.call_getattr_or_delattr(
+                            delattr_attr_ty,
+                            attr_name.clone(),
+                            range,
+                            errors,
+                            context,
+                        )
+                    });
+                match result {
+                    Ok(_) => {}
+                    Err(no_access) => {
+                        self.error(
+                            errors,
+                            range,
+                            ErrorKind::MissingAttribute,
+                            context,
+                            no_access.to_error_msg(attr_name),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     fn check_attr_set_and_infer_narrow(
         &self,
         base: &Type,
@@ -634,112 +754,127 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut narrowed_types = Some(Vec::new());
         let bases = self.get_possible_attribute_bases(base);
         for attr_base in bases {
-            let lookup_result = attr_base.map_or_else(
-                || LookupResult::InternalError(InternalError::AttributeBaseUndefined(base.clone())),
-                |attr_base| self.lookup_attr_from_base_no_union(attr_base, attr_name),
-            );
-            match lookup_result {
-                LookupResult::Found(attr) => match attr.inner {
-                    AttributeInner::Simple(want, Visibility::ReadWrite) => {
-                        let ty = match &got {
-                            TypeOrExpr::Expr(got) => self.expr(
-                                got,
-                                Some((&want, &|| TypeCheckContext {
-                                    kind: TypeCheckKind::Attribute(attr_name.clone()),
-                                    context: context.map(|ctx| ctx()),
-                                })),
-                                errors,
-                            ),
-                            TypeOrExpr::Type(got, _) => {
-                                self.check_type(&want, got, range, errors, &|| TypeCheckContext {
-                                    kind: TypeCheckKind::Attribute(attr_name.clone()),
-                                    context: context.map(|ctx| ctx()),
-                                });
-                                (*got).clone()
-                            }
-                        };
-                        if let Some(narrowed_types) = &mut narrowed_types {
-                            narrowed_types.push(ty)
+            let Some(attr_base) = attr_base else {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::InternalError,
+                    context,
+                    InternalError::AttributeBaseUndefined(base.clone())
+                        .to_error_msg(attr_name, todo_ctx),
+                );
+                narrowed_types = None;
+                continue;
+            };
+            match self.lookup_attr_from_base_no_union(attr_base.clone(), attr_name) {
+                // Attribute setting bypasses `__getattr__` lookup and checks `__setattr__`
+                // If the attribute is not found, we fall back to `__setattr__`
+                LookupResult::NotFound(not_found)
+                | LookupResult::Found(Attribute {
+                    inner: AttributeInner::GetAttr(not_found, _, _),
+                }) => {
+                    self.check_setattr(
+                        attr_base, attr_name, got, not_found, range, errors, context,
+                    );
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Simple(want, Visibility::ReadWrite),
+                }) => {
+                    let ty = match &got {
+                        TypeOrExpr::Expr(got) => self.expr(
+                            got,
+                            Some((&want, &|| TypeCheckContext {
+                                kind: TypeCheckKind::Attribute(attr_name.clone()),
+                                context: context.map(|ctx| ctx()),
+                            })),
+                            errors,
+                        ),
+                        TypeOrExpr::Type(got, _) => {
+                            self.check_type(&want, got, range, errors, &|| TypeCheckContext {
+                                kind: TypeCheckKind::Attribute(attr_name.clone()),
+                                context: context.map(|ctx| ctx()),
+                            });
+                            (*got).clone()
                         }
-                        // Avoid the hook where we wipe `narrowed_types` in all other cases.
-                        continue;
+                    };
+                    if let Some(narrowed_types) = &mut narrowed_types {
+                        narrowed_types.push(ty)
                     }
-                    AttributeInner::NoAccess(e) => {
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::NoAccess,
-                            context,
-                            e.to_error_msg(attr_name),
-                        );
-                    }
-                    AttributeInner::Simple(_, Visibility::ReadOnly) => {
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::ReadOnly,
-                            context,
-                            format!("Cannot assign to read-only attribute `{attr_name}`"),
-                        );
-                    }
-                    AttributeInner::Property(_, None, cls) => {
-                        let e = NoAccessReason::SettingReadOnlyProperty(cls);
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::ReadOnly,
-                            context,
-                            e.to_error_msg(attr_name),
-                        );
-                    }
-                    AttributeInner::Property(_, Some(setter), _) => {
-                        let got = CallArg::arg(got);
-                        self.call_property_setter(setter, got, range, errors, context);
-                    }
-                    AttributeInner::Descriptor(d) => {
-                        match (d.base, d.setter) {
-                            (DescriptorBase::Instance(class_type), Some(setter)) => {
-                                let got = CallArg::arg(got);
-                                self.call_descriptor_setter(
-                                    setter, class_type, got, range, errors, context,
-                                );
-                            }
-                            (DescriptorBase::Instance(class_type), None) => {
-                                let e = NoAccessReason::SettingReadOnlyDescriptor(
-                                    class_type.class_object().dupe(),
-                                );
-                                self.error(
-                                    errors,
-                                    range,
-                                    ErrorKind::ReadOnly,
-                                    context,
-                                    e.to_error_msg(attr_name),
-                                );
-                            }
-                            (DescriptorBase::ClassDef(class), _) => {
-                                let e = NoAccessReason::SettingDescriptorOnClass(class.dupe());
-                                self.error(
-                                    errors,
-                                    range,
-                                    ErrorKind::NoAccess,
-                                    context,
-                                    e.to_error_msg(attr_name),
-                                );
-                            }
-                        };
-                    }
-                    AttributeInner::GetAttr(not_found, _, name) => {
-                        // Attribute setting bypasses `__getattr__` lookup and behaves the same
-                        // as if the `__getattr__` lookup did not happen.
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::MissingAttribute,
-                            context,
-                            not_found.to_error_msg(&name),
-                        );
-                    }
-                },
+                    // Avoid the hook where we wipe `narrowed_types` in all other cases.
+                    continue;
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::NoAccess(e),
+                }) => {
+                    self.error(
+                        errors,
+                        range,
+                        ErrorKind::NoAccess,
+                        context,
+                        e.to_error_msg(attr_name),
+                    );
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Simple(_, Visibility::ReadOnly(reason)),
+                }) => {
+                    let msg = vec1![
+                        format!("Cannot set field `{attr_name}`"),
+                        reason.error_message()
+                    ];
+                    errors.add(range, ErrorKind::ReadOnly, None, msg);
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Property(_, None, cls),
+                }) => {
+                    let e = NoAccessReason::SettingReadOnlyProperty(cls);
+                    self.error(
+                        errors,
+                        range,
+                        ErrorKind::ReadOnly,
+                        context,
+                        e.to_error_msg(attr_name),
+                    );
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Property(_, Some(setter), _),
+                }) => {
+                    let got = CallArg::arg(got);
+                    self.call_property_setter(setter, got, range, errors, context);
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Descriptor(d),
+                }) => {
+                    match (d.base, d.setter) {
+                        (DescriptorBase::Instance(class_type), Some(setter)) => {
+                            let got = CallArg::arg(got);
+                            self.call_descriptor_setter(
+                                setter, class_type, got, range, errors, context,
+                            );
+                        }
+                        (DescriptorBase::Instance(class_type), None) => {
+                            let e = NoAccessReason::SettingReadOnlyDescriptor(
+                                class_type.class_object().dupe(),
+                            );
+                            self.error(
+                                errors,
+                                range,
+                                ErrorKind::ReadOnly,
+                                context,
+                                e.to_error_msg(attr_name),
+                            );
+                        }
+                        (DescriptorBase::ClassDef(class), _) => {
+                            let e = NoAccessReason::SettingDescriptorOnClass(class.dupe());
+                            self.error(
+                                errors,
+                                range,
+                                ErrorKind::NoAccess,
+                                context,
+                                e.to_error_msg(attr_name),
+                            );
+                        }
+                    };
+                }
                 LookupResult::InternalError(e) => {
                     self.error(
                         errors,
@@ -747,15 +882,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ErrorKind::InternalError,
                         context,
                         e.to_error_msg(attr_name, todo_ctx),
-                    );
-                }
-                LookupResult::NotFound(e) => {
-                    self.error(
-                        errors,
-                        range,
-                        ErrorKind::MissingAttribute,
-                        context,
-                        e.to_error_msg(attr_name),
                     );
                 }
             }
@@ -777,47 +903,54 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) {
         let bases = self.get_possible_attribute_bases(base);
         for attr_base in bases {
-            let lookup_result = attr_base.map_or_else(
-                || LookupResult::InternalError(InternalError::AttributeBaseUndefined(base.clone())),
-                |attr_base| self.lookup_attr_from_base_no_union(attr_base, attr_name),
-            );
-            match lookup_result {
-                LookupResult::Found(attr) => match attr.inner {
-                    // TODO: deleting attributes is allowed at runtime, but is not type-safe
-                    // except for descriptors that implement `__delete__`
-                    AttributeInner::Simple(_, Visibility::ReadWrite)
-                    | AttributeInner::Property(_, _, _)
-                    | AttributeInner::Descriptor(_) => {}
-                    AttributeInner::NoAccess(e) => {
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::NoAccess,
-                            context,
-                            e.to_error_msg(attr_name),
-                        );
-                    }
-                    AttributeInner::Simple(_, Visibility::ReadOnly) => {
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::ReadOnly,
-                            context,
-                            format!("Cannot delete read-only attribute `{attr_name}`"),
-                        );
-                    }
-                    AttributeInner::GetAttr(not_found, _, name) => {
-                        // Attribute deleting bypasses `__getattr__` lookup and behaves the same
-                        // as if the `__getattr__` lookup did not happen.
-                        self.error(
-                            errors,
-                            range,
-                            ErrorKind::MissingAttribute,
-                            context,
-                            not_found.to_error_msg(&name),
-                        );
-                    }
-                },
+            let Some(attr_base) = attr_base else {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::InternalError,
+                    context,
+                    InternalError::AttributeBaseUndefined(base.clone())
+                        .to_error_msg(attr_name, todo_ctx),
+                );
+                return;
+            };
+            match self.lookup_attr_from_base_no_union(attr_base.clone(), attr_name) {
+                // Attribute deletion bypasses `__getattr__` lookup and checks `__delattr__`
+                // If the attribute is not found, we fall back to `__delattr__`
+                LookupResult::NotFound(not_found)
+                | LookupResult::Found(Attribute {
+                    inner: AttributeInner::GetAttr(not_found, _, _),
+                }) => {
+                    self.check_delattr(attr_base, attr_name, not_found, range, errors, context);
+                }
+                // TODO: deleting attributes is allowed at runtime, but is not type-safe
+                // except for descriptors that implement `__delete__`
+                LookupResult::Found(Attribute {
+                    inner:
+                        AttributeInner::Simple(_, Visibility::ReadWrite)
+                        | AttributeInner::Property(_, _, _)
+                        | AttributeInner::Descriptor(_),
+                }) => {}
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::NoAccess(e),
+                }) => {
+                    self.error(
+                        errors,
+                        range,
+                        ErrorKind::NoAccess,
+                        context,
+                        e.to_error_msg(attr_name),
+                    );
+                }
+                LookupResult::Found(Attribute {
+                    inner: AttributeInner::Simple(_, Visibility::ReadOnly(reason)),
+                }) => {
+                    let msg = vec1![
+                        format!("Cannot delete field `{attr_name}`"),
+                        reason.error_message()
+                    ];
+                    errors.add(range, ErrorKind::ReadOnly, None, msg);
+                }
                 LookupResult::InternalError(e) => {
                     self.error(
                         errors,
@@ -825,15 +958,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ErrorKind::InternalError,
                         context,
                         e.to_error_msg(attr_name, todo_ctx),
-                    );
-                }
-                LookupResult::NotFound(e) => {
-                    self.error(
-                        errors,
-                        range,
-                        ErrorKind::MissingAttribute,
-                        context,
-                        e.to_error_msg(attr_name),
                     );
                 }
             }
@@ -853,7 +977,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Err(AttrSubsetError::Property)
             }
             (
-                AttributeInner::Simple(_, Visibility::ReadOnly),
+                AttributeInner::Simple(_, Visibility::ReadOnly(_)),
                 AttributeInner::Property(_, Some(_), _)
                 | AttributeInner::Simple(_, Visibility::ReadWrite),
             ) => Err(AttrSubsetError::ReadOnly),
@@ -889,7 +1013,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             (
                 AttributeInner::Simple(got, ..),
-                AttributeInner::Simple(want, Visibility::ReadOnly),
+                AttributeInner::Simple(want, Visibility::ReadOnly(_)),
             ) => {
                 if is_subset(got, want) {
                     Ok(())
@@ -903,7 +1027,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             (
-                AttributeInner::Simple(got, Visibility::ReadOnly),
+                AttributeInner::Simple(got, Visibility::ReadOnly(_)),
                 AttributeInner::Property(want, _, _),
             ) => {
                 if is_subset(
@@ -1035,7 +1159,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         match attr.inner {
             AttributeInner::NoAccess(reason) => Err(reason),
             AttributeInner::Simple(ty, Visibility::ReadWrite)
-            | AttributeInner::Simple(ty, Visibility::ReadOnly) => Ok(ty),
+            | AttributeInner::Simple(ty, Visibility::ReadOnly(_)) => Ok(ty),
             AttributeInner::Property(getter, ..) => {
                 Ok(self.call_property_getter(getter, range, errors, context))
             }
@@ -1060,7 +1184,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             AttributeInner::GetAttr(_, getattr_attr, name) => self
                 .resolve_get_access(Attribute::new(*getattr_attr), range, errors, context)
-                .map(|getattr_ty| self.call_getattr(getattr_ty, name, range, errors, context)),
+                .map(|getattr_ty| {
+                    self.call_getattr_or_delattr(getattr_ty, name, range, errors, context)
+                }),
         }
     }
 
@@ -1079,7 +1205,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // TODO(stroxler): ReadWrite attributes are not actually methods but limiting access to
             // ReadOnly breaks unit tests; we should investigate callsites to understand this better.
             // NOTE(grievejia): We currently do not expect to use `__getattr__` for this lookup.
-            AttributeInner::Simple(ty, Visibility::ReadOnly)
+            AttributeInner::Simple(ty, Visibility::ReadOnly(_))
             | AttributeInner::Simple(ty, Visibility::ReadWrite) => Some(ty),
             AttributeInner::NoAccess(_)
             | AttributeInner::Property(..)
@@ -1090,10 +1216,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn resolve_named_tuple_element(&self, attr: Attribute) -> Option<Type> {
         // NamedTuples are immutable, so their attributes are always read-only
-        // NOTE(grievejia): We do not use `__getattr__` here because this lookup is expected to be inovked
+        // NOTE(grievejia): We do not use `__getattr__` here because this lookup is expected to be invoked
         // on NamedTuple attributes with known names.
         match attr.inner {
-            AttributeInner::Simple(ty, Visibility::ReadOnly) => Some(ty),
+            AttributeInner::Simple(ty, Visibility::ReadOnly(_)) => Some(ty),
             AttributeInner::Simple(_, Visibility::ReadWrite)
             | AttributeInner::NoAccess(_)
             | AttributeInner::Property(..)
@@ -1262,7 +1388,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // TODO(stroxler): it is probably possible to synthesize a forall type here
                     // that uses a type var to propagate the setter. Investigate this option later.
                     getter.transform_func_metadata(|meta: &mut FuncMetadata| {
-                        meta.kind = FunctionKind::PropertySetter(Box::new(meta.kind.as_func_id()));
+                        meta.flags.is_property_setter_decorator = true;
                     });
                     LookupResult::found_type(
                         // TODO(samzhou19815): Support go-to-definition for @property applied symbols
@@ -1350,20 +1476,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> LookupResult {
         let direct_lookup_result = self.lookup_attr_from_attribute_base(base.clone(), attr_name);
         self.lookup_attr_from_base_getattr_fallback(base, attr_name, direct_lookup_result)
-    }
-
-    // This function is intended as a low-level building block
-    // Unions or intersections should be handled by callers
-    fn lookup_magic_dunder_attr_no_union(&self, base: &Type, attr_name: &Name) -> LookupResult {
-        match self.as_attribute_base_no_union(base.clone()) {
-            None => {
-                LookupResult::InternalError(InternalError::AttributeBaseUndefined(base.clone()))
-            }
-            Some(base) => {
-                let direct_lookup_result = self.lookup_magic_dunder_attr(base.clone(), attr_name);
-                self.lookup_attr_from_base_getattr_fallback(base, attr_name, direct_lookup_result)
-            }
-        }
     }
 
     // This function is intended as a low-level building block
@@ -1459,38 +1571,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::Type(box Type::SelfType(class_type)) => {
                 Some(AttributeBase::ClassObject(class_type.class_object().dupe()))
             }
-            Type::TypedDict(typed_dict) => Some(AttributeBase::TypedDict(typed_dict.clone())),
-            Type::Tuple(Tuple::Unbounded(element)) => {
-                Some(AttributeBase::ClassInstance(self.stdlib.tuple(*element)))
+            Type::TypedDict(td) | Type::PartialTypedDict(td) => {
+                Some(AttributeBase::TypedDict(td.clone()))
             }
-            Type::Tuple(Tuple::Concrete(elements)) => {
-                Some(AttributeBase::ClassInstance(if elements.is_empty() {
-                    self.stdlib.tuple(Type::Any(AnyStyle::Implicit))
-                } else {
-                    self.stdlib.tuple(self.unions(elements))
-                }))
-            }
-            Type::Tuple(Tuple::Unpacked(box (
-                prefix,
-                Type::Tuple(Tuple::Unbounded(middle)),
-                suffix,
-            ))) => {
-                let mut elements = prefix;
-                elements.push(*middle);
-                elements.extend(suffix);
-                Some(AttributeBase::ClassInstance(
-                    self.stdlib.tuple(self.unions(elements)),
-                ))
-            }
-            // TODO(yangdanny): Can we do better here? There might be some information
-            // in the unpacked bit that would be useful.
-            Type::Tuple(Tuple::Unpacked(_)) => Some(AttributeBase::ClassInstance(
-                self.stdlib.tuple(Type::any_implicit()),
-            )),
+            Type::Tuple(tuple) => Some(AttributeBase::ClassInstance(self.erase_tuple_type(tuple))),
             Type::LiteralString => Some(AttributeBase::ClassInstance(self.stdlib.str().clone())),
-            Type::Literal(Lit::Enum(box (class, member, raw_ty))) => {
-                Some(AttributeBase::EnumLiteral(class, member, raw_ty))
-            }
+            Type::Literal(Lit::Enum(lit_enum)) => Some(AttributeBase::EnumLiteral(
+                lit_enum.class,
+                lit_enum.member,
+                lit_enum.ty,
+            )),
             Type::Literal(lit) => Some(AttributeBase::ClassInstance(
                 lit.general_class_type(self.stdlib).clone(),
             )),
@@ -1503,7 +1593,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(AttributeBase::ClassObject(class.class_object().dupe()))
             }
             Type::Type(box Type::Quantified(q)) if q.is_type_var() => match q.restriction() {
-                // TODO(#119): this is wrong, because we lose the information that this is a type var
+                // TODO(https://github.com/facebook/pyrefly/issues/514)
+                // this is wrong, because we lose the information that this is a type var
                 Restriction::Bound(bound) => {
                     self.as_attribute_base_no_union(Type::type_form(bound.clone()))
                 }
@@ -1512,7 +1603,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::Type(box Type::Quantified(q)) => Some(AttributeBase::TypeVar(q, None)),
             Type::Type(box Type::Any(style)) => Some(AttributeBase::TypeAny(style)),
             Type::Module(module) => Some(AttributeBase::Module(module)),
-            Type::TypeVar(_) => Some(AttributeBase::ClassInstance(self.stdlib.type_var().clone())),
+            Type::TypeVar(_) | Type::Type(box Type::TypeVar(_)) => {
+                Some(AttributeBase::ClassInstance(self.stdlib.type_var().clone()))
+            }
             Type::ParamSpec(_) => Some(AttributeBase::ClassInstance(
                 self.stdlib.param_spec().clone(),
             )),
@@ -1533,6 +1626,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::Callable(_) => Some(AttributeBase::ClassInstance(
                 self.stdlib.function_type().clone(),
             )),
+            Type::KwCall(call) => self.as_attribute_base_no_union(call.return_ty),
             Type::Function(box Function {
                 signature: _,
                 metadata,
@@ -1562,15 +1656,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             Type::SuperInstance(box (cls, obj)) => Some(AttributeBase::SuperInstance(cls, obj)),
-            Type::Quantified(q) if q.is_type_var() => match q.restriction() {
-                // TODO(#119): this is wrong, because we lose the information that this is a type var
-                Restriction::Bound(bound) => self.as_attribute_base_no_union(bound.clone()),
-                // TODO: handle constraints
-                Restriction::Constraints(_) => None,
-                Restriction::Unrestricted => {
-                    Some(AttributeBase::ClassInstance(self.stdlib.object().clone()))
-                }
-            },
             // TODO: check to see which ones should have class representations
             Type::Union(_)
             | Type::SpecialForm(_)
@@ -1691,12 +1776,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         expected_attribute_name: Option<&Name>,
         res: &mut Vec<AttrInfo>,
     ) {
+        let mro = self.get_mro_for_class(cls);
         let mut seen = SmallSet::new();
-        for c in iter::once(cls).chain(
-            self.get_metadata_for_class(cls)
-                .ancestors(self.stdlib)
-                .map(|x| x.class_object()),
-        ) {
+        for c in iter::once(cls).chain(mro.ancestors(self.stdlib).map(|x| x.class_object())) {
             if c == self.stdlib.object().class_object() {
                 // Don't want to suggest `__hash__`
                 break;
@@ -1704,7 +1786,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             match expected_attribute_name {
                 None => {
                     for fld in c.fields() {
-                        if seen.insert(fld.clone())
+                        if seen.insert(fld)
                             && let Some(range) = c.field_decl_range(fld)
                         {
                             res.push(AttrInfo {
@@ -1781,16 +1863,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// List all the attributes available from a type. Used to power completion.
-    /// Not all usages need types, so we can skip type computation with `include_types=false`.
-    pub fn completions(
+    // `base` is expected to be neither a union nor an intersection type
+    // if this precondition doesn't hold, the function won't crash but it
+    // will also not find an answer.
+    pub fn completions_no_union_intersection(
         &self,
         base: Type,
         expected_attribute_name: Option<&Name>,
         include_types: bool,
     ) -> Vec<AttrInfo> {
         let mut res = Vec::new();
-        // TODO: expose attributes shared across all union members
         if let Some(base) = self.as_attribute_base_no_union(base) {
             match &base {
                 AttributeBase::ClassInstance(class) | AttributeBase::EnumLiteral(class, _, _) => {
@@ -1849,6 +1931,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
         res
+    }
+
+    /// List all the attributes available from a type. Used to power completion.
+    /// Not all usages need types, so we can skip type computation with `include_types=false`.
+    pub fn completions(
+        &self,
+        base: Type,
+        expected_attribute_name: Option<&Name>,
+        include_types: bool,
+    ) -> Vec<AttrInfo> {
+        // TODO:
+        // - If `base` is a union, expose only attributes shared by all members
+        // - If `base` is an intersection, expose all possible attributes for any members
+        self.completions_no_union_intersection(base, expected_attribute_name, include_types)
     }
 }
 

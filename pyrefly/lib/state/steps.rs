@@ -11,6 +11,9 @@ use dupe::Dupe;
 use enum_iterator::Sequence;
 use parse_display::Display;
 use paste::paste;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::ModModule;
 
@@ -22,13 +25,11 @@ use crate::config::base::UntypedDefBehavior;
 use crate::error::style::ErrorStyle;
 use crate::export::exports::Exports;
 use crate::export::exports::LookupExport;
-use crate::module::module_name::ModuleName;
-use crate::module::module_path::ModulePath;
+use crate::module::parse::module_parse;
 use crate::solver::solver::Solver;
 use crate::state::load::Load;
 use crate::state::memory::MemoryFilesLookup;
 use crate::state::require::Require;
-use crate::sys_info::SysInfo;
 use crate::types::stdlib::Stdlib;
 
 pub struct Context<'a, Lookup> {
@@ -145,7 +146,11 @@ impl Step {
 
     #[inline(never)]
     fn step_ast<Lookup>(ctx: &Context<Lookup>, load: Arc<Load>) -> Arc<ModModule> {
-        Arc::new(load.module_info.parse(ctx.sys_info.version(), &load.errors))
+        Arc::new(module_parse(
+            load.module_info.contents(),
+            ctx.sys_info.version(),
+            &load.errors,
+        ))
     }
 
     #[inline(never)]

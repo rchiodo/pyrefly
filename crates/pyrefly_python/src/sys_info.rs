@@ -18,7 +18,6 @@ use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::with_hash::WithHash;
 use regex::Match;
 use regex::Regex;
-use ruff_python_ast::Arguments;
 use ruff_python_ast::BoolOp;
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::Expr;
@@ -34,7 +33,7 @@ use serde::Serialize;
 use serde::de;
 use serde::de::Visitor;
 
-use crate::ruff::ast::Ast;
+use crate::ast::Ast;
 
 #[derive(Debug, Clone, Copy, Dupe, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PythonVersion {
@@ -227,18 +226,22 @@ impl SysInfo {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, PartialOrd)]
 enum Value {
     Tuple(Vec<Value>),
     String(String),
     Int(i64),
     Bool(bool),
+    /// I know what the value evaluates to when considered truthy, but not it's precise outcome.
+    /// We make sure below that it never compares equal to itself
+    Truthiness(bool),
 }
 
 impl Value {
     fn to_bool(&self) -> bool {
         match self {
             Value::Bool(x) => *x,
+            Value::Truthiness(x) => *x,
             Value::Int(x) => *x != 0,
             Value::String(x) => !x.is_empty(),
             Value::Tuple(x) => !x.is_empty(),
@@ -251,13 +254,14 @@ impl Value {
             (Value::String(_), Value::String(_)) => true,
             (Value::Int(_), Value::Int(_)) => true,
             (Value::Bool(_), Value::Bool(_)) => true,
+            (Value::Truthiness(_), Value::Truthiness(_)) => false, // We don't know if they are the same ype
             _ => false,
         }
     }
 
     fn compare(&self, op: CmpOp, other: &Value) -> Option<bool> {
         if !self.same_type(other) {
-            return None; // Someone got confused
+            return None; // Someone got confused, or we are working with Truthiness
         }
         Some(match op {
             CmpOp::Eq => self == other,
@@ -285,41 +289,46 @@ impl SysInfo {
         }
     }
 
+    fn is_type_checking_constant_name(x: &str) -> bool {
+        x == "TYPE_CHECKING" || x == "TYPE_CHECKING_WITH_PYREFLY"
+    }
+
     fn evaluate(&self, x: &Expr) -> Option<Value> {
         match x {
             Expr::Compare(x) if x.ops.len() == 1 && x.comparators.len() == 1 => Some(Value::Bool(
                 self.evaluate(&x.left)?
                     .compare(x.ops[0], &self.evaluate(&x.comparators[0])?)?,
             )),
-            Expr::Attribute(ExprAttribute {
-                value: box Expr::Name(name),
-                attr,
-                ..
-            }) if &name.id == "sys" => match attr.as_str() {
-                "platform" => Some(Value::String(self.0.platform.as_str().to_owned())),
-                "version_info" => Some(Value::Tuple(vec![
-                    Value::Int(self.0.version.major as i64),
-                    Value::Int(self.0.version.minor as i64),
-                ])),
-                _ => None,
-            },
-            Expr::Name(name) if name.id == "TYPE_CHECKING" => Some(Value::Bool(true)),
+            Expr::Attribute(ExprAttribute { value, attr, .. })
+                if let Expr::Name(name) = &**value
+                    && &name.id == "sys" =>
+            {
+                match attr.as_str() {
+                    "platform" => Some(Value::String(self.0.platform.as_str().to_owned())),
+                    "version_info" => Some(Value::Tuple(vec![
+                        Value::Int(self.0.version.major as i64),
+                        Value::Int(self.0.version.minor as i64),
+                    ])),
+                    _ => None,
+                }
+            }
+            Expr::Name(name) if Self::is_type_checking_constant_name(name.id()) => {
+                Some(Value::Bool(true))
+            }
             Expr::Attribute(ExprAttribute {
                 // We support TYPE_CHECKING regardless of which import (or reimport) it is from.
-                value: box Expr::Name(_),
+                value,
                 attr,
                 ..
-            }) if attr.as_str() == "TYPE_CHECKING" => Some(Value::Bool(true)),
+            }) if value.is_name_expr() && Self::is_type_checking_constant_name(attr.as_str()) => {
+                Some(Value::Bool(true))
+            }
             Expr::Call(ExprCall {
-                func: box Expr::Attribute(ExprAttribute { value, attr, .. }),
-                arguments:
-                    Arguments {
-                        args: box [arg],
-                        keywords: box [],
-                        ..
-                    },
-                ..
-            }) if attr.as_str() == "startswith"
+                func, arguments, ..
+            }) if let Expr::Attribute(ExprAttribute { value, attr, .. }) = &**func
+                && attr.as_str() == "startswith"
+                && arguments.keywords.is_empty()
+                && let [arg] = &*arguments.args
                 && let Some(Value::String(x)) = self.evaluate(value)
                 && let Some(Value::String(y)) = self.evaluate(arg) =>
             {
@@ -335,24 +344,34 @@ impl SysInfo {
             Expr::StringLiteral(x) => Some(Value::String(x.value.to_str().to_owned())),
             Expr::BoolOp(x) => match x.op {
                 BoolOp::And => {
-                    let mut last = Value::Bool(true);
+                    let mut res = Some(Value::Bool(true));
                     for x in &x.values {
-                        last = self.evaluate(x)?;
-                        if !last.to_bool() {
-                            break;
+                        match self.evaluate(x) {
+                            None => res = None,
+                            Some(x) => match (x.to_bool(), res.is_none()) {
+                                (false, false) => return Some(x),
+                                (false, true) => return Some(Value::Truthiness(false)),
+                                (true, false) => res = Some(x),
+                                (true, true) => res = None,
+                            },
                         }
                     }
-                    Some(last)
+                    res
                 }
                 BoolOp::Or => {
-                    let mut last = Value::Bool(false);
+                    let mut res = Some(Value::Bool(false));
                     for x in &x.values {
-                        last = self.evaluate(x)?;
-                        if last.to_bool() {
-                            break;
+                        match self.evaluate(x) {
+                            None => res = None,
+                            Some(x) => match (x.to_bool(), res.is_none()) {
+                                (false, false) => res = Some(x),
+                                (false, true) => res = None,
+                                (true, false) => return Some(x),
+                                (true, true) => return Some(Value::Truthiness(true)),
+                            },
                         }
                     }
-                    Some(last)
+                    res
                 }
             },
             Expr::UnaryOp(x) => match x.op {

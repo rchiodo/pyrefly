@@ -6,8 +6,8 @@
  */
 
 use itertools::Itertools;
+use pyrefly_python::sys_info::PythonVersion;
 
-use crate::sys_info::PythonVersion;
 use crate::test::util::TestEnv;
 use crate::test::util::get_class;
 use crate::test::util::mk_state;
@@ -52,6 +52,12 @@ assert_type(MyEnum.X.value, int)
 assert_type(MyEnum.X._value_, int)
 
 MyEnum["FOO"]  # E: Enum `MyEnum` does not have a member named `FOO`
+
+def foo(member: str) -> None:
+    assert_type(MyEnum[member], MyEnum)
+
+def bar(member: int) -> None:
+    MyEnum[member] # E: Enum `MyEnum` can only be indexed by strings
 "#,
 );
 
@@ -129,8 +135,8 @@ class MyEnum(Enum):
     V = member(1)
     W = auto()
     X = 1
-    Y = "FOO"  # E: The value for enum member `Y` must match the annotation of the _value_ attribute
-    Z = member("FOO")  # E: The value for enum member `Z` must match the annotation of the _value_ attribute
+    Y = "FOO"  # E: Enum member `Y` has type `str`, must match the `_value_` attribute annotation of `int`
+    Z = member("FOO")  # E: Enum member `Z` has type `str`, must match the `_value_` attribute annotation of `int`
 
     def get_value(self) -> int:
         if self.value > 0:
@@ -181,7 +187,7 @@ from typing import assert_type, Literal
 from enum import Enum
 
 class MyEnum(Enum):
-    X: float = 5  # E: Enum member `X` may not be annotated directly. Instead, annotate the _value_ attribute
+    X: float = 5  # E: Enum member `X` may not be annotated directly. Instead, annotate the `_value_` attribute
 
 assert_type(MyEnum.X, Literal[MyEnum.X])
 assert_type(MyEnum.X.value, float)
@@ -346,4 +352,52 @@ class A(enum.IntEnum):
 
 assert_type(A.B, Literal[A.B])
     "#,
+);
+
+// This used to trigger a false positive where we thought the metaclass inheriting
+// Any meant it was an enum metaclass, see https://github.com/facebook/pyrefly/issues/622
+testcase!(
+    test_metaclass_subtype_of_any_is_not_enum_metaclass,
+    r#"
+from typing import Any
+class CustomMetaclass(Any):
+    pass
+class C[T](metaclass=CustomMetaclass):  # Ok - was a false positive
+    x: T
+    "#,
+);
+
+fn env_enum_dots() -> TestEnv {
+    let mut env = TestEnv::new();
+    env.add_with_path("py", "py.py", r#"
+from enum import IntEnum
+
+class Color(IntEnum):
+    RED = ... # E: Enum member `RED` has type `Ellipsis`, must match the `_value_` attribute annotation of `int`
+    GREEN = "wrong" # E: Enum member `GREEN` has type `str`, must match the `_value_` attribute annotation of `int`
+"#
+    );
+    env.add_with_path("pyi", "pyi.pyi", r#"
+from enum import IntEnum
+
+class Color(IntEnum):
+    RED = ...
+    GREEN = "wrong" # E: Enum member `GREEN` has type `str`, must match the `_value_` attribute annotation of `int`
+"#
+    );
+    env
+}
+
+testcase!(
+    bug = "The RED = ... in pyi should be fine",
+    test_enum_value_dots_pyi,
+    env_enum_dots(),
+    r#"
+import py
+import pyi
+
+from typing import assert_type, Literal
+assert_type(py.Color.RED, Literal[py.Color.RED])
+assert_type(pyi.Color.RED, Literal[pyi.Color.RED])
+"#,
 );

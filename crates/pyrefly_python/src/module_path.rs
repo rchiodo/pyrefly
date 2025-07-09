@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde::Serializer;
 
 use crate::dunder;
-use crate::module::module_name::ModuleName;
+use crate::module_name::ModuleName;
 
 #[derive(Debug, Clone, Dupe, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ModuleStyle {
@@ -40,7 +40,7 @@ pub enum ModulePathDetails {
     Namespace(PathBuf),
     /// The module source comes from memory, only for files (not namespace).
     Memory(PathBuf),
-    /// The module source comes from typeshed bundled with Pyre (which gets stored in-memory).
+    /// The module source comes from typeshed bundled with Pyrefly (which gets stored in-memory).
     /// The path is relative to the root of the typeshed directory.
     BundledTypeshed(PathBuf),
 }

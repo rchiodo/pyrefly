@@ -9,6 +9,12 @@ use std::fmt::Debug;
 use std::mem;
 
 use parse_display::Display;
+use pyrefly_python::ast::Ast;
+use pyrefly_python::dunder;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_python::sys_info::SysInfo;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprAttribute;
 use ruff_python_ast::ExprName;
@@ -33,26 +39,22 @@ use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassMetadata;
+use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSynthesizedFields;
 use crate::binding::binding::KeyFunction;
 use crate::binding::binding::KeyVariance;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::bindings::BindingTable;
-use crate::binding::bindings::User;
+use crate::binding::bindings::CurrentIdx;
 use crate::binding::function::SelfAssignments;
-use crate::common::symbol_kind::SymbolKind;
-use crate::dunder;
 use crate::export::definitions::DefinitionStyle;
 use crate::export::definitions::Definitions;
 use crate::export::exports::LookupExport;
 use crate::export::special::SpecialExport;
 use crate::graph::index::Idx;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
-use crate::sys_info::SysInfo;
 use crate::types::class::ClassDefIndex;
 
 /// Many names may map to the same TextRange (e.g. from foo import *).
@@ -73,15 +75,18 @@ pub struct StaticInfo {
 impl StaticInfo {
     pub fn as_key(&self, name: &Name) -> Key {
         if self.count == 1 {
-            if matches!(self.style, DefinitionStyle::ImportModule(_)) {
-                Key::Import(name.clone(), self.loc)
-            } else {
-                // We are constructing an identifier, but it must have been one that we saw earlier
-                assert_ne!(self.loc, TextRange::default());
-                Key::Definition(ShortIdentifier::new(&Identifier {
-                    id: name.clone(),
-                    range: self.loc,
-                }))
+            match self.style {
+                DefinitionStyle::ImportModule(_) => Key::Import(name.clone(), self.loc),
+                DefinitionStyle::Global => Key::Global(name.clone()),
+                _ => {
+                    // We are constructing an identifier, but it must have been one that we saw earlier
+                    assert_ne!(self.loc, TextRange::default());
+                    Key::Definition(ShortIdentifier::new(&Identifier {
+                        node_index: AtomicNodeIndex::dummy(),
+                        id: name.clone(),
+                        range: self.loc,
+                    }))
+                }
             }
         } else {
             Key::Anywhere(name.clone(), self.loc)
@@ -134,8 +139,11 @@ impl Static {
             module_info.path().is_init(),
             sys_info,
         );
-        if top_level && module_info.name() != ModuleName::builtins() {
-            d.inject_builtins();
+        if top_level {
+            if module_info.name() != ModuleName::builtins() {
+                d.inject_builtins();
+            }
+            d.inject_globals();
         }
 
         let mut wildcards = Vec::with_capacity(d.import_all.len());
@@ -289,6 +297,7 @@ pub struct ClassIndices {
     pub def_index: ClassDefIndex,
     pub class_idx: Idx<KeyClass>,
     pub metadata_idx: Idx<KeyClassMetadata>,
+    pub mro_idx: Idx<KeyClassMro>,
     pub synthesized_fields_idx: Idx<KeyClassSynthesizedFields>,
     pub variance_idx: Idx<KeyVariance>,
 }
@@ -375,6 +384,7 @@ fn is_attribute_defining_method(method_name: &Name, class_name: &Name) -> bool {
     if method_name == &dunder::INIT
         || method_name == &dunder::INIT_SUBCLASS
         || method_name == &dunder::NEW
+        || method_name == &dunder::POST_INIT
     {
         true
     } else {
@@ -922,15 +932,15 @@ impl Scopes {
     /// Return `None` if this succeeded and Some(rejected_return) if we are at the top-level
     pub fn record_or_reject_return(
         &mut self,
-        user: User,
+        ret: CurrentIdx,
         x: StmtReturn,
-    ) -> Result<(), (User, StmtReturn)> {
+    ) -> Result<(), (CurrentIdx, StmtReturn)> {
         match self.current_yields_and_returns_mut() {
             Some(yields_and_returns) => {
-                yields_and_returns.returns.push((user.into_idx(), x));
+                yields_and_returns.returns.push((ret.into_idx(), x));
                 Ok(())
             }
-            None => Err((user, x)),
+            None => Err((ret, x)),
         }
     }
 

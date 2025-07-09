@@ -10,6 +10,7 @@ use std::slice;
 
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::AnyNodeRef;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::DictItem;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprBooleanLiteral;
@@ -25,7 +26,6 @@ use ruff_python_ast::PatternMatchSingleton;
 use ruff_python_ast::PySourceType;
 use ruff_python_ast::Singleton;
 use ruff_python_ast::Stmt;
-use ruff_python_ast::StmtExpr;
 use ruff_python_ast::StmtIf;
 use ruff_python_ast::StringFlags;
 use ruff_python_ast::StringLiteral;
@@ -259,8 +259,12 @@ impl Ast {
 
     pub fn pattern_match_singleton_to_expr(x: &PatternMatchSingleton) -> Expr {
         match x.value {
-            Singleton::None => Expr::NoneLiteral(ExprNoneLiteral { range: x.range }),
+            Singleton::None => Expr::NoneLiteral(ExprNoneLiteral {
+                node_index: AtomicNodeIndex::dummy(),
+                range: x.range,
+            }),
             Singleton::True | Singleton::False => Expr::BooleanLiteral(ExprBooleanLiteral {
+                node_index: AtomicNodeIndex::dummy(),
                 range: x.range,
                 value: x.value == Singleton::True,
             }),
@@ -271,10 +275,7 @@ impl Ast {
     pub fn has_docstring(x: &ModModule) -> bool {
         matches!(
             x.body.first(),
-            Some(Stmt::Expr(StmtExpr {
-                range: _,
-                value: box Expr::StringLiteral(_),
-            }))
+            Some(Stmt::Expr(x)) if x.value.is_string_literal_expr()
         )
     }
 

@@ -8,6 +8,8 @@
 use std::mem;
 use std::sync::LazyLock;
 
+use pyrefly_python::ast::Ast;
+use pyrefly_python::module_name::ModuleName;
 use pyrefly_util::prelude::SliceExt;
 use regex::Regex;
 use ruff_python_ast::Expr;
@@ -24,14 +26,16 @@ use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::alt::class::class_metadata::BaseClass;
+use crate::alt::class::base_class::BaseClass;
 use crate::binding::binding::AnnotationTarget;
 use crate::binding::binding::Binding;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
+use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSynthesizedFields;
+use crate::binding::binding::BindingTParams;
 use crate::binding::binding::BindingVariance;
 use crate::binding::binding::ClassBinding;
 use crate::binding::binding::ClassFieldInitialValue;
@@ -41,11 +45,13 @@ use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
+use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSynthesizedFields;
+use crate::binding::binding::KeyTParams;
 use crate::binding::binding::KeyVariance;
 use crate::binding::bindings::BindingsBuilder;
+use crate::binding::bindings::CurrentIdx;
 use crate::binding::bindings::LegacyTParamBuilder;
-use crate::binding::bindings::User;
 use crate::binding::scope::ClassIndices;
 use crate::binding::scope::FlowStyle;
 use crate::binding::scope::InstanceAttribute;
@@ -54,9 +60,7 @@ use crate::binding::scope::Scope;
 use crate::binding::scope::ScopeKind;
 use crate::error::kind::ErrorKind;
 use crate::graph::index::Idx;
-use crate::module::module_name::ModuleName;
 use crate::module::short_identifier::ShortIdentifier;
-use crate::ruff::ast::Ast;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
 use crate::types::special_form::SpecialForm;
@@ -83,18 +87,20 @@ impl<'a> BindingsBuilder<'a> {
         res
     }
 
-    fn class_object_and_indices(&mut self, class_name: &Identifier) -> (User, ClassIndices) {
+    fn class_object_and_indices(&mut self, class_name: &Identifier) -> (CurrentIdx, ClassIndices) {
         let def_index = self.def_index();
         let class_indices = ClassIndices {
             def_index,
             class_idx: self.idx_for_promise(KeyClass(ShortIdentifier::new(class_name))),
             metadata_idx: self.idx_for_promise(KeyClassMetadata(def_index)),
+            mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
             synthesized_fields_idx: self.idx_for_promise(KeyClassSynthesizedFields(def_index)),
             variance_idx: self.idx_for_promise(KeyVariance(def_index)),
         };
         // The user - used for first-usage tracking of any expressions we analyze in a class definition -
         // is the `Idx<Key>` of the class object bound to the class name.
-        let class_object = self.declare_user(Key::Definition(ShortIdentifier::new(class_name)));
+        let class_object =
+            self.declare_current_idx(Key::Definition(ShortIdentifier::new(class_name)));
         (class_object, class_indices)
     }
 
@@ -114,8 +120,10 @@ impl<'a> BindingsBuilder<'a> {
         let mut key_class_fields: SmallSet<Idx<KeyClassField>> = SmallSet::new();
 
         let body = mem::take(&mut x.body);
-        let decorators =
-            self.ensure_and_bind_decorators(mem::take(&mut x.decorator_list), class_object.usage());
+        let decorators_with_ranges = self.ensure_and_bind_decorators_with_ranges(
+            mem::take(&mut x.decorator_list),
+            class_object.usage(),
+        );
 
         self.scopes.push(Scope::annotation(x.range));
 
@@ -142,7 +150,15 @@ impl<'a> BindingsBuilder<'a> {
                 }
                 _ => {}
             }
-            self.ensure_type(&mut base, &mut legacy);
+            // If it's really obvious this can't be a legacy type var (since they can't be raw names under bases)
+            // then don't even record it.
+            let mut none = None;
+            let legacy = if matches!(base, Expr::Name(_) | Expr::Attribute(_)) {
+                &mut none
+            } else {
+                &mut legacy
+            };
+            self.ensure_type(&mut base, legacy);
             base
         });
 
@@ -172,9 +188,15 @@ impl<'a> BindingsBuilder<'a> {
                 class_idx: class_indices.class_idx,
                 bases: bases.clone().into_boxed_slice(),
                 keywords: keywords.into_boxed_slice(),
-                decorators: decorators.clone().into_boxed_slice(),
+                decorators: decorators_with_ranges.clone().into_boxed_slice(),
                 is_new_type: false,
                 special_base: None,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.mro_idx,
+            BindingClassMro {
+                class_idx: class_indices.class_idx,
             },
         );
         self.insert_binding_idx(
@@ -212,6 +234,8 @@ impl<'a> BindingsBuilder<'a> {
                     ClassFieldInitialValue::Class(Some(e)) => ExprOrBinding::Expr(e.clone()),
                     _ => ExprOrBinding::Binding(Binding::Forward(info.key)),
                 };
+                let is_initialized_on_class =
+                    matches!(initial_value, ClassFieldInitialValue::Class(_));
                 let binding = BindingClassField {
                     class_idx: class_indices.class_idx,
                     name: name.into_key().clone(),
@@ -224,13 +248,14 @@ impl<'a> BindingsBuilder<'a> {
                 };
                 fields_possibly_defined_by_this_class.insert_hashed(
                     name.cloned(),
-                    ClassFieldProperties::new(stat_info.annot.is_some(), stat_info.loc),
+                    ClassFieldProperties::new(
+                        stat_info.annot.is_some(),
+                        is_initialized_on_class,
+                        stat_info.loc,
+                    ),
                 );
-
                 let key_field = KeyClassField(class_indices.def_index, name.into_key().clone());
-
                 key_class_fields.insert(self.idx_for_promise(key_field.clone()));
-
                 self.insert_binding(key_field, binding);
             }
         }
@@ -250,9 +275,10 @@ impl<'a> BindingsBuilder<'a> {
                     } else {
                         None
                     };
+
                     fields_possibly_defined_by_this_class.insert_hashed(
                         name.clone(),
-                        ClassFieldProperties::new(annotation.is_some(), range),
+                        ClassFieldProperties::new(annotation.is_some(), false, range),
                     );
 
                     let key_field = KeyClassField(class_indices.def_index, name.key().clone());
@@ -281,14 +307,33 @@ impl<'a> BindingsBuilder<'a> {
             unreachable!("Expected class body scope, got {:?}", last_scope.kind);
         }
 
-        let legacy_tparams = legacy_tparam_builder.lookup_keys();
-
-        self.bind_definition_user(
+        let decorator_keys = decorators_with_ranges
+            .map(|(idx, _)| *idx)
+            .into_boxed_slice();
+        self.bind_definition_current(
             &x.name,
             class_object,
-            Binding::ClassDef(class_indices.class_idx, decorators.into_boxed_slice()),
+            Binding::ClassDef(class_indices.class_idx, decorator_keys),
             FlowStyle::Other,
         );
+
+        // Insert a `KeyTParams` / `BindingTParams` pair, but only if there is at least
+        // one generic base class - otherwise, it is not possible that legacy tparams are used.
+        let legacy_tparams = legacy_tparam_builder.lookup_keys();
+        let tparams_require_binding = !legacy_tparams.is_empty();
+        if tparams_require_binding {
+            let scoped_type_params = mem::take(&mut x.type_params);
+            self.insert_binding(
+                KeyTParams(class_indices.def_index),
+                BindingTParams {
+                    name: x.name.clone(),
+                    scoped_type_params,
+                    bases: bases.clone().into_boxed_slice(),
+                    legacy_tparams: legacy_tparams.into_boxed_slice(),
+                },
+            );
+        }
+
         fields_possibly_defined_by_this_class.reserve(0); // Attempt to shrink to capacity
         self.insert_binding_idx(
             class_indices.class_idx,
@@ -296,8 +341,7 @@ impl<'a> BindingsBuilder<'a> {
                 def_index: class_indices.def_index,
                 def: x,
                 fields: fields_possibly_defined_by_this_class,
-                bases: bases.clone().into_boxed_slice(),
-                legacy_tparams: legacy_tparams.into_boxed_slice(),
+                tparams_require_binding,
             }),
         );
 
@@ -376,7 +420,7 @@ impl<'a> BindingsBuilder<'a> {
     fn synthesize_class_def(
         &mut self,
         class_name: Identifier,
-        class_object: User,
+        class_object: CurrentIdx,
         class_indices: ClassIndices,
         base: Option<Expr>,
         keywords: Box<[(Name, Expr)]>,
@@ -402,6 +446,12 @@ impl<'a> BindingsBuilder<'a> {
                 decorators: Box::new([]),
                 is_new_type: class_kind == SynthesizedClassKind::NewType,
                 special_base,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.mro_idx,
+            BindingClassMro {
+                class_idx: class_indices.class_idx,
             },
         );
         self.insert_binding_idx(
@@ -434,14 +484,14 @@ impl<'a> BindingsBuilder<'a> {
                     IllegalIdentifierHandling::Allow => {}
                     IllegalIdentifierHandling::Error => {
                         self.error(
-                            range,
-                            ErrorKind::BadClassDefinition,
-                            None,
-                            format!(
-                                "NamedTuple field name may not start with an underscore: `{member_name}`"
-                            ),
+                             range,
+                             ErrorKind::BadClassDefinition,
+                             None,
+                             format!(
+                                 "NamedTuple field name may not start with an underscore: `{member_name}`"
+                             ),
 
-                        );
+                         );
                         continue;
                     }
                     IllegalIdentifierHandling::Rename => member_name = format!("_{idx}"),
@@ -462,6 +512,7 @@ impl<'a> BindingsBuilder<'a> {
                 member_name.clone(),
                 ClassFieldProperties::new(
                     member_annotation.is_some() || class_kind == SynthesizedClassKind::NamedTuple,
+                    member_value.is_some(),
                     range,
                 ),
             );
@@ -513,7 +564,7 @@ impl<'a> BindingsBuilder<'a> {
                 },
             );
         }
-        self.bind_definition_user(
+        self.bind_definition_current(
             &class_name,
             class_object,
             Binding::ClassDef(class_indices.class_idx, Box::new([])),

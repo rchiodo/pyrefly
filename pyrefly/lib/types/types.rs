@@ -16,7 +16,6 @@ use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
 use pyrefly_util::assert_words;
 use pyrefly_util::display::commas_iter;
-use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::uniques::Unique;
 use pyrefly_util::uniques::UniqueFactory;
 use pyrefly_util::visit::Visit;
@@ -36,11 +35,13 @@ use crate::types::callable::Params;
 use crate::types::class::Class;
 use crate::types::class::ClassKind;
 use crate::types::class::ClassType;
-use crate::types::class::TArgs;
+use crate::types::keywords::DataclassTransformKeywords;
+use crate::types::keywords::KwCall;
 use crate::types::literal::Lit;
 use crate::types::module::Module;
 use crate::types::param_spec::ParamSpec;
 use crate::types::quantified::Quantified;
+use crate::types::quantified::QuantifiedKind;
 use crate::types::simplify::unions;
 use crate::types::special_form::SpecialForm;
 use crate::types::stdlib::Stdlib;
@@ -63,16 +64,14 @@ impl Display for Var {
 }
 
 impl Var {
+    pub const ZERO: Var = Var(Unique::ZERO);
+
     pub fn new(uniques: &UniqueFactory) -> Self {
         Self(uniques.fresh())
     }
 
     pub fn to_type(self) -> Type {
         Type::Var(self)
-    }
-
-    fn zero(&mut self) {
-        self.0 = Unique::zero();
     }
 }
 
@@ -108,6 +107,24 @@ impl TParam {
 #[derive(Visit, VisitMut, TypeEq)]
 pub struct TParams(Vec<TParam>);
 
+/// Implement `VisitMut` for `Arc<TParams>` as a no-op.
+///
+/// This is not technically correct, because TParams can contain types inside
+/// the bounds on `Quantified`, but we only use `VisitMut` to eliminate `Var`s,
+/// and we do not need to eliminate vars on tparams.
+///
+/// Without making this simplifying assumption we would not be able to use `Arc`
+/// to share the `TParams`.
+impl VisitMut<Type> for Arc<TParams> {
+    fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {}
+}
+
+impl Visit<Type> for Arc<TParams> {
+    fn recurse<'a>(&'a self, f: &mut dyn FnMut(&'a Type)) {
+        self.as_ref().recurse(f);
+    }
+}
+
 impl Display for TParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "[{}]", commas_iter(|| self.0.iter()))
@@ -131,8 +148,14 @@ impl TParams {
         self.0.iter()
     }
 
-    pub fn quantified(&self) -> impl ExactSizeIterator<Item = &Quantified> + '_ {
+    pub fn quantifieds(&self) -> impl ExactSizeIterator<Item = &Quantified> + '_ {
         self.0.iter().map(|x| &x.quantified)
+    }
+
+    pub fn contain_type_var_tuple(&self) -> bool {
+        self.0
+            .iter()
+            .any(|tparam| tparam.quantified.kind() == QuantifiedKind::TypeVarTuple)
     }
 
     pub fn as_vec(&self) -> &[TParam] {
@@ -144,13 +167,88 @@ impl TParams {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Visit, VisitMut, TypeEq)]
+pub struct TArgs(Box<(Arc<TParams>, Box<[Type]>)>);
+
+impl TArgs {
+    pub fn new(tparams: Arc<TParams>, targs: Vec<Type>) -> Self {
+        if tparams.len() != targs.len() {
+            panic!("TParams and TArgs must have the same length");
+        }
+        Self(Box::new((tparams, targs.into_boxed_slice())))
+    }
+
+    pub fn tparams(&self) -> &TParams {
+        &self.0.0
+    }
+
+    pub fn iter_paired(&self) -> impl ExactSizeIterator<Item = (&TParam, &Type)> {
+        self.0.0.iter().zip(self.0.1.iter())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.1.len()
+    }
+
+    pub fn as_slice(&self) -> &[Type] {
+        &self.0.1
+    }
+
+    pub fn as_mut(&mut self) -> &mut [Type] {
+        &mut self.0.1
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.1.is_empty()
+    }
+
+    /// Apply a substitution to type arguments.
+    ///
+    /// This is useful mainly to re-express ancestors (which, in the MRO, are in terms of class
+    /// type parameters)
+    ///
+    /// This is mainly useful to take ancestors coming from the MRO (which are always in terms
+    /// of the current class's type parameters) and re-express them in terms of the current
+    /// class specialized with type arguments.
+    pub fn apply_substitution(&self, substitution: &Substitution) -> Self {
+        let tys = self
+            .0
+            .1
+            .iter()
+            .map(|ty| substitution.substitute(ty.clone()))
+            .collect();
+        Self::new(self.0.0.dupe(), tys)
+    }
+
+    pub fn substitution<'a>(&'a self) -> Substitution<'a> {
+        let tparams = self.tparams();
+        let tys = self.as_slice();
+        Substitution(tparams.quantifieds().zip(tys.iter()).collect())
+    }
+
+    pub fn substitute(&self, ty: Type) -> Type {
+        self.substitution().substitute(ty)
+    }
+}
+
+pub struct Substitution<'a>(SmallMap<&'a Quantified, &'a Type>);
+
+impl<'a> Substitution<'a> {
+    pub fn substitute(&self, ty: Type) -> Type {
+        ty.subst(&self.0)
+    }
+}
+
+/// The types of Never. Prefer later ones where we have multiple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub enum NeverStyle {
-    Never,
     NoReturn,
+    Never,
 }
 
+/// The types of Any. Prefer later ones where we have multiple.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Display)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub enum AnyStyle {
@@ -247,7 +345,8 @@ impl TypeAlias {
 
 assert_words!(Type, 4);
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Visit, VisitMut, TypeEq)]
 pub enum CalleeKind {
     Callable,
     Function(FunctionKind),
@@ -400,18 +499,13 @@ impl OverloadType {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub struct Forall<T> {
-    pub tparams: TParams,
+    pub tparams: Arc<TParams>,
     pub body: T,
 }
 
 impl Forall<Forallable> {
-    pub fn subst(self, targs: TArgs) -> Type {
-        let param_map = self
-            .tparams
-            .quantified()
-            .zip(targs.as_slice())
-            .collect::<SmallMap<_, _>>();
-        self.body.as_type().subst(&param_map)
+    pub fn apply_targs(self, targs: TArgs) -> Type {
+        targs.substitute(self.body.as_type())
     }
 }
 
@@ -424,7 +518,7 @@ pub enum Forallable {
 }
 
 impl Forallable {
-    pub fn forall(self, tparams: TParams) -> Type {
+    pub fn forall(self, tparams: Arc<TParams>) -> Type {
         if tparams.is_empty() {
             self.as_type()
         } else {
@@ -511,6 +605,10 @@ pub enum Type {
     /// that TypedDict class definitions are still represented as `ClassDef(TD)`, just
     /// like regular classes.
     TypedDict(TypedDict),
+    /// Represents a "partial" version of a TypedDict.
+    /// For a TypedDict type `C`, `Partial[C]` represents an object with any subset of keys from `C`,
+    /// where each present key has the same value type as in `C`.
+    PartialTypedDict(TypedDict),
     Tuple(Tuple),
     Module(Module),
     Forall(Box<Forall<Forallable>>),
@@ -550,6 +648,9 @@ pub enum Type {
     /// typing.Self with the class definition it appears in. We store the latter as a ClassType
     /// because of how often we need the type of an instance of the class.
     SelfType(ClassType),
+    /// Wraps the result of a function call whose keyword arguments have typing effects, like
+    /// `typing.dataclass_transform(...)`.
+    KwCall(Box<KwCall>),
     None,
 }
 
@@ -567,6 +668,7 @@ impl Visit for Type {
             Type::ClassDef(x) => x.visit(f),
             Type::ClassType(x) => x.visit(f),
             Type::TypedDict(x) => x.visit(f),
+            Type::PartialTypedDict(x) => x.visit(f),
             Type::Tuple(x) => x.visit(f),
             Type::Module(x) => x.visit(f),
             Type::Forall(x) => x.visit(f),
@@ -590,6 +692,7 @@ impl Visit for Type {
             Type::TypeAlias(x) => x.visit(f),
             Type::SuperInstance(x) => x.visit(f),
             Type::SelfType(x) => x.visit(f),
+            Type::KwCall(x) => x.visit(f),
             Type::None => {}
         }
     }
@@ -609,6 +712,7 @@ impl VisitMut for Type {
             Type::ClassDef(x) => x.visit_mut(f),
             Type::ClassType(x) => x.visit_mut(f),
             Type::TypedDict(x) => x.visit_mut(f),
+            Type::PartialTypedDict(x) => x.visit_mut(f),
             Type::Tuple(x) => x.visit_mut(f),
             Type::Module(x) => x.visit_mut(f),
             Type::Forall(x) => x.visit_mut(f),
@@ -632,6 +736,7 @@ impl VisitMut for Type {
             Type::TypeAlias(x) => x.visit_mut(f),
             Type::SuperInstance(x) => x.visit_mut(f),
             Type::SelfType(x) => x.visit_mut(f),
+            Type::KwCall(x) => x.visit_mut(f),
             Type::None => {}
         }
     }
@@ -822,6 +927,7 @@ impl Type {
             Type::ClassDef(c) => Some(CalleeKind::Class(c.kind())),
             Type::Forall(forall) => forall.body.clone().as_type().callee_kind(),
             Type::Overload(overload) => Some(CalleeKind::Function(overload.metadata.kind.clone())),
+            Type::KwCall(call) => call.return_ty.callee_kind(),
             _ => None,
         }
     }
@@ -919,6 +1025,10 @@ impl Type {
         self.check_func_metadata(&|meta| meta.flags.is_property_getter)
     }
 
+    pub fn is_property_setter_decorator(&self) -> bool {
+        self.check_func_metadata(&|meta| meta.flags.is_property_setter_decorator)
+    }
+
     pub fn is_property_setter_with_getter(&self) -> Option<Type> {
         self.check_func_metadata(&|meta| meta.flags.is_property_setter_with_getter.clone())
     }
@@ -933,6 +1043,10 @@ impl Type {
 
     pub fn has_final_decoration(&self) -> bool {
         self.check_func_metadata(&|meta| meta.flags.has_final_decoration)
+    }
+
+    pub fn dataclass_transform_metadata(&self) -> Option<DataclassTransformKeywords> {
+        self.check_func_metadata(&|meta| meta.flags.dataclass_transform_metadata.clone())
     }
 
     pub fn transform_func_metadata(&mut self, mut f: impl FnMut(&mut FuncMetadata)) {
@@ -1079,7 +1193,7 @@ impl Type {
             match ty {
                 Type::Var(v) => {
                     // TODO: Should mostly be forcing these before printing
-                    v.zero();
+                    *v = Var::ZERO;
                 }
                 _ => {}
             }
@@ -1145,15 +1259,6 @@ impl Type {
                 }
                 answer
             }
-            _ => None,
-        }
-    }
-
-    pub fn as_decomposed_tuple_or_union(&self, stdlib: &Stdlib) -> Option<Vec<Type>> {
-        match self {
-            Type::Tuple(Tuple::Concrete(ts)) => Some(ts.clone()),
-            Type::Type(box Type::Union(ts)) => Some(ts.map(|t| Type::type_form(t.clone()))),
-            Type::TypeAlias(ta) => ta.as_value(stdlib).as_decomposed_tuple_or_union(stdlib),
             _ => None,
         }
     }

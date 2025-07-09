@@ -11,16 +11,17 @@ use lsp_types::SemanticToken;
 use lsp_types::SemanticTokenModifier;
 use lsp_types::SemanticTokenType;
 use lsp_types::SemanticTokensLegend;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::symbol_kind::SymbolKind;
 use pyrefly_util::visit::Visit as _;
+use ruff_python_ast::Arguments;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ModModule;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 
 use crate::binding::binding::Key;
-use crate::common::symbol_kind::SymbolKind;
 use crate::module::module_info::ModuleInfo;
-use crate::module::module_name::ModuleName;
 
 pub struct SemanticTokensLegends {
     token_types_index: HashMap<SemanticTokenType, u32>,
@@ -95,22 +96,22 @@ impl SemanticTokensLegends {
         let mut previous_col = 0;
         let mut lsp_semantic_tokens = Vec::new();
         for token in tokens {
-            let source_range = module_info.source_range(token.range);
+            let source_range = module_info.display_range(token.range);
             let length = token.range.len().to_u32();
             let current_line = source_range.start.line.to_zero_indexed();
-            let current_col = source_range.start.column.to_zero_indexed();
+            let current_col = source_range.start.column.get() - 1;
             let (delta_line, delta_start) = if previous_line == current_line {
                 let delta_start = current_col - previous_col;
                 if delta_start == 0 {
                     continue;
                 }
                 previous_col = current_col;
-                (0, delta_start as u32)
+                (0, delta_start)
             } else {
                 let delta_line = current_line - previous_line;
                 previous_line = current_line;
                 previous_col = current_col;
-                (delta_line as u32, current_col as u32)
+                (delta_line, current_col)
             };
             let token_type = *self.token_types_index.get(&token.token_type).unwrap();
             let mut token_modifiers_bitset = 0;
@@ -199,18 +200,31 @@ impl SemanticTokenBuilder {
         self.push_if_in_range(reference_range, token_type, token_modifiers);
     }
 
+    fn process_arguments(&mut self, args: &Arguments) {
+        for keyword in &args.keywords {
+            if let Some(arg) = &keyword.arg {
+                self.push_if_in_range(arg.range, SemanticTokenType::PARAMETER, Vec::new());
+            }
+        }
+    }
+
     fn process_expr(&mut self, x: &Expr) {
         match x {
             Expr::Call(call) if let Expr::Attribute(attr) = call.func.as_ref() => {
-                self.push_if_in_range(attr.attr.range(), SemanticTokenType::METHOD, vec![]);
+                self.push_if_in_range(attr.attr.range(), SemanticTokenType::METHOD, Vec::new());
                 attr.value.visit(&mut |x| self.process_expr(x));
                 for arg in call.arguments.arguments_source_order() {
                     arg.value().visit(&mut |x| self.process_expr(x));
                 }
+                self.process_arguments(&call.arguments);
+            }
+            Expr::Call(call) => {
+                self.process_arguments(&call.arguments);
+                x.recurse(&mut |x| self.process_expr(x));
             }
             Expr::Attribute(attr) => {
                 // todo(samzhou19815): if the class's base is Enum, it should be ENUM_MEMBER
-                self.push_if_in_range(attr.attr.range(), SemanticTokenType::PROPERTY, vec![]);
+                self.push_if_in_range(attr.attr.range(), SemanticTokenType::PROPERTY, Vec::new());
                 attr.value.visit(&mut |x| self.process_expr(x));
             }
             _ => {

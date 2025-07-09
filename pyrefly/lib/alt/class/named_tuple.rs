@@ -5,15 +5,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::dunder;
 use ruff_python_ast::name::Name;
 use starlark_map::small_set::SmallSet;
 use starlark_map::smallmap;
 
-use crate::alt::answers::AnswersSolver;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::types::class_metadata::ClassSynthesizedField;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
-use crate::dunder;
+use crate::error;
+use crate::error::collector::ErrorCollector;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
@@ -27,7 +29,7 @@ use crate::types::tuple::Tuple;
 use crate::types::types::Type;
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
-    pub fn get_named_tuple_elements(&self, cls: &Class) -> SmallSet<Name> {
+    pub fn get_named_tuple_elements(&self, cls: &Class, errors: &ErrorCollector) -> SmallSet<Name> {
         let mut elements = Vec::new();
         for name in cls.fields() {
             if !cls.is_field_annotated(name) {
@@ -37,7 +39,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 elements.push((name.clone(), range));
             }
         }
-        elements.sort_by_key(|e| e.1.start());
+        elements.sort_by_key(|e: &(Name, ruff_text_size::TextRange)| e.1.start());
+        let mut has_seen_default: bool = false;
+        for (name, range) in &elements {
+            let has_default = cls.is_field_initialized_on_class(name);
+            if !has_default && has_seen_default {
+                self.error(
+                    errors,
+                    *range,
+                    error::kind::ErrorKind::BadClassDefinition,
+                    None,
+                    format!(
+                        "NamedTuple field '{}' without a default may not follow NamedTuple field with a default",
+                        name
+                    ),
+                );
+            }
+            if has_default {
+                has_seen_default = true;
+            }
+        }
         elements.into_iter().map(|(name, _)| name).collect()
     }
 
