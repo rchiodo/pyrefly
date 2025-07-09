@@ -1518,6 +1518,9 @@ impl Server {
         // Convert offset to TextSize
         let position = TextSize::new(params.node.start as u32);
 
+        // First, check if we can get type information at this position
+        let type_info = transaction.get_type_at(&handle, position);
+
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
             if let Some((definition_metadata, definition, _docstring)) = 
@@ -1554,7 +1557,7 @@ impl Server {
                     crate::state::lsp::DefinitionMetadata::Module => {
                         // For module imports, check if type info is available to determine if resolved
                         let mut import_flags = tsp::DeclarationFlags::new();
-                        if transaction.get_type_at(&handle, position).is_none() {
+                        if type_info.is_none() {
                             // If we can't get type info for an import, it might be unresolved
                             import_flags = import_flags.with_unresolved_import();
                         }
@@ -1627,7 +1630,7 @@ impl Server {
 
                 // Get synthesized types if available
                 let mut synth_types = Vec::new();
-                if let Some(type_info) = transaction.get_type_at(&handle, position) {
+                if let Some(type_info) = type_info {
                     synth_types.push(tsp::convert_to_tsp_type(type_info));
                 }
 
@@ -1641,7 +1644,7 @@ impl Server {
                 });
 
                 let mut synth_types = Vec::new();
-                if let Some(type_info) = transaction.get_type_at(&handle, position) {
+                if let Some(type_info) = type_info {
                     synth_types.push(tsp::convert_to_tsp_type(type_info));
                 }
 
