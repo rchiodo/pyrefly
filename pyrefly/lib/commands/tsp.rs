@@ -360,7 +360,7 @@ fn extract_module_name(py_type: &crate::types::types::Type) -> Option<ModuleName
     }
 }
 
-fn convert_module_name(pyrefly_module: &crate::module::module_name::ModuleName) -> ModuleName {
+fn convert_module_name(pyrefly_module: &pyrefly_python::module_name::ModuleName) -> ModuleName {
     ModuleName {
         leading_dots: 0, // pyrefly modules don't have leading dots in this context
         name_parts: pyrefly_module.as_str().split('.').map(|s| s.to_string()).collect(),

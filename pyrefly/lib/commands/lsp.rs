@@ -165,6 +165,8 @@ use ruff_source_file::LineIndex;
 use ruff_source_file::OneIndexed;
 use ruff_source_file::SourceLocation;
 use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
+use ruff_text_size::TextSize;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use starlark_map::small_map::SmallMap;
@@ -183,7 +185,6 @@ use crate::commands::tsp::GetReprRequest;
 use crate::commands::tsp::GetDocstringRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
-use crate::common::symbol_kind::SymbolKind;
 use crate::config::config::ConfigFile;
 use crate::config::config::ConfigSource;
 use crate::config::environment::environment::PythonEnvironment;
@@ -1627,8 +1628,10 @@ impl Server {
 
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
-            if let Some((definition_metadata, definition, _docstring)) = 
-                transaction.find_definition(&handle, position, true) {
+            if let Some(first_definition) = transaction.find_definition(&handle, position, true).first() {
+                let definition_metadata = &first_definition.metadata;
+                let definition = &first_definition.location;
+                let _docstring = &first_definition.docstring;
                 
                 // Use provided name or extract from definition
                 let name = params.name.unwrap_or_else(|| {
@@ -1648,13 +1651,13 @@ impl Server {
                 let (category, flags) = match &definition_metadata {
                     crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
                         match symbol_kind {
-                            SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
-                            SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                            SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
-                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
-                            SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
-                            SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
+                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
                             _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                         }
                     },
@@ -1673,14 +1676,14 @@ impl Server {
                     },
                     crate::state::lsp::DefinitionMetadata::VariableOrAttribute(_, Some(symbol_kind)) => {
                         match symbol_kind {
-                            SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new().with_class_member()),
-                            SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
-                            SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member().with_constant()),
-                            SymbolKind::Attribute => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
-                            SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
-                            SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
-                            SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member().with_constant()),
+                            pyrefly_python::symbol_kind::SymbolKind::Attribute => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
                             _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
                         }
                     },
@@ -1799,7 +1802,7 @@ impl Server {
         };
 
         // Try to find the module and resolve the imported symbol
-        let pyrefly_module_name = crate::module::module_name::ModuleName::from_str(&full_module_path);
+        let pyrefly_module_name = pyrefly_python::module_name::ModuleName::from_str(&full_module_path);
         
         // Get Python search paths from the current context
         // We need to get the search paths from the importing file's context
@@ -1835,8 +1838,8 @@ impl Server {
 
         // Get the configuration for the importing file to get proper search paths
         let config = self.state.config_finder().python_file(
-            crate::module::module_name::ModuleName::unknown(),
-            &crate::module::module_path::ModulePath::filesystem(importing_path),
+            pyrefly_python::module_name::ModuleName::unknown(),
+            &pyrefly_python::module_path::ModulePath::filesystem(importing_path),
         );
         
         // Get all search paths: regular search paths + site packages
@@ -1852,28 +1855,28 @@ impl Server {
             // Try as a regular .py file
             let potential_py_file = search_path.join(&module_path_components).with_extension("py");
             if potential_py_file.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_py_file));
+                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_py_file));
                 break;
             }
             
             // Try as a package with __init__.py
             let potential_package_init = search_path.join(&module_path_components).join("__init__.py");
             if potential_package_init.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_package_init));
+                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_package_init));
                 break;
             }
             
             // Try as a .pyi stub file
             let potential_pyi_file = search_path.join(&module_path_components).with_extension("pyi");
             if potential_pyi_file.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_pyi_file));
+                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_pyi_file));
                 break;
             }
             
             // Try as a package with __init__.pyi stub
             let potential_package_pyi = search_path.join(&module_path_components).join("__init__.pyi");
             if potential_package_pyi.exists() {
-                target_module_path = Some(crate::module::module_path::ModulePath::filesystem(potential_package_pyi));
+                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_package_pyi));
                 break;
             }
         }
@@ -1949,15 +1952,19 @@ impl Server {
         // If we found the symbol, try to get its definition info
         if let Some(pos) = found_position {
             let text_pos = TextSize::new(pos as u32);
-            if let Some((def_metadata, def_info, _docstring)) = transaction.find_definition(&target_handle, text_pos, true) {
+            if let Some(first_definition) = transaction.find_definition(&target_handle, text_pos, true).first() {
+                let def_metadata = &first_definition.metadata;
+                let def_info = &first_definition.location;
+                let _docstring = &first_definition.docstring;
+                
                 // Create a resolved declaration with proper category and flags
                 let (category, flags) = match &def_metadata {
                     crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
                         match symbol_kind {
-                            crate::common::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
-                            crate::common::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            crate::common::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                            crate::common::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
                             _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
                         }
                     },
@@ -2014,8 +2021,8 @@ impl Server {
 
         // Get the configuration for this file
         let config = self.state.config_finder().python_file(
-            crate::module::module_name::ModuleName::unknown(),
-            &crate::module::module_path::ModulePath::filesystem(path),
+            pyrefly_python::module_name::ModuleName::unknown(),
+            &pyrefly_python::module_path::ModulePath::filesystem(path),
         );
 
         // Collect all search paths: search_path + site_package_path
@@ -2307,9 +2314,11 @@ impl Server {
         let position = TextSize::new(node.start as u32);
 
         // Try to find definition at the position - this is the same logic as hover
-        if let Some((_definition_metadata, _text_range_with_module_info, docstring)) =
-            transaction.find_definition(handle, position, true)
-        {
+        if let Some(first_definition) = transaction.find_definition(handle, position, true).first() {
+            let _definition_metadata = &first_definition.metadata;
+            let _text_range_with_module_info = &first_definition.location;
+            let docstring = &first_definition.docstring;
+            
             if let Some(docstring) = docstring {
                 return Ok(Some(docstring.as_string().trim().to_string()));
             }
