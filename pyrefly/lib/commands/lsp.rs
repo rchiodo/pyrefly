@@ -2262,14 +2262,46 @@ impl Server {
             });
         }
 
-        // For now, we'll generate a basic string representation based on the type information
-        // This is a simplified implementation - a full implementation would need to:
-        // 1. Convert TSP Type back to pyrefly's internal type representation
-        // 2. Use pyrefly's type formatting capabilities
-        // 3. Apply the formatting flags (expand aliases, print variance, convert to instance)
-        
-        let type_repr = format_type_representation(&params.type_param, params.flags);
-        Ok(type_repr)
+        // Use the handle mapping to get the actual pyrefly type
+        let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
+            // If we can't find the internal type, fall back to the basic formatter
+            eprintln!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
+            let type_repr = format_type_representation(&params.type_param, params.flags);
+            return Ok(type_repr);
+        };
+
+        // Use pyrefly's native type formatting
+        let type_repr = if params.flags.has_convert_to_instance_type() {
+            // Convert class types to instance types
+            match &internal_type {
+                crate::types::types::Type::ClassDef(class) => {
+                    // Convert ClassDef to ClassType (instance)
+                    let empty_tparams = std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
+                    let empty_targs = crate::types::types::TArgs::new(empty_tparams, Vec::new());
+                    let class_type = crate::types::class::ClassType::new(
+                        class.clone(),
+                        empty_targs,
+                    );
+                    format!("{}", crate::types::types::Type::ClassType(class_type))
+                }
+                _ => format!("{}", internal_type)
+            }
+        } else {
+            // Standard type representation
+            format!("{}", internal_type)
+        };
+
+        // Apply additional formatting based on flags
+        let final_repr = if params.flags.has_expand_type_aliases() {
+            // For now, we don't have specific alias expansion logic in the Display impl,
+            // but this is where we would implement it if needed
+            type_repr
+        } else {
+            type_repr
+        };
+
+        eprintln!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
+        Ok(final_repr)
     }
 
     fn get_docstring(
