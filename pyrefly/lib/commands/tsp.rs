@@ -292,7 +292,7 @@ impl lsp_types::request::Request for GetTypeRequest {
 
 impl lsp_types::request::Request for GetSymbolRequest {
     type Params = GetSymbolParams;
-    type Result = Symbol;
+    type Result = Option<Symbol>;
     const METHOD: &'static str = "typeServer/getSymbol";
 }
 

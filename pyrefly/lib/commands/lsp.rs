@@ -1582,7 +1582,7 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolParams,
-    ) -> Result<tsp::Symbol, ResponseError> {
+    ) -> Result<Option<tsp::Symbol>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
             return Err(ResponseError {
@@ -1754,17 +1754,21 @@ impl Server {
                 let mut synth_types = Vec::new();
                 if let Some(type_info) = type_info {
                     synth_types.push(tsp::convert_to_tsp_type(type_info));
+                } else {
+                    // No definition found and no type information available
+                    eprintln!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
+                    return Ok(None);
                 }
 
                 (name, Vec::new(), synth_types)
             };
 
-        Ok(tsp::Symbol {
+        Ok(Some(tsp::Symbol {
             node: params.node,
             name: symbol_name,
             decls: declarations,
             synthesized_types,
-        })
+        }))
     }
 
     fn resolve_import_declaration(
