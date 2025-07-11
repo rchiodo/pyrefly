@@ -183,6 +183,7 @@ use crate::commands::tsp::ResolveImportDeclarationRequest;
 use crate::commands::tsp::GetTypeOfDeclarationRequest;
 use crate::commands::tsp::GetReprRequest;
 use crate::commands::tsp::GetDocstringRequest;
+use crate::commands::tsp::SearchForTypeAttributeRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -1147,6 +1148,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, self.get_docstring(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, self.search_for_type_attribute(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2326,6 +2332,43 @@ impl Server {
         }
 
         // No docstring found
+        Ok(None)
+    }
+
+    fn search_for_type_attribute(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::SearchForTypeAttributeParams,
+    ) -> Result<Option<tsp::Attribute>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(ResponseError {
+                code: ErrorCode::ServerCancelled as i32,
+                message: "Snapshot is outdated".to_string(),
+                data: None,
+            });
+        }
+
+        // TODO: This is a placeholder implementation
+        // In a real implementation, we would:
+        // 1. Convert the TSP Type to pyrefly's internal Type representation
+        // 2. Use pyrefly's type system to search for the attribute in the class hierarchy
+        // 3. Handle overload disambiguation using the expression node
+        // 4. Consider access flags for proper visibility rules:
+        //    - SKIP_INSTANCE_ATTRIBUTES: Skip instance attributes when searching
+        //    - SKIP_TYPE_BASE_CLASS: Skip members from the base class
+        //    - SKIP_ATTRIBUTE_ACCESS_OVERRIDES: Skip attribute access overrides
+        //    - GET_BOUND_ATTRIBUTES: Look for bound attributes (methods bound to instance)
+        // 5. Create appropriate declarations for the found attribute
+        // 6. Handle instance vs class attribute access
+        
+        eprintln!(
+            "Warning: searchForTypeAttribute not fully implemented yet. Looking for attribute '{}' on type with access flags: {:?}",
+            params.attribute_name, params.access_flags
+        );
+        
+        // For now, return None to indicate no attribute found
+        // This allows the client to handle the case gracefully
         Ok(None)
     }
 

@@ -108,6 +108,8 @@ pub struct Attribute {
     #[serde(rename = "boundType")]
     pub bound_type: Option<Type>,
     pub flags: AttributeFlags,
+    // The declarations for the attribute
+    pub decls: Vec<Declaration>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -509,4 +511,50 @@ impl lsp_types::request::Request for GetDocstringRequest {
     type Params = GetDocstringParams;
     type Result = Option<String>;
     const METHOD: &'static str = "typeServer/getDocstring";
+}
+
+// Flags that are used for searching for attributes of a class Type
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct AttributeAccessFlags(pub u32);
+
+impl AttributeAccessFlags {
+    pub const NONE: AttributeAccessFlags = AttributeAccessFlags(0);
+    // Skip instance attributes when searching for attributes of a type
+    pub const SKIP_INSTANCE_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 0);
+    // Skip members from the base class of a type when searching for members of a type
+    pub const SKIP_TYPE_BASE_CLASS: AttributeAccessFlags = AttributeAccessFlags(1 << 1);
+    // Skip attribute access overrides when searching for members of a type
+    pub const SKIP_ATTRIBUTE_ACCESS_OVERRIDES: AttributeAccessFlags = AttributeAccessFlags(1 << 2);
+    // Look for bound attributes when searching for attributes of a type. That is methods bound specifically to an instance
+    pub const GET_BOUND_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 3);
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchForTypeAttributeParams {
+    // The starting point in the type hierarchy to search for the attribute
+    #[serde(rename = "startType")]
+    pub start_type: Type,
+    // The name of the attribute being requested
+    #[serde(rename = "attributeName")]
+    pub attribute_name: String,
+    // Flags that control how the attribute is accessed
+    #[serde(rename = "accessFlags")]
+    pub access_flags: AttributeAccessFlags,
+    // Optional: The expression node that the member is being accessed from
+    #[serde(rename = "expressionNode")]
+    pub expression_node: Option<Node>,
+    // Optional: The type of an instance that the attribute is being accessed from
+    #[serde(rename = "instanceType")]
+    pub instance_type: Option<Type>,
+    // The snapshot version of the type server state
+    pub snapshot: i32,
+}
+
+// LSP request type for searchForTypeAttribute
+pub enum SearchForTypeAttributeRequest {}
+
+impl lsp_types::request::Request for SearchForTypeAttributeRequest {
+    type Params = SearchForTypeAttributeParams;
+    type Result = Option<Attribute>;
+    const METHOD: &'static str = "typeServer/searchForTypeAttribute";
 }
