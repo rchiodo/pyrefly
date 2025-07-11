@@ -2444,9 +2444,9 @@ impl Server {
 
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
     fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
-        // Handle contentsAsUri scheme for bundled typeshed files
-        if uri.scheme() == "contentsAsUri" {
-            // Extract the path from contentsAsUri:///path?base64_content
+        // Handle contentsasuri scheme for bundled typeshed files
+        if uri.scheme() == "contentsasuri" {
+            // Extract the path from contentsasuri:///path?base64_content
             let path_str = uri.path();
             // Remove leading '/' to get the actual path
             let path_str = path_str.strip_prefix('/').unwrap_or(path_str);
