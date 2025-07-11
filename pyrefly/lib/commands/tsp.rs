@@ -286,7 +286,7 @@ impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
 
 impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
-    type Result = Type;
+    type Result = Option<Type>;
     const METHOD: &'static str = "typeServer/getType";
 }
 

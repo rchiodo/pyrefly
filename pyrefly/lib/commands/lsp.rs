@@ -1530,7 +1530,7 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetTypeParams,
-    ) -> Result<tsp::Type, ResponseError> {
+    ) -> Result<Option<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
             return Err(ResponseError {
@@ -1570,15 +1570,12 @@ impl Server {
 
         // Get the type at the position
         let Some(type_info) = transaction.get_type_at(&handle, position) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "No type found at position".to_string(),
-                data: None,
-            });
+            eprintln!("Warning: No type found at position {} in {}", position.to_usize(), uri);
+            return Ok(None);
         };
 
         // Convert pyrefly Type to TSP Type format
-        Ok(tsp::convert_to_tsp_type(type_info))
+        Ok(Some(tsp::convert_to_tsp_type(type_info)))
     }
 
     fn get_symbol(
