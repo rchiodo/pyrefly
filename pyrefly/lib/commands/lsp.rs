@@ -2444,6 +2444,19 @@ impl Server {
 
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
     fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
+        // Handle contentsAsUri scheme for bundled typeshed files
+        if uri.scheme() == "contentsAsUri" {
+            // Extract the path from contentsAsUri:///path?base64_content
+            let path_str = uri.path();
+            // Remove leading '/' to get the actual path
+            let path_str = path_str.strip_prefix('/').unwrap_or(path_str);
+            let path = PathBuf::from(path_str);
+            
+            // For contentsAsUri, we always use bundled typeshed module path
+            let module_path = ModulePath::bundled_typeshed(path);
+            return Some(Self::handle_from_module_path(&self.state, module_path));
+        }
+        
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
