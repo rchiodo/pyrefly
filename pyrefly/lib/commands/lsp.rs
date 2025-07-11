@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use pyrefly_util::lock::Mutex;
+use pyrefly_util::lock::RwLock;
 
 use base64::Engine;
 use base64::engine::general_purpose;
@@ -154,8 +156,7 @@ use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::arc_id::WeakArcId;
 use pyrefly_util::args::clap_env;
 use pyrefly_util::events::CategorizedEvents;
-use pyrefly_util::lock::Mutex;
-use pyrefly_util::lock::RwLock;
+
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
@@ -352,6 +353,9 @@ struct Server {
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
     version_info: Mutex<HashMap<PathBuf, i32>>,
+    /// Lookup table from TSP type handles to internal pyrefly types
+    /// This is cleared whenever the snapshot increments
+    type_handle_lookup: Arc<RwLock<(i32, HashMap<String, crate::types::types::Type>)>>,
 }
 
 /// Information about the Python environment p
@@ -1200,6 +1204,7 @@ impl Server {
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: Arc::new(AtomicBool::new(false)),
             version_info: Mutex::new(HashMap::new()),
+            type_handle_lookup: Arc::new(RwLock::new((0, HashMap::new()))),
         };
         s.configure(&folders, &[]);
 
@@ -1581,7 +1586,7 @@ impl Server {
         };
 
         // Convert pyrefly Type to TSP Type format
-        Ok(Some(tsp::convert_to_tsp_type(type_info)))
+        Ok(Some(self.convert_and_register_type(type_info)))
     }
 
     fn get_symbol(
@@ -1745,7 +1750,7 @@ impl Server {
                 // Get synthesized types if available
                 let mut synth_types = Vec::new();
                 if let Some(type_info) = type_info {
-                    synth_types.push(tsp::convert_to_tsp_type(type_info));
+                    synth_types.push(self.convert_and_register_type(type_info));
                 }
 
                 (name, decls, synth_types)
@@ -1759,7 +1764,7 @@ impl Server {
 
                 let mut synth_types = Vec::new();
                 if let Some(type_info) = type_info {
-                    synth_types.push(tsp::convert_to_tsp_type(type_info));
+                    synth_types.push(self.convert_and_register_type(type_info));
                 } else {
                     // No definition found and no type information available
                     eprintln!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
@@ -2098,7 +2103,7 @@ impl Server {
                 if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
                     let resolved_position = TextSize::new(resolved_node.start as u32);
                     if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
-                        return Ok(Some(tsp::convert_to_tsp_type(resolved_type)));
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
                     }
                 }
             }
@@ -2133,7 +2138,7 @@ impl Server {
                     
                     let resolved_position = TextSize::new(resolved_node.start as u32);
                     if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
-                        return Ok(Some(tsp::convert_to_tsp_type(resolved_type)));
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
                     }
                 }
             }
@@ -2214,7 +2219,7 @@ impl Server {
                 };
                 
                 // Convert pyrefly Type to TSP Type format using the fresh transaction result
-                return Ok(tsp::convert_to_tsp_type(type_info));
+                return Ok(self.convert_and_register_type(type_info));
             }
         };
 
@@ -2237,7 +2242,7 @@ impl Server {
         };
 
         // Convert pyrefly Type to TSP Type format
-        Ok(tsp::convert_to_tsp_type(type_info))
+        Ok(self.convert_and_register_type(type_info))
     }
 
     fn get_repr(
@@ -2349,31 +2354,187 @@ impl Server {
             });
         }
 
-        // TODO: This is a placeholder implementation
-        // In a real implementation, we would:
-        // 1. Convert the TSP Type to pyrefly's internal Type representation
+        // Extract information from the start type
+        let start_type = &params.start_type;
+        
+        // Try to lookup the internal pyrefly type from the TSP type handle
+        let py_type = self.lookup_type_from_tsp_type(start_type);
+        
+        if let Some(internal_type) = py_type {
+            let handle_str = match &start_type.handle {
+                tsp::TypeHandle::String(s) => s.clone(),
+                tsp::TypeHandle::Integer(i) => format!("{}", i),
+            };
+            eprintln!(
+                "Found internal type for TSP handle: {} -> {}",
+                handle_str,
+                internal_type.to_string()
+            );
+            
+            // TODO: Now we can use the internal type system to search for attributes
+            // For now, let's still use the basic implementation but with better type info
+        } else {
+            let handle_str = match &start_type.handle {
+                tsp::TypeHandle::String(s) => s.clone(),
+                tsp::TypeHandle::Integer(i) => format!("{}", i),
+            };
+            eprintln!(
+                "Warning: Could not lookup internal type for TSP handle: {}",
+                handle_str
+            );
+        }
+        
+        // Basic filtering based on type category
+        // Only classes and modules typically have attributes we can search
+        match start_type.category {
+            tsp::TypeCategory::CLASS | tsp::TypeCategory::MODULE => {
+                // Proceed with attribute search
+            }
+            _ => {
+                // For non-class/module types, return None
+                eprintln!(
+                    "Warning: searchForTypeAttribute called on non-class/module type: {:?}",
+                    start_type.category
+                );
+                return Ok(None);
+            }
+        }
+
+        // Basic implementation: Create a mock attribute for common Python attributes
+        // This demonstrates the structure while we work on the full implementation
+        let common_attributes = [
+            "__class__", "__dict__", "__doc__", "__module__", "__name__",
+            "__init__", "__str__", "__repr__", "__len__", "__call__"
+        ];
+
+        if common_attributes.contains(&params.attribute_name.as_str()) {
+            // Create a basic attribute response
+            let attribute = tsp::Attribute {
+                name: params.attribute_name.clone(),
+                type_info: tsp::Type {
+                    handle: tsp::TypeHandle::String(format!("attr_{}", params.attribute_name)),
+                    category: match params.attribute_name.as_str() {
+                        "__class__" => tsp::TypeCategory::CLASS,
+                        "__dict__" => tsp::TypeCategory::ANY,
+                        "__doc__" => tsp::TypeCategory::ANY, // Could be str or None
+                        "__module__" => tsp::TypeCategory::ANY, // str
+                        "__name__" => tsp::TypeCategory::ANY, // str
+                        "__init__" | "__call__" => tsp::TypeCategory::FUNCTION,
+                        "__str__" | "__repr__" => tsp::TypeCategory::FUNCTION,
+                        "__len__" => tsp::TypeCategory::FUNCTION,
+                        _ => tsp::TypeCategory::ANY,
+                    },
+                    flags: tsp::TypeFlags::new(),
+                    module_name: start_type.module_name.clone(),
+                    name: match params.attribute_name.as_str() {
+                        "__class__" => "type".to_string(),
+                        "__dict__" => "dict[str, Any]".to_string(),
+                        "__doc__" => "str | None".to_string(),
+                        "__module__" => "str".to_string(),
+                        "__name__" => "str".to_string(),
+                        "__init__" => "(...) -> None".to_string(),
+                        "__str__" | "__repr__" => "() -> str".to_string(),
+                        "__len__" => "() -> int".to_string(),
+                        "__call__" => "(...) -> Any".to_string(),
+                        _ => "Any".to_string(),
+                    },
+                    category_flags: 0,
+                    decl: None,
+                },
+                owner: Some(start_type.clone()),
+                bound_type: params.instance_type.clone(),
+                flags: tsp::AttributeFlags::NONE, // Basic flags
+                decls: Vec::new(), // Empty for now - would need actual source locations
+            };
+
+            eprintln!(
+                "Found common attribute '{}' on type '{}' with flags: {:?}",
+                params.attribute_name, start_type.name, params.access_flags
+            );
+
+            return Ok(Some(attribute));
+        }
+
+        // If not a common attribute, log and return None
+        eprintln!(
+            "Warning: Attribute '{}' not found on type '{}' with access flags: {:?}",
+            params.attribute_name, start_type.name, params.access_flags
+        );
+        
+        // TODO: Full implementation would:
+        // 1. Convert TSP Type back to pyrefly's internal Type representation
         // 2. Use pyrefly's type system to search for the attribute in the class hierarchy
         // 3. Handle overload disambiguation using the expression node
-        // 4. Consider access flags for proper visibility rules:
+        // 4. Apply access flags:
         //    - SKIP_INSTANCE_ATTRIBUTES: Skip instance attributes when searching
         //    - SKIP_TYPE_BASE_CLASS: Skip members from the base class
         //    - SKIP_ATTRIBUTE_ACCESS_OVERRIDES: Skip attribute access overrides
         //    - GET_BOUND_ATTRIBUTES: Look for bound attributes (methods bound to instance)
-        // 5. Create appropriate declarations for the found attribute
-        // 6. Handle instance vs class attribute access
+        // 5. Create appropriate declarations for the found attribute with real source locations
+        // 6. Handle instance vs class attribute access properly
         
-        eprintln!(
-            "Warning: searchForTypeAttribute not fully implemented yet. Looking for attribute '{}' on type with access flags: {:?}",
-            params.attribute_name, params.access_flags
-        );
-        
-        // For now, return None to indicate no attribute found
-        // This allows the client to handle the case gracefully
         Ok(None)
     }
 
     fn current_snapshot(&self) -> i32 {
         self.state.current_snapshot()
+    }
+
+    /// Converts a pyrefly type to TSP type and registers it in the lookup table
+    fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
+        let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
+        
+        // Register the type in the lookup table
+        if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
+            self.register_type_handle(handle_str.clone(), py_type);
+        }
+        
+        tsp_type
+    }
+
+    /// Registers a type handle in the lookup table, clearing old entries if snapshot changed
+    fn register_type_handle(&self, handle: String, py_type: crate::types::types::Type) {
+        let current_snapshot = self.current_snapshot();
+        let mut lookup = self.type_handle_lookup.write();
+        
+        // Clear the lookup table if snapshot has changed
+        if lookup.0 != current_snapshot {
+            lookup.1.clear();
+            lookup.0 = current_snapshot;
+        }
+        
+        lookup.1.insert(handle, py_type);
+    }
+
+    /// Looks up a pyrefly type from a TSP type handle
+    fn lookup_type_from_handle(&self, handle: &str) -> Option<crate::types::types::Type> {
+        let current_snapshot = self.current_snapshot();
+        let mut lookup = self.type_handle_lookup.write();
+        
+        // Clear the lookup table if snapshot has changed
+        if lookup.0 != current_snapshot {
+            lookup.1.clear();
+            lookup.0 = current_snapshot;
+            return None;
+        }
+        
+        lookup.1.get(handle).cloned()
+    }
+
+    /// Looks up a pyrefly type from an integer TSP type handle
+    fn lookup_type_by_int_handle(&self, id: i32) -> Option<crate::types::types::Type> {
+        // For now, convert integer handle to string and use the existing lookup
+        // In a more sophisticated implementation, we might have separate integer and string lookups
+        let handle_str = format!("{}", id);
+        self.lookup_type_from_handle(&handle_str)
+    }
+
+    /// Looks up a pyrefly type from a TSP Type
+    fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
+        match &tsp_type.handle {
+            tsp::TypeHandle::String(handle_str) => self.lookup_type_from_handle(handle_str),
+            tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
+        }
     }
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
@@ -2944,9 +3105,9 @@ impl Server {
             &params.text_document.uri.to_file_path().unwrap(),
         );
         let mut items = Vec::new();
-        let open_files = &self.open_files.read();
+        let open_files = self.open_files.read();
         for e in transaction.get_errors(once(&handle)).collect_errors().shown {
-            if let Some((_, diag)) = self.get_diag_if_shown(&e, open_files) {
+            if let Some((_, diag)) = self.get_diag_if_shown(&e, &open_files) {
                 items.push(diag);
             }
         }
