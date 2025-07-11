@@ -151,6 +151,9 @@ use lsp_types::request::WorkspaceConfiguration;
 use path_absolutize::Absolutize;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use ruff_python_ast::name::Name;
+use crate::error::collector::ErrorCollector;
+use crate::error::style::ErrorStyle;
 use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::arc_id::WeakArcId;
@@ -2383,34 +2386,110 @@ impl Server {
         }
     }
 
-    /// Search for attribute in class types (simplified implementation)
+    /// Search for attribute in class types using the solver
     fn search_attribute_in_class_type(
         &self,
-        _class_type: &crate::types::class::ClassType,
+        class_type: &crate::types::class::ClassType,
         attribute_name: &str,
-        _transaction: &Transaction,
+        transaction: &Transaction,
         _params: &tsp::SearchForTypeAttributeParams,
     ) -> Result<Option<tsp::Attribute>, ResponseError> {
         eprintln!(
-            "Searching for attribute '{}' in class type (simplified - returns None)",
+            "Searching for attribute '{}' in class type using solver",
             attribute_name
         );
 
-        // For now, always return None - this is honest about not finding attributes
-        // instead of lying and creating fake ones.
-        // 
-        // TODO: Implement proper attribute lookup using the solver:
-        // 1. Convert attribute name to ruff_python_ast::name::Name
-        // 2. Get access to the solver from transaction (need to find the right method)
-        // 3. Use solver.type_order().try_lookup_attr_from_class_type()
-        // 4. Convert found attributes to TSP format
+        // Convert string attribute name to ruff_python_ast::name::Name
+        let attr_name = Name::new(attribute_name.to_string());
+
+        // Get the module info from the class type
+        let class_qname = class_type.class_object().qname();
+        let module_info = class_qname.module_info();
         
-        eprintln!(
-            "Attribute '{}' not found in class type (honest implementation)",
-            attribute_name
+        // Create a handle for the module containing the class
+        // Use the existing config finder to get the proper config
+        let module_path = module_info.path().clone();
+        let module_name = module_info.name();
+        let config = self.state.config_finder().python_file(module_name, &module_path);
+        let handle = crate::state::handle::Handle::new(
+            module_name,
+            module_path,
+            config.get_sys_info(),
         );
-        
-        Ok(None)
+
+        // Use ad_hoc_solve to access the solver and look up the attribute
+        let result = transaction.ad_hoc_solve(&handle, |solver| {
+            // First try to get the attribute using try_lookup_attr_from_class_type
+            if let Some(attribute) = solver.try_lookup_attr_from_class_type(class_type.clone(), &attr_name) {
+                // We found the attribute, now we need to get its type
+                // Use type_of_attr_get to get the resolved type
+                let class_instance_type = crate::types::types::Type::ClassType(class_type.clone());
+                let attribute_type = solver.type_of_attr_get(
+                    &class_instance_type,
+                    &attr_name,
+                    ruff_text_size::TextRange::default(), // Use a default range
+                    &ErrorCollector::new(
+                        module_info.clone(),
+                        ErrorStyle::Never,
+                    ), // Create a temporary error collector
+                    None, // No context
+                    "search_for_type_attribute", // Context description
+                );
+                
+                Some((attribute, attribute_type))
+            } else {
+                None
+            }
+        });
+
+        match result {
+            Some(Some((_attribute, attribute_type))) => {
+                eprintln!(
+                    "Found attribute '{}' in class type with type: {:?}",
+                    attribute_name, attribute_type
+                );
+                
+                // Convert the pyrefly Attribute to TSP Attribute
+                let tsp_attribute = self.convert_type_to_tsp_attribute(attribute_type, attribute_name);
+                Ok(Some(tsp_attribute))
+            }
+            Some(None) => {
+                eprintln!(
+                    "Attribute '{}' not found in class type",
+                    attribute_name
+                );
+                Ok(None)
+            }
+            None => {
+                eprintln!(
+                    "Failed to create solver for attribute lookup of '{}'",
+                    attribute_name
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// Convert a pyrefly Type to TSP Attribute format
+    fn convert_type_to_tsp_attribute(
+        &self,
+        attribute_type: crate::types::types::Type,
+        attribute_name: &str,
+    ) -> tsp::Attribute {
+        // Convert the pyrefly type to TSP type and register it
+        let tsp_type = self.convert_and_register_type(attribute_type);
+
+        // For now, create default flags - we could enhance this later with more attribute metadata
+        let flags = tsp::AttributeFlags::NONE;
+
+        tsp::Attribute {
+            name: attribute_name.to_string(),
+            type_info: tsp_type,
+            owner: None, // TODO: Could set this to the class type if needed
+            bound_type: None, // TODO: Could implement bound type if needed
+            flags,
+            decls: Vec::new(), // TODO: Could add declaration information if available
+        }
     }
 
     fn current_snapshot(&self) -> i32 {
