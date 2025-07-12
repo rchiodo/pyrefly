@@ -1570,15 +1570,6 @@ impl Server {
             });
         };
 
-        // Get module info for position conversion
-        let Some(_module_info) = transaction.get_module_info(&handle) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Failed to get module info".to_string(),
-                data: None,
-            });
-        };
-
         // Convert offset to TextSize
         let position = TextSize::new(params.node.start as u32);
 
@@ -1623,23 +1614,43 @@ impl Server {
         };
 
         // Get module info for position conversion
-        let Some(module_info) = transaction.get_module_info(&handle) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Failed to get module info".to_string(),
-                data: None,
-            });
+        // If the module is not loaded in the transaction, try to load it
+        let (module_info, transaction_to_use) = match transaction.get_module_info(&handle) {
+            Some(info) => (info, None), // Use the existing transaction
+            None => {
+                // Module not loaded in transaction, try to load it
+                let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+                    return Err(ResponseError {
+                        code: ErrorCode::RequestFailed as i32,
+                        message: "Failed to load module".to_string(),
+                        data: None,
+                    });
+                };
+                
+                let Some(info) = fresh_transaction.get_module_info(&handle) else {
+                    return Err(ResponseError {
+                        code: ErrorCode::RequestFailed as i32,
+                        message: "Failed to get module info after loading".to_string(),
+                        data: None,
+                    });
+                };
+                
+                (info, Some(fresh_transaction))
+            }
         };
+
+        // Use the appropriate transaction for the rest of the function
+        let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
 
         // Convert offset to TextSize
         let position = TextSize::new(params.node.start as u32);
 
         // First, check if we can get type information at this position
-        let type_info = transaction.get_type_at(&handle, position);
+        let type_info = active_transaction.get_type_at(&handle, position);
 
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
-            if let Some(first_definition) = transaction.find_definition(&handle, position, true).first() {
+            if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).first() {
                 let definition_metadata = &first_definition.metadata;
                 let definition = &first_definition.location;
                 let _docstring = &first_definition.docstring;
