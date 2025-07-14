@@ -13,9 +13,11 @@ use anyhow::Context as _;
 use clap::Parser;
 use parse_display::Display;
 use path_absolutize::Absolutize;
+use pyrefly_util::display;
 use pyrefly_util::fs_anyhow;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use crate::commands::check;
 use crate::commands::config_migration;
@@ -23,6 +25,7 @@ use crate::commands::config_migration::write_pyproject;
 use crate::commands::globs_and_config_getter;
 use crate::commands::run::CommandExitStatus;
 use crate::config::config::ConfigFile;
+use crate::error::summarise;
 
 const MAX_ERRORS_TO_PROMPT_SUPPRESSION: usize = 100;
 
@@ -115,10 +118,7 @@ impl Args {
             // decline confirmation, mocking user input
             return false;
         }
-        print!("{prompt}");
-        std::io::stdout().flush().ok();
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).ok();
+        let input = Self::read_from_stdin(prompt);
         let input = input.trim();
         input == "y" || input == "Y"
     }
@@ -135,13 +135,18 @@ impl Args {
                 let check_result = self.run_check(config_path.clone());
 
                 // Check if there are errors and if there are fewer than 100
-                if let Ok((_, error_count)) = check_result {
+                if let Ok((_, errors)) = check_result {
+                    let error_count = errors.len();
                     if error_count == 0 {
                         return Ok(CommandExitStatus::Success);
                     }
                     // 3a. Prompt error suppression if there are less than the maximum number of errors
                     else if error_count <= MAX_ERRORS_TO_PROMPT_SUPPRESSION {
                         return self.prompt_error_suppression(config_path, error_count);
+                    }
+                    // 3b. Prompt error suppression in specific subdirectories if there are more than the maximum number of errors
+                    else {
+                        return self.prompt_init_on_subdirectory(config_path, errors);
                     }
                 }
                 Ok(CommandExitStatus::Success)
@@ -152,10 +157,10 @@ impl Args {
     fn run_check(
         &self,
         config_path: Option<PathBuf>,
-    ) -> anyhow::Result<(CommandExitStatus, usize)> {
+    ) -> anyhow::Result<(CommandExitStatus, Vec<crate::error::error::Error>)> {
         info!("Running pyrefly check...");
 
-        // Create check args by parsing arguments with output-format set to errors-omitted
+        // Create check args by parsing arguments with output-format set to omit-errors
         let mut check_args = check::Args::parse_from(["check", "--output-format", "omit-errors"]);
 
         // Use get to get the filtered globs and config finder
@@ -164,10 +169,10 @@ impl Args {
 
         // Run the check directly
         match check_args.run_once(filtered_globs, config_finder, true) {
-            Ok((status, error_count)) => Ok((status, error_count)),
+            Ok((status, errors)) => Ok((status, errors)),
             Err(e) => {
                 error!("Failed to run pyrefly check: {}", e);
-                Ok((CommandExitStatus::Success, 0)) // Still return success to match original behavior
+                Ok((CommandExitStatus::Success, Vec::new())) // Still return success to match original behavior
             }
         }
     }
@@ -177,10 +182,8 @@ impl Args {
         config_path: Option<PathBuf>,
         error_count: usize,
     ) -> anyhow::Result<CommandExitStatus> {
-        let prompt = format!(
-            "Found {} errors. Would you like to suppress them? (y/N): ",
-            error_count
-        );
+        let prompt =
+            format!("Found {error_count} errors. Would you like to suppress them? (y/N): ");
 
         if Self::prompt_user_confirmation(&prompt) {
             info!("Running pyrefly check with suppress-errors flag...");
@@ -190,7 +193,7 @@ impl Args {
                 "check",
                 "--suppress-errors",
                 "--output-format",
-                "errors-omitted",
+                "omit-errors",
                 "--no-summary",
             ]);
 
@@ -209,6 +212,115 @@ impl Args {
         }
 
         Ok(CommandExitStatus::Success)
+    }
+
+    fn prompt_init_on_subdirectory(
+        &self,
+        config_path: Option<PathBuf>,
+        errors: Vec<crate::error::error::Error>,
+    ) -> anyhow::Result<CommandExitStatus> {
+        // Get the top directories by error count
+        let (best_path_index, dirs_to_show) =
+            summarise::get_top_error_dirs_for_init(&errors, config_path.as_ref());
+
+        // Print the top directories
+        info!("Top 10 Directories by Error Count:");
+        if !dirs_to_show.is_empty() {
+            info!("  (Using path_index = {} for grouping)", best_path_index);
+
+            // Take the top 10 directories with <= 100 errors
+            for (i, (dir, error_count)) in dirs_to_show.iter().enumerate() {
+                info!(
+                    "  {}) {}: {}",
+                    i + 1,
+                    dir.display(),
+                    display::count(*error_count, "error")
+                );
+            }
+        } else {
+            error!("  No directories found with <= 100 errors.");
+            return Ok(CommandExitStatus::Success);
+        }
+
+        // Prompt user to select directories to suppress errors in
+        let prompt = "Enter directory numbers to suppress errors (comma-separated, e.g. 1,3,5), or press Enter to skip: ";
+        let selected_indices = Self::read_input_comma_separated_values(prompt, 1, 10);
+
+        // If no valid directories were selected, return success
+        if selected_indices.is_empty() {
+            error!("No valid directory numbers provided. Skipping error suppression.");
+            return Ok(CommandExitStatus::Success);
+        }
+
+        // Get the selected directories
+        let selected_dirs: Vec<PathBuf> = selected_indices
+            .iter()
+            .filter_map(|&idx| {
+                if idx < dirs_to_show.len() {
+                    Some(dirs_to_show[idx - 1].0.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Print selected directories
+        let dirs_str = if selected_dirs.len() == 1 {
+            format!("directory {}", selected_dirs[0].display())
+        } else {
+            format!(
+                "directories {}",
+                selected_dirs
+                    .iter()
+                    .map(|d| d.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+
+        // Run check with suppress-errors for the selected directories
+        info!(
+            "Running pyrefly check with suppress-errors flag for selected directories: {}",
+            dirs_str
+        );
+
+        // Create check args with suppress-errors flag
+        let mut suppress_args = check::Args::parse_from([
+            "check",
+            "--suppress-errors",
+            "--output-format",
+            "omit-errors",
+            "--no-summary",
+        ]);
+
+        // Collect file paths from errors in selected directories
+        let mut files_to_check: Vec<String> = Vec::new();
+        for error in &errors {
+            let error_path = PathBuf::from(error.path().to_string());
+            if selected_dirs.iter().any(|dir| error_path.starts_with(dir)) {
+                // Convert PathBuf to String
+                files_to_check.push(error_path.to_string_lossy().into_owned());
+            }
+        }
+
+        // If there are no files to check in the selected directories, return success
+        if files_to_check.is_empty() {
+            error!("No errors found in the selected directories.");
+            return Ok(CommandExitStatus::Success);
+        }
+
+        // Use get to get the filtered globs and config finder, passing the files to check
+        let (suppress_globs, suppress_config_finder) =
+            globs_and_config_getter::get(files_to_check, None, config_path, &mut suppress_args)?;
+
+        // Run the check with suppress-errors flag
+        match suppress_args.run_once(suppress_globs, suppress_config_finder, true) {
+            Ok(_) => Ok(CommandExitStatus::Success),
+            Err(e) => {
+                error!("Failed to suppress errors: {}", e);
+                Ok(CommandExitStatus::Success) // Still return success to match original behavior
+            }
+        }
     }
 
     fn create_config(&self) -> anyhow::Result<(CommandExitStatus, Option<PathBuf>)> {
@@ -287,6 +399,60 @@ impl Args {
         fs_anyhow::write(&config_path, serialized.as_bytes())?;
         info!("New config written to `{}`", config_path.display());
         Ok((CommandExitStatus::Success, Some(config_path)))
+    }
+
+    fn read_from_stdin(prompt: &str) -> String {
+        print!("{prompt}");
+        std::io::stdout().flush().ok();
+
+        // Read user input
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+        input
+    }
+
+    fn read_input_comma_separated_values(prompt: &str, min: usize, max: usize) -> Vec<usize> {
+        let input = Self::read_from_stdin(prompt);
+        Self::parse_comma_separated_values(&input, min, max)
+    }
+
+    /// Parses comma-separated values from a string and returns a vector of parsed values
+    /// within the specified range.
+    ///
+    /// # Arguments
+    /// * `input` - The input string containing comma-separated values
+    /// * `min` - The minimum valid value (inclusive)
+    /// * `max` - The maximum valid value (inclusive)
+    ///
+    /// # Returns
+    /// A vector of parsed values within the specified range
+    fn parse_comma_separated_values(input: &str, min: usize, max: usize) -> Vec<usize> {
+        let input = input.trim();
+
+        // If input is empty, return empty vector
+        if input.is_empty() {
+            return Vec::new();
+        }
+
+        // Parse comma-separated values
+        let selected_indices: Vec<usize> = input
+            .split(',')
+            .filter_map(|s| {
+                let trimmed = s.trim();
+                match trimmed.parse::<usize>() {
+                    Ok(num) if (min..=max).contains(&num) => Some(num),
+                    _ => {
+                        warn!(
+                            "'{}' is not a valid number ({}-{}), skipping.",
+                            trimmed, min, max
+                        );
+                        None
+                    }
+                }
+            })
+            .collect();
+
+        selected_indices
     }
 }
 
@@ -646,5 +812,40 @@ k = [\"v\"]
         let status = run_init_on_file(&tmp, "pyproject.toml")?;
         assert_user_error(status);
         Ok(())
+    }
+
+    // Test for parse_comma_separated_values with multiple test cases
+    #[test]
+    fn test_parse_comma_separated_values() {
+        // Define test cases as (input, min, max, expected_result)
+        let test_cases = [
+            // Empty input
+            ("", 1, 10, vec![]),
+            // Single valid number
+            ("5", 1, 10, vec![5]),
+            // Multiple valid numbers
+            ("1,3,5,10", 1, 10, vec![1, 3, 5, 10]),
+            // Input with spaces
+            (" 1, 3 , 5,  10 ", 1, 10, vec![1, 3, 5, 10]),
+            // Out of range values
+            ("0,11,15", 1, 10, vec![]),
+            // Mixed valid and invalid values
+            ("0,3,11,5", 1, 10, vec![3, 5]),
+            // Non-numeric values
+            ("a,b,c", 1, 10, vec![]),
+            // Mixed numeric and non-numeric values
+            ("1,a,3,b,5", 1, 10, vec![1, 3, 5]),
+            // Custom range
+            ("4,5,10,15,16", 5, 15, vec![5, 10, 15]),
+        ];
+
+        // Run each test case
+        for (i, (input, min, max, expected)) in test_cases.iter().enumerate() {
+            let result = Args::parse_comma_separated_values(input, *min, *max);
+            assert_eq!(
+                result, *expected,
+                "Test case {i} failed: input='{input}', min={min}, max={max}",
+            );
+        }
     }
 }

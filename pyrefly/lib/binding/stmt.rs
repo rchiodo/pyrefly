@@ -263,7 +263,7 @@ impl<'a> BindingsBuilder<'a> {
                     let mut delete_link = self.declare_current_idx(Key::UsageLink(target.range()));
                     if let Expr::Name(name) = target {
                         let idx = self.ensure_mutable_name(name);
-                        self.scopes.update_flow_info(
+                        self.scopes.upsert_flow_info(
                             Hashed::new(&name.id),
                             idx,
                             Some(FlowStyle::Uninitialized),
@@ -487,9 +487,7 @@ impl<'a> BindingsBuilder<'a> {
                     // This assignment gets checked with the provided annotation. But if there exists a prior
                     // annotation, we might be invalidating it unless the annotations are the same. Insert a
                     // check that in that case the annotations match.
-                    if let Some(ann) = cannonical_ann_idx
-                        && ann != ann_idx
-                    {
+                    if let Some(ann) = cannonical_ann_idx {
                         self.insert_binding(
                             KeyExpect(name.range),
                             BindingExpect::Redefinition {
@@ -767,6 +765,9 @@ impl<'a> BindingsBuilder<'a> {
             Stmt::Assert(mut x) => {
                 self.ensure_expr(&mut x.test, &mut Usage::Narrowing);
                 self.bind_narrow_ops(&NarrowOps::from_expr(self, Some(&x.test)), x.range);
+                if let Some(false) = self.sys_info.evaluate_bool(&x.test) {
+                    self.scopes.mark_flow_termination();
+                }
                 self.insert_binding(Key::Anon(x.test.range()), Binding::Expr(None, *x.test));
                 if let Some(mut msg_expr) = x.msg {
                     let mut msg = self.declare_current_idx(Key::UsageLink(msg_expr.range()));
@@ -808,7 +809,7 @@ impl<'a> BindingsBuilder<'a> {
                                 Key::Import(first.clone(), x.name.range),
                                 Binding::Module(m, vec![first.clone()], module_key),
                             );
-                            self.bind_key(&first, key, FlowStyle::MergeableImport(m));
+                            self.bind_name(&first, key, FlowStyle::MergeableImport(m));
                         }
                     }
                 }
@@ -838,7 +839,7 @@ impl<'a> BindingsBuilder<'a> {
                                             Binding::Type(Type::any_error())
                                         };
                                         let key = self.insert_binding(key, val);
-                                        self.bind_key(
+                                        self.bind_name(
                                             name.key(),
                                             key,
                                             FlowStyle::Import(m, name.into_key().clone()),

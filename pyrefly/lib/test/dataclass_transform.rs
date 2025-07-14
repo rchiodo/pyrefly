@@ -175,7 +175,6 @@ assert_type(c.x, int)
 );
 
 testcase!(
-    bug = "`x` should not be in the generated `__init__`",
     test_set_init_through_overload,
     r#"
 from typing import dataclass_transform, overload, Any, Literal
@@ -192,12 +191,11 @@ def build(x): ...
 class C:
     x: int = field()
     y: str = field(name='y')
-C(y='hello world')  # E: Missing argument `x`
+C(y='hello world')
     "#,
 );
 
 testcase!(
-    bug = "`x` should be kw-only",
     test_field_default,
     r#"
 from typing import dataclass_transform, Any
@@ -208,6 +206,115 @@ def build(x): ...
 class C:
     x: int = field()
 C(x=0)
-C(0)  # Should be an error
+C(0)  # E: Missing argument `x`  # E: Expected 0 positional arguments
+    "#,
+);
+
+testcase!(
+    test_converter,
+    r#"
+from typing import dataclass_transform, Any
+def my_field(**kwargs) -> Any: ...
+@dataclass_transform(field_specifiers=(my_field,))
+def build(x): ...
+def int_to_str(x: int) -> str:
+    return str(x)
+@build
+class C:
+    x: str = my_field(converter=int_to_str)
+C(x=0)
+C(x="oops")  # E: `Literal['oops']` is not assignable to parameter `x` with type `int`
+    "#,
+);
+
+testcase!(
+    test_set_attr_with_converter,
+    r#"
+from typing import dataclass_transform, Any
+def my_field(**kwargs) -> Any: ...
+@dataclass_transform(field_specifiers=(my_field,))
+def build(x): ...
+def int_to_str(x: int) -> str:
+    return str(x)
+@build
+class C:
+    x: str = my_field(converter=int_to_str)
+c = C(x=0)
+c.x = 42
+c.x = "oops"  # E: `Literal['oops']` is not assignable to attribute `x` with type `int`
+    "#,
+);
+
+testcase!(
+    test_class_converter,
+    r#"
+from typing import dataclass_transform, Any
+def my_field(**kwargs) -> Any: ...
+@dataclass_transform(field_specifiers=(my_field,))
+def build(x): ...
+
+class Converter:
+    def __init__(self, x: int) -> None: ...
+
+@build
+class Data:
+    x: Converter = my_field(converter=Converter)
+Data(x=0)
+Data(x=Converter(0))  # E: `Converter` is not assignable to parameter `x` with type `int`
+    "#,
+);
+
+testcase!(
+    test_overloaded_converter,
+    r#"
+from typing import dataclass_transform, overload, Any
+def my_field(**kwargs) -> Any: ...
+@dataclass_transform(field_specifiers=(my_field,))
+def build(x): ...
+
+class Converter1:
+    @overload
+    def __init__(self, x: int) -> None: ...
+    @overload
+    def __init__(self, x: str) -> None: ...
+    def __init__(self, x): ...
+
+@build
+class Data1:
+    x: Converter1 = my_field(converter=Converter1)
+Data1(x=0)
+Data1(x="")
+Data1(x=Converter1(0))  # E: `Converter1` is not assignable to parameter `x` with type `int | str`
+
+@overload
+def converter2(x: bytes) -> int: ...
+@overload
+def converter2(x: str) -> int: ...
+def converter2(x): return int(x)
+
+@build
+class Data2:
+    x: int = my_field(converter=converter2)
+Data2(x=b"")
+Data2(x="")
+Data2(x=0)  # E: `Literal[0]` is not assignable to parameter `x` with type `bytes | str`
+    "#,
+);
+
+testcase!(
+    test_builtin_class_converter,
+    r#"
+from typing import dataclass_transform, Any
+def my_field(**kwargs) -> Any: ...
+@dataclass_transform(field_specifiers=(my_field,))
+def build(x): ...
+@build
+class Data:
+    x: int = my_field(converter=int)
+
+class NotConvertibleToInt: ...
+
+Data(x="42")
+Data(x=NotConvertibleToInt())  # E: `NotConvertibleToInt` is not assignable to parameter `x`
     "#,
 );

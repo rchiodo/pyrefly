@@ -544,7 +544,9 @@ impl ConfigFile {
     pub fn configure(&mut self) -> Vec<ConfigError> {
         let mut configure_errors = Vec::new();
 
-        if !self.interpreters.skip_interpreter_query {
+        if self.interpreters.skip_interpreter_query {
+            self.python_environment.set_empty_to_default();
+        } else {
             match self.interpreters.find_interpreter(self.source.root()) {
                 Ok(interpreter) => {
                     let (env, error) = PythonEnvironment::get_interpreter_env(&interpreter);
@@ -790,6 +792,7 @@ mod tests {
     use super::*;
     use crate::config::util::ConfigOrigin;
     use crate::error::kind::ErrorKind;
+    use crate::error::kind::Severity;
 
     #[test]
     fn deserialize_pyrefly_config() {
@@ -854,8 +857,8 @@ mod tests {
                 root: ConfigBase {
                     extras: Default::default(),
                     errors: Some(ErrorDisplayConfig::new(HashMap::from_iter([
-                        (ErrorKind::AssertType, true),
-                        (ErrorKind::BadReturn, false)
+                        (ErrorKind::BadReturn, Severity::Ignore),
+                        (ErrorKind::AssertType, Severity::Error),
                     ]))),
                     ignore_errors_in_generated_code: Some(true),
                     replace_imports_with_any: Some(vec![ModuleWildcard::new("fibonacci").unwrap()]),
@@ -868,8 +871,8 @@ mod tests {
                     settings: ConfigBase {
                         extras: Default::default(),
                         errors: Some(ErrorDisplayConfig::new(HashMap::from_iter([
-                            (ErrorKind::AssertType, false),
-                            (ErrorKind::InvalidYield, false)
+                            (ErrorKind::InvalidYield, Severity::Ignore),
+                            (ErrorKind::AssertType, Severity::Ignore),
                         ]))),
                         ignore_errors_in_generated_code: Some(false),
                         replace_imports_with_any: Some(Vec::new()),
@@ -901,8 +904,8 @@ mod tests {
              ignore_missing_source = true
 
              [errors]
-             assert-type = true
-                 bad-return = false
+             assert-type = "error"
+                 bad-return = "ignore"
 
                  [[sub_config]]
                  matches = "sub/project/**"
@@ -911,8 +914,8 @@ mod tests {
                      replace_imports_with_any = []
                      ignore_errors_in_generated_code = false
                      [sub_config.errors]
-                     assert-type = false
-                         invalid-yield = false
+                     assert-type = "warn"
+                         invalid-yield = "ignore"
                          "#;
         let config = ConfigFile::parse_config(config_str).unwrap();
         assert!(config.root.extras.0.is_empty());

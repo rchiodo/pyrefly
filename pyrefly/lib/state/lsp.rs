@@ -72,7 +72,7 @@ use crate::state::state::CancellableTransaction;
 use crate::state::state::Transaction;
 use crate::types::callable::Param;
 use crate::types::callable::Params;
-use crate::types::module::Module;
+use crate::types::module::ModuleType;
 use crate::types::types::BoundMethodType;
 use crate::types::types::Type;
 
@@ -590,7 +590,7 @@ impl<'a> Transaction<'a> {
                     },
             }) => {
                 // TODO: Handle relative import (via ModuleName::new_maybe_relative)
-                Some(Type::Module(Module::new(
+                Some(Type::Module(ModuleType::new(
                     module_name.first_component(),
                     OrderedSet::from_iter([module_name]),
                 )))
@@ -741,7 +741,7 @@ impl<'a> Transaction<'a> {
 
     fn create_signature_information(type_: Type, arg_index: usize) -> SignatureInformation {
         let type_ = type_.deterministic_printing();
-        let label = format!("{}", type_);
+        let label = format!("{type_}");
         let (parameters, active_parameter) =
             if let Some(params) = Self::normalize_singleton_function_type_into_params(type_) {
                 let active_parameter = if arg_index < params.len() {
@@ -751,7 +751,7 @@ impl<'a> Transaction<'a> {
                 };
                 (
                     Some(params.map(|param| ParameterInformation {
-                        label: ParameterLabel::Simple(format!("{}", param)),
+                        label: ParameterLabel::Simple(format!("{param}")),
                         documentation: None,
                     })),
                     active_parameter,
@@ -1569,94 +1569,87 @@ impl<'a> Transaction<'a> {
                 identifier: _,
                 context: IdentifierContext::Attribute { base_range, .. },
             }) => {
-                if let Some(answers) = self.get_answers(handle) {
-                    if let Some(base_type) = answers.get_type_trace(base_range) {
-                        self.ad_hoc_solve(handle, |solver| {
-                            solver
-                                .completions(base_type.arc_clone(), None, true)
-                                .iter()
-                                .for_each(|x| {
-                                    let kind = match x.ty {
-                                        Some(Type::BoundMethod(_)) => {
-                                            Some(CompletionItemKind::METHOD)
-                                        }
-                                        Some(Type::Function(_)) => {
-                                            Some(CompletionItemKind::FUNCTION)
-                                        }
-                                        _ => Some(CompletionItemKind::FIELD),
-                                    };
-                                    result.push(CompletionItem {
-                                        label: x.name.as_str().to_owned(),
-                                        detail: x.ty.clone().map(|t| t.to_string()),
-                                        kind,
-                                        ..Default::default()
-                                    });
+                if let Some(answers) = self.get_answers(handle)
+                    && let Some(base_type) = answers.get_type_trace(base_range)
+                {
+                    self.ad_hoc_solve(handle, |solver| {
+                        solver
+                            .completions(base_type.arc_clone(), None, true)
+                            .iter()
+                            .for_each(|x| {
+                                let kind = match x.ty {
+                                    Some(Type::BoundMethod(_)) => Some(CompletionItemKind::METHOD),
+                                    Some(Type::Function(_)) => Some(CompletionItemKind::FUNCTION),
+                                    _ => Some(CompletionItemKind::FIELD),
+                                };
+                                result.push(CompletionItem {
+                                    label: x.name.as_str().to_owned(),
+                                    detail: x.ty.clone().map(|t| t.to_string()),
+                                    kind,
+                                    ..Default::default()
                                 });
-                        });
-                    }
+                            });
+                    });
                 }
             }
             Some(IdentifierWithContext { identifier, .. }) => {
-                if let Some(bindings) = self.get_bindings(handle) {
-                    if let Some(module_info) = self.get_module_info(handle) {
-                        bindings
-                            .available_definitions(position)
-                            .into_iter()
-                            .for_each(|idx| {
-                                let key = bindings.idx_to_key(idx);
-                                if let Key::Definition(id) = key {
-                                    let binding = bindings.get(idx);
-                                    let detail = self.get_type(handle, key).map(|t| t.to_string());
-                                    result.push(CompletionItem {
-                                        label: module_info.code_at(id.range()).to_owned(),
-                                        detail,
-                                        kind: binding
-                                            .symbol_kind()
-                                            .map_or(Some(CompletionItemKind::VARIABLE), |k| {
-                                                Some(k.to_lsp_completion_item_kind())
-                                            }),
-                                        ..Default::default()
-                                    })
-                                }
-                            });
-                        // We should not try to generate autoimport when the user has typed very few
-                        // characters. It's unhelpful to narrow down suggestions.
-                        if identifier.as_str().len() >= MIN_CHARACTERS_TYPED_AUTOIMPORT
-                            && let Some(ast) = self.get_ast(handle)
-                        {
-                            for (handle_to_import_from, name, export) in
-                                self.search_exports_fuzzy(identifier.as_str())
-                            {
-                                let (insert_text, additional_text_edits) =
-                                    match handle_to_import_from.module().as_str() {
-                                        "builtins" => (None, None),
-                                        _ => {
-                                            let (position, insert_text) = insert_import_edit(
-                                                &ast,
-                                                handle_to_import_from,
-                                                &name,
-                                            );
-                                            let import_text_edit = TextEdit {
-                                                range: module_info.lined_buffer().to_lsp_range(
-                                                    TextRange::at(position, TextSize::new(0)),
-                                                ),
-                                                new_text: insert_text.clone(),
-                                            };
-                                            (Some(insert_text), Some(vec![import_text_edit]))
-                                        }
-                                    };
+                if let Some(bindings) = self.get_bindings(handle)
+                    && let Some(module_info) = self.get_module_info(handle)
+                {
+                    bindings
+                        .available_definitions(position)
+                        .into_iter()
+                        .for_each(|idx| {
+                            let key = bindings.idx_to_key(idx);
+                            if let Key::Definition(id) = key {
+                                let binding = bindings.get(idx);
+                                let detail = self.get_type(handle, key).map(|t| t.to_string());
                                 result.push(CompletionItem {
-                                    label: name,
-                                    detail: insert_text,
-                                    kind: export
-                                        .symbol_kind
+                                    label: module_info.code_at(id.range()).to_owned(),
+                                    detail,
+                                    kind: binding
+                                        .symbol_kind()
                                         .map_or(Some(CompletionItemKind::VARIABLE), |k| {
                                             Some(k.to_lsp_completion_item_kind())
                                         }),
-                                    additional_text_edits,
                                     ..Default::default()
-                                });
+                                })
                             }
+                        });
+                    // We should not try to generate autoimport when the user has typed very few
+                    // characters. It's unhelpful to narrow down suggestions.
+                    if identifier.as_str().len() >= MIN_CHARACTERS_TYPED_AUTOIMPORT
+                        && let Some(ast) = self.get_ast(handle)
+                    {
+                        for (handle_to_import_from, name, export) in
+                            self.search_exports_fuzzy(identifier.as_str())
+                        {
+                            let (insert_text, additional_text_edits) =
+                                match handle_to_import_from.module().as_str() {
+                                    "builtins" => (None, None),
+                                    _ => {
+                                        let (position, insert_text) =
+                                            insert_import_edit(&ast, handle_to_import_from, &name);
+                                        let import_text_edit = TextEdit {
+                                            range: module_info.lined_buffer().to_lsp_range(
+                                                TextRange::at(position, TextSize::new(0)),
+                                            ),
+                                            new_text: insert_text.clone(),
+                                        };
+                                        (Some(insert_text), Some(vec![import_text_edit]))
+                                    }
+                                };
+                            result.push(CompletionItem {
+                                label: name,
+                                detail: insert_text,
+                                kind: export
+                                    .symbol_kind
+                                    .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                                        Some(k.to_lsp_completion_item_kind())
+                                    }),
+                                additional_text_edits,
+                                ..Default::default()
+                            });
                         }
                     }
                 }
@@ -1710,19 +1703,19 @@ impl<'a> Transaction<'a> {
         bindings: Bindings,
         transaction: &mut CancellableTransaction,
     ) -> Vec<(ModuleInfo, Vec<TextRange>)> {
-        if let Key::Definition(id) = bindings.idx_to_key(idx) {
-            if let Some(module_info) = self.get_module_info(handle) {
-                let definition_kind = DefinitionMetadata::VariableOrAttribute(
-                    Name::from(module_info.code_at(id.range())),
-                    None,
-                );
-                if let Ok(references) = transaction.find_global_references_from_definition(
-                    handle.sys_info(),
-                    definition_kind,
-                    TextRangeWithModuleInfo::new(module_info, id.range()),
-                ) {
-                    return references;
-                }
+        if let Key::Definition(id) = bindings.idx_to_key(idx)
+            && let Some(module_info) = self.get_module_info(handle)
+        {
+            let definition_kind = DefinitionMetadata::VariableOrAttribute(
+                Name::from(module_info.code_at(id.range())),
+                None,
+            );
+            if let Ok(references) = transaction.find_global_references_from_definition(
+                handle.sys_info(),
+                definition_kind,
+                TextRangeWithModuleInfo::new(module_info, id.range()),
+            ) {
+                return references;
             }
         }
         Vec::new()
@@ -1760,7 +1753,6 @@ impl<'a> Transaction<'a> {
                 }
                 let max_len = v.iter().map(|row| row.len()).max().unwrap();
                 let mut result = vec![Vec::new(); max_len];
-
                 for row in v {
                     for (i, elem) in row.into_iter().enumerate() {
                         result[i].push(elem);
@@ -1768,15 +1760,29 @@ impl<'a> Transaction<'a> {
                 }
                 result
             }
-
             fn zip_types(
                 inferred_types: Vec<Vec<Type>>,
                 function_arguments: Vec<ParameterAnnotation>,
             ) -> Vec<ParameterAnnotation> {
                 let zipped_inferred_types: Vec<Vec<Type>> = transpose(inferred_types);
-                function_arguments
+                let types: Vec<(ParameterAnnotation, Vec<Type>)> =
+                    match zipped_inferred_types.is_empty() {
+                        true => function_arguments
+                            .into_iter()
+                            .map(
+                                |arg: ParameterAnnotation| -> (ParameterAnnotation, Vec<Type>) {
+                                    (arg, vec![])
+                                },
+                            )
+                            .collect(),
+                        false => function_arguments
+                            .into_iter()
+                            .zip(zipped_inferred_types)
+                            .collect(),
+                    };
+
+                types
                     .into_iter()
-                    .zip(zipped_inferred_types)
                     .map(|(arg, mut ty)| {
                         let mut arg = arg;
                         if let Some(default_type) = arg.ty {
@@ -1888,7 +1894,7 @@ impl<'a> Transaction<'a> {
                         && is_interesting_expr(e)
                         && is_interesting_type(&ty)
                     {
-                        let ty = format!(": {}", ty);
+                        let ty = format!(": {ty}");
                         res.push((key.range().end(), ty));
                     }
                 }
@@ -1997,6 +2003,29 @@ impl<'a> Transaction<'a> {
         let mut result = Vec::new();
         ast.body
             .visit(&mut |stmt| recurse_stmt_adding_symbols(stmt, &mut result, &module_info));
+        Some(result)
+    }
+
+    pub fn workspace_symbols(
+        &self,
+        query: &str,
+    ) -> Option<Vec<(String, lsp_types::SymbolKind, TextRangeWithModuleInfo)>> {
+        if query.len() < MIN_CHARACTERS_TYPED_AUTOIMPORT {
+            return None;
+        }
+        let mut result = Vec::new();
+        for (handle, name, export) in self.search_exports_fuzzy(query) {
+            if let Some(module_info) = self.get_module_info(&handle) {
+                let kind = export
+                    .symbol_kind
+                    .map_or(lsp_types::SymbolKind::VARIABLE, |k| k.to_lsp_symbol_kind());
+                let location = TextRangeWithModuleInfo {
+                    module_info,
+                    range: export.location,
+                };
+                result.push((name, kind, location));
+            }
+        }
         Some(result)
     }
 }

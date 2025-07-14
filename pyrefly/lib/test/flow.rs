@@ -837,6 +837,51 @@ def test(x: tuple[int, ...] | tuple[int, *tuple[int, ...], int] | tuple[int, int
 );
 
 testcase!(
+    bug = "we don't narrow attributes in a positional pattern",
+    test_match_class_union,
+    r#"
+from typing import assert_type, Literal
+
+class Foo:
+    x: int
+    y: str
+    __match_args__ = ("x", "y")
+
+class Bar:
+    x: str
+    __match_args__ = ("x",)
+
+def test(x: Foo | Bar) -> None:
+    match x:
+        case Foo(1, "a"):
+            # we should narrow x.x and x.y to literals
+            assert_type(x, Foo)
+            assert_type(x.x, int)
+            assert_type(x.y, str)
+        case Foo(a, b):
+            assert_type(x, Foo)
+            assert_type(a, int)
+            assert_type(b, str)
+        case Foo(x = b, y = a):
+            assert_type(x, Foo)
+            assert_type(a, str)
+            assert_type(b, int)
+        case Foo(x = 1, y = ""):
+            assert_type(x, Foo)
+            assert_type(x.x, Literal[1])
+            assert_type(x.y, Literal[""])
+        case Bar("bar"):
+            assert_type(x, Bar)
+            assert_type(x.x, str)  # we want to narrow this to Literal["bar"]
+        case Bar(a) as b:
+            assert_type(x, Foo | Bar)
+            assert_type(b, Bar)
+            assert_type(a, str)
+            assert_type(b, Bar)
+"#,
+);
+
+testcase!(
     test_match_sequence_concrete,
     r#"
 from typing import assert_type, Never
@@ -1183,6 +1228,16 @@ if 0.1:
     raise SystemExit
 assert_type(vari, Literal["test"])
 "#,
+);
+
+testcase!(
+    test_assert_false_terminates_flow,
+    r#"
+def test1() -> int:
+    assert False
+def test2() -> int:  # E: Function declared to return `int` but is missing an explicit `return`
+    assert True
+    "#,
 );
 
 testcase!(

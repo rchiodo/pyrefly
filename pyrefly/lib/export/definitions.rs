@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Meta Platforms, Inc. an affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -227,10 +227,10 @@ pub struct DocString(Arc<String>);
 impl DocString {
     pub fn from_stmts(xs: &[Stmt]) -> Option<Self> {
         xs.first().and_then(|stmt| {
-            if let Stmt::Expr(expr_stmt) = stmt {
-                if let ruff_python_ast::Expr::StringLiteral(string_lit) = &*expr_stmt.value {
-                    return Some(DocString(Arc::new(string_lit.value.to_string())));
-                }
+            if let Stmt::Expr(expr_stmt) = stmt
+                && let ruff_python_ast::Expr::StringLiteral(string_lit) = &*expr_stmt.value
+            {
+                return Some(DocString(Arc::new(string_lit.value.to_string())));
             }
             None
         })

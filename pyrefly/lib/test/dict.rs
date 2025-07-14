@@ -5,17 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#![cfg(test)]
+use crate::testcase;
 
-mod basic;
-mod completion;
-mod configuration;
-mod definition;
-mod diagnostic;
-mod did_change;
-mod hover;
-mod io;
-mod references;
-mod rename;
-mod util;
-mod workspace_symbol;
+testcase!(
+    test_literal_dict,
+    r#"
+dict(x = 1, y = "test") # E:  No matching overload found for function `dict.__init__`
+    "#,
+);

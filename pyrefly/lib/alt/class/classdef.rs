@@ -91,21 +91,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn get_metadata_for_class(&self, cls: &Class) -> Arc<ClassMetadata> {
         self.get_from_class(cls, &KeyClassMetadata(cls.index()))
+            .unwrap_or_else(|| Arc::new(ClassMetadata::recursive()))
     }
 
     pub fn get_mro_for_class(&self, cls: &Class) -> Arc<ClassMro> {
         self.get_from_class(cls, &KeyClassMro(cls.index()))
+            .unwrap_or_else(|| Arc::new(ClassMro::recursive()))
     }
 
     pub fn get_class_field_map(&self, cls: &Class) -> SmallMap<Name, Arc<ClassField>> {
-        let mut map = SmallMap::new();
+        let fields = cls.fields();
+        let mut map = SmallMap::with_capacity(fields.len());
 
-        for name in cls.fields() {
+        for name in fields {
             let key = KeyClassField(cls.index(), name.clone());
-            let field = self.get_from_class(cls, &key);
-            map.insert(name.clone(), field);
+            if let Some(field) = self.get_from_class(cls, &key) {
+                map.insert(name.clone(), field);
+            }
         }
-
         map
     }
 
@@ -125,7 +128,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Note that for the purposes of type narrowing, we always unwrap Type::Type(Type::ClassType),
             // but it's not always a valid argument to isinstance/issubclass. expr_infer separately checks
             // whether the argument is valid.
-            Type::Type(box ty @ (Type::ClassType(_) | Type::Quantified(_))) => Some(ty.clone()),
+            Type::Type(box ty @ (Type::ClassType(_) | Type::Quantified(_) | Type::SelfType(_))) => {
+                Some(ty.clone())
+            }
             Type::Type(box Type::Tuple(_)) => Some(Type::any_tuple()),
             Type::Type(box Type::Any(a)) => Some(a.propagate()),
             Type::None | Type::Type(box Type::None) => Some(Type::None),

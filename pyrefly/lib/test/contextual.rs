@@ -163,7 +163,7 @@ testcase!(
     test_call_keyword_arg_is_context_even_for_duplicates,
     r#"
 from typing import assert_type, Callable, Any
-def f(cb: Callable[[int], None]) -> None: ...
+def f(cb: Callable[[int], int]) -> None: ...
 def g(cb: Any) -> None: ...
 f(cb = lambda x: assert_type(x, int), cb = lambda x: assert_type(x, int))  # E: Multiple values for argument `cb` # E: Parse error
 g(cb = lambda x: assert_type(x, Any), cb = lambda x: assert_type(x, Any))  # E: Multiple values for argument `cb` # E: Parse error
@@ -347,6 +347,19 @@ class B(A): ...
 x: list[A]
 y: list[B]
 x = y = [B()]  # E: Wrong type for assignment, expected `list[A]` and got `list[B]`
+    "#,
+);
+
+testcase!(
+    test_context_assign_expr,
+    r#"
+from typing import assert_type
+
+class A: ...
+class B(A): ...
+
+xs: list[A] = (ys := [B()]) # E: `list[B]` is not assignable to `list[A]`
+assert_type(ys, list[B])
     "#,
 );
 

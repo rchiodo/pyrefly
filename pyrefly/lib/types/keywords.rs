@@ -28,14 +28,11 @@ impl TypeMap {
         Self(OrderedMap::new())
     }
 
-    fn get_bool(&self, name: &Name, default: bool) -> bool {
-        self.0
-            .get(name)
-            .and_then(|t| t.as_bool())
-            .unwrap_or(default)
+    pub fn get_bool(&self, name: &Name) -> Option<bool> {
+        self.0.get(name).and_then(|t| t.as_bool())
     }
 
-    fn get_string(&self, name: &Name) -> Option<&str> {
+    pub fn get_string(&self, name: &Name) -> Option<&str> {
         self.0.get(name).and_then(|t| match t {
             Type::Literal(Lit::Str(s)) => Some(&**s),
             _ => None,
@@ -98,10 +95,10 @@ impl DataclassTransformKeywords {
 
     pub fn from_type_map(map: &TypeMap) -> Self {
         Self {
-            eq_default: map.get_bool(&Self::EQ_DEFAULT, true),
-            order_default: map.get_bool(&Self::ORDER_DEFAULT, false),
-            kw_only_default: map.get_bool(&Self::KW_ONLY_DEFAULT, false),
-            frozen_default: map.get_bool(&Self::FROZEN_DEFAULT, false),
+            eq_default: map.get_bool(&Self::EQ_DEFAULT).unwrap_or(true),
+            order_default: map.get_bool(&Self::ORDER_DEFAULT).unwrap_or(false),
+            kw_only_default: map.get_bool(&Self::KW_ONLY_DEFAULT).unwrap_or(false),
+            frozen_default: map.get_bool(&Self::FROZEN_DEFAULT).unwrap_or(false),
             field_specifiers: match map.0.get(&Self::FIELD_SPECIFIERS) {
                 Some(Type::Tuple(Tuple::Concrete(elts))) => {
                     elts.iter().filter_map(|e| e.callee_kind()).collect()
@@ -122,41 +119,37 @@ impl DataclassTransformKeywords {
 #[derive(Visit, VisitMut, TypeEq)]
 pub struct DataclassFieldKeywords {
     pub init: bool,
+    /// Whether this field has a default. Note that this is derived from the various
+    /// default-related parameters but does not correspond directly to any of them
     pub default: bool,
     /// None means that kw_only was not explicitly set
     pub kw_only: Option<bool>,
     /// Alias that is used in `__init__` rather than the field name. None means no alias
     pub alias: Option<Name>,
-    // TODO(rechen): add converter
+    /// If a converter callable is passed in, its first positional parameter
+    pub converter_param: Option<Type>,
 }
 
 impl DataclassFieldKeywords {
-    const INIT: Name = Name::new_static("init");
+    pub const INIT: Name = Name::new_static("init");
     /// We combine default, default_factory, and factory into a single "default" keyword indicating
     /// whether the field has a default. The default value isn't stored.
-    const DEFAULT: Name = Name::new_static("default");
-    const DEFAULT_FACTORY: Name = Name::new_static("default_factory");
-    const FACTORY: Name = Name::new_static("factory");
-    const KW_ONLY: Name = Name::new_static("kw_only");
-    const ALIAS: Name = Name::new_static("alias");
-
-    pub fn from_type_map(map: &TypeMap) -> Self {
-        let init = map.get_bool(&Self::INIT, true);
-        let default = [&Self::DEFAULT, &Self::DEFAULT_FACTORY, &Self::FACTORY]
-            .iter()
-            .any(|k| map.0.contains_key(*k));
-        let kw_only = map.0.get(&Self::KW_ONLY).and_then(|t| t.as_bool());
-        let alias = map.get_string(&Self::ALIAS).map(Name::new);
-        Self {
-            init,
-            default,
-            kw_only,
-            alias,
-        }
-    }
+    pub const DEFAULT: Name = Name::new_static("default");
+    pub const DEFAULT_FACTORY: Name = Name::new_static("default_factory");
+    pub const FACTORY: Name = Name::new_static("factory");
+    pub const KW_ONLY: Name = Name::new_static("kw_only");
+    pub const ALIAS: Name = Name::new_static("alias");
+    /// We extract and store only the first positional parameter to the converter callable.
+    pub const CONVERTER: Name = Name::new_static("converter");
 
     pub fn new() -> Self {
-        Self::from_type_map(&TypeMap::new())
+        Self {
+            init: true,
+            default: false,
+            kw_only: None,
+            alias: None,
+            converter_param: None,
+        }
     }
 
     pub fn is_kw_only(&self) -> bool {
@@ -191,14 +184,18 @@ impl DataclassKeywords {
 
     pub fn from_type_map(map: &TypeMap, defaults: &DataclassTransformKeywords) -> Self {
         Self {
-            init: map.get_bool(&Self::INIT, true),
-            order: map.get_bool(&Self::ORDER, defaults.order_default),
-            frozen: map.get_bool(&Self::FROZEN, defaults.frozen_default),
-            match_args: map.get_bool(&Self::MATCH_ARGS, true),
-            kw_only: map.get_bool(&Self::KW_ONLY, defaults.kw_only_default),
-            eq: map.get_bool(&Self::EQ, defaults.eq_default),
-            unsafe_hash: map.get_bool(&Self::UNSAFE_HASH, false),
-            slots: map.get_bool(&Self::SLOTS, false),
+            init: map.get_bool(&Self::INIT).unwrap_or(true),
+            order: map.get_bool(&Self::ORDER).unwrap_or(defaults.order_default),
+            frozen: map
+                .get_bool(&Self::FROZEN)
+                .unwrap_or(defaults.frozen_default),
+            match_args: map.get_bool(&Self::MATCH_ARGS).unwrap_or(true),
+            kw_only: map
+                .get_bool(&Self::KW_ONLY)
+                .unwrap_or(defaults.kw_only_default),
+            eq: map.get_bool(&Self::EQ).unwrap_or(defaults.eq_default),
+            unsafe_hash: map.get_bool(&Self::UNSAFE_HASH).unwrap_or(false),
+            slots: map.get_bool(&Self::SLOTS).unwrap_or(false),
         }
     }
 

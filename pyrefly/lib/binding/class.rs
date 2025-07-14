@@ -38,7 +38,6 @@ use crate::binding::binding::BindingClassSynthesizedFields;
 use crate::binding::binding::BindingTParams;
 use crate::binding::binding::BindingVariance;
 use crate::binding::binding::ClassBinding;
-use crate::binding::binding::ClassFieldInitialValue;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
@@ -49,6 +48,7 @@ use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSynthesizedFields;
 use crate::binding::binding::KeyTParams;
 use crate::binding::binding::KeyVariance;
+use crate::binding::binding::RawClassFieldInitialization;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::CurrentIdx;
 use crate::binding::bindings::LegacyTParamBuilder;
@@ -217,25 +217,26 @@ impl<'a> BindingsBuilder<'a> {
 
         let last_scope = self.scopes.pop();
         self.scopes.pop(); // annotation scope
-        let mut fields_possibly_defined_by_this_class =
-            SmallMap::with_capacity(last_scope.stat.0.len());
+        let mut fields = SmallMap::with_capacity(last_scope.stat.0.len());
         for (name, info) in last_scope.flow.info.iter_hashed() {
-            let is_function_without_return_annotation =
-                if let FlowStyle::FunctionDef(_, has_return_annotation) = info.style {
-                    !has_return_annotation
-                } else {
-                    false
-                };
-            // A name with flow in the last_scope, but whose static is in a parent scope, is a reference to something that isn't a class field.
-            // Can occur when we narrow a parent scopes variable, thus producing a fresh flow for it, but no static.
+            // Ignore a name not in the current flow's static. This can happen because operations
+            // like narrows can change the local flow info for a name defined in some parent scope.
             if let Some(stat_info) = last_scope.stat.0.get_hashed(name) {
+                let is_function_without_return_annotation =
+                    if let FlowStyle::FunctionDef(_, has_return_annotation) = info.style {
+                        !has_return_annotation
+                    } else {
+                        false
+                    };
                 let initial_value = info.as_initial_value();
                 let value = match &initial_value {
-                    ClassFieldInitialValue::Class(Some(e)) => ExprOrBinding::Expr(e.clone()),
+                    RawClassFieldInitialization::ClassBody(Some(e)) => {
+                        ExprOrBinding::Expr(e.clone())
+                    }
                     _ => ExprOrBinding::Binding(Binding::Forward(info.key)),
                 };
                 let is_initialized_on_class =
-                    matches!(initial_value, ClassFieldInitialValue::Class(_));
+                    matches!(initial_value, RawClassFieldInitialization::ClassBody(_));
                 let binding = BindingClassField {
                     class_idx: class_indices.class_idx,
                     name: name.into_key().clone(),
@@ -246,7 +247,7 @@ impl<'a> BindingsBuilder<'a> {
                     is_function_without_return_annotation,
                     implicit_def_method: None,
                 };
-                fields_possibly_defined_by_this_class.insert_hashed(
+                fields.insert_hashed(
                     name.cloned(),
                     ClassFieldProperties::new(
                         stat_info.annot.is_some(),
@@ -269,14 +270,14 @@ impl<'a> BindingsBuilder<'a> {
                 InstanceAttribute(value, annotation, range),
             ) in class_scope.method_defined_attributes()
             {
-                if !fields_possibly_defined_by_this_class.contains_key_hashed(name.as_ref()) {
+                if !fields.contains_key_hashed(name.as_ref()) {
                     let implicit_def_method = if !recognized_attribute_defining_method {
                         Some(method_name.clone())
                     } else {
                         None
                     };
 
-                    fields_possibly_defined_by_this_class.insert_hashed(
+                    fields.insert_hashed(
                         name.clone(),
                         ClassFieldProperties::new(annotation.is_some(), false, range),
                     );
@@ -292,15 +293,11 @@ impl<'a> BindingsBuilder<'a> {
                             value,
                             annotation,
                             range,
-                            initial_value: ClassFieldInitialValue::Instance(Some(
-                                method_name.clone(),
-                            )),
+                            initial_value: RawClassFieldInitialization::Method(method_name.clone()),
                             is_function_without_return_annotation: false,
                             implicit_def_method,
                         },
                     );
-                } else if annotation.is_some() {
-                    self.error(range, ErrorKind::InvalidAnnotation, None, format!("Cannot annotate attribute `{}`, which is already annotated in the class body", &name), );
                 }
             }
         } else {
@@ -334,13 +331,13 @@ impl<'a> BindingsBuilder<'a> {
             );
         }
 
-        fields_possibly_defined_by_this_class.reserve(0); // Attempt to shrink to capacity
+        fields.reserve(0); // Attempt to shrink to capacity
         self.insert_binding_idx(
             class_indices.class_idx,
             BindingClass::ClassDef(ClassBinding {
                 def_index: class_indices.def_index,
                 def: x,
-                fields: fields_possibly_defined_by_this_class,
+                fields,
                 tparams_require_binding,
             }),
         );
@@ -517,9 +514,9 @@ impl<'a> BindingsBuilder<'a> {
                 ),
             );
             let initial_value = if force_class_initialization || member_value.is_some() {
-                ClassFieldInitialValue::Class(member_value.clone())
+                RawClassFieldInitialization::ClassBody(member_value.clone())
             } else {
-                ClassFieldInitialValue::Instance(None)
+                RawClassFieldInitialization::Uninitialized
             };
             let value = match member_value {
                 Some(value) => ExprOrBinding::Expr(value),
@@ -770,8 +767,7 @@ impl<'a> BindingsBuilder<'a> {
                         ErrorKind::InvalidArgument,
                         None,
                         format!(
-                            "Too many defaults values: expected up to {}, got {}",
-                            n_members, n_defaults
+                            "Too many defaults values: expected up to {n_members}, got {n_defaults}",
                         ),
                     );
                     let n_to_drop = n_defaults - n_members;
@@ -990,7 +986,7 @@ impl<'a> BindingsBuilder<'a> {
                     arg.range(),
                     ErrorKind::InvalidArgument,
                     None,
-                    format!("Expected string literal \"{}\"", name),
+                    format!("Expected string literal \"{name}\""),
                 );
             }
         } else {
@@ -998,7 +994,7 @@ impl<'a> BindingsBuilder<'a> {
                 arg.range(),
                 ErrorKind::InvalidArgument,
                 None,
-                format!("Expected string literal \"{}\"", name),
+                format!("Expected string literal \"{name}\""),
             );
         }
     }

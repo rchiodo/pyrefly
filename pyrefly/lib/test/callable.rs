@@ -17,7 +17,7 @@ reveal_type(f1)  # E: revealed type: (x: Unknown) -> Literal[1]
 f2 = lambda x: reveal_type(x)  # E: revealed type: Unknown
 f3: Callable[[int], int] = lambda x: 1
 reveal_type(f3)  # E: revealed type: (int) -> int
-f4: Callable[[int], None] = lambda x: reveal_type(x)  # E: revealed type: int
+f4: Callable[[int], int] = lambda x: reveal_type(x)  # E: revealed type: int
 f5: Callable[[int], int] = lambda x: x
 f6: Callable[[int], int] = lambda x: "foo"  # E: `(x: int) -> Literal['foo']` is not assignable to `(int) -> int`
 f7: Callable[[int, int], int] = lambda x: 1  # E: `(x: int) -> Literal[1]` is not assignable to `(int, int) -> int`
@@ -837,5 +837,17 @@ testcase!(
     r#"
 isinstance(1, "not a class object")  # E: Expected class object
 issubclass(str, "not a class object")  # E: Expected class object
+    "#,
+);
+
+testcase!(
+    test_generic_function_is_callable,
+    r#"
+from typing import Any, Callable
+def f[T](*, x: T) -> T:
+    return x
+def g(f: Callable[..., Any]):
+    pass
+g(f)
     "#,
 );

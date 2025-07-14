@@ -33,7 +33,6 @@ use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
 
-use crate::binding::binding::ClassFieldInitialValue;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
@@ -45,6 +44,7 @@ use crate::binding::binding::KeyFunction;
 use crate::binding::binding::KeyVariance;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
+use crate::binding::binding::RawClassFieldInitialization;
 use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::CurrentIdx;
 use crate::binding::function::SelfAssignments;
@@ -259,26 +259,55 @@ impl FlowStyle {
 pub struct FlowInfo {
     /// The key to use if you need the value of this name.
     pub key: Idx<Key>,
-    /// The default value to use if you are inside a loop and need to default a Var.
-    /// Only set if you are outside a loop, OR it has never been set before.
-    /// Only used if you are inside a loop.
+    /// The default value - used to create Default bindings inside loops.
+    /// - Always set to `key` when a flow is first created.
+    /// - Set to `key` whenever a flow is updated outside of loops, but not inside.
     pub default: Idx<Key>,
     /// The style of this binding.
     pub style: FlowStyle,
 }
 
 impl FlowInfo {
-    pub fn as_initial_value(&self) -> ClassFieldInitialValue {
+    fn new(key: Idx<Key>, style: Option<FlowStyle>) -> Self {
+        Self {
+            key,
+            default: key,
+            style: style.unwrap_or(FlowStyle::Other),
+        }
+    }
+
+    /// Create a new FlowInfo after an update.
+    ///
+    /// Also return the `Idx<Key>` of the default binding, if we are updating inside a loop
+    /// (and `None` if we are not in a loop).
+    fn updated(
+        &self,
+        key: Idx<Key>,
+        style: Option<FlowStyle>,
+        in_loop: bool,
+    ) -> (Self, Option<Idx<Key>>) {
+        let default = if in_loop { Some(self.default) } else { None };
+        (
+            Self {
+                key,
+                default: default.unwrap_or(key),
+                style: style.unwrap_or_else(|| self.style.clone()),
+            },
+            default,
+        )
+    }
+
+    pub fn as_initial_value(&self) -> RawClassFieldInitialization {
         match &self.style {
             FlowStyle::ClassField {
                 initial_value: Some(e),
-            } => ClassFieldInitialValue::Class(Some(e.clone())),
+            } => RawClassFieldInitialization::ClassBody(Some(e.clone())),
             FlowStyle::ClassField {
                 initial_value: None,
-            } => ClassFieldInitialValue::Instance(None),
+            } => RawClassFieldInitialization::Uninitialized,
             // All other styles (e.g. function def, import) indicate we do have
             // a value, but it is not coming from a simple style.
-            _ => ClassFieldInitialValue::Class(None),
+            _ => RawClassFieldInitialization::ClassBody(None),
         }
     }
 }
@@ -627,10 +656,10 @@ impl Scopes {
         &self,
         name: &Name,
     ) -> Option<(Idx<Key>, Idx<KeyFunction>)> {
-        if let Some(flow) = self.current().flow.info.get(name) {
-            if let FlowStyle::FunctionDef(fidx, _) = flow.style {
-                return Some((flow.key, fidx));
-            }
+        if let Some(flow) = self.current().flow.info.get(name)
+            && let FlowStyle::FunctionDef(fidx, _) = flow.style
+        {
+            return Some((flow.key, fidx));
         }
         None
     }
@@ -735,16 +764,20 @@ impl Scopes {
             .fold(0, |depth, node| depth + node.scope.loops.len() as u32)
     }
 
-    /// Update the flow info to bind `name` to `key`, maybe with `FlowStyle` `style`
+    /// Set the flow info to bind `name` to `key`, maybe with `FlowStyle` `style`
     ///
-    /// - Return the `Idx<Key>` of the default binding, if inside a loop
-    /// - If `style` is `None` and a previous entry exists, preserve the old style
+    /// - If `style` is `None`, then:
+    ///   - Preserve the existing style, when updating an existing name.
+    ///   - Use `FlowStyle::Other`, when inserting a new name.
+    /// - Maybe return the `Idx<Key>` of the default binding:
+    ///   - Return it if this is an update of an existing name, inside a loop.
+    ///   - For insert of a new name or if we are not in a loop, return `None`.
     ///
     /// A caller of this function promises to create a binding for `key`; the
     /// binding may not exist yet (it might depend on the returned default).
     ///
     /// TODO(grievejia): Properly separate out `FlowStyle` from the indices
-    pub fn update_flow_info(
+    pub fn upsert_flow_info(
         &mut self,
         name: Hashed<&Name>,
         key: Idx<Key>,
@@ -753,22 +786,12 @@ impl Scopes {
         let in_loop = self.loop_depth() != 0;
         match self.current_mut().flow.info.entry_hashed(name.cloned()) {
             Entry::Vacant(e) => {
-                let style = style.unwrap_or(FlowStyle::Other);
-                e.insert(FlowInfo {
-                    key,
-                    default: key,
-                    style,
-                });
+                e.insert(FlowInfo::new(key, style));
                 None
             }
             Entry::Occupied(mut e) => {
-                let default = if in_loop { Some(e.get().default) } else { None };
-                let style = style.unwrap_or_else(|| e.get().style.clone());
-                *e.get_mut() = FlowInfo {
-                    key,
-                    default: default.unwrap_or(key),
-                    style,
-                };
+                let (updated, default) = e.get().updated(key, style, in_loop);
+                *e.get_mut() = updated;
                 default
             }
         }

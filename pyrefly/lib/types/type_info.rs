@@ -102,11 +102,9 @@ impl TypeInfo {
             0 => Self::of_ty(Type::never()),
             1 => branches.pop().unwrap(),
             n => {
-                let (tys, facets_branches): (Vec<Type>, Vec<Option<&NarrowedFacets>>) = branches
-                    .iter()
-                    .map(|TypeInfo { ty, facets }| {
-                        (ty.clone(), facets.as_ref().map(|a| a.as_ref()))
-                    })
+                let (tys, facets_branches): (Vec<Type>, Vec<Option<NarrowedFacets>>) = branches
+                    .into_iter()
+                    .map(|TypeInfo { ty, facets }| (ty, facets.map(|x| *x)))
                     .unzip();
                 let ty = union_types(tys);
                 let branches = facets_branches.into_iter().flatten().collect::<Vec<_>>();
@@ -204,7 +202,7 @@ impl Display for TypeInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.ty().fmt(f)?;
         if let Some(facets) = &self.facets {
-            write!(f, " ({})", facets)?;
+            write!(f, " ({facets})")?;
         }
         Ok(())
     }
@@ -217,7 +215,7 @@ impl Display for TypeInfo {
 ///
 /// Note that we don't cap the overall size of a [TypeInfo], merely the fanout at
 /// each level. We may need to cap the overall size, if that becomes a problem.
-const NARROWED_FACETS_LIMIT: usize = 100;
+const NARROWED_FACETS_LIMIT: usize = 50;
 
 /// The facets one level down, bounded by [NARROWED_FACETS_LIMIT].
 #[derive(Debug, Clone, PartialEq, Eq, TypeEq)]
@@ -296,10 +294,10 @@ impl NarrowedFacets {
         Self(smallmap! {facet => NarrowedFacet::new(more_facets, ty)})
     }
 
-    fn join(mut branches: Vec<&Self>, union_types: &impl Fn(Vec<Type>) -> Type) -> Option<Self> {
+    fn join(mut branches: Vec<Self>, union_types: &impl Fn(Vec<Type>) -> Type) -> Option<Self> {
         match branches.len() {
             0 => None,
-            1 => Some(branches.pop().unwrap().clone()),
+            1 => Some(branches.pop().unwrap()),
             n => {
                 let first = branches[0].clone();
                 let tail = &branches[1..];
@@ -308,7 +306,7 @@ impl NarrowedFacets {
                     .into_iter()
                     .filter_map(|(facet, narrowed_facet)| {
                         let mut facet_branches = Vec::with_capacity(n);
-                        facet_branches.push(narrowed_facet.clone());
+                        facet_branches.push(narrowed_facet);
                         facet_branches
                             .extend(tail.iter().filter_map(|facets| facets.get(&facet).cloned()));
                         // If any map lacked this facet, we just drop it. Only join if all maps have it.
@@ -502,9 +500,8 @@ impl NarrowedFacet {
             }
         }
         let ty = ty_branches.map(union_types);
-        let facets = facets_branches.and_then(|facets_branches| {
-            NarrowedFacets::join(facets_branches.iter().collect(), union_types)
-        });
+        let facets = facets_branches
+            .and_then(|facets_branches| NarrowedFacets::join(facets_branches, union_types));
         match (ty, facets) {
             (None, None) => None,
             (Some(ty), None) => Some(Self::Leaf(ty)),

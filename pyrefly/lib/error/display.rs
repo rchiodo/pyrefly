@@ -20,7 +20,7 @@ impl ErrorContext {
                 format!("Cannot use `{cm}` as a context manager")
             }
             Self::UnaryOp(op, target) => {
-                format!("Unary `{}` is not supported on `{}`", op, target,)
+                format!("Unary `{op}` is not supported on `{target}`")
             }
             Self::BinaryOp(op, left, right) => {
                 let ctx = TypeDisplayContext::new(&[left, right]);
@@ -226,6 +226,9 @@ impl TypeCheckKind {
             Self::UnexpectedBareYield => format!(
                 "Expected to yield a value of type `{}`, but a bare `yield` gives `None` instead",
                 ctx.display(want),
+            ),
+            Self::PostInit => format!(
+                "`__post_init__` type `{got}` is not assignable to expected type `{want}` generated from the dataclass's `InitVar` fields"
             ),
         }
     }

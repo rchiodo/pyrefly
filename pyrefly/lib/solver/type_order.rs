@@ -4,6 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+
 use std::sync::Arc;
 
 use dupe::Clone_;
@@ -24,7 +25,10 @@ use crate::types::class::ClassType;
 use crate::types::stdlib::Stdlib;
 use crate::types::typed_dict::TypedDict;
 use crate::types::typed_dict::TypedDictField;
+use crate::types::types::Forall;
+use crate::types::types::Forallable;
 use crate::types::types::Type;
+use crate::types::types::Var;
 
 /// `TypeOrder` provides a minimal API allowing `Subset` to request additional
 /// information about types that may be required for solving bindings
@@ -56,10 +60,6 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
         self.0.as_class_type_unchecked(class)
     }
 
-    pub fn is_compatible_constructor_return(self, ty: &Type, class: &Class) -> bool {
-        self.0.is_compatible_constructor_return(ty, class)
-    }
-
     pub fn has_metaclass(self, cls: &Class, metaclass: &ClassType) -> bool {
         let metadata = self.0.get_metadata_for_class(cls);
         match metadata.metaclass() {
@@ -68,10 +68,6 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
             }
             None => metaclass == self.stdlib().builtins_type(),
         }
-    }
-
-    pub fn get_metaclass_dunder_call(self, cls: &ClassType) -> Option<Type> {
-        self.0.get_metaclass_dunder_call(cls)
     }
 
     pub fn is_protocol(self, cls: &Class) -> bool {
@@ -84,6 +80,15 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
             proto.members.clone()
         } else {
             SmallSet::new()
+        }
+    }
+
+    pub fn get_enum_member_count(self, cls: &Class) -> Option<usize> {
+        let meta = self.0.get_metadata_for_class(cls);
+        if meta.is_enum() {
+            Some(self.0.get_enum_members(cls).len())
+        } else {
+            None
         }
     }
 
@@ -124,14 +129,6 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
         self.0.promote_silently(cls)
     }
 
-    pub fn get_dunder_new(self, cls: &ClassType) -> Option<Type> {
-        self.0.get_dunder_new(cls)
-    }
-
-    pub fn get_dunder_init(self, cls: &ClassType, get_object_init: bool) -> Option<Type> {
-        self.0.get_dunder_init(cls, get_object_init)
-    }
-
     pub fn typed_dict_fields(self, typed_dict: &TypedDict) -> SmallMap<Name, TypedDictField> {
         self.0.typed_dict_fields(typed_dict)
     }
@@ -141,6 +138,16 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
     }
 
     pub fn get_variance_from_class(self, cls: &Class) -> Arc<VarianceMap> {
-        self.0.get_from_class(cls, &KeyVariance(cls.index()))
+        self.0
+            .get_from_class(cls, &KeyVariance(cls.index()))
+            .unwrap_or_default()
+    }
+
+    pub fn constructor_to_callable(self, cls: &ClassType) -> Type {
+        self.0.constructor_to_callable(cls)
+    }
+
+    pub fn instantiate_forall(self, forall: Forall<Forallable>) -> (Vec<Var>, Type) {
+        self.0.instantiate_forall(forall)
     }
 }

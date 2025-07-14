@@ -103,45 +103,45 @@ test11: object = l3()
 testcase!(
     test_type_guard_subtyping,
     r#"
-from typing import Callable, TypeGuard
+from typing import Callable, TypeGuard, Any
 
-def t0() -> TypeGuard[bool]: ...
-def t1() -> TypeGuard[int]: ...
-def t2() -> TypeGuard[bool] | TypeGuard[int]: ...
-def t3() -> bool: ...
+def t0(x: Any) -> TypeGuard[bool]: ...
+def t1(x: Any) -> TypeGuard[int]: ...
+def t2(x: Any) -> TypeGuard[bool] | TypeGuard[int]: ...
+def t3(x: Any) -> bool: ...
 
-test0: Callable[[], bool] = t0
-test1: Callable[[], TypeGuard[int]] = t0
-test2: Callable[[], bool] = t1
-test3: Callable[[], TypeGuard[bool]] = t1  # E: `() -> TypeGuard[int]` is not assignable to `() -> TypeGuard[bool]`
-test4: Callable[[], bool] = t2
-test5: Callable[[], TypeGuard[int]] = t2
-test6: Callable[[], TypeGuard[bool]] = t2  # E: `() -> TypeGuard[bool] | TypeGuard[int]` is not assignable to `() -> TypeGuard[bool]
-test7: Callable[[], TypeGuard[bool]] = t3  # E: `() -> bool` is not assignable to `() -> TypeGuard[bool]`
+test0: Callable[[Any], bool] = t0
+test1: Callable[[Any], TypeGuard[int]] = t0
+test2: Callable[[Any], bool] = t1
+test3: Callable[[Any], TypeGuard[bool]] = t1  # E: `(x: Any) -> TypeGuard[int]` is not assignable to `(Any) -> TypeGuard[bool]`
+test4: Callable[[Any], bool] = t2
+test5: Callable[[Any], TypeGuard[int]] = t2
+test6: Callable[[Any], TypeGuard[bool]] = t2  # E: `(x: Any) -> TypeGuard[bool] | TypeGuard[int]` is not assignable to `(Any) -> TypeGuard[bool]
+test7: Callable[[Any], TypeGuard[bool]] = t3  # E: `(x: Any) -> bool` is not assignable to `(Any) -> TypeGuard[bool]`
 
-test8: Callable[[], object] = t0
-test9: Callable[[], object] = t2
+test8: Callable[[Any], object] = t0
+test9: Callable[[Any], object] = t2
 "#,
 );
 
 testcase!(
     test_type_is_subtyping,
     r#"
-from typing import Callable, TypeIs
+from typing import Callable, TypeIs, Any
 
-def t0() -> TypeIs[bool]: ...
-def t1() -> TypeIs[int]: ...
-def t2() -> TypeIs[bool] | TypeIs[int]: ...
-def t3() -> bool: ...
+def t0(x: Any) -> TypeIs[bool]: ...
+def t1(x: Any) -> TypeIs[int]: ...
+def t2(x: Any) -> TypeIs[bool] | TypeIs[int]: ...
+def t3(x: Any) -> bool: ...
 
-test0: Callable[[], bool] = t0
-test1: Callable[[], TypeIs[int]] = t0  # E: `() -> TypeIs[bool]` is not assignable to `() -> TypeIs[int]`
-test2: Callable[[], bool] = t1
-test4: Callable[[], bool] = t2
-test5: Callable[[], TypeIs[int]] = t3  # E: `() -> bool` is not assignable to `() -> TypeIs[int]`
+test0: Callable[[Any], bool] = t0
+test1: Callable[[Any], TypeIs[int]] = t0  # E: `(x: Any) -> TypeIs[bool]` is not assignable to `(Any) -> TypeIs[int]`
+test2: Callable[[Any], bool] = t1
+test4: Callable[[Any], bool] = t2
+test5: Callable[[Any], TypeIs[int]] = t3  # E: `(x: Any) -> bool` is not assignable to `(Any) -> TypeIs[int]`
 
-test6: Callable[[], object] = t0
-test7: Callable[[], object] = t2
+test6: Callable[[Any], object] = t0
+test7: Callable[[Any], object] = t2
 "#,
 );
 
@@ -192,13 +192,43 @@ def f(b: B):
     "#,
 );
 
-// See https://github.com/facebook/pyrefly/issues/622
+// See https://github.com/facebook/pyrefly/issues/622 for an example
+// of when it matters to have reasonable analysis of `type(...)` in
+// base classes; sometimes the runtime semantics require this, particularly
+// dealing with C extensions.
+
 testcase!(
-    bug = "We probably need to be able to handle `type(...)` as a base class.",
-    test_bad_gradual_is_subset_eq,
+    test_type_function_in_base_class_list_v0,
     r#"
-from typing import Generic
-class CustomMetaclass(type(Generic)):  # E: Expected a type form, got instance of `type`
+class A:
     pass
+a = A()
+class B(type(a)):
+    pass
+    "#,
+);
+
+testcase!(
+    test_type_function_in_base_class_list_v1,
+    r#"
+class A:
+    pass
+class B(type(A)):
+    pass
+    "#,
+);
+
+testcase!(
+    bug = "We probably need to be able to handle `type(...)` as a base class better than we do.",
+    test_type_function_in_base_class_list_v2,
+    r#"
+from typing import assert_type, ClassVar
+class M(type):
+    x: ClassVar[int] = 42
+class A(metaclass=M):
+    pass
+class B(type(A)):
+    pass
+assert_type(B.x, int)
     "#,
 );

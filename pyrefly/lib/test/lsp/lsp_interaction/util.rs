@@ -4,6 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+
 use core::panic;
 use std::path::Path;
 use std::path::PathBuf;
@@ -54,8 +55,6 @@ pub struct TestCase {
     pub(crate) configuration: bool,
     /// if client has file watch capability
     pub(crate) file_watch: bool,
-    /// if client has contents as uri capability
-    pub(crate) contents_as_uri: bool,
 }
 
 pub fn run_test_lsp(test_case: TestCase) {
@@ -93,7 +92,7 @@ pub fn run_test_lsp(test_case: TestCase) {
         // this thread sends messages to the language server (from test case)
         scope.spawn(move || {
             for msg in
-                get_initialize_messages(&test_case.workspace_folders, test_case.configuration, test_case.file_watch, test_case.contents_as_uri)
+                get_initialize_messages(&test_case.workspace_folders, test_case.configuration, test_case.file_watch)
                     .into_iter()
                     .chain(test_case.messages_from_language_client)
             {
@@ -180,7 +179,7 @@ pub fn run_test_lsp(test_case: TestCase) {
                                 server_response_received_sender.send(id.clone()).unwrap();
                             }
                             Message::Notification(notification) => {
-                                eprintln!("Received notification: {:?}", notification);
+                                eprintln!("Received notification: {notification:?}");
                             }
                             Message::Request(Request {
                                 id,
@@ -211,7 +210,6 @@ fn get_initialize_params(
     workspace_folders: &Option<Vec<(String, Url)>>,
     configuration: bool,
     file_watch: bool,
-    contents_as_uri: bool,
 ) -> serde_json::Value {
     let mut params = serde_json::json!({
         "rootPath": "/",
@@ -249,10 +247,6 @@ fn get_initialize_params(
     if configuration {
         params["capabilities"]["workspace"]["configuration"] = serde_json::json!(true);
     }
-    if contents_as_uri {
-        params["initializationOptions"] = serde_json::json!({"supportContentsAsUri": true});
-    }
-
     params
 }
 
@@ -260,18 +254,12 @@ fn get_initialize_messages(
     workspace_folders: &Option<Vec<(String, Url)>>,
     configuration: bool,
     file_watch: bool,
-    contents_as_uri: bool,
 ) -> std::vec::Vec<lsp_server::Message> {
     vec![
         Message::from(Request {
             id: RequestId::from(1),
             method: "initialize".to_owned(),
-            params: get_initialize_params(
-                workspace_folders,
-                configuration,
-                file_watch,
-                contents_as_uri,
-            ),
+            params: get_initialize_params(workspace_folders, configuration, file_watch),
         }),
         Message::from(Notification {
             method: "initialized".to_owned(),
@@ -319,6 +307,7 @@ fn get_initialize_responses(find_refs: bool) -> Vec<Message> {
             hover_provider: Some(HoverProviderCapability::Simple(true)),
             inlay_hint_provider: Some(OneOf::Left(true)),
             document_symbol_provider: Some(OneOf::Left(true)),
+            workspace_symbol_provider: Some(OneOf::Left(true)),
             workspace: Some(WorkspaceServerCapabilities {
                 workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                     supported: Some(true),

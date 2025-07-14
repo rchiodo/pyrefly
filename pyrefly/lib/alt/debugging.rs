@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 use pyrefly_util::display::DisplayWithCtx;
 
 use crate::alt::answers::LookupAnswer;
@@ -83,7 +90,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // In practice we'll never hit this debugging, but there's no need to panic if we do.
                 "(None)".to_owned()
             }
-            Some(calc_id) => format!("{}", calc_id),
+            Some(calc_id) => format!("{calc_id}"),
         }
     }
 
@@ -119,7 +126,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.stack()
             .into_vec()
             .into_iter()
-            .map(|calc_id| format!("{}", calc_id))
+            .map(|calc_id| format!("{calc_id}"))
     }
 
     // Get a printable representation of the current cycle.
@@ -130,6 +137,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .current_cycle()
             .unwrap()
             .into_iter()
-            .map(|c| format!("{}", c))
+            .map(|c| format!("{c}"))
     }
 }

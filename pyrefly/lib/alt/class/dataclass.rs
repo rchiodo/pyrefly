@@ -8,12 +8,18 @@
 use std::sync::Arc;
 
 use pyrefly_python::dunder;
+use pyrefly_util::prelude::SliceExt;
+use ruff_python_ast::Arguments;
 use ruff_python_ast::name::Name;
+use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
+use vec1::Vec1;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
+use crate::alt::callable::CallArg;
+use crate::alt::callable::CallKeyword;
 use crate::alt::class::class_field::ClassField;
 use crate::alt::class::class_field::DataclassMember;
 use crate::alt::types::class_metadata::ClassMetadata;
@@ -22,16 +28,21 @@ use crate::alt::types::class_metadata::ClassSynthesizedFields;
 use crate::alt::types::class_metadata::DataclassMetadata;
 use crate::error;
 use crate::error::collector::ErrorCollector;
+use crate::error::context::TypeCheckContext;
+use crate::error::context::TypeCheckKind;
 use crate::error::kind::ErrorKind;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
+use crate::types::callable::Params;
 use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassType;
+use crate::types::display::ClassDisplayContext;
 use crate::types::keywords::DataclassFieldKeywords;
+use crate::types::keywords::TypeMap;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::types::AnyStyle;
@@ -115,6 +126,230 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some(ClassSynthesizedFields::new(fields))
     }
 
+    pub fn validate_frozen_dataclass_inheritance(
+        &self,
+        cls: &Class,
+        dataclass_metadata: &DataclassMetadata,
+        bases_with_metadata: &[(ClassType, Arc<ClassMetadata>)],
+        errors: &ErrorCollector,
+    ) {
+        for (base_type, base_metadata) in bases_with_metadata {
+            if let Some(base_dataclass_metadata) = base_metadata.dataclass_metadata() {
+                let is_base_frozen = base_dataclass_metadata.kws.frozen;
+                let is_current_frozen = dataclass_metadata.kws.frozen;
+
+                if is_current_frozen != is_base_frozen {
+                    let current_status = if is_current_frozen {
+                        "frozen"
+                    } else {
+                        "non-frozen"
+                    };
+                    let base_status = if is_base_frozen {
+                        "frozen"
+                    } else {
+                        "non-frozen"
+                    };
+
+                    let base = base_type.class_object();
+                    let ctx = ClassDisplayContext::new(&[cls, base]);
+                    self.error(
+                        errors,
+                        cls.range(),
+                        ErrorKind::InvalidInheritance,
+                        None,
+                        format!(
+                            "Cannot inherit {} dataclass `{}` from {} dataclass `{}`",
+                            current_status,
+                            ctx.display(cls),
+                            base_status,
+                            ctx.display(base),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn validate_post_init(
+        &self,
+        cls: &Class,
+        dataclass_metadata: &DataclassMetadata,
+        post_init: Type,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) {
+        // `__post_init__` is called with a dataclass's `InitVar`s, so we use the `InitVar` types
+        // to generate a callable signature to check `__post_init__` against.
+        let mut params = Vec::new();
+        for (name, field, _) in self.iter_fields(cls, dataclass_metadata, true) {
+            if field.is_init_var() {
+                params.push(field.as_param(&name, false, false, None));
+            }
+        }
+        let want = Type::Callable(Box::new(Callable::list(
+            ParamList::new(params),
+            self.stdlib.object().clone().to_type(),
+        )));
+        self.check_type(&want, &post_init, range, errors, &|| {
+            TypeCheckContext::of_kind(TypeCheckKind::PostInit)
+        });
+    }
+
+    pub fn dataclass_field_keywords(
+        &self,
+        func: &Type,
+        args: &Arguments,
+        errors: &ErrorCollector,
+    ) -> DataclassFieldKeywords {
+        let mut map = TypeMap::new();
+        for kw in args.keywords.iter() {
+            if let Some(name) = &kw.arg {
+                map.0
+                    .insert(name.id.clone(), self.expr_infer(&kw.value, errors));
+            }
+        }
+        let mut init = map.get_bool(&DataclassFieldKeywords::INIT);
+        let default = [
+            &DataclassFieldKeywords::DEFAULT,
+            &DataclassFieldKeywords::DEFAULT_FACTORY,
+            &DataclassFieldKeywords::FACTORY,
+        ]
+        .iter()
+        .any(|k| map.0.contains_key(*k));
+        let mut kw_only = map.get_bool(&DataclassFieldKeywords::KW_ONLY);
+        let mut alias = map
+            .get_string(&DataclassFieldKeywords::ALIAS)
+            .map(Name::new);
+        let mut converter_param = map
+            .0
+            .get(&DataclassFieldKeywords::CONVERTER)
+            .map(|converter| self.get_converter_param(converter));
+        // Note that we intentionally don't try to fill in `default`, since we can't distinguish
+        // between a real default and something like `dataclasses.MISSING`.
+        if init.is_none() || kw_only.is_none() || alias.is_none() || converter_param.is_none() {
+            self.fill_in_field_keywords_from_function_signature(
+                func,
+                args,
+                errors,
+                &mut init,
+                &mut kw_only,
+                &mut alias,
+                &mut converter_param,
+            );
+        }
+        DataclassFieldKeywords {
+            init: init.unwrap_or(true),
+            default,
+            kw_only,
+            alias,
+            converter_param,
+        }
+    }
+
+    /// Fill in keyword values from the function signature of a dataclass field specifier.
+    fn fill_in_field_keywords_from_function_signature(
+        &self,
+        func: &Type,
+        args: &Arguments,
+        errors: &ErrorCollector,
+        init: &mut Option<bool>,
+        kw_only: &mut Option<bool>,
+        alias: &mut Option<Name>,
+        converter_param: &mut Option<Type>,
+    ) {
+        let sigs = func.callable_signatures();
+        let sig = if sigs.len() == 1 {
+            sigs[0].clone()
+        } else if sigs.len() > 1
+            && let Type::Overload(overload) = func
+        {
+            // Overloaded function. Call it to see which signature is actually used.
+            self.call_overloads(
+                Vec1::try_from_vec(sigs).unwrap(),
+                (*overload.metadata).clone(),
+                None,
+                &args.args.map(CallArg::expr_maybe_starred),
+                &args.keywords.map(CallKeyword::new),
+                args.range,
+                errors,
+                None,
+            )
+            .1
+        } else {
+            return;
+        };
+        if let Params::List(params) = &sig.params {
+            for param in params.items() {
+                // Look for a parameter that can be called by name, to attempt to read a default value for a keyword argument.
+                let (name, ty, default_ty) = match param {
+                    Param::Pos(name, ty, Required::Required)
+                    | Param::KwOnly(name, ty, Required::Required) => (name, ty, None),
+                    Param::Pos(name, ty, Required::Optional(default))
+                    | Param::KwOnly(name, ty, Required::Optional(default)) => {
+                        (name, ty, default.as_ref())
+                    }
+                    _ => continue,
+                };
+                if name == &DataclassFieldKeywords::INIT {
+                    self.fill_in_literal(init, ty, default_ty, |ty| ty.as_bool());
+                }
+                if name == &DataclassFieldKeywords::KW_ONLY {
+                    self.fill_in_literal(kw_only, ty, default_ty, |ty| ty.as_bool());
+                }
+                if alias.is_none() && name == &DataclassFieldKeywords::ALIAS {
+                    self.fill_in_literal(alias, ty, default_ty, |ty| match ty {
+                        Type::Literal(Lit::Str(s)) => Some(Name::new(s)),
+                        _ => None,
+                    });
+                }
+                if converter_param.is_none() && name == &DataclassFieldKeywords::CONVERTER {
+                    *converter_param = Some(self.get_converter_param(ty));
+                }
+            }
+        }
+    }
+
+    /// Fills in a keyword with a literal value from a parameter type and default, if possible.
+    fn fill_in_literal<T>(
+        &self,
+        keyword: &mut Option<T>,
+        ty: &Type,
+        default: Option<&Type>,
+        type_to_literal: impl Fn(&Type) -> Option<T>,
+    ) {
+        if keyword.is_none() {
+            if let Some(lit) = type_to_literal(ty) {
+                *keyword = Some(lit);
+            } else if let Some(default) = default
+                && let Some(lit) = type_to_literal(default)
+            {
+                *keyword = Some(lit);
+            }
+        }
+    }
+
+    fn get_converter_param(&self, converter: &Type) -> Type {
+        let converter = {
+            if let Type::ClassDef(cls) = converter
+                && let Type::ClassType(instance) = self.instantiate_fresh(cls)
+            {
+                let callable = self.constructor_to_callable(&instance);
+                &self.distribute_over_union(&callable, |ty| {
+                    if let Type::BoundMethod(m) = ty {
+                        m.to_callable().unwrap_or_else(|| ty.clone())
+                    } else {
+                        ty.clone()
+                    }
+                })
+            } else {
+                converter
+            }
+        };
+        self.distribute_over_union(converter, |ty| {
+            ty.callable_first_param().unwrap_or_else(Type::any_implicit)
+        })
+    }
+
     fn iter_fields(
         &self,
         cls: &Class,
@@ -126,27 +361,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut kwonly_fields = Vec::new();
         let cls_is_kw_only = dataclass.kws.kw_only;
         for name in dataclass.fields.iter() {
-            match self.get_dataclass_member(cls, name, cls_is_kw_only, seen_kw_only_marker) {
-                DataclassMember::KwOnlyMarker => {
+            match (self.get_dataclass_member(cls, name), include_initvar) {
+                (DataclassMember::KwOnlyMarker, _) => {
                     seen_kw_only_marker = true;
                 }
-                DataclassMember::NotAField => {}
-                DataclassMember::Field(field, keywords) => {
+                (DataclassMember::NotAField, _) => {}
+                (DataclassMember::Field(field, mut keywords), _)
+                | (DataclassMember::InitVar(field, mut keywords), true) => {
+                    if keywords.kw_only.is_none() {
+                        // kw_only hasn't been explicitly set on the field
+                        keywords.kw_only = Some(
+                            seen_kw_only_marker || (cls_is_kw_only && field.defining_class == *cls),
+                        );
+                    };
                     if keywords.is_kw_only() {
-                        kwonly_fields.push((name.clone(), field, keywords))
+                        kwonly_fields.push((name.clone(), (*field.value).clone(), keywords))
                     } else {
-                        positional_fields.push((name.clone(), field, keywords))
+                        positional_fields.push((name.clone(), (*field.value).clone(), keywords))
                     }
                 }
-                DataclassMember::InitVar(field, keywords) => {
-                    if include_initvar {
-                        if keywords.is_kw_only() {
-                            kwonly_fields.push((name.clone(), field, keywords))
-                        } else {
-                            positional_fields.push((name.clone(), field, keywords))
-                        }
-                    }
-                }
+                (DataclassMember::InitVar(..), false) => {}
             }
         }
         positional_fields.extend(kwonly_fields);
@@ -167,9 +401,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let has_default = field_flags.default;
                 let is_kw_only = field_flags.is_kw_only();
                 if !is_kw_only {
-                    if !has_default && has_seen_default {
-                        if let Some(range) = cls.field_decl_range(&name) {
-                            self.error(
+                    if !has_default
+                        && has_seen_default
+                        && let Some(range) = cls.field_decl_range(&name)
+                    {
+                        self.error(
                                 errors,
                                 range,
                                 error::kind::ErrorKind::BadClassDefinition,
@@ -178,7 +414,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     "Dataclass field `{name}` without a default may not follow dataclass field with a default"
                                 ),
                             );
-                        }
                     }
                     if has_default {
                         has_seen_default = true;
@@ -188,6 +423,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     &field_flags.alias.unwrap_or(name),
                     has_default,
                     is_kw_only,
+                    field_flags.converter_param,
                 ));
             }
         }

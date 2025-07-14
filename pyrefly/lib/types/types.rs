@@ -38,7 +38,7 @@ use crate::types::class::ClassType;
 use crate::types::keywords::DataclassTransformKeywords;
 use crate::types::keywords::KwCall;
 use crate::types::literal::Lit;
-use crate::types::module::Module;
+use crate::types::module::ModuleType;
 use crate::types::param_spec::ParamSpec;
 use crate::types::quantified::Quantified;
 use crate::types::quantified::QuantifiedKind;
@@ -610,7 +610,7 @@ pub enum Type {
     /// where each present key has the same value type as in `C`.
     PartialTypedDict(TypedDict),
     Tuple(Tuple),
-    Module(Module),
+    Module(ModuleType),
     Forall(Box<Forall<Forallable>>),
     Var(Var),
     Quantified(Quantified),
@@ -761,7 +761,7 @@ impl Type {
         )
     }
 
-    pub fn as_module(&self) -> Option<&Module> {
+    pub fn as_module(&self) -> Option<&ModuleType> {
         match self {
             Type::Module(m) => Some(m),
             _ => None,
@@ -997,7 +997,9 @@ impl Type {
         seen
     }
 
-    fn check_func_metadata<T: Default>(&self, check: &dyn Fn(&FuncMetadata) -> T) -> T {
+    /// Calls a `check` function on this type's function metadata if it is a function. Note that we
+    /// do *not* recurse into the type to find nested function types.
+    fn check_toplevel_func_metadata<T: Default>(&self, check: &dyn Fn(&FuncMetadata) -> T) -> T {
         match self {
             Type::Function(box func)
             | Type::Forall(box Forall {
@@ -1014,42 +1016,44 @@ impl Type {
     }
 
     pub fn is_override(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.is_override)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_override)
     }
 
     pub fn has_enum_member_decoration(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.has_enum_member_decoration)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.has_enum_member_decoration)
     }
 
     pub fn is_property_getter(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.is_property_getter)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_property_getter)
     }
 
     pub fn is_property_setter_decorator(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.is_property_setter_decorator)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_property_setter_decorator)
     }
 
     pub fn is_property_setter_with_getter(&self) -> Option<Type> {
-        self.check_func_metadata(&|meta| meta.flags.is_property_setter_with_getter.clone())
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_property_setter_with_getter.clone())
     }
 
     pub fn is_overload(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.is_overload)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_overload)
     }
 
     pub fn is_deprecated(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.is_deprecated)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.is_deprecated)
     }
 
     pub fn has_final_decoration(&self) -> bool {
-        self.check_func_metadata(&|meta| meta.flags.has_final_decoration)
+        self.check_toplevel_func_metadata(&|meta| meta.flags.has_final_decoration)
     }
 
     pub fn dataclass_transform_metadata(&self) -> Option<DataclassTransformKeywords> {
-        self.check_func_metadata(&|meta| meta.flags.dataclass_transform_metadata.clone())
+        self.check_toplevel_func_metadata(&|meta| meta.flags.dataclass_transform_metadata.clone())
     }
 
-    pub fn transform_func_metadata(&mut self, mut f: impl FnMut(&mut FuncMetadata)) {
+    /// Transforms this type's function metadata, if it is a function. Note that we do *not*
+    /// recurse into the type to find nested function types.
+    pub fn transform_toplevel_func_metadata(&mut self, mut f: impl FnMut(&mut FuncMetadata)) {
         match self {
             Type::Function(box func)
             | Type::Forall(box Forall {
@@ -1065,7 +1069,43 @@ impl Type {
         }
     }
 
-    fn transform_callable(&mut self, mut f: impl FnMut(&mut Callable)) {
+    /// Apply `f` to this type if it is a callable. Note that we do *not* recurse into the type to
+    /// find nested callable types.
+    fn visit_toplevel_callable<'a>(&'a self, mut f: impl FnMut(&'a Callable)) {
+        match self {
+            Type::Callable(callable) => f(callable),
+            Type::Function(box func)
+            | Type::Forall(box Forall {
+                body: Forallable::Function(func),
+                ..
+            })
+            | Type::BoundMethod(box BoundMethod {
+                func: BoundMethodType::Function(func),
+                ..
+            })
+            | Type::BoundMethod(box BoundMethod {
+                func: BoundMethodType::Forall(Forall { body: func, .. }),
+                ..
+            }) => f(&func.signature),
+            Type::Overload(overload)
+            | Type::BoundMethod(box BoundMethod {
+                func: BoundMethodType::Overload(overload),
+                ..
+            }) => {
+                for x in overload.signatures.iter() {
+                    match x {
+                        OverloadType::Callable(callable) => f(callable),
+                        OverloadType::Forall(forall) => f(&forall.body.signature),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Transform this type if it is a callable. Note that we do *not* recurse into the type to
+    /// find nested callable types.
+    fn transform_toplevel_callable(&mut self, mut f: impl FnMut(&mut Callable)) {
         match self {
             Type::Callable(callable) => f(callable),
             Type::Function(box func)
@@ -1098,12 +1138,12 @@ impl Type {
     }
 
     // This doesn't handle generics currently
-    pub fn callable_return_type(&mut self) -> Option<Type> {
+    pub fn callable_return_type(&self) -> Option<Type> {
         let mut rets = Vec::new();
-        let mut get_ret = |callable: &mut Callable| {
+        let mut get_ret = |callable: &Callable| {
             rets.push(callable.ret.clone());
         };
-        self.transform_callable(&mut get_ret);
+        self.visit_toplevel_callable(&mut get_ret);
         if rets.is_empty() {
             None
         } else {
@@ -1116,7 +1156,28 @@ impl Type {
         let mut set_ret = |callable: &mut Callable| {
             callable.ret = ret.clone();
         };
-        self.transform_callable(&mut set_ret);
+        self.transform_toplevel_callable(&mut set_ret);
+    }
+
+    pub fn callable_first_param(&self) -> Option<Type> {
+        let mut params = Vec::new();
+        let mut get_param = |callable: &Callable| {
+            if let Some(p) = callable.get_first_param() {
+                params.push(p);
+            }
+        };
+        self.visit_toplevel_callable(&mut get_param);
+        if params.is_empty() {
+            None
+        } else {
+            Some(unions(params))
+        }
+    }
+
+    pub fn callable_signatures(&self) -> Vec<&Callable> {
+        let mut sigs = Vec::new();
+        self.visit_toplevel_callable(&mut |sig| sigs.push(sig));
+        sigs
     }
 
     pub fn promote_literals(self, stdlib: &Stdlib) -> Type {
@@ -1171,16 +1232,18 @@ impl Type {
             fn transform_params(params: &mut ParamList) {
                 for param in params.items_mut() {
                     if let Param::PosOnly(Some(_), ty, req) = param {
-                        *param = Param::PosOnly(None, ty.clone(), *req);
+                        *param = Param::PosOnly(None, ty.clone(), req.clone());
                     }
                 }
             }
-            ty.transform_callable(&mut |callable: &mut Callable| match &mut callable.params {
-                Params::List(params) => {
-                    transform_params(params);
-                }
-                _ => {}
-            });
+            ty.transform_toplevel_callable(
+                &mut |callable: &mut Callable| match &mut callable.params {
+                    Params::List(params) => {
+                        transform_params(params);
+                    }
+                    _ => {}
+                },
+            );
             if let Type::ParamSpecValue(params) = &mut ty {
                 transform_params(params);
             }

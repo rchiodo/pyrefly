@@ -792,6 +792,21 @@ def foo(x: int):
 );
 
 testcase!(
+    test_builtins_type_constructor,
+    r#"
+from typing import assert_type
+class Foo:
+    @classmethod
+    def method(cls, x: str) -> int:
+        return 1
+    def g(self):
+        assert_type(type(self).method("tst"), int)
+x = Foo()
+assert_type(type(x), type[Foo])
+"#,
+);
+
+testcase!(
     test_anywhere_binding,
     r#"
 from typing import assert_type, Literal
@@ -1036,6 +1051,19 @@ def reveal_type(x, y, z):
     pass
 assert_type()
 reveal_type(1, 2, 3)
+    "#,
+);
+
+testcase!(
+    test_special_calls_return,
+    r#"
+from typing import Literal, assert_type, reveal_type
+
+a = assert_type(0, str) # E: assert_type(Literal[0], str) failed
+assert_type(a, Literal[0]) 
+
+b = reveal_type(0) # E: revealed type: Literal[0]
+assert_type(b, Literal[0])
     "#,
 );
 
@@ -1569,7 +1597,7 @@ def f(x = 1):
     reveal_type(x) # E: revealed type: int | Unknown
     return x
 
-reveal_type(f) # E: revealed type: (x: int | Unknown = ...) -> int | Unknown
+reveal_type(f) # E: revealed type: (x: int | Unknown = 1) -> int | Unknown
 "#,
 );
 
@@ -1612,5 +1640,13 @@ from typing import Any, assert_type
 def f(x: type[Any]):
     assert_type(x(), Any)
     assert_type(x(7, arg=8), Any)
+"#,
+);
+
+testcase!(
+    test_bin_op_bool_num,
+    r#"
+def f(x:float, y:bool) -> float:
+    return x * y 
 "#,
 );

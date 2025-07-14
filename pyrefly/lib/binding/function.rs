@@ -58,6 +58,7 @@ use crate::types::types::Type;
 struct Decorators {
     has_no_type_check: bool,
     is_overload: bool,
+    is_abstract_method: bool,
     decorators: Box<[Idx<Key>]>,
 }
 
@@ -416,9 +417,12 @@ impl<'a> BindingsBuilder<'a> {
     fn decorators(&mut self, decorator_list: Vec<Decorator>, usage: &mut Usage) -> Decorators {
         let mut is_overload = false;
         let mut has_no_type_check = false;
+        let mut is_abstract_method = false;
         for d in &decorator_list {
             let special_export = self.as_special_export(&d.expression);
             is_overload = is_overload || matches!(special_export, Some(SpecialExport::Overload));
+            is_abstract_method =
+                is_abstract_method || matches!(special_export, Some(SpecialExport::AbstractMethod));
             has_no_type_check =
                 has_no_type_check || matches!(special_export, Some(SpecialExport::NoTypeCheck));
         }
@@ -428,6 +432,7 @@ impl<'a> BindingsBuilder<'a> {
         Decorators {
             has_no_type_check,
             is_overload,
+            is_abstract_method,
             decorators,
         }
     }
@@ -443,7 +448,9 @@ impl<'a> BindingsBuilder<'a> {
         func_name: &Identifier,
         class_key: Option<Idx<KeyClass>>,
     ) -> (FunctionStubOrImpl, Option<SelfAssignments>) {
-        let stub_or_impl = if is_ellipse(&body)
+        let stub_or_impl = if (body.first().is_some_and(is_docstring)
+            && decorators.is_abstract_method)
+            || is_ellipse(&body)
             || (body.first().is_some_and(is_docstring) && decorators.is_overload)
         {
             FunctionStubOrImpl::Stub
@@ -566,6 +573,7 @@ fn function_last_expressions<'a>(
         match x.last()? {
             Stmt::Expr(x) => res.push((LastStmt::Expr, &x.value)),
             Stmt::Return(_) | Stmt::Raise(_) => {}
+            Stmt::Assert(x) if sys_info.evaluate_bool(&x.test) == Some(false) => {}
             Stmt::With(x) => {
                 let kind = IsAsync::new(x.is_async);
                 for y in &x.items {

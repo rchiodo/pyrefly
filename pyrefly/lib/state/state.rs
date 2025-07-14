@@ -25,10 +25,12 @@ use std::sync::MutexGuard;
 use std::sync::RwLockReadGuard;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use dupe::Dupe;
+use dupe::OptionDupedExt;
 use enum_iterator::Sequence;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -39,6 +41,7 @@ use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
+use pyrefly_util::fs_anyhow;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
 use pyrefly_util::locked_map::LockedMap;
@@ -135,6 +138,11 @@ struct ModuleDataMut {
     handle: Handle,
     config: RwLock<ArcId<ConfigFile>>,
     state: UpgradeLock<Step, ModuleDataInner>,
+    /// Invariant: If `h1` depends on `h2` then we must have both of:
+    /// data[h1].deps[h2.module].contains(h2)
+    /// data[h2].rdeps.contains(h1)
+    ///
+    /// To ensure that is atomic, we always modify the rdeps while holding the deps write lock.
     deps: RwLock<HashMap<ModuleName, SmallSet1<Handle>, BuildNoHash>>,
     /// The reverse dependencies of this module. This is used to invalidate on change.
     /// Note that if we are only running once, e.g. on the command line, this isn't valuable.
@@ -352,10 +360,10 @@ impl<'a> Transaction<'a> {
             })
             .collect::<Vec<_>>();
         for (k, v) in self.readable.modules.iter() {
-            if self.data.updated_modules.get(k).is_none() {
-                if let Some(load) = v.state.steps.load.dupe() {
-                    res.push((load, v.config.dupe()));
-                }
+            if self.data.updated_modules.get(k).is_none()
+                && let Some(load) = v.state.steps.load.dupe()
+            {
+                res.push((load, v.config.dupe()));
             }
         }
         Errors::new(res)
@@ -610,7 +618,8 @@ impl<'a> Transaction<'a> {
             if let Some(subscriber) = &self.data.subscriber {
                 subscriber.start_work(module_data.handle.dupe());
             }
-            let deps = mem::take(&mut *module_data.deps.write());
+            let mut deps_lock = module_data.deps.write();
+            let deps = mem::take(&mut *deps_lock);
             finish(&mut w);
             if !deps.is_empty() {
                 // Downgrade to exclusive, so other people can read from us, or we lock up.
@@ -625,6 +634,8 @@ impl<'a> Transaction<'a> {
                     assert!(removed);
                 }
             }
+            // Make sure we hold deps write lock while mutating rdeps
+            drop(deps_lock);
         };
 
         if exclusive.dirty.require {
@@ -942,14 +953,15 @@ impl<'a> Transaction<'a> {
         }
 
         let t = self.lookup_answer(module_data.dupe(), &KeyExport(name.clone()), thread_state);
-        let class = match t.arc_clone() {
-            Type::ClassDef(cls) => Some(cls),
+        let class = match t.as_deref() {
+            Some(Type::ClassDef(cls)) => Some(cls.dupe()),
             ty => {
                 self.add_error(
                     &module_data,
                     TextRange::default(),
                     format!(
-                        "Did not expect non-class type `{ty}` for stdlib import `{}.{name}`",
+                        "Did not expect non-class type `{}` for stdlib import `{}.{name}`",
+                        ty.map_or_else(|| "<KeyError>".to_owned(), |t| t.to_string()),
                         module_data.handle.module()
                     ),
                     ErrorKind::MissingModuleAttribute,
@@ -960,9 +972,9 @@ impl<'a> Transaction<'a> {
         class.map(|class| {
             let tparams = match class.precomputed_tparams() {
                 Some(tparams) => tparams.dupe(),
-                None => {
-                    self.lookup_answer(module_data.dupe(), &KeyTParams(class.index()), thread_state)
-                }
+                None => self
+                    .lookup_answer(module_data.dupe(), &KeyTParams(class.index()), thread_state)
+                    .unwrap_or_default(),
             };
             (class, tparams)
         })
@@ -979,7 +991,7 @@ impl<'a> Transaction<'a> {
         module_data: ArcId<ModuleDataMut>,
         key: &K,
         thread_state: &ThreadState,
-    ) -> Arc<<K as Keyed>::Answer>
+    ) -> Option<Arc<<K as Keyed>::Answer>>
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
@@ -992,7 +1004,7 @@ impl<'a> Transaction<'a> {
         for _ in 0..2 {
             let lock = module_data.state.read();
             if let Some(solutions) = &lock.steps.solutions {
-                return solutions.get_hashed(key).dupe();
+                return solutions.get_hashed_opt(key).duped();
             } else if let Some(answers) = &lock.steps.answers {
                 let load = lock.steps.load.dupe().unwrap();
                 let answers = answers.dupe();
@@ -1166,6 +1178,8 @@ impl<'a> Transaction<'a> {
         handles: &[(Handle, Require)],
         old_require: RequireDefault,
     ) -> Result<(), Cancelled> {
+        let run_number = self.data.state.run_count.fetch_add(1, Ordering::SeqCst);
+
         // We first compute all the modules that are either new or have changed.
         // Then we repeatedly compute all the modules who depend on modules that changed.
         // To ensure we guarantee termination, and don't endure more than a linear overhead,
@@ -1174,7 +1188,7 @@ impl<'a> Transaction<'a> {
         let mut changed_twice = SmallSet::new();
 
         for i in 1.. {
-            debug!("Running epoch {i}");
+            debug!("Running epoch {i} of run {run_number}");
             // The first version we use the old require. We use this to trigger require changes,
             // but only once, as after we've done it once, the "old" value will no longer be accessible.
             self.run_step(handles, if i == 1 { Some(old_require) } else { None })?;
@@ -1351,7 +1365,7 @@ impl<'a> Transaction<'a> {
         );
     }
 
-    pub fn report_timings(&self, path: &Path) -> anyhow::Result<()> {
+    pub fn report_timings(&mut self, path: &Path) -> anyhow::Result<()> {
         let mut file = BufWriter::new(File::create(path)?);
         writeln!(file, "Module,Step,Seconds")?;
         file.flush()?;
@@ -1430,6 +1444,24 @@ impl<'a> Transaction<'a> {
                 subscriber.finish_work(m.handle.dupe(), alt.load.unwrap().dupe());
             }
         }
+        self.data.subscriber = None; // Finalise the progress bar before printing to stderr
+
+        fn line_key(x: &str) -> Option<(u64, &str)> {
+            let (_, x) = x.rsplit_once(',')?;
+            let (whole, frac) = x.split_once('.').unwrap_or((x, ""));
+            Some((whole.parse::<u64>().unwrap_or(u64::MAX), frac))
+        }
+
+        // Often what the person wants is what is taking most time, so sort that way.
+        // But sometimes they abort, so we can't just buffer the results in memory.
+        file.flush()?;
+        drop(file);
+        let contents = fs_anyhow::read_to_string(path)?;
+        let mut lines = contents.lines().collect::<Vec<_>>();
+        lines.sort_by_cached_key(|x| line_key(x));
+        lines.reverse();
+        fs_anyhow::write(path, (lines.join("\n") + "\n").as_bytes())?;
+
         for (step, duration) in timings {
             info!("Step {step} took {duration:.3} seconds");
         }
@@ -1477,10 +1509,12 @@ impl<'a> TransactionHandle<'a> {
             }
             Entry::Occupied(mut e) => e.get_mut().insert(handle),
         };
-        drop(write);
         if did_insert {
-            res.rdeps.lock().insert(self.module_data.handle.dupe());
+            let inserted = res.rdeps.lock().insert(self.module_data.handle.dupe());
+            assert!(inserted);
         }
+        // Make sure we hold the deps write lock until after we insert into rdeps.
+        drop(write);
         Ok(res)
     }
 }
@@ -1518,7 +1552,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         path: Option<&ModulePath>,
         k: &K,
         thread_state: &ThreadState,
-    ) -> Arc<K::Answer>
+    ) -> Option<Arc<K::Answer>>
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
@@ -1527,7 +1561,20 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         // The unwrap is safe because we must have said there were no exports,
         // so no one can be trying to get at them
         let module_data = self.get_module(module, path).unwrap();
-        self.transaction.lookup_answer(module_data, k, thread_state)
+        let res = self.transaction.lookup_answer(module_data, k, thread_state);
+        if res.is_none() {
+            let msg = format!(
+                "LookupAnswer::get failed to find key, {module} {k:?} (concurrent changes?)"
+            );
+            if self.transaction.data.state.run_count.load(Ordering::SeqCst) <= 1 {
+                // We failed to find the key, but we are the only one running, and have never had any invalidation.
+                // We should panic.
+                panic!("{msg}");
+            } else {
+                debug!("{msg}");
+            }
+        }
+        res
     }
 }
 
@@ -1585,6 +1632,7 @@ pub struct State {
     uniques: UniqueFactory,
     config_finder: ConfigFinder,
     state: RwLock<StateInner>,
+    run_count: AtomicUsize,
     committing_transaction_lock: Mutex<()>,
     snapshot_counter: AtomicI32,
 }
@@ -1596,6 +1644,7 @@ impl State {
             uniques: UniqueFactory::new(),
             config_finder,
             state: RwLock::new(StateInner::new()),
+            run_count: AtomicUsize::new(0),
             committing_transaction_lock: Mutex::new(()),
             snapshot_counter: AtomicI32::new(1), // Start at 1
         }

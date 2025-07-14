@@ -18,6 +18,7 @@ use crate::config::error::ErrorConfig;
 use crate::error::context::ErrorContext;
 use crate::error::error::Error;
 use crate::error::kind::ErrorKind;
+use crate::error::kind::Severity;
 use crate::error::style::ErrorStyle;
 use crate::module::module_info::ModuleInfo;
 
@@ -157,10 +158,13 @@ impl ErrorCollector {
             for err in errors.iter() {
                 if err.is_ignored(error_config.permissive_ignores) {
                     result.suppressed.push(err.clone());
-                } else if !error_config.display_config.is_enabled(err.error_kind()) {
-                    result.disabled.push(err.clone());
                 } else {
-                    result.shown.push(err.clone());
+                    match error_config.display_config.severity(err.error_kind()) {
+                        Severity::Error => result.shown.push(err.with_severity(Severity::Error)),
+                        Severity::Warn => result.shown.push(err.with_severity(Severity::Warn)),
+                        Severity::Info => result.shown.push(err.with_severity(Severity::Info)),
+                        Severity::Ignore => result.disabled.push(err.clone()),
+                    }
                 }
             }
         }
@@ -189,6 +193,7 @@ mod tests {
 
     use super::*;
     use crate::config::error::ErrorDisplayConfig;
+    use crate::error::kind::Severity;
 
     fn add(errors: &ErrorCollector, range: TextRange, kind: ErrorKind, msg: String) {
         errors.add(range, kind, None, vec1![msg]);
@@ -285,9 +290,9 @@ mod tests {
         );
 
         let display_config = ErrorDisplayConfig::new(HashMap::from([
-            (ErrorKind::AsyncError, true),
-            (ErrorKind::BadAssignment, false),
-            (ErrorKind::NotIterable, false),
+            (ErrorKind::AsyncError, Severity::Error),
+            (ErrorKind::BadAssignment, Severity::Ignore),
+            (ErrorKind::NotIterable, Severity::Ignore),
         ]));
         let config = ErrorConfig::new(&display_config, false, false);
 

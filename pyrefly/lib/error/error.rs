@@ -6,6 +6,7 @@
  */
 
 use std::borrow::Cow;
+use std::cmp;
 use std::fmt::Debug;
 use std::io;
 use std::io::Write;
@@ -14,6 +15,7 @@ use itertools::Itertools;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_util::display::number_thousands;
 use pyrefly_util::lined_buffer::DisplayRange;
+use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::lined_buffer::LinedBuffer;
 use ruff_annotate_snippets::Level;
 use ruff_annotate_snippets::Message;
@@ -35,6 +37,7 @@ pub struct Error {
     range: TextRange,
     display_range: DisplayRange,
     error_kind: ErrorKind,
+    severity: Severity,
     /// First line of the error message
     msg_header: Box<str>,
     /// The rest of the error message after the first line.
@@ -50,11 +53,11 @@ impl Ranged for Error {
 
 impl Error {
     pub fn write_line(&self, mut f: impl Write, verbose: bool) -> io::Result<()> {
-        if verbose {
+        if verbose && self.severity.is_enabled() {
             writeln!(
                 f,
                 "{} {} [{}]",
-                self.error_kind().severity().label(),
+                self.severity.label(),
                 self.msg_header,
                 self.error_kind.to_name(),
             )?;
@@ -65,11 +68,11 @@ impl Error {
             if let Some(details) = &self.msg_details {
                 writeln!(f, "{details}")?;
             }
-        } else {
+        } else if self.severity.is_enabled() {
             writeln!(
                 f,
                 "{} {}:{}: {} [{}]",
-                self.error_kind().severity().label(),
+                self.severity.label(),
                 self.path(),
                 self.display_range,
                 self.msg_header,
@@ -80,10 +83,10 @@ impl Error {
     }
 
     pub fn print_colors(&self, verbose: bool) {
-        if verbose {
+        if verbose && self.severity.is_enabled() {
             anstream::println!(
                 "{} {} {}",
-                self.error_kind().severity().painted(),
+                self.severity.painted(),
                 Paint::new(&*self.msg_header),
                 Paint::dim(format!("[{}]", self.error_kind().to_name()).as_str()),
             );
@@ -94,10 +97,10 @@ impl Error {
             if let Some(details) = &self.msg_details {
                 anstream::println!("{details}");
             }
-        } else {
+        } else if self.severity.is_enabled() {
             anstream::println!(
                 "{} {}:{}: {} {}",
-                self.error_kind().severity().painted(),
+                self.severity.painted(),
                 Paint::blue(&self.path().as_path().display()),
                 Paint::dim(self.display_range()),
                 Paint::new(&*self.msg_header),
@@ -111,31 +114,49 @@ impl Error {
     }
 
     fn get_source_snippet<'a>(&'a self, origin: &'a str) -> Message<'a> {
+        // Maximum number of lines to print in the snippet.
+        const MAX_LINES: u32 = 5;
+
         // Warning: The SourceRange is char indexed, while the snippet is byte indexed.
         //          Be careful in the conversion.
-        // Question: Should we just keep the original TextRange around?
-        let source = self
-            .module_info
-            .lined_buffer()
-            .content_in_line_range(self.display_range.start.line, self.display_range.end.line);
+        let source = self.module_info.lined_buffer().content_in_line_range(
+            self.display_range.start.line,
+            cmp::min(
+                LineNumber::from_zero_indexed(
+                    self.display_range.start.line.to_zero_indexed() + MAX_LINES,
+                ),
+                self.display_range.end.line,
+            ),
+        );
         let line_start = self
             .module_info
             .lined_buffer()
             .line_start(self.display_range.start.line);
 
-        let level = match self.error_kind().severity() {
+        let level = match self.severity {
             Severity::Error => Level::Error,
             Severity::Warn => Level::Warning,
             Severity::Info => Level::Info,
+            Severity::Ignore => Level::None,
         };
         let span_start = (self.range.start() - line_start).to_usize();
-        let span_end = span_start + self.range.len().to_usize();
+        let span_end = cmp::min(span_start + self.range.len().to_usize(), source.len());
         Level::None.title("").snippet(
             Snippet::source(source)
                 .line_start(self.display_range.start.line.get() as usize)
                 .origin(origin)
                 .annotation(level.span(span_start..span_end)),
         )
+    }
+
+    pub fn with_severity(&self, severity: Severity) -> Self {
+        let mut res = self.clone();
+        res.severity = severity;
+        res
+    }
+
+    pub fn severity(&self) -> Severity {
+        self.severity
     }
 }
 
@@ -190,6 +211,7 @@ impl Error {
             range,
             display_range,
             error_kind,
+            severity: error_kind.default_severity(),
             msg_header,
             msg_details,
         }
@@ -220,11 +242,102 @@ impl Error {
     }
 
     pub fn is_ignored(&self, permissive_ignores: bool) -> bool {
-        self.module_info
-            .is_ignored(&self.display_range, self.error_kind, permissive_ignores)
+        self.module_info.is_ignored(
+            &self.display_range,
+            self.error_kind.to_name(),
+            permissive_ignores,
+        )
     }
 
     pub fn error_kind(&self) -> ErrorKind {
         self.error_kind
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use pyrefly_python::module_name::ModuleName;
+    use ruff_text_size::TextSize;
+    use vec1::vec1;
+
+    use super::*;
+
+    #[test]
+    fn test_error_render() {
+        let module_info = ModuleInfo::new(
+            ModuleName::from_str("test"),
+            ModulePath::filesystem(PathBuf::from("test.py")),
+            Arc::new("def f(x: int) -> str:\n    return x".to_owned()),
+        );
+        let error = Error::new(
+            module_info,
+            TextRange::new(TextSize::new(26), TextSize::new(34)),
+            vec1!["bad return".to_owned()],
+            ErrorKind::BadReturn,
+        );
+        let mut normal = Vec::new();
+        error
+            .write_line(&mut Cursor::new(&mut normal), false)
+            .unwrap();
+        let mut verbose = Vec::new();
+        error
+            .write_line(&mut Cursor::new(&mut verbose), true)
+            .unwrap();
+
+        assert_eq!(
+            str::from_utf8(&normal).unwrap(),
+            "ERROR test.py:2:5-13: bad return [bad-return]\n"
+        );
+        assert_eq!(
+            str::from_utf8(&verbose).unwrap(),
+            r#"ERROR bad return [bad-return]
+ --> test.py:2:5
+  |
+2 |     return x
+  |     ^^^^^^^^
+  |
+"#,
+        );
+    }
+
+    #[test]
+    fn test_error_too_long() {
+        let contents = format!("Start\n{}\nEnd", "X\n".repeat(1000));
+
+        let module_info = ModuleInfo::new(
+            ModuleName::from_str("test"),
+            ModulePath::filesystem(PathBuf::from("test.py")),
+            Arc::new(contents.clone()),
+        );
+        let error = Error::new(
+            module_info,
+            TextRange::new(TextSize::new(0), TextSize::new(contents.len() as u32)),
+            vec1!["oops".to_owned()],
+            ErrorKind::BadReturn,
+        );
+        let mut output = Vec::new();
+        error
+            .write_line(&mut Cursor::new(&mut output), true)
+            .unwrap();
+
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            r#"ERROR oops [bad-return]
+ --> test.py:1:1
+  |
+1 | / Start
+2 | | X
+3 | | X
+4 | | X
+5 | | X
+6 | | X
+  | |__^
+  |
+"#,
+        );
     }
 }

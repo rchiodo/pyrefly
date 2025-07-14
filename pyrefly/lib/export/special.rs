@@ -36,8 +36,11 @@ pub enum SpecialExport {
     Quit,
     OsExit,
     Len,
+    Bool,
+    Type,
     NoTypeCheck,
     Overload,
+    AbstractMethod,
 }
 
 impl SpecialExport {
@@ -65,8 +68,11 @@ impl SpecialExport {
             "quit" => Some(Self::Quit),
             "_exit" => Some(Self::OsExit),
             "len" => Some(Self::Len),
+            "bool" => Some(Self::Bool),
+            "type" => Some(Self::Type),
             "no_type_check" => Some(Self::NoTypeCheck),
             "overload" => Some(Self::Overload),
+            "abstractmethod" => Some(Self::AbstractMethod),
             _ => None,
         }
     }
@@ -92,10 +98,12 @@ impl SpecialExport {
             }
             Self::CollectionsNamedTuple => matches!(m.as_str(), "collections"),
             Self::Enum | Self::StrEnum | Self::IntEnum => matches!(m.as_str(), "enum"),
-            Self::Super | Self::Len => matches!(m.as_str(), "builtins"),
+            Self::Super | Self::Len | Self::Quit | Self::Bool | Self::Type => {
+                matches!(m.as_str(), "builtins")
+            }
             Self::Exit => matches!(m.as_str(), "sys" | "builtins"),
-            Self::Quit => matches!(m.as_str(), "builtins"),
             Self::OsExit => matches!(m.as_str(), "os"),
+            Self::AbstractMethod => matches!(m.as_str(), "abc"),
         }
     }
 }

@@ -245,8 +245,8 @@ class A:
     x: int
     y: str
     def __init__(self):
-        self.x: Literal[1] = 1  # E: Cannot annotate attribute `x`, which is already annotated in the class body
-        self.y: Final = "y"  # E: Cannot annotate attribute `y`, which is already annotated in the class body
+        self.x: Literal[1] = 1  
+        self.y: Final = "y"  
 def f(a: A):
     assert_type(a.x, int)
     "#,
@@ -361,7 +361,7 @@ C().f(0)    # E: Argument `Literal[0]` is not assignable to parameter `x` with t
     "#,
 );
 
-// Make sure we treat `callable_attr` as plain instance data, not a bound method.
+// Make sure we treat `callable_attr` as a bare instance attribute, not a bound method.
 testcase!(
     test_callable_instance_only_attribute,
     r#"
@@ -374,6 +374,49 @@ c = C()
 x = c.callable_attr(42)
 assert_type(x, int)
     "#,
+);
+
+// We currently treat `Callable` as not having method binding behavior. This is
+// not compatible with Pyright and mypy, both of which assume in the face of
+// ambiguity that the callable is probably a function or lambda.
+//
+// See https://discuss.python.org/t/when-should-we-assume-callable-types-are-method-descriptors/92938
+testcase!(
+    bug = "We probably need to treat `f` as a method here.",
+    test_callable_as_class_var,
+    r#"
+from typing import assert_type, Callable, ClassVar
+def get_callback() -> Callable[[object, int], int]: ...
+class C:
+    f: ClassVar[Callable[[object, int], int]] = get_callback()
+assert_type(C.f(None, 1), int)
+# We probably should to be treating f as a bound method here.
+assert_type(C().f(None, 1), int)
+"#,
+);
+
+// Mypy and Pyright treat `f` as not a method here; its actual behavior
+// is ambiguous even if we assume the values are always functions or lambdas
+// because the default value can be overridden by instance assignment.
+//
+// Our behavior is compatible, but the underlying implementation is not, we are
+// behaving this way based on how we treate the Callable type rather than based
+// on the absence of `ClassVar`.
+//
+// See https://discuss.python.org/t/when-should-we-assume-callable-types-are-method-descriptors/92938
+testcase!(
+    test_callable_with_ambiguous_binding,
+    r#"
+from typing import assert_type, Callable
+def get_callback() -> Callable[[object, int], int]: ...
+class C:
+    f = get_callback()
+assert_type(C.f(None, 1), int)
+assert_type(C().f(None, 1), int)
+# This is why the behavior is ambiguous - at runtime, the default `C.f` is a
+# method but the instance-level shadow is not.
+C().f = lambda _, x: x
+"#,
 );
 
 testcase!(
@@ -601,6 +644,27 @@ from foo import A
 
 assert_type(A.x, int)
 assert_type(A.y, int)
+    "#,
+);
+
+testcase!(
+    test_object_getattribute,
+    r#"
+from typing import *
+class A:
+    def __getattribute__(self, name: str, /) -> int: ...
+    def __setattr__(self, name: str, value: Any, /) -> None: ...
+    def __delattr__(self, name: str, /) -> None: ...
+class B:
+    def __getattribute__(self, name: str, /) -> str: ...
+a = A()
+b = B()
+assert_type(a.x, int)
+assert_type(b.x, str)
+a.x = 1
+del a.x
+b.x = 1  # E: Object of class `B` has no attribute `x`
+del b.x  # E: Object of class `B` has no attribute `x`
     "#,
 );
 
@@ -1063,6 +1127,46 @@ def f(c: Config):
 );
 
 testcase!(
+    bug = "We probably should disallow reassignment of class objects",
+    test_nested_class_mutability,
+    r#"
+class Backend:
+    class Options:
+        pass
+class Options2(Backend.Options):
+    pass
+Backend.Options = Options2  # This probably should not be legal
+    "#,
+);
+
+testcase!(
+    bug = "We should allow subtyping in nested class types",
+    test_nested_class_inheritance,
+    r#"
+class Backend:
+    class Options:
+        pass
+class ProcessGroupGloo(Backend):
+    class Options(Backend.Options): # E: `ProcessGroupGloo.Options` has type `type[Options]`, which is not consistent with `type[Options]` in `Backend.Options` (the type of read-write attributes cannot be changed)
+        pass
+    "#,
+);
+
+testcase!(
+    bug = "We should allow subtyping in nested class types via assignment",
+    test_nested_class_inheritance_via_assignment,
+    r#"
+class Backend:
+    class Options:
+        pass
+class Options2(Backend.Options):
+    pass
+class ProcessGroupGloo(Backend):
+    Options = Options2  # E: `ProcessGroupGloo.Options` has type `type[Options2]`, which is not consistent with `type[Options]` in `Backend.Options` (the type of read-write attributes cannot be changed)
+    "#,
+);
+
+testcase!(
     bug = "other.output type is too general. Also, there should be no errors.",
     test_attr_cast,
     r#"
@@ -1075,5 +1179,32 @@ class C:
         assert_type(other, Self)
         assert_type(other.outputs, Any) # E: TODO: Expr::attr_infer_for_type
         len(self.outputs) == len(other.outputs) # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: Self 
+    "#,
+);
+
+testcase!(
+    bug = "There should be no errors here.",
+    test_attr_tuple,
+    r#"
+from typing import Any, Tuple
+
+def g(ann) -> None:
+    if ann is Tuple: ...
+    ann.__module__ # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: type[Tuple] | Unknown (trying to access __module__)
+    "#,
+);
+
+testcase!(
+    bug = "PyTorch TODO: First error message can be improved and there should be  no error on obj.__name__",
+    test_attr,
+    r#"
+def f(obj, g, field_type, my_type,):
+    assert issubclass(obj, tuple) and hasattr(obj, "_fields")
+    for f in obj._fields: # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: type[tuple[Unknown, ...]] 
+        if isinstance(field_type, my_type) and g is not None:
+            if g is None:
+                raise ValueError(
+                    f"{obj.__name__}." # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: @_ (trying to access __name__)
+                )
     "#,
 );

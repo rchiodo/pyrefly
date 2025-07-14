@@ -265,29 +265,38 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self_type = self_type.map(Type::type_form);
         }
 
+        let get_requiredness =
+            |default: Option<&Expr>, check: Option<(&Type, &(dyn Fn() -> TypeCheckContext))>| {
+                match default {
+                    Some(default)
+                        if stub_or_impl != FunctionStubOrImpl::Stub
+                            || !matches!(default, Expr::EllipsisLiteral(_)) =>
+                    {
+                        Required::Optional(Some(self.expr(default, check, errors)))
+                    }
+                    Some(_) => Required::Optional(None),
+                    None => Required::Required,
+                }
+            };
+
         // Determine the type of the parameter based on its binding. Left is annotated parameter, right is unannotated
-        let mut get_param_ty = |name: &Identifier, default: Option<&Expr>| {
-            let ty = match self.bindings().get_function_param(name) {
+        let mut get_param_type_and_requiredness = |name: &Identifier, default: Option<&Expr>| {
+            let (ty, required) = match self.bindings().get_function_param(name) {
                 Either::Left(idx) => {
                     // If the parameter is annotated, we check the default value against the annotation
                     let param_ty = self.get_idx(idx).annotation.get_type().clone();
-                    if let Some(default) = default
-                        && (stub_or_impl != FunctionStubOrImpl::Stub
-                            || !matches!(default, Expr::EllipsisLiteral(_)))
-                    {
-                        self.expr(
-                            default,
-                            Some((&param_ty, &|| {
-                                TypeCheckContext::of_kind(TypeCheckKind::FunctionParameterDefault(
-                                    name.id.clone(),
-                                ))
-                            })),
-                            errors,
-                        );
-                    }
-                    param_ty
+                    let required = get_requiredness(
+                        default,
+                        Some((&param_ty, &|| {
+                            TypeCheckContext::of_kind(TypeCheckKind::FunctionParameterDefault(
+                                name.id.clone(),
+                            ))
+                        })),
+                    );
+                    (param_ty, required)
                 }
                 Either::Right(var) => {
+                    let required = get_requiredness(default, None);
                     // If this is the first parameter and there is a self type, solve to `Self`.
                     // We only try to solve the first param for now. Other unannotated params
                     // are also Var. If a default value of type T is provided, it will resolve to Any | T.
@@ -295,33 +304,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Some(ty) = &self_type {
                         self.solver()
                             .is_subset_eq(&var.to_type(), ty, self.type_order());
-                    } else if let Some(default) = default
-                        && (stub_or_impl != FunctionStubOrImpl::Stub
-                            || !matches!(default, Expr::EllipsisLiteral(_)))
-                    {
-                        let default_ty = self.expr(default, None, errors);
+                    } else if let Required::Optional(Some(default_ty)) = &required {
                         self.solver().is_subset_eq(
-                            &self.union(Type::any_implicit(), default_ty),
+                            &self.union(Type::any_implicit(), default_ty.clone()),
                             &var.to_type(),
                             self.type_order(),
                         );
                     }
-                    self.solver().force_var(var)
+                    (self.solver().force_var(var), required)
                 }
             };
             self_type = None; // Stop using `self` type solve Var params after the first param.
-            ty
+            (ty, required)
         };
         let mut paramspec_args = None;
         let mut paramspec_kwargs = None;
         let mut params = Vec::with_capacity(def.parameters.len());
         params.extend(def.parameters.posonlyargs.iter().map(|x| {
-            let ty = get_param_ty(&x.parameter.name, x.default.as_deref());
-            let required = if x.default.is_some() {
-                Required::Optional
-            } else {
-                Required::Required
-            };
+            let (ty, required) =
+                get_param_type_and_requiredness(&x.parameter.name, x.default.as_deref());
             Param::PosOnly(Some(x.parameter.name.id.clone()), ty, required)
         }));
 
@@ -331,12 +332,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut seen_keyword_args = false;
 
         params.extend(def.parameters.args.iter().map(|x| {
-            let ty = get_param_ty(&x.parameter.name, x.default.as_deref());
-            let required = if x.default.is_some() {
-                Required::Optional
-            } else {
-                Required::Required
-            };
+            let (ty, required) =
+                get_param_type_and_requiredness(&x.parameter.name, x.default.as_deref());
 
             // If the parameter begins but does not end with "__", it is a positional-only parameter.
             // See: https://typing.python.org/en/latest/spec/historical.html#positional-only-parameters
@@ -365,7 +362,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }));
         params.extend(def.parameters.vararg.iter().map(|x| {
-            let ty = get_param_ty(&x.name, None);
+            let (ty, _) = get_param_type_and_requiredness(&x.name, None);
             if let Type::Args(q) = &ty {
                 paramspec_args = Some(q.clone());
             }
@@ -386,12 +383,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
         }
         params.extend(def.parameters.kwonlyargs.iter().map(|x| {
-            let ty = get_param_ty(&x.parameter.name, x.default.as_deref());
-            let required = if x.default.is_some() {
-                Required::Optional
-            } else {
-                Required::Required
-            };
+            let (ty, required) =
+                get_param_type_and_requiredness(&x.parameter.name, x.default.as_deref());
             Param::KwOnly(x.parameter.name.id.clone(), ty, required)
         }));
         params.extend(def.parameters.kwarg.iter().map(|x| {
@@ -410,6 +403,65 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let ret = self
             .get(&Key::ReturnType(ShortIdentifier::new(&def.name)))
             .arc_clone_ty();
+
+        if matches!(&ret, Type::TypeGuard(_) | Type::TypeIs(_)) {
+            // https://typing.python.org/en/latest/spec/narrowing.html#typeguard
+            // https://typing.python.org/en/latest/spec/narrowing.html#typeis
+            // TypeGuard and TypeIs must accept at least one positional argument.
+            // If a type guard function is implemented as an instance method or
+            // class method, the first positional argument maps to the second
+            // parameter (after “self” or “cls”).
+            let position_args_count = params
+                .iter()
+                .filter(|p| matches!(p, Param::Pos(..) | Param::PosOnly(..)))
+                .count()
+                - (if class_key.is_some() && !is_staticmethod {
+                    1 // Subtract the "self" or "cls" parameter
+                } else {
+                    0
+                });
+            if position_args_count < 1 {
+                self.error(
+                    errors,
+                    // The error should be raised on the line of the function
+                    // definition, but using `def.range` would be too broad
+                    // since it includes the decorators, which does not match
+                    // the conformance testsuite.
+                    def.name.range,
+                    ErrorKind::BadFunctionDefinition,
+                    None,
+                    "Type guard functions must accept at least one positional argument".to_owned(),
+                );
+            }
+        };
+
+        if let Type::TypeIs(ty_narrow) = &ret {
+            // https://typing.python.org/en/latest/spec/narrowing.html#typeis
+            // The return type R must be assignable to I. The type checker
+            // should emit an error if this condition is not met.
+            let ty_arg = if class_key.is_some() && !is_staticmethod {
+                // Skip the first argument (`self` or `cls`) if this is a method or class method.
+                params.get(1)
+            } else {
+                params.first()
+            };
+            if let Some(ty_arg) = ty_arg
+                && !self.is_subset_eq(ty_narrow, ty_arg.param_to_type())
+            {
+                // If the narrowed type is not a subtype of the argument type, we report an error.
+                self.error(
+                    errors,
+                    def.name.range,
+                    ErrorKind::BadFunctionDefinition,
+                    None,
+                    format!(
+                        "Return type `{}` must be assignable to the first argument type `{}`",
+                        self.for_display(*ty_narrow.clone()),
+                        self.for_display(ty_arg.param_to_type().clone())
+                    ),
+                );
+            }
+        }
 
         let mut tparams = self.scoped_type_params(def.type_params.as_deref(), errors);
         let legacy_tparams = legacy_tparams
@@ -518,7 +570,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     });
                     if let Some(mut call_attr) = call_attr {
-                        call_attr.transform_func_metadata(|m| {
+                        call_attr.transform_toplevel_func_metadata(|m| {
                             *m = FuncMetadata {
                                 kind: FunctionKind::CallbackProtocol(Box::new(cls.clone())),
                                 flags: metadata.flags.clone(),

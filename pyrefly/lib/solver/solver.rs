@@ -30,7 +30,7 @@ use crate::solver::type_order::TypeOrder;
 use crate::types::callable::Callable;
 use crate::types::callable::Function;
 use crate::types::callable::Params;
-use crate::types::module::Module;
+use crate::types::module::ModuleType;
 use crate::types::quantified::QuantifiedInfo;
 use crate::types::simplify::simplify_tuples;
 use crate::types::simplify::unions;
@@ -433,7 +433,7 @@ impl Solver {
         }
 
         // We want to union modules differently, by merging their module sets
-        let mut modules: SmallMap<Vec<Name>, Module> = SmallMap::new();
+        let mut modules: SmallMap<Vec<Name>, ModuleType> = SmallMap::new();
         let mut branches = branches
             .into_iter()
             .flat_map(|x| match x {
@@ -441,7 +441,7 @@ impl Solver {
                 // recursive variables that we can't examine.
                 // In practice unlikely anyone has a recursive variable which evaluates to a module.
                 Type::Module(m) => {
-                    match modules.entry(m.path().to_owned()) {
+                    match modules.entry(m.parts().to_owned()) {
                         Entry::Occupied(mut e) => {
                             e.get_mut().merge(&m);
                         }
@@ -455,7 +455,9 @@ impl Solver {
             })
             .collect::<Vec<_>>();
         branches.extend(modules.into_values().map(Type::Module));
-        unions_with_literals(branches, type_order.stdlib())
+        unions_with_literals(branches, type_order.stdlib(), &|cls| {
+            type_order.get_enum_member_count(cls)
+        })
     }
 
     /// Record a variable that is used recursively.

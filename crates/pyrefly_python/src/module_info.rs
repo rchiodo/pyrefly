@@ -8,9 +8,6 @@
 use std::sync::Arc;
 
 use dupe::Dupe;
-use pyrefly_python::ignore::Ignore;
-use pyrefly_python::module_name::ModuleName;
-use pyrefly_python::module_path::ModulePath;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::lined_buffer::DisplayPos;
 use pyrefly_util::lined_buffer::DisplayRange;
@@ -18,16 +15,21 @@ use pyrefly_util::lined_buffer::LinedBuffer;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 
-use crate::error::kind::ErrorKind;
+use crate::ignore::Ignore;
+use crate::module_name::ModuleName;
+use crate::module_path::ModulePath;
 
 pub static GENERATED_TOKEN: &str = concat!("@", "generated");
 
+/// Legacy alias, to be deleted in due course.
+pub type ModuleInfo = Module;
+
 /// Information about a module, notably its name, path, and contents.
 #[derive(Debug, Clone, Dupe, PartialEq, Eq, Hash)]
-pub struct ModuleInfo(ArcId<ModuleInfoInner>);
+pub struct Module(ArcId<ModuleInner>);
 
 #[derive(Debug, Clone)]
-struct ModuleInfoInner {
+struct ModuleInner {
     name: ModuleName,
     path: ModulePath,
     ignore: Ignore,
@@ -41,7 +43,7 @@ impl ModuleInfo {
         let ignore = Ignore::new(&contents);
         let is_generated = contents.contains(GENERATED_TOKEN);
         let contents = LinedBuffer::new(contents);
-        Self(ArcId::new(ModuleInfoInner {
+        Self(ArcId::new(ModuleInner {
             name,
             path,
             ignore,
@@ -103,13 +105,13 @@ impl ModuleInfo {
     pub fn is_ignored(
         &self,
         source_range: &DisplayRange,
-        error_kind: ErrorKind,
+        error_kind: &str,
         permissive_ignores: bool,
     ) -> bool {
         self.0.ignore.is_ignored(
             source_range.start.line,
             source_range.end.line,
-            error_kind.to_name(),
+            error_kind,
             permissive_ignores,
         )
     }

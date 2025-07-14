@@ -7,6 +7,7 @@
 
 use std::sync::LazyLock;
 
+use clap::ValueEnum;
 use convert_case::Case;
 use convert_case::Casing;
 use dupe::Dupe;
@@ -21,8 +22,22 @@ use yansi::Painted;
 use crate::types::quantified::QuantifiedKind;
 
 // IMPORTANT: these cases should be listed in order of severity
-#[derive(Debug, Clone, Dupe, Copy, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Dupe,
+    Copy,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Hash,
+    Deserialize,
+    Serialize
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
+    Ignore,
     Info,
     Warn,
     Error,
@@ -35,6 +50,7 @@ impl Severity {
             Severity::Info => " INFO",
             Severity::Warn => " WARN",
             Severity::Error => "ERROR",
+            Severity::Ignore => "",
         }
     }
 
@@ -43,7 +59,12 @@ impl Severity {
             Severity::Info => Paint::blue,
             Severity::Warn => Paint::yellow,
             Severity::Error => Paint::red,
+            Severity::Ignore => Paint::conceal,
         })(self.label())
+    }
+
+    pub fn is_enabled(self) -> bool {
+        self != Severity::Ignore
     }
 }
 
@@ -61,7 +82,7 @@ impl Severity {
 // These categories are flexible; use them for guidance when naming new ErrorKinds, but
 // go with what feels right.
 #[derive(Debug, Copy, Dupe, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
-#[derive(Display, Sequence, Deserialize, Serialize)]
+#[derive(Display, Sequence, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorKind {
     /// Attempting to annotate a name with incompatible annotations.
@@ -222,7 +243,7 @@ impl ErrorKind {
             .as_str()
     }
 
-    pub fn severity(self) -> Severity {
+    pub fn default_severity(self) -> Severity {
         match self {
             ErrorKind::RevealType => Severity::Info,
             ErrorKind::Deprecated => Severity::Warn,

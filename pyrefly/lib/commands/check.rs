@@ -6,6 +6,7 @@
  */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Display;
 use std::fs::File;
@@ -51,11 +52,13 @@ use crate::commands::util::module_from_path;
 use crate::config::base::UntypedDefBehavior;
 use crate::config::config::ConfigFile;
 use crate::config::config::validate_path;
+use crate::config::error::ErrorDisplayConfig;
 use crate::config::finder::ConfigError;
 use crate::config::finder::ConfigFinder;
 use crate::config::util::ConfigOrigin;
 use crate::error::error::Error;
 use crate::error::error::print_error_counts;
+use crate::error::kind::ErrorKind;
 use crate::error::kind::Severity;
 use crate::error::legacy::LegacyErrors;
 use crate::error::summarise::print_error_summary;
@@ -224,6 +227,15 @@ struct ConfigOverrideArgs {
     /// Whether Pyrefly will respect ignore statements for other tools, e.g. `# mypy: ignore`.
     #[arg(long, env = clap_env("PERMISSIVE_IGNORES"))]
     permissive_ignores: Option<bool>,
+    /// Force this rule to emit an error. Can be used multiple times.
+    #[arg(long, env = clap_env("ERROR"))]
+    error: Vec<ErrorKind>,
+    /// Force this rule to emit a warning. Can be used multiple times.
+    #[arg(long, env = clap_env("WARN"))]
+    warn: Vec<ErrorKind>,
+    /// Do not emit diagnostics for this rule. Can be used multiple times.
+    #[arg(long, env = clap_env("IGNORE"))]
+    ignore: Vec<ErrorKind>,
 }
 
 impl OutputFormat {
@@ -300,16 +312,12 @@ pub struct Handles {
 }
 
 impl Handles {
-    pub fn new(
-        files: Vec<PathBuf>,
-        args_search_path: &[PathBuf],
-        config_finder: &ConfigFinder,
-    ) -> Self {
+    pub fn new(files: Vec<PathBuf>, config_finder: &ConfigFinder) -> Self {
         let mut handles = Self {
             path_data: HashMap::new(),
         };
         for file in files {
-            handles.register_file(file, args_search_path, config_finder);
+            handles.register_file(file, config_finder);
         }
         handles
     }
@@ -317,14 +325,13 @@ impl Handles {
     fn register_file(
         &mut self,
         path: PathBuf,
-        args_search_path: &[PathBuf],
         config_finder: &ConfigFinder,
     ) -> &(ModuleName, SysInfo) {
         let module_path = ModulePath::filesystem(path.clone());
         let unknown = ModuleName::unknown();
         let config = config_finder.python_file(unknown, &module_path);
 
-        let search_path = args_search_path.iter().chain(config.search_path());
+        let search_path = config.search_path();
         let module_name = module_from_path(&path, search_path).unwrap_or(unknown);
 
         self.path_data
@@ -352,11 +359,10 @@ impl Handles {
         &mut self,
         created_files: impl Iterator<Item = &'a PathBuf>,
         removed_files: impl Iterator<Item = &'a PathBuf>,
-        args_search_path: &[PathBuf],
         config_finder: &ConfigFinder,
     ) {
         for file in created_files {
-            self.register_file(file.to_path_buf(), args_search_path, config_finder);
+            self.register_file(file.to_path_buf(), config_finder);
         }
         for file in removed_files {
             self.path_data.remove(file);
@@ -460,10 +466,6 @@ impl Args {
     ) -> anyhow::Result<Vec<(Handle, Require)>> {
         let handles = Handles::new(
             checkpoint(files_to_check.files(), config_finder)?,
-            self.config_override
-                .search_path
-                .as_deref()
-                .unwrap_or_default(),
             config_finder,
         );
         Ok(handles.all(self.get_required_levels().specified))
@@ -474,7 +476,7 @@ impl Args {
         files_to_check: FilteredGlobs,
         config_finder: ConfigFinder,
         allow_forget: bool,
-    ) -> anyhow::Result<(CommandExitStatus, usize)> {
+    ) -> anyhow::Result<(CommandExitStatus, Vec<Error>)> {
         let mut timings = Timings::new();
         let list_files_start = Instant::now();
         let expanded_file_list = checkpoint(files_to_check.files(), &config_finder)?;
@@ -485,18 +487,11 @@ impl Args {
             Timings::show(timings.list_files),
         );
         if expanded_file_list.is_empty() {
-            return Ok((CommandExitStatus::Success, 0));
+            return Ok((CommandExitStatus::Success, Vec::new()));
         }
 
         let holder = Forgetter::new(State::new(config_finder), allow_forget);
-        let handles = Handles::new(
-            expanded_file_list,
-            self.config_override
-                .search_path
-                .as_deref()
-                .unwrap_or_default(),
-            holder.as_ref().config_finder(),
-        );
+        let handles = Handles::new(expanded_file_list, holder.as_ref().config_finder());
         let require_levels = self.get_required_levels();
         let mut transaction = Forgetter::new(
             holder
@@ -521,14 +516,7 @@ impl Args {
         // - Config search is stable across incremental runs.
         let expanded_file_list = checkpoint(files_to_check.files(), &config_finder)?;
         let require_levels = self.get_required_levels();
-        let mut handles = Handles::new(
-            expanded_file_list,
-            self.config_override
-                .search_path
-                .as_deref()
-                .unwrap_or_default(),
-            &config_finder,
-        );
+        let mut handles = Handles::new(expanded_file_list, &config_finder);
         let state = State::new(config_finder);
         let mut transaction = state.new_committable_transaction(require_levels.default, None);
         loop {
@@ -554,10 +542,6 @@ impl Args {
             handles.update(
                 events.created.iter().filter(|p| files_to_check.covers(p)),
                 events.removed.iter().filter(|p| files_to_check.covers(p)),
-                self.config_override
-                    .search_path
-                    .as_deref()
-                    .unwrap_or_default(),
                 state.config_finder(),
             );
         }
@@ -567,7 +551,7 @@ impl Args {
         fn validate_arg(arg_name: &str, paths: Option<&[PathBuf]>) -> anyhow::Result<()> {
             if let Some(paths) = paths {
                 for path in paths {
-                    validate_path(path).with_context(|| format!("Invalid {}", arg_name))?;
+                    validate_path(path).with_context(|| format!("Invalid {arg_name}"))?;
                 }
             }
             Ok(())
@@ -577,6 +561,30 @@ impl Args {
             self.config_override.site_package_path.as_deref(),
         )?;
         validate_arg("--search-path", self.config_override.search_path.as_deref())?;
+        let ignored_errors = &self.config_override.ignore.iter().collect::<HashSet<_>>();
+        let warn_errors = &self.config_override.warn.iter().collect::<HashSet<_>>();
+        let error_errors = self.config_override.error.iter().collect::<HashSet<_>>();
+        let error_ignore_conflicts: Vec<_> = error_errors.intersection(ignored_errors).collect();
+        if !error_ignore_conflicts.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Error types are specified for both --ignore and --error: [{}]",
+                display::commas_iter(|| error_ignore_conflicts.iter().map(|&&s| s))
+            ));
+        }
+        let error_warn_conflicts: Vec<_> = error_errors.intersection(warn_errors).collect();
+        if !error_warn_conflicts.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Error types are specified for both --warn and --error: [{}]",
+                display::commas_iter(|| error_warn_conflicts.iter().map(|&&s| s))
+            ));
+        }
+        let ignore_warn_conflicts: Vec<_> = ignored_errors.intersection(warn_errors).collect();
+        if !ignore_warn_conflicts.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Error types are specified for both --warn and --ignore: [{}]",
+                display::commas_iter(|| ignore_warn_conflicts.iter().map(|&&s| s))
+            ));
+        }
         Ok(())
     }
 
@@ -635,6 +643,23 @@ impl Args {
         if let Some(x) = &self.config_override.ignore_errors_in_generated_code {
             config.root.ignore_errors_in_generated_code = Some(*x);
         }
+        let apply_error_settings = |error_config: &mut ErrorDisplayConfig| {
+            for error_kind in &self.config_override.error {
+                error_config.with_error_setting(*error_kind, Severity::Error);
+            }
+            for error_kind in &self.config_override.warn {
+                error_config.with_error_setting(*error_kind, Severity::Warn);
+            }
+            for error_kind in &self.config_override.ignore {
+                error_config.with_error_setting(*error_kind, Severity::Ignore);
+            }
+        };
+        let root_errors = config.root.errors.get_or_insert_default();
+        apply_error_settings(root_errors);
+        for sub_config in config.sub_configs.iter_mut() {
+            let sub_config_errors = sub_config.settings.errors.get_or_insert_default();
+            apply_error_settings(sub_config_errors);
+        }
         let errors = config.configure();
         (ArcId::new(config), errors)
     }
@@ -665,7 +690,7 @@ impl Args {
         mut timings: Timings,
         transaction: &mut Transaction,
         handles: &[(Handle, Require)],
-    ) -> anyhow::Result<(CommandExitStatus, usize)> {
+    ) -> anyhow::Result<(CommandExitStatus, Vec<Error>)> {
         let mut memory_trace = MemoryUsageTrace::start(Duration::from_secs_f32(0.1));
 
         let type_check_start = Instant::now();
@@ -706,7 +731,7 @@ impl Args {
         }
         let mut shown_errors_count = config_errors_count;
         for error in &errors.shown {
-            if error.error_kind().severity() >= Severity::Warn {
+            if error.severity() >= Severity::Warn {
                 shown_errors_count += 1;
             }
         }
@@ -762,8 +787,9 @@ impl Args {
         }
         if self.behavior.suppress_errors {
             let mut errors_to_suppress: SmallMap<PathBuf, Vec<Error>> = SmallMap::new();
-            for e in errors.shown {
-                if e.error_kind().severity() >= Severity::Warn
+            let shown_errors = errors.shown.clone();
+            for e in shown_errors {
+                if e.severity() >= Severity::Warn
                     && let ModulePathDetails::FileSystem(path) = e.path().details()
                 {
                     errors_to_suppress.entry(path.clone()).or_default().push(e);
@@ -796,11 +822,11 @@ impl Args {
         }
         if self.behavior.expectations {
             loads.check_against_expectations()?;
-            Ok((CommandExitStatus::Success, shown_errors_count))
+            Ok((CommandExitStatus::Success, errors.shown))
         } else if shown_errors_count > 0 {
-            Ok((CommandExitStatus::UserError, shown_errors_count))
+            Ok((CommandExitStatus::UserError, errors.shown))
         } else {
-            Ok((CommandExitStatus::Success, shown_errors_count))
+            Ok((CommandExitStatus::Success, errors.shown))
         }
     }
 }

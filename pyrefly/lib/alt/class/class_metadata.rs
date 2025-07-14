@@ -211,10 +211,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                         elements: self.get_named_tuple_elements(cls, errors)
                                     })
                                 }
-                            } else if let Some(base_named_tuple) = base_class_metadata.named_tuple_metadata() {
-                                if named_tuple_metadata.is_none() {
+                            } else if let Some(base_named_tuple) = base_class_metadata.named_tuple_metadata() &&
+                                named_tuple_metadata.is_none() {
                                     named_tuple_metadata = Some(base_named_tuple.clone());
-                                }
                             }
                             if let Some(proto) = &mut protocol_metadata {
                                 if let Some(base_proto) = base_class_metadata.protocol_metadata() {
@@ -528,8 +527,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // - the class inherits from Generic[...] or Protocol [...]. We probably dropped the type
         //   arguments because we found an error in them.
         let has_unknown_tparams = empty_tparams && (has_base_any || has_generic_base_class);
+        if let Some(dm) = dataclass_metadata.as_ref() {
+            self.validate_frozen_dataclass_inheritance(cls, dm, &bases_with_metadata, errors);
+        }
         ClassMetadata::new(
-            cls,
             bases_with_metadata,
             metaclass,
             keywords,
@@ -544,7 +545,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             has_unknown_tparams,
             total_ordering_metadata,
             dataclass_transform_metadata,
-            errors,
         )
     }
 

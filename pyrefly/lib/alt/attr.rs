@@ -18,6 +18,7 @@ use vec1::vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
+use crate::alt::class::class_field::DataclassMember;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::types::class_metadata::EnumMetadata;
 use crate::binding::binding::ExprOrBinding;
@@ -37,7 +38,7 @@ use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassType;
 use crate::types::literal::Lit;
-use crate::types::module::Module;
+use crate::types::module::ModuleType;
 use crate::types::quantified::Quantified;
 use crate::types::quantified::QuantifiedKind;
 use crate::types::read_only::ReadOnlyReason;
@@ -210,11 +211,11 @@ enum AttributeInner {
     /// for the get and set actions.
     Descriptor(Descriptor),
     /// The attribute being looked up is not defined explicitly, but it may be defined via a
-    /// __getattr__ fallback.
+    /// `__getattr__` or `__getattribute__` fallback.
     /// The `NotFound` field stores the (failed) lookup result on the original attribute for
     /// better error reporting downstream. The `AttributeInner` field stores the (successful)
-    /// lookup result of the `__getattr__` function or method. The `Name` field stores the name
-    /// of the original attribute being looked up.
+    /// lookup result of the `__getattr__`/`__getattribute__` function or method.
+    /// The `Name` field stores the name of the original attribute being looked up.
     GetAttr(NotFound, Box<AttributeInner>, Name),
 }
 
@@ -247,7 +248,7 @@ pub enum DescriptorBase {
 pub enum NotFound {
     Attribute(Class),
     ClassAttribute(Class),
-    ModuleExport(Module),
+    ModuleExport(ModuleType),
 }
 
 #[derive(Clone, Debug)]
@@ -412,7 +413,7 @@ enum AttributeBase {
     EnumLiteral(ClassType, Name, Type),
     ClassInstance(ClassType),
     ClassObject(Class),
-    Module(Module),
+    Module(ModuleType),
     /// The attribute access is on a quantified type form (as in `args: P.args` - this
     /// is only used when the base *is* a quantified type, not when the base is
     /// a term that *has* a quantified type.
@@ -500,7 +501,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         todo_ctx: &str,
     ) -> Type {
         let bases = self.get_possible_attribute_bases(base);
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(bases.len());
         for attr_base in bases {
             let lookup_result = attr_base.map_or_else(
                 || LookupResult::InternalError(InternalError::AttributeBaseUndefined(base.clone())),
@@ -780,6 +781,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 LookupResult::Found(Attribute {
                     inner: AttributeInner::Simple(want, Visibility::ReadWrite),
                 }) => {
+                    // If the attribute has a converter, then `want` should be the type expected by the converter.
+                    let want = match attr_base {
+                        AttributeBase::ClassInstance(cls) => match self
+                            .get_dataclass_member(cls.class_object(), attr_name)
+                        {
+                            DataclassMember::Field(_, kws) => kws.converter_param.unwrap_or(want),
+                            _ => want,
+                        },
+                        _ => want,
+                    };
                     let ty = match &got {
                         TypeOrExpr::Expr(got) => self.expr(
                             got,
@@ -1387,7 +1398,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // by updating the getter's metadata to mark it as a setter method.
                     // TODO(stroxler): it is probably possible to synthesize a forall type here
                     // that uses a type var to propagate the setter. Investigate this option later.
-                    getter.transform_func_metadata(|meta: &mut FuncMetadata| {
+                    getter.transform_toplevel_func_metadata(|meta: &mut FuncMetadata| {
                         meta.flags.is_property_setter_decorator = true;
                     });
                     LookupResult::found_type(
@@ -1427,6 +1438,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             AttributeBase::ClassObject(class) => {
                 let metadata = self.get_metadata_for_class(class);
                 let metaclass = metadata.metaclass().unwrap_or(self.stdlib.builtins_type());
+                if *dunder_name == dunder::GETATTRIBUTE
+                    && self.method_is_inherited_from_object(metaclass, dunder_name)
+                {
+                    return LookupResult::NotFound(NotFound::Attribute(
+                        metaclass.class_object().clone(),
+                    ));
+                }
                 match self.get_instance_attribute(metaclass, dunder_name) {
                     Some(attr) => LookupResult::Found(attr),
                     None => LookupResult::NotFound(NotFound::Attribute(
@@ -1437,12 +1455,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             AttributeBase::ClassInstance(cls)
             | AttributeBase::EnumLiteral(cls, _, _)
             | AttributeBase::TypeVar(_, Some(cls))
-                if (*dunder_name == dunder::SETATTR || *dunder_name == dunder::DELATTR)
+            | AttributeBase::SuperInstance(cls, _)
+                if (*dunder_name == dunder::SETATTR
+                    || *dunder_name == dunder::DELATTR
+                    || *dunder_name == dunder::GETATTRIBUTE)
                     && self.method_is_inherited_from_object(cls, dunder_name) =>
             {
                 LookupResult::NotFound(NotFound::Attribute(cls.class_object().clone()))
             }
-
+            AttributeBase::TypedDict(typed_dict) if *dunder_name == dunder::GETATTRIBUTE => {
+                LookupResult::NotFound(NotFound::Attribute(typed_dict.class_object().clone()))
+            }
             _ => self.lookup_attr_from_attribute_base(base, dunder_name),
         }
     }
@@ -1456,10 +1479,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         match direct_lookup_result {
             LookupResult::Found(_) | LookupResult::InternalError(_) => direct_lookup_result,
             LookupResult::NotFound(not_found) => {
-                let getattr_lookup_result = self.lookup_magic_dunder_attr(base, &dunder::GETATTR);
+                let getattr_lookup_result =
+                    self.lookup_magic_dunder_attr(base.clone(), &dunder::GETATTR);
                 match getattr_lookup_result {
                     LookupResult::NotFound(_) | LookupResult::InternalError(_) => {
-                        LookupResult::NotFound(not_found)
+                        // If the `__getattr__` lookup fails, we fall back to `__getattribute__`
+                        // Note: at runtime, `__getattribute__` is checked BEFORE looking up the attribute by name,
+                        // but because the declaration is on `object` and returns `Any`, all attribute accesses
+                        // would return `Any`.
+                        let getattribute_lookup_result =
+                            self.lookup_magic_dunder_attr(base, &dunder::GETATTRIBUTE);
+                        match getattribute_lookup_result {
+                            LookupResult::NotFound(_) | LookupResult::InternalError(_) => {
+                                LookupResult::NotFound(not_found)
+                            }
+                            LookupResult::Found(attr) => LookupResult::Found(Attribute::getattr(
+                                not_found,
+                                attr,
+                                attr_name.clone(),
+                            )),
+                        }
                     }
                     LookupResult::Found(attr) => {
                         LookupResult::Found(Attribute::getattr(not_found, attr, attr_name.clone()))
@@ -1519,21 +1558,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.exports.get(module_name).ok()
     }
 
-    fn get_exported_type(&self, exports: &Exports, from: ModuleName, name: &Name) -> Option<Type> {
-        if exports.exports(self.exports).contains_key(name) {
-            Some(
-                self.get_from_module(from, None, &KeyExport(name.clone()))
-                    .arc_clone(),
-            )
-        } else {
-            None
-        }
-    }
-
-    fn get_module_attr(&self, module: &Module, attr_name: &Name) -> Option<Type> {
-        let module_name = ModuleName::from_parts(module.path());
-        let module_exports = self.get_module_exports(module_name);
-
+    fn get_module_attr(&self, module: &ModuleType, attr_name: &Name) -> Option<Type> {
         // `module_name` could refer to a package, in which case we need to check if
         // `module_name.attr_name`:
         // - Has been imported. This can happen in two ways:
@@ -1546,18 +1571,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // This check always takes precedence over the result of the module export lookup, because the import system
         // would always bind the submodule name `attr_name` to the namespace of `module_name` *after* the module
         // toplevel of `module_name` has been executed.
-        let submodule = module.push_path(attr_name.clone());
-        let submodule_name = module_name.append(attr_name);
-        let is_imported = submodule.is_submodules_imported_directly()
-            || module_exports
-                .as_ref()
-                .is_some_and(|exports| exports.is_submodule_imported_implicitly(attr_name));
-        if is_imported && self.get_module_exports(submodule_name).is_some() {
+        let submodule = module.push_part(attr_name.clone());
+        if submodule.is_submodules_imported_directly() {
+            return Some(submodule.to_type());
+        }
+
+        let module_name = ModuleName::from_parts(module.parts());
+        let module_exports = match self.get_module_exports(module_name) {
+            Some(x) => x,
+            None => return Some(Type::any_error()), // This module doesn't exist, we must have already errored
+        };
+
+        if module_exports.is_submodule_imported_implicitly(attr_name)
+            && self
+                .get_module_exports(module_name.append(attr_name))
+                .is_some()
+        {
             Some(submodule.to_type())
+        } else if module_exports.exports(self.exports).contains_key(attr_name) {
+            Some(
+                self.get_from_export(module_name, None, &KeyExport(attr_name.clone()))
+                    .arc_clone(),
+            )
         } else {
-            module_exports.map_or(Some(Type::any_error()), |exports| {
-                self.get_exported_type(&exports, module_name, attr_name)
-            })
+            None
         }
     }
 
@@ -1825,11 +1862,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn completions_module(
         &self,
-        module: &Module,
+        module: &ModuleType,
         expected_attribute_name: Option<&Name>,
         res: &mut Vec<AttrInfo>,
     ) {
-        let module_name = ModuleName::from_parts(module.path());
+        let module_name = ModuleName::from_parts(module.parts());
         if let Some(exports) = self.get_module_exports(module_name) {
             match expected_attribute_name {
                 None => {

@@ -147,30 +147,14 @@
     "Line 61: Unexpected errors ['Missing argument `c` in function `DC4.__init__`', 'Argument `float` is not assignable to parameter `b` with type `int` in function `DC4.__init__`', 'Multiple values for argument `b` in function `DC4.__init__`']"
   ],
   "dataclasses_order.py": [],
-  "dataclasses_postinit.py": [
-    "Line 19: Expected 1 errors",
-    "Line 36: Expected 1 errors"
-  ],
+  "dataclasses_postinit.py": [],
   "dataclasses_slots.py": [
     "Line 25: Expected 1 errors",
     "Line 38: Expected 1 errors"
   ],
   "dataclasses_transform_class.py": [],
-  "dataclasses_transform_converter.py": [
-    "Line 118: Expected 1 errors",
-    "Line 29: Unexpected errors ['Argument `tuple[[S, T](*, converter: (S) -> T, default: S | None, default_factory: (() -> S) | None) -> T]` is not assignable to parameter `field_specifiers` with type `tuple[((...) -> Any) | type[Any], ...]` in function `typing.dataclass_transform`']",
-    "Line 112: Unexpected errors [\"Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`\", \"Argument `Literal[b'f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`\", 'Argument `list[@_]` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`']",
-    "Line 114: Unexpected errors [\"`Literal['f1']` is not assignable to attribute `field0` with type `int`\"]",
-    "Line 115: Unexpected errors [\"`Literal['f6']` is not assignable to attribute `field3` with type `ConverterClass`\"]",
-    "Line 116: Unexpected errors [\"`Literal[b'f6']` is not assignable to attribute `field3` with type `ConverterClass`\"]",
-    "Line 121: Unexpected errors [\"Argument `Literal['f0']` is not assignable to parameter `field0` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f1']` is not assignable to parameter `field1` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f2']` is not assignable to parameter `field2` with type `int` in function `DC2.__init__`\", \"Argument `Literal['f6']` is not assignable to parameter `field3` with type `ConverterClass` in function `DC2.__init__`\", \"Argument `Literal['1']` is not assignable to parameter `field4` with type `int` in function `DC2.__init__`\", \"Argument `tuple[tuple[Literal['a'], Literal['1']], tuple[Literal['b'], Literal['2']]]` is not assignable to parameter `field5` with type `dict[str, str]` in function `DC2.__init__`\"]"
-  ],
-  "dataclasses_transform_field.py": [
-    "Line 64: Expected 1 errors",
-    "Line 59: Unexpected errors ['Missing argument `id` in function `CustomerModel1.__init__`']",
-    "Line 60: Unexpected errors ['Missing argument `id` in function `CustomerModel1.__init__`']",
-    "Line 77: Unexpected errors ['Missing argument `id` in function `CustomerModel2.__init__`']"
-  ],
+  "dataclasses_transform_converter.py": [],
+  "dataclasses_transform_field.py": [],
   "dataclasses_transform_func.py": [],
   "dataclasses_transform_meta.py": [],
   "dataclasses_usage.py": [],
@@ -222,7 +206,7 @@
   "generics_basic.py": [
     "Line 49: Expected 1 errors",
     "Line 121: Expected 1 errors",
-    "Line 34: Unexpected errors ['`+` is not supported between `AnyStr` and `AnyStr`\\n  Argument `AnyStr` is not assignable to parameter `self` with type `Self@bytes` in function `bytes.__add__`', '`+` is not supported between `AnyStr` and `AnyStr`\\n  Argument `AnyStr` is not assignable to parameter `value` with type `Buffer` in function `bytes.__add__`', '`+` is not supported between `AnyStr` and `AnyStr`\\n  No matching overload found for function `str.__add__`\\n  Possible overloads:\\n  (value: LiteralString, /) -> LiteralString [closest match]\\n  (value: str, /) -> str', 'Returned type `bytes | Unknown` is not assignable to declared return type `AnyStr`']",
+    "Line 34: Unexpected errors ['`+` is not supported between `AnyStr` and `AnyStr`\\n  Argument `AnyStr` is not assignable to parameter `self` with type `Self@bytes` in function `bytes.__add__`', '`+` is not supported between `AnyStr` and `AnyStr`\\n  No matching overload found for function `str.__add__`\\n  Possible overloads:\\n  (value: LiteralString, /) -> LiteralString [closest match]\\n  (value: str, /) -> str', 'Returned type `bytes | Unknown` is not assignable to declared return type `AnyStr`']",
     "Line 67: Unexpected errors ['assert_type(MyStr, str) failed']",
     "Line 68: Unexpected errors ['assert_type(MyStr, str) failed', 'Argument `str` is not assignable to parameter `y` with type `MyStr` in function `concat`']"
   ],
@@ -348,16 +332,8 @@
   "namedtuples_define_functional.py": [],
   "namedtuples_type_compat.py": [],
   "namedtuples_usage.py": [],
-  "narrowing_typeguard.py": [
-    "Line 102: Expected 1 errors",
-    "Line 107: Expected 1 errors"
-  ],
-  "narrowing_typeis.py": [
-    "Line 105: Expected 1 errors",
-    "Line 110: Expected 1 errors",
-    "Line 195: Expected 1 errors",
-    "Line 199: Expected 1 errors"
-  ],
+  "narrowing_typeguard.py": [],
+  "narrowing_typeis.py": [],
   "overloads_basic.py": [],
   "overloads_consistency.py": [
     "Lines 25, 28: Expected error (tag 'return_type')",

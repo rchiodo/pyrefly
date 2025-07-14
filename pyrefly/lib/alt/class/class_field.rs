@@ -16,7 +16,6 @@ use pyrefly_derive::VisitMut;
 use pyrefly_python::dunder;
 use pyrefly_util::owner::Owner;
 use pyrefly_util::prelude::ResultExt;
-use ruff_python_ast::Arguments;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprCall;
 use ruff_python_ast::name::Name;
@@ -31,10 +30,10 @@ use crate::alt::attr::Attribute;
 use crate::alt::attr::DescriptorBase;
 use crate::alt::attr::NoAccessReason;
 use crate::alt::types::class_metadata::ClassMetadata;
-use crate::binding::binding::ClassFieldInitialValue;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassSynthesizedFields;
+use crate::binding::binding::RawClassFieldInitialization;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::TypeCheckContext;
 use crate::error::context::TypeCheckKind;
@@ -48,7 +47,6 @@ use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassType;
 use crate::types::keywords::DataclassFieldKeywords;
-use crate::types::keywords::TypeMap;
 use crate::types::literal::Lit;
 use crate::types::literal::LitEnum;
 use crate::types::quantified::Quantified;
@@ -72,8 +70,13 @@ use crate::types::types::Type;
 pub enum ClassFieldInitialization {
     /// If this is a dataclass field, DataclassFieldKeywords stores the field's
     /// dataclass flags (which are options that control how fields behave).
-    Class(Option<DataclassFieldKeywords>),
-    Instance,
+    ClassBody(Option<DataclassFieldKeywords>),
+    /// This field is initialized in a method. Note that this applies only if the field is not
+    /// declared anywhere else.
+    Method,
+    /// The field is not initialized at the point where it is declared. This usually means that the
+    /// field is instance-only and is declared but not initialized in the class body.
+    Uninitialized,
     /// The field is not initialized in the class body or any method in the class,
     /// but we treat it as if it was initialized.
     /// For example, any field defined in a stub file.
@@ -83,8 +86,9 @@ pub enum ClassFieldInitialization {
 impl Display for ClassFieldInitialization {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Class(_) => write!(f, "initialized on class body"),
-            Self::Instance => write!(f, "initialized on instances"),
+            Self::ClassBody(_) => write!(f, "initialized on class body"),
+            Self::Method => write!(f, "initialized in method"),
+            Self::Uninitialized => write!(f, "initialized on instances"),
             Self::Magic => {
                 write!(f, "not initialized on class body/method")
             }
@@ -94,28 +98,7 @@ impl Display for ClassFieldInitialization {
 
 impl ClassFieldInitialization {
     fn recursive() -> Self {
-        ClassFieldInitialization::Class(None)
-    }
-}
-
-#[derive(Clone, Debug, TypeEq, VisitMut, PartialEq, Eq)]
-pub enum ClassFieldDefinedBy {
-    ClassBody,
-    Method,
-}
-
-impl Display for ClassFieldDefinedBy {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ClassBody => write!(f, "defined by class body"),
-            Self::Method => write!(f, "defined by method"),
-        }
-    }
-}
-
-impl ClassFieldDefinedBy {
-    fn recursive() -> Self {
-        ClassFieldDefinedBy::ClassBody
+        ClassFieldInitialization::ClassBody(None)
     }
 }
 
@@ -134,7 +117,6 @@ enum ClassFieldInner {
         ty: Type,
         annotation: Option<Annotation>,
         initialization: ClassFieldInitialization,
-        defined_by: ClassFieldDefinedBy,
         /// The reason this field is read-only. `None` indicates it is read-write.
         read_only_reason: Option<ReadOnlyReason>,
         // Descriptor getter method, if there is one. `None` indicates no getter.
@@ -160,7 +142,6 @@ impl ClassField {
         ty: Type,
         annotation: Option<Annotation>,
         initialization: ClassFieldInitialization,
-        defined_by: ClassFieldDefinedBy,
         read_only_reason: Option<ReadOnlyReason>,
         descriptor_getter: Option<Type>,
         descriptor_setter: Option<Type>,
@@ -170,7 +151,6 @@ impl ClassField {
             ty,
             annotation,
             initialization,
-            defined_by,
             read_only_reason,
             descriptor_getter,
             descriptor_setter,
@@ -216,8 +196,7 @@ impl ClassField {
         ClassField(ClassFieldInner::Simple {
             ty,
             annotation: None,
-            initialization: ClassFieldInitialization::Class(None),
-            defined_by: ClassFieldDefinedBy::ClassBody,
+            initialization: ClassFieldInitialization::ClassBody(None),
             read_only_reason: None,
             descriptor_getter: None,
             descriptor_setter: None,
@@ -230,7 +209,6 @@ impl ClassField {
             ty: Type::any_implicit(),
             annotation: None,
             initialization: ClassFieldInitialization::recursive(),
-            defined_by: ClassFieldDefinedBy::recursive(),
             read_only_reason: None,
             descriptor_getter: None,
             descriptor_setter: None,
@@ -250,7 +228,6 @@ impl ClassField {
                 ty,
                 annotation,
                 initialization,
-                defined_by,
                 read_only_reason,
                 descriptor_getter,
                 descriptor_setter,
@@ -259,7 +236,6 @@ impl ClassField {
                 ty: instance.instantiate_member(ty.clone()),
                 annotation: annotation.clone(),
                 initialization: initialization.clone(),
-                defined_by: defined_by.clone(),
                 read_only_reason: read_only_reason.clone(),
                 descriptor_getter: descriptor_getter
                     .as_ref()
@@ -272,29 +248,38 @@ impl ClassField {
         }
     }
 
-    pub fn as_param(self, name: &Name, default: bool, kw_only: bool) -> Param {
+    pub fn as_param(
+        self,
+        name: &Name,
+        default: bool,
+        kw_only: bool,
+        converter_param: Option<Type>,
+    ) -> Param {
         let ClassField(ClassFieldInner::Simple { ty, .. }) = self;
+        let param_ty = converter_param.unwrap_or(ty);
         let required = match default {
-            true => Required::Optional,
+            true => Required::Optional(None),
             false => Required::Required,
         };
         if kw_only {
-            Param::KwOnly(name.clone(), ty, required)
+            Param::KwOnly(name.clone(), param_ty, required)
         } else {
-            Param::Pos(name.clone(), ty, required)
+            Param::Pos(name.clone(), param_ty, required)
         }
     }
 
-    fn as_raw_special_method_type(self, instance: &Instance) -> Option<Type> {
+    fn as_raw_special_method_type(&self, instance: &Instance) -> Option<Type> {
         match self.instantiate_for(instance).0 {
             ClassFieldInner::Simple { ty, .. } => match self.initialization() {
-                ClassFieldInitialization::Class(_) => Some(ty),
-                ClassFieldInitialization::Instance | ClassFieldInitialization::Magic => None,
+                ClassFieldInitialization::ClassBody(_) => Some(ty),
+                ClassFieldInitialization::Method
+                | ClassFieldInitialization::Uninitialized
+                | ClassFieldInitialization::Magic => None,
             },
         }
     }
 
-    fn as_special_method_type(self, instance: &Instance) -> Option<Type> {
+    fn as_special_method_type(&self, instance: &Instance) -> Option<Type> {
         self.as_raw_special_method_type(instance)
             .and_then(|ty| make_bound_method(instance, ty).ok())
     }
@@ -308,11 +293,14 @@ impl ClassField {
     pub fn as_named_tuple_requiredness(&self) -> Required {
         match &self.0 {
             ClassFieldInner::Simple {
-                initialization: ClassFieldInitialization::Class(_),
+                initialization: ClassFieldInitialization::ClassBody(_),
                 ..
-            } => Required::Optional,
+            } => Required::Optional(None),
             ClassFieldInner::Simple {
-                initialization: ClassFieldInitialization::Instance | ClassFieldInitialization::Magic,
+                initialization:
+                    ClassFieldInitialization::Method
+                    | ClassFieldInitialization::Uninitialized
+                    | ClassFieldInitialization::Magic,
                 ..
             } => Required::Required,
         }
@@ -399,42 +387,7 @@ impl ClassField {
         }
     }
 
-    /// Determine the read_only reason from annotation and other factors
-    fn determine_read_only_reason<Ans: LookupAnswer>(
-        cls: &Class,
-        name: &Name,
-        annotation: &Option<Annotation>,
-        initialization: &ClassFieldInitialization,
-        solver: &AnswersSolver<'_, Ans>,
-    ) -> Option<ReadOnlyReason> {
-        if let Some(ann) = annotation {
-            // TODO: enable this for Final attrs that aren't initialized on the class
-            if ann.is_final() && matches!(initialization, ClassFieldInitialization::Class(_)) {
-                return Some(ReadOnlyReason::Final);
-            }
-            if ann.has_qualifier(&Qualifier::ReadOnly) {
-                return Some(ReadOnlyReason::ReadOnlyQualifier);
-            }
-        }
-        let metadata = solver.get_metadata_for_class(cls);
-        // NamedTuple members are read-only
-        if metadata
-            .named_tuple_metadata()
-            .is_some_and(|nt| nt.elements.contains(name))
-        {
-            return Some(ReadOnlyReason::NamedTuple);
-        }
-        // Frozen dataclass fields (not methods) are read-only
-        if let Some(dm) = metadata.dataclass_metadata() {
-            if dm.kws.frozen && dm.fields.contains(name) {
-                return Some(ReadOnlyReason::FrozenDataclass);
-            }
-        }
-        // Default: the field is read-write
-        None
-    }
-
-    pub fn has_explicit_annotation(&self) -> bool {
+    fn has_explicit_annotation(&self) -> bool {
         match &self.0 {
             ClassFieldInner::Simple { annotation, .. } => annotation.is_some(),
         }
@@ -449,35 +402,27 @@ impl ClassField {
         }
     }
 
-    fn dataclass_flags_of(&self, kw_only: bool) -> DataclassFieldKeywords {
+    fn dataclass_flags_of(&self) -> DataclassFieldKeywords {
         match &self.0 {
-            ClassFieldInner::Simple { initialization, .. } => {
-                let mut flags = match initialization {
-                    ClassFieldInitialization::Class(Some(field_flags)) => field_flags.clone(),
-                    ClassFieldInitialization::Class(None) => {
-                        let mut kws = DataclassFieldKeywords::new();
-                        kws.default = true;
-                        kws
-                    }
-                    ClassFieldInitialization::Instance | ClassFieldInitialization::Magic => {
-                        DataclassFieldKeywords::new()
-                    }
-                };
-                // If kw_only hasn't been explicitly set to false on the field, set it to true
-                if kw_only && flags.kw_only.is_none() {
-                    flags.kw_only = Some(true);
+            ClassFieldInner::Simple { initialization, .. } => match initialization {
+                ClassFieldInitialization::ClassBody(Some(field_flags)) => field_flags.clone(),
+                ClassFieldInitialization::ClassBody(None) => {
+                    let mut kws = DataclassFieldKeywords::new();
+                    kws.default = true;
+                    kws
                 }
-                flags
-            }
+                ClassFieldInitialization::Method
+                | ClassFieldInitialization::Uninitialized
+                | ClassFieldInitialization::Magic => DataclassFieldKeywords::new(),
+            },
         }
     }
 
-    pub fn is_defined_on_class_body(&self) -> bool {
+    fn is_initialized_in_method(&self) -> bool {
         match &self.0 {
-            ClassFieldInner::Simple { defined_by, .. } => match defined_by {
-                ClassFieldDefinedBy::ClassBody => true,
-                ClassFieldDefinedBy::Method => false,
-            },
+            ClassFieldInner::Simple { initialization, .. } => {
+                matches!(initialization, ClassFieldInitialization::Method)
+            }
         }
     }
 }
@@ -616,7 +561,7 @@ fn bind_instance_attribute(
 /// For example, given `class A: x: int; class B(A): pass`, the defining class
 /// for attribute `x` is `A` even when `x` is looked up on `B`.
 #[derive(Debug)]
-pub(in crate::alt::class) struct WithDefiningClass<T> {
+pub struct WithDefiningClass<T> {
     pub value: T,
     pub defining_class: Class,
 }
@@ -630,9 +575,9 @@ impl<T> WithDefiningClass<T> {
 /// The result of processing a raw dataclass member (any annotated assignment in its body).
 pub enum DataclassMember {
     /// A dataclass field
-    Field(ClassField, DataclassFieldKeywords),
+    Field(WithDefiningClass<Arc<ClassField>>, DataclassFieldKeywords),
     /// A pseudo-field that only appears as a constructor argument
-    InitVar(ClassField, DataclassFieldKeywords),
+    InitVar(WithDefiningClass<Arc<ClassField>>, DataclassFieldKeywords),
     /// A pseudo-field annotated with KW_ONLY
     KwOnlyMarker,
     /// Anything else
@@ -683,7 +628,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         value: &ExprOrBinding,
         // Type annotation that appears directly on the field declaration (vs. one inherited from a parent)
         direct_annotation: Option<&Annotation>,
-        initial_value: &ClassFieldInitialValue,
+        initial_value: &RawClassFieldInitialization,
         class: &Class,
         is_function_without_return_annotation: bool,
         implicit_def_method: Option<&Name>,
@@ -737,14 +682,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Ban typed dict from containing values; fields should be annotation-only.
         // TODO(stroxler): we ought to look into this more: class-level attributes make sense on a `TypedDict` class;
         // the typing spec does not explicitly define whether this is permitted.
-        if metadata.is_typed_dict() && matches!(initialization, ClassFieldInitialization::Class(_))
+        if metadata.is_typed_dict()
+            && matches!(initialization, ClassFieldInitialization::ClassBody(_))
         {
             self.error(
                 errors,
                 range,
                 ErrorKind::BadClassDefinition,
                 None,
-                format!("TypedDict item `{}` may not be initialized", name),
+                format!("TypedDict item `{name}` may not be initialized"),
             );
         }
         if metadata.is_typed_dict()
@@ -759,10 +705,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorKind::InvalidAnnotation,
                         None,
-                        format!(
-                            "`{}` may not be used for TypedDict or NamedTuple members",
-                            q
-                        ),
+                        format!("`{q}` may not be used for TypedDict or NamedTuple members",),
                     );
                 }
             }
@@ -779,7 +722,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorKind::InvalidAnnotation,
                         None,
-                        format!("`{}` may only be used for TypedDict members", q),
+                        format!("`{q}` may only be used for TypedDict members"),
                     );
                 }
             }
@@ -789,13 +732,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let is_override = value_ty.is_override();
 
         let annotation = direct_annotation.or(inherited_annotation.as_ref());
-        let read_only_reason = ClassField::determine_read_only_reason(
-            class,
-            name,
-            &annotation.cloned(),
-            &initialization,
-            self,
-        );
+        let read_only_reason =
+            self.determine_read_only_reason(class, name, &annotation.cloned(), &initialization);
         let is_namedtuple_member = metadata
             .named_tuple_metadata()
             .is_some_and(|nt| nt.elements.contains(name));
@@ -821,8 +759,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         let ty = match initial_value {
-            ClassFieldInitialValue::Class(_) | ClassFieldInitialValue::Instance(None) => ty,
-            ClassFieldInitialValue::Instance(Some(method_name)) => self
+            RawClassFieldInitialization::ClassBody(_)
+            | RawClassFieldInitialization::Uninitialized => ty,
+            RawClassFieldInitialization::Method(method_name) => self
                 .check_and_sanitize_method_scope_type_parameters(
                     class,
                     method_name,
@@ -831,12 +770,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range,
                     errors,
                 ),
-        };
-        let defined_by = match initial_value {
-            ClassFieldInitialValue::Class(_) | ClassFieldInitialValue::Instance(None) => {
-                ClassFieldDefinedBy::ClassBody
-            }
-            ClassFieldInitialValue::Instance(Some(_)) => ClassFieldDefinedBy::Method,
         };
 
         // Enum handling:
@@ -855,7 +788,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if direct_annotation.is_some() {
                 self.error(
                     errors, range,ErrorKind::InvalidAnnotation, None,
-                    format!("Enum member `{}` may not be annotated directly. Instead, annotate the `_value_` attribute.", name),
+                    format!("Enum member `{name}` may not be annotated directly. Instead, annotate the `_value_` attribute."),
                 );
             }
             if enum_.has_value
@@ -910,7 +843,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ty,
             direct_annotation.cloned(),
             initialization,
-            defined_by,
             read_only_reason,
             descriptor_getter,
             descriptor_setter,
@@ -928,7 +860,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         if let Some(method_name) = implicit_def_method {
             let mut defined_in_parent = false;
-            let metadata = self.get_metadata_for_class(class);
             let parents = metadata.bases_with_metadata();
             for (parent, _) in parents {
                 if self.get_class_member(parent.class_object(), name).is_some() {
@@ -946,7 +877,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
             }
         }
+        if let Some(dm) = metadata.dataclass_metadata()
+            && name == &dunder::POST_INIT
+            && let Some(post_init) = class_field
+                .as_special_method_type(&Instance::of_class(&self.as_class_type_unchecked(class)))
+        {
+            self.validate_post_init(class, dm, post_init, range, errors);
+        }
         class_field
+    }
+
+    fn determine_read_only_reason(
+        &self,
+        cls: &Class,
+        name: &Name,
+        annotation: &Option<Annotation>,
+        initialization: &ClassFieldInitialization,
+    ) -> Option<ReadOnlyReason> {
+        if let Some(ann) = annotation {
+            // TODO: enable this for Final attrs that aren't initialized on the class
+            if ann.is_final() && matches!(initialization, ClassFieldInitialization::ClassBody(_)) {
+                return Some(ReadOnlyReason::Final);
+            }
+            if ann.has_qualifier(&Qualifier::ReadOnly) {
+                return Some(ReadOnlyReason::ReadOnlyQualifier);
+            }
+        }
+        let metadata = self.get_metadata_for_class(cls);
+        // NamedTuple members are read-only
+        if metadata
+            .named_tuple_metadata()
+            .is_some_and(|nt| nt.elements.contains(name))
+        {
+            return Some(ReadOnlyReason::NamedTuple);
+        }
+        // Frozen dataclass fields (not methods) are read-only
+        if let Some(dm) = metadata.dataclass_metadata()
+            && dm.kws.frozen
+            && dm.fields.contains(name)
+        {
+            return Some(ReadOnlyReason::FrozenDataclass);
+        }
+        // Default: the field is read-write
+        None
     }
 
     /// Return (did you find any fields, first one with an annotation)
@@ -968,26 +941,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn get_class_field_initialization(
         &self,
         metadata: &ClassMetadata,
-        initial_value: &ClassFieldInitialValue,
+        initial_value: &RawClassFieldInitialization,
         magically_initialized: bool,
     ) -> ClassFieldInitialization {
         match initial_value {
-            ClassFieldInitialValue::Instance(_) => {
-                if magically_initialized {
-                    ClassFieldInitialization::Magic
-                } else {
-                    ClassFieldInitialization::Instance
-                }
+            RawClassFieldInitialization::ClassBody(None) => {
+                ClassFieldInitialization::ClassBody(None)
             }
-            ClassFieldInitialValue::Class(None) => ClassFieldInitialization::Class(None),
-            ClassFieldInitialValue::Class(Some(e)) => {
+            RawClassFieldInitialization::ClassBody(Some(e)) => {
                 // If this field was created via a call to a dataclass field specifier, extract field flags from the call.
                 if let Some(dm) = metadata.dataclass_metadata()
                     && let Expr::Call(ExprCall {
                         node_index: _,
                         range: _,
                         func,
-                        arguments: Arguments { keywords, .. },
+                        arguments,
                     }) = e
                 {
                     // We already type-checked this expression as part of computing the type for the ClassField,
@@ -998,66 +966,55 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Some(func_kind) = func_kind
                         && dm.field_specifiers.contains(&func_kind)
                     {
-                        let mut map = TypeMap::new();
-                        for kw in keywords {
-                            if let Some(name) = &kw.arg {
-                                map.0.insert(
-                                    name.id.clone(),
-                                    self.expr_infer(&kw.value, &ignore_errors),
-                                );
-                            }
-                        }
-                        let flags = DataclassFieldKeywords::from_type_map(&map);
-                        ClassFieldInitialization::Class(Some(flags))
+                        let flags =
+                            self.dataclass_field_keywords(&func_ty, arguments, &ignore_errors);
+                        ClassFieldInitialization::ClassBody(Some(flags))
                     } else {
-                        ClassFieldInitialization::Class(None)
+                        ClassFieldInitialization::ClassBody(None)
                     }
                 } else {
-                    ClassFieldInitialization::Class(None)
+                    ClassFieldInitialization::ClassBody(None)
                 }
             }
+            RawClassFieldInitialization::Method(_) | RawClassFieldInitialization::Uninitialized
+                if magically_initialized =>
+            {
+                ClassFieldInitialization::Magic
+            }
+            RawClassFieldInitialization::Method(_) => ClassFieldInitialization::Method,
+            RawClassFieldInitialization::Uninitialized => ClassFieldInitialization::Uninitialized,
         }
     }
 
     /// This is used for dataclass field synthesis; when accessing attributes on dataclass instances,
     /// use `get_instance_attribute` or `get_class_attribute`
-    pub fn get_dataclass_member(
-        &self,
-        cls: &Class,
-        name: &Name,
-        cls_is_kw_only: bool,
-        seen_kw_only_marker: bool,
-    ) -> DataclassMember {
+    pub fn get_dataclass_member(&self, cls: &Class, name: &Name) -> DataclassMember {
         // Even though we check that the class member exists before calling this function,
         // it can be None if the class has an invalid MRO.
         let Some(member) = self.get_class_member_impl(cls, name, true) else {
             return DataclassMember::NotAField;
         };
-        let default_to_kw_only = member.defining_class == *cls && cls_is_kw_only;
         let field = &*member.value;
         // A field with type KW_ONLY is a sentinel value that indicates that the remaining
         // fields should be keyword-only params in the generated `__init__`.
         if field.is_dataclass_kwonly_marker() {
             DataclassMember::KwOnlyMarker
-        } else if field.is_class_var()
-            || !field.is_defined_on_class_body()
+        } else if field.is_initialized_in_method() // This member is defined in a method without being declared on the class
+            || field.is_class_var() // Class variables are not dataclass fields
             || (!field.has_explicit_annotation()
                 && self
                     .get_inherited_annotation(cls, name)
                     .1
                     .is_some_and(|annot| annot.has_qualifier(&Qualifier::ClassVar)))
         {
-            DataclassMember::NotAField // Class variables are not dataclass fields
-        } else if field.is_init_var() {
-            DataclassMember::InitVar(
-                field.clone(),
-                field.dataclass_flags_of(seen_kw_only_marker || default_to_kw_only),
-            )
+            DataclassMember::NotAField
         } else {
-            DataclassMember::Field(
-                field.clone(),
-                field.dataclass_flags_of(seen_kw_only_marker || default_to_kw_only),
-            )
+            let flags = field.dataclass_flags_of();
+            if field.is_init_var() {
+                DataclassMember::InitVar(member, flags)
+            } else {
+                DataclassMember::Field(member, flags)
+            }
         }
     }
 
@@ -1142,23 +1099,27 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } => {
                 let is_class_var = annotation.is_some_and(|ann| ann.is_class_var());
                 match field.initialization() {
-                    ClassFieldInitialization::Class(_) => {
+                    ClassFieldInitialization::ClassBody(_) => {
                         self.expand_type_mut(&mut ty); // bind_instance matches on the type, so resolve it if we can
                         bind_instance_attribute(instance, ty, is_class_var, read_only_reason)
                     }
-                    ClassFieldInitialization::Instance | ClassFieldInitialization::Magic
+                    ClassFieldInitialization::Method
+                    | ClassFieldInitialization::Uninitialized
+                    | ClassFieldInitialization::Magic
                         if let Some(read_only_reason) = read_only_reason =>
                     {
                         Attribute::read_only(ty, read_only_reason)
                     }
-                    ClassFieldInitialization::Instance | ClassFieldInitialization::Magic
+                    ClassFieldInitialization::Method
+                    | ClassFieldInitialization::Uninitialized
+                    | ClassFieldInitialization::Magic
                         if is_class_var =>
                     {
                         Attribute::read_only(ty, ReadOnlyReason::ClassVar)
                     }
-                    ClassFieldInitialization::Instance | ClassFieldInitialization::Magic => {
-                        Attribute::read_write(ty)
-                    }
+                    ClassFieldInitialization::Method
+                    | ClassFieldInitialization::Uninitialized
+                    | ClassFieldInitialization::Magic => Attribute::read_write(ty),
                 }
             }
         }
@@ -1180,7 +1141,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
             ClassFieldInner::Simple {
-                initialization: ClassFieldInitialization::Instance,
+                initialization:
+                    ClassFieldInitialization::Method | ClassFieldInitialization::Uninitialized,
                 ..
             } => Attribute::no_access(NoAccessReason::ClassUseOfInstanceAttribute(cls.dupe())),
             ClassFieldInner::Simple { ty, .. } => {
@@ -1287,16 +1249,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         for (parent, parent_metadata) in parents {
             parent_has_any = parent_has_any || parent_metadata.has_base_any();
             // Don't allow overriding a namedtuple element
-            if let Some(named_tuple_metadata) = parent_metadata.named_tuple_metadata() {
-                if named_tuple_metadata.elements.contains(name) {
-                    self.error(
-                        errors,
-                        range,
-                        ErrorKind::BadOverride,
-                        None,
-                        format!("Cannot override named tuple element `{}`", name),
-                    );
-                }
+            if let Some(named_tuple_metadata) = parent_metadata.named_tuple_metadata()
+                && named_tuple_metadata.elements.contains(name)
+            {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::BadOverride,
+                    None,
+                    format!("Cannot override named tuple element `{name}`"),
+                );
             }
             let Some(want_member) = self.get_class_member(parent.class_object(), name) else {
                 continue;
@@ -1397,13 +1359,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         name: &Name,
         include_initvar: bool,
     ) -> Option<Arc<ClassField>> {
-        if cls.contains(name) {
-            let field = self.get_from_class(cls, &KeyClassField(cls.index(), name.clone()));
-            if !include_initvar && field.is_init_var() {
-                None
-            } else {
-                Some(field)
-            }
+        if cls.contains(name)
+            && let Some(field) = self.get_from_class(cls, &KeyClassField(cls.index(), name.clone()))
+            && (include_initvar || !field.is_init_var())
+        {
+            Some(field)
         } else {
             None
         }
@@ -1421,10 +1381,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             Some(field)
         } else {
-            let synthesized_fields =
-                self.get_from_class(cls, &KeyClassSynthesizedFields(cls.index()));
-            let synth = synthesized_fields.get(name);
-            synth.map(|f| f.inner.dupe())
+            Some(
+                self.get_from_class(cls, &KeyClassSynthesizedFields(cls.index()))?
+                    .get(name)?
+                    .inner
+                    .dupe(),
+            )
         }
     }
 

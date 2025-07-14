@@ -600,7 +600,7 @@ assert_type(y1, B)
 
 y2: A = (x2 := B())
 
-y3: list[A] = (x3 := [B()])
+y3: list[A] = (x3 := [B()]) # E: `list[B]` is not assignable to `list[A]`
 
 y4: B = (x4 := A())  # E: `A` is not assignable to `B`
     "#,
@@ -758,5 +758,47 @@ def f(x):
 def f(x):
     x = 3
     x = "None" 
+    "#,
+);
+
+testcase!(
+    test_ann_assign_valid1,
+    r#"
+class A:
+    _x: int
+    def __init__(self, x:int):
+        self._x: int = x
+    "#,
+);
+
+testcase!(
+    test_ann_assign_invalid,
+    r#"
+class A:
+    _x: bool 
+    def __init__(self, x:int):
+        self._x: int = x # E: `int` is not assignable to attribute `_x` with type `bool`
+    "#,
+);
+
+testcase!(
+    test_ann_assign_valid2,
+    r#"
+int2 = int
+class A:
+    _x: int2
+    def __init__(self, x:int):
+        self._x: int = x 
+    "#,
+);
+
+testcase!(
+    test_ann_assign_twice,
+    r#"
+class A:
+    _x: bool 
+    def __init__(self, x:int):
+        self._x: int = x # E: `int` is not assignable to attribute `_x` with type `bool`
+        self._x: bool = x # E: `int` is not assignable to attribute `_x` with type `bool`
     "#,
 );

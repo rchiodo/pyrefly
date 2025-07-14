@@ -4,6 +4,7 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+
 use std::iter;
 use std::sync::Arc;
 
@@ -93,11 +94,12 @@ use crate::types::class::Class;
 use crate::types::class::ClassType;
 use crate::types::display::TypeDisplayContext;
 use crate::types::literal::Lit;
-use crate::types::module::Module;
+use crate::types::module::ModuleType;
 use crate::types::param_spec::ParamSpec;
 use crate::types::quantified::Quantified;
 use crate::types::quantified::QuantifiedInfo;
 use crate::types::quantified::QuantifiedKind;
+use crate::types::special_form::SpecialForm;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
 use crate::types::type_var::PreInferenceVariance;
@@ -149,6 +151,40 @@ pub enum TypeFormContext {
     /// Variable annotation outside of a class definition
     /// Is the variable assigned a value here?
     VarAnnotation(Initialized),
+}
+
+impl TypeFormContext {
+    pub fn quantified_kind_default(x: QuantifiedKind) -> Self {
+        match x {
+            QuantifiedKind::TypeVar => TypeFormContext::TypeVarDefault,
+            QuantifiedKind::ParamSpec => TypeFormContext::ParamSpecDefault,
+            QuantifiedKind::TypeVarTuple => TypeFormContext::TypeVarTupleDefault,
+        }
+    }
+
+    /// Is this special form valid as an un-parameterized annotation anywhere?
+    pub fn is_valid_unparameterized_annotation(self, x: SpecialForm) -> bool {
+        match x {
+            SpecialForm::Protocol | SpecialForm::TypedDict => {
+                matches!(self, TypeFormContext::BaseClassList)
+            }
+            SpecialForm::TypeAlias => matches!(
+                self,
+                TypeFormContext::TypeAlias | TypeFormContext::VarAnnotation(Initialized::Yes)
+            ),
+            SpecialForm::Final => matches!(
+                self,
+                TypeFormContext::VarAnnotation(Initialized::Yes)
+                    | TypeFormContext::ClassVarAnnotation
+            ),
+            SpecialForm::LiteralString
+            | SpecialForm::Never
+            | SpecialForm::NoReturn
+            | SpecialForm::Type
+            | SpecialForm::SelfType => true,
+            _ => false,
+        }
+    }
 }
 
 pub enum Iterable {
@@ -299,7 +335,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         x.range(),
                         ErrorKind::InvalidAnnotation,
                         None,
-                        format!("`{}` is only allowed inside a class body", special),
+                        format!("`{special}` is only allowed inside a class body"),
                     );
                     None
                 }
@@ -315,8 +351,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ErrorKind::InvalidAnnotation,
                         None,
                         format!(
-                            "`{}` is only allowed on a class or local variable annotation",
-                            special
+                            "`{special}` is only allowed on a class or local variable annotation"
                         ),
                     );
                     None
@@ -431,7 +466,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             x.range(),
                             ErrorKind::InvalidAnnotation,
                             None,
-                            format!("Expected a type argument for `{}`", qualifier,),
+                            format!("Expected a type argument for `{qualifier}`"),
                         );
                     }
                 }
@@ -510,7 +545,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             _ => {
                 let ann_ty = self.expr_untype(x, type_form_context, errors);
                 if let Type::SpecialForm(special_form) = ann_ty
-                    && !special_form.is_valid_unparameterized_annotation(type_form_context)
+                    && !type_form_context.is_valid_unparameterized_annotation(special_form)
                 {
                     if special_form.can_be_subscripted() {
                         self.error(
@@ -518,7 +553,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             x.range(),
                             ErrorKind::InvalidAnnotation,
                             None,
-                            format!("Expected a type argument for `{}`", special_form),
+                            format!("Expected a type argument for `{special_form}`"),
                         );
                     } else {
                         self.error(
@@ -526,7 +561,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             x.range(),
                             ErrorKind::InvalidAnnotation,
                             None,
-                            format!("`{}` is not allowed in this context", special_form),
+                            format!("`{special_form}` is not allowed in this context"),
                         );
                     }
                 }
@@ -1387,7 +1422,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(class) = &class.0 {
             self.variance_map(class)
         } else {
-            Arc::new(VarianceMap(SmallMap::new()))
+            Arc::new(VarianceMap::default())
         }
     }
 
@@ -1538,10 +1573,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ErrorKind::from_quantified(kind),
                         None,
                         format!(
-                            "Expected default `{}` of `{}` to be assignable to the upper bound of `{}`",
-                            default,
-                            name,
-                            bound_ty,
+                            "Expected default `{default}` of `{name}` to be assignable to the upper bound of `{bound_ty}`",
                         ),
                     );
                     return Type::any_error();
@@ -1555,7 +1587,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     let formatted_constraints = constraints
                         .iter()
-                        .map(|x| format!("`{}`", x))
+                        .map(|x| format!("`{x}`"))
                         .collect::<Vec<_>>()
                         .join(", ");
                     self.error(
@@ -1564,10 +1596,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ErrorKind::from_quantified(kind),
                         None,
                         format!(
-                            "Expected default `{}` of `{}` to be one of the following constraints: {}",
-                            default,
-                            name,
-                            formatted_constraints,
+                            "Expected default `{default}` of `{name}` to be one of the following constraints: {formatted_constraints}"
                         ),
                     );
                     return Type::any_error();
@@ -1585,7 +1614,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorKind::InvalidParamSpec,
                         None,
-                        format!("Default for `ParamSpec` must be a parameter list, `...`, or another `ParamSpec`, got `{}`", default),
+                        format!("Default for `ParamSpec` must be a parameter list, `...`, or another `ParamSpec`, got `{default}`"),
                     );
                     Type::any_error()
                 }
@@ -1601,7 +1630,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorKind::InvalidTypeVarTuple,
                         None,
-                        format!("Default for `TypeVarTuple` must be an unpacked tuple form or another `TypeVarTuple`, got `{}`", default),
+                        format!("Default for `TypeVarTuple` must be an unpacked tuple form or another `TypeVarTuple`, got `{default}`"),
                     );
                     Type::any_error()
                 }
@@ -1613,10 +1642,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorKind::InvalidTypeVar,
                         None,
-                        format!(
-                            "Default for `TypeVar` may not be a `TypeVarTuple` or `ParamSpec`, got `{}`",
-                            default
-                        ),
+                        format!( "Default for `TypeVar` may not be a `TypeVarTuple` or `ParamSpec`, got `{default}`"),
                     );
                     Type::any_error()
                 } else {
@@ -2083,16 +2109,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     }
                     Type::Any(AnyStyle::Error) => match_args,
-                    _ => self.error(
-                        errors,
-                        *range,
-                        ErrorKind::MatchError,
-                        Some(&context),
-                        format!(
-                            "Expected concrete tuple for `__match_args__`, got `{}`",
-                            match_args
-                        ),
-                    ),
+                    _ => {
+                        self.error(
+                            errors,
+                            *range,
+                            ErrorKind::MatchError,
+                            Some(&context),
+                            format!(
+                                "Expected concrete tuple for `__match_args__`, got `{match_args}`",
+                            ),
+                        )
+                    }
                 }
             }
             Binding::PatternMatchClassKeyword(_, attr, key) => {
@@ -2121,7 +2148,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 expr.range(),
                                 ErrorKind::BadAssignment,
                                 None,
-                                format!("`{}` is marked final", name),
+                                format!("`{name}` is marked final"),
                             );
                         }
                         let annot_ty = annot.ty(self.stdlib);
@@ -2594,7 +2621,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.solve_function_binding(idx, &mut pred, class_meta.as_ref(), errors)
             }
             Binding::Import(m, name, _aliased) => self
-                .get_from_module(*m, None, &KeyExport(name.clone()))
+                .get_from_export(*m, None, &KeyExport(name.clone()))
                 .arc_clone(),
             Binding::ClassDef(x, decorators) => match &self.get_idx(*x).0 {
                 None => Type::any_implicit(),
@@ -2651,7 +2678,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if let Some(default_expr) = default {
                     let default = self.expr_untype(
                         default_expr,
-                        kind.type_form_context_for_default(),
+                        TypeFormContext::quantified_kind_default(*kind),
                         errors,
                     );
                     default_ty = Some(self.validate_type_var_default(
@@ -2681,16 +2708,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .as_ref()
                     .and_then(|x| self.get_idx(*x).ty().as_module().cloned());
                 match prev {
-                    Some(prev) if prev.path() == path => prev.add_module(*m).to_type(),
+                    Some(prev) if prev.parts() == path => prev.add_module(*m).to_type(),
                     _ => {
                         if path.len() == 1 {
-                            Type::Module(Module::new(
+                            Type::Module(ModuleType::new(
                                 path[0].clone(),
                                 OrderedSet::from_iter([(*m)]),
                             ))
                         } else {
                             assert_eq!(&m.components(), path);
-                            Type::Module(Module::new_as(*m))
+                            Type::Module(ModuleType::new_as(*m))
                         }
                     }
                 }
@@ -2964,6 +2991,35 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    // Approximate the result of calling `type()` on something of type T
+    // In many cases the result is just type[T] with generics erased, but sometimes
+    // we'll fall back to builtins.type. We can add more cases here as-needed.
+    pub fn type_of(&self, ty: Type) -> Type {
+        match ty {
+            Type::ClassType(cls) | Type::SelfType(cls) => {
+                Type::ClassDef(cls.class_object().clone())
+            }
+            Type::Union(xs) if !xs.is_empty() => {
+                let mut ts = Vec::new();
+                for x in xs {
+                    let t = self.type_of(x);
+                    ts.push(t);
+                }
+                self.unions(ts)
+            }
+            Type::TypeAlias(ta) => self.type_of(ta.as_type()),
+            Type::Any(style) => Type::type_form(style.propagate()),
+            Type::ClassDef(cls) => {
+                if let Some(meta) = self.get_metadata_for_class(&cls).metaclass() {
+                    Type::type_form(Type::ClassType(meta.clone()))
+                } else {
+                    Type::ClassDef(self.stdlib.builtins_type().class_object().clone())
+                }
+            }
+            _ => self.stdlib.builtins_type().clone().to_type(),
+        }
+    }
+
     pub fn validate_type_form(
         &self,
         ty: Type,
@@ -3036,7 +3092,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorKind::InvalidAnnotation,
                 None,
-                format!("`{}` is not allowed in this context", ty),
+                format!("`{ty}` is not allowed in this context"),
             );
         }
         if !matches!(
@@ -3071,7 +3127,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
         if let Type::SpecialForm(special_form) = ty
-            && !special_form.is_valid_unparameterized_annotation(type_form_context)
+            && !type_form_context.is_valid_unparameterized_annotation(special_form)
         {
             if special_form.can_be_subscripted() {
                 self.error(
@@ -3079,7 +3135,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range,
                     ErrorKind::InvalidAnnotation,
                     None,
-                    format!("Expected a type argument for `{}`", special_form),
+                    format!("Expected a type argument for `{special_form}`"),
                 );
             } else {
                 self.error(
@@ -3087,7 +3143,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range,
                     ErrorKind::InvalidAnnotation,
                     None,
-                    format!("`{}` is not allowed in this context", special_form),
+                    format!("`{special_form}` is not allowed in this context"),
                 );
             }
         }

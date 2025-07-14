@@ -771,7 +771,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let base = self.expr_infer_type_info(&x.value, errors);
                 self.subscript_infer(&base, &x.slice, x.range(), errors)
             }
-            Expr::Named(x) => self.expr_infer_type_info_with_hint(&x.value, hint, errors),
+            Expr::Named(x) => match &*x.target {
+                Expr::Name(name) => self
+                    .get(&Key::Definition(ShortIdentifier::expr_name(name)))
+                    .arc_clone(),
+                _ => TypeInfo::of_ty(Type::any_error()), // syntax error
+            },
             // All other expressions operate at the `Type` level only, so we avoid the overhead of
             // wrapping and unwrapping `TypeInfo` by computing the result as a `Type` and only wrapping
             // at the end.
@@ -1010,7 +1015,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .into_ty()
             }
             Expr::If(x) => {
-                // TODO: Support type narrowing
                 let condition_type = self.expr_infer(&x.test, errors);
                 let body_type = self.expr_infer_type_no_trace(&x.body, hint, errors);
                 let orelse_type = self.expr_infer_type_no_trace(&x.orelse, hint, errors);
@@ -1400,6 +1404,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             if self.has_exactly_two_posargs(&x.arguments) =>
                         {
                             self.call_issubclass(&x.arguments.args[0], &x.arguments.args[1], errors)
+                        }
+                        _ if matches!(&ty_fun, Type::ClassDef(cls) if cls == self.stdlib.builtins_type().class_object())
+                            && x.arguments.args.len() == 1 && x.arguments.keywords.is_empty() =>
+                        {
+                            // We may be able to provide a more precise type when the constructor for `builtins.type`
+                            // is called with a single argument.
+                            let typ = self.expr_infer(&x.arguments.args[0], errors);
+                            self.type_of(typ)
                         }
                         _ => {
                             let callable = self.as_call_target_or_error(

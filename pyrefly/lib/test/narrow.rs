@@ -33,6 +33,29 @@ def f(x: str | None, y: bool):
 );
 
 testcase!(
+    test_bool_simple,
+    r#"
+from typing import assert_type
+def f(x: str | None):
+    if bool(x):
+        assert_type(x, str)
+    "#,
+);
+
+testcase!(
+    bug = "We don't identify bool() as builtins.bool if it's used elsewhere as a type annotation, instead the special exports system thinks it's defined by the current file (main.bool)",
+    test_bool_special_exports_bug,
+    r#"
+from typing import assert_type
+def f(x: bool):
+    if bool(x):
+        assert_type(x, bool)  # should be Literal[True]
+    else:
+        assert_type(x, bool)  # should be Literal[False]
+    "#,
+);
+
+testcase!(
     test_eq,
     r#"
 from typing import assert_type
@@ -530,6 +553,31 @@ def f(x: str | int):
 );
 
 testcase!(
+    test_type_eq,
+    r#"
+from typing import assert_type
+def f(x: str | int):
+    if type(x) == str:
+        assert_type(x, str)
+    else:
+        # x can still be a subclass of str
+        assert_type(x, str | int)
+    if type(x) is str:
+        assert_type(x, str)
+    else:
+        # x can still be a subclass of str
+        assert_type(x, str | int)
+
+def verify_type(input: int):
+    pass
+
+def foo(x: int | None) -> None:
+    assert type(x) is int
+    verify_type(x)
+    "#,
+);
+
+testcase!(
     test_isinstance_union,
     r#"
 from typing import assert_type
@@ -995,7 +1043,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertTrue(x is not None)
         assert_type(x, int)
-    
+
     def test_false(self) -> None:
         x = foo()
         self.assertFalse(x is None)
@@ -1014,7 +1062,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertIsNone(x)
         assert_type(x, None)
-    
+
     def test_is_not_none(self) -> None:
         x = foo()
         self.assertIsNotNone(x)
@@ -1033,7 +1081,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertIsInstance(x, int)
         assert_type(x, int)
-    
+
     def test_is_not_instance(self) -> None:
         x = foo()
         self.assertNotIsInstance(x, int)
@@ -1052,7 +1100,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertEqual(x, 0)
         assert_type(x, Literal[0])
-    
+
     def test_not_equal(self) -> None:
         x = foo()
         self.assertNotEqual(x, 0)
@@ -1071,7 +1119,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertIs(x, True)
         assert_type(x, Literal[True])
-    
+
     def test_is_not(self) -> None:
         x = foo()
         self.assertIsNot(x, True)
@@ -1090,7 +1138,7 @@ class MyTest(TestCase):
         x = foo()
         self.assertIn(x, [1, 2])
         assert_type(x, Literal[1, 2])
-    
+
     def test_not_in(self) -> None:
         x = foo()
         self.assertNotIn(x, [1, 2])
@@ -1319,4 +1367,195 @@ def f(a_type, handlers, type2):
         if issubclass(a_type, type2):
             pass
     "#,
+);
+
+testcase!(
+    test_isinstance_uniontype,
+    r#"
+import types
+
+def f(x, y: types.UnionType):
+    isinstance(x, y)
+"#,
+);
+
+testcase!(
+    test_isinstance_selftype,
+    r#"
+from typing import reveal_type
+
+class Foo:
+    @classmethod
+    def foo(cls, x):
+        if isinstance(x, cls):
+            reveal_type(x) # E: revealed type: Self@Foo
+"#,
+);
+
+testcase!(
+    test_isinstance_unpacked_tuple,
+    r#"
+from typing import assert_type
+
+def f(x, y):
+    isinstance(x, (str, *y))
+
+def g(x, y: tuple[type[int], type[str]]):
+    if isinstance(x, (bool, *y)):
+        assert_type(x, bool | int | str)
+"#,
+);
+
+testcase!(
+    test_typeguard_argument_number,
+    r#"
+from typing import TypeGuard
+
+def guard_no_arg() -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+    return True
+
+def guard_one_arg(x) -> TypeGuard[int]:
+    return True
+
+def guard_two_args(x, y) -> TypeGuard[int]:
+    return True
+
+def guard_kw_arg(*, x) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+    return True
+
+class C:
+    def guard_no_arg(self) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    def guard_one_arg(self, x) -> TypeGuard[int]:
+        return True
+
+    def guard_two_args(self, x, y) -> TypeGuard[int]:
+        return True
+
+    def guard_kw_arg(self, *, x) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @classmethod
+    def guard_no_arg_cls(cls) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @classmethod
+    def guard_one_arg_cls(cls, x) -> TypeGuard[int]:
+        return True
+
+    @classmethod
+    def guard_two_args_cls(cls, x, y) -> TypeGuard[int]:
+        return True
+
+    @classmethod
+    def guard_kw_arg_cls(cls, *, x) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @staticmethod
+    def guard_no_arg_static() -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @staticmethod
+    def guard_one_arg_static(x) -> TypeGuard[int]:
+        return True
+
+    @staticmethod
+    def guard_two_args_static(x, y) -> TypeGuard[int]:
+        return True
+
+    @staticmethod
+    def guard_kw_arg_static(*, x) -> TypeGuard[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+"#,
+);
+
+testcase!(
+    test_typeis_argument_number,
+    r#"
+from typing import TypeIs
+
+def guard_no_arg() -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+    return True
+
+def guard_one_arg(x) -> TypeIs[int]:
+    return True
+
+def guard_two_args(x, y) -> TypeIs[int]:
+    return True
+
+def guard_kw_arg(*, x) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+    return True
+
+class C:
+    def guard_no_arg(self) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    def guard_one_arg(self, x) -> TypeIs[int]:
+        return True
+
+    def guard_two_args(self, x, y) -> TypeIs[int]:
+        return True
+
+    def guard_kw_arg(self, *, x) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @classmethod
+    def guard_no_arg_cls(cls) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @classmethod
+    def guard_one_arg_cls(cls, x) -> TypeIs[int]:
+        return True
+
+    @classmethod
+    def guard_two_args_cls(cls, x, y) -> TypeIs[int]:
+        return True
+
+    @classmethod
+    def guard_kw_arg_cls(cls, *, x) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @staticmethod
+    def guard_no_arg_static() -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+
+    @staticmethod
+    def guard_one_arg_static(x) -> TypeIs[int]:
+        return True
+
+    @staticmethod
+    def guard_two_args_static(x, y) -> TypeIs[int]:
+        return True
+
+    @staticmethod
+    def guard_kw_arg_static(*, x) -> TypeIs[int]: # E: Type guard functions must accept at least one positional argument
+        return True
+"#,
+);
+
+testcase!(
+    test_typeis_subtyping,
+    r#"
+from typing import TypeIs
+
+def bad_typeis(x: str) -> TypeIs[int]: # E: Return type `int` must be assignable to the first argument type `str`
+    return isinstance(x, int)
+
+# From the conformance tests
+def also_bad_typeis(x: list[object]) -> TypeIs[list[int]]: # E: Return type `list[int]` must be assignable to the first argument type `list[object]`
+    return all(isinstance(i, int) for i in x)
+
+class C:
+    def is_int(self, x: str) -> TypeIs[int]: # E: Return type `int` must be assignable to the first argument type `str`
+        return isinstance(x, int)
+
+    @classmethod
+    def is_int_cls(cls, x: str) -> TypeIs[int]: # E: Return type `int` must be assignable to the first argument type `str`
+        return isinstance(x, int)
+
+    @staticmethod
+    def is_int_static(x: str) -> TypeIs[int]: # E: Return type `int` must be assignable to the first argument type `str`
+        return isinstance(x, int)
+"#,
 );

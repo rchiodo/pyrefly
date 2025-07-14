@@ -151,11 +151,13 @@ pub enum Param {
     Kwargs(Option<Name>, Type),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Requiredness for a function parameter.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub enum Required {
     Required,
-    Optional,
+    /// The parameter is optional, with the `Type` being the type of its default value, if available.
+    Optional(Option<Type>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -349,6 +351,25 @@ impl Callable {
         }
     }
 
+    pub fn get_first_param(&self) -> Option<Type> {
+        match self {
+            Self {
+                params: Params::List(params),
+                ret: _,
+            } if let Some(param) = params.items().first() => match param {
+                Param::PosOnly(_, ty, _) | Param::Pos(_, ty, _) | Param::VarArg(_, ty) => {
+                    Some(ty.clone())
+                }
+                _ => None,
+            },
+            Self {
+                params: Params::ParamSpec(ts, _),
+                ret: _,
+            } => ts.first().cloned(),
+            _ => None,
+        }
+    }
+
     pub fn is_typeguard(&self) -> bool {
         matches!(
             self,
@@ -393,6 +414,14 @@ impl Callable {
 }
 
 impl Param {
+    fn fmt_default(&self, default: &Option<Type>) -> String {
+        match default {
+            Some(Type::Literal(lit)) => format!("{lit}"),
+            Some(Type::None) => "None".to_owned(),
+            _ => "...".to_owned(),
+        }
+    }
+
     pub fn fmt_with_type<'a, D: Display + 'a>(
         &'a self,
         f: &mut fmt::Formatter<'_>,
@@ -400,18 +429,16 @@ impl Param {
     ) -> fmt::Result {
         match self {
             Param::PosOnly(None, ty, Required::Required) => write!(f, "{}", wrap(ty)),
-            Param::PosOnly(None, ty, Required::Optional) => write!(f, "_: {} = ...", wrap(ty)),
-            Param::PosOnly(Some(name), ty, required) | Param::Pos(name, ty, required) => {
-                write!(
-                    f,
-                    "{}: {}{}",
-                    name,
-                    wrap(ty),
-                    match required {
-                        Required::Required => "",
-                        Required::Optional => " = ...",
-                    }
-                )
+            Param::PosOnly(None, ty, Required::Optional(default)) => {
+                write!(f, "_: {} = {}", wrap(ty), self.fmt_default(default))
+            }
+            Param::PosOnly(Some(name), ty, Required::Required)
+            | Param::Pos(name, ty, Required::Required) => {
+                write!(f, "{}: {}", name, wrap(ty),)
+            }
+            Param::PosOnly(Some(name), ty, Required::Optional(default))
+            | Param::Pos(name, ty, Required::Optional(default)) => {
+                write!(f, "{}: {} = {}", name, wrap(ty), self.fmt_default(default))
             }
             Param::VarArg(Some(name), ty) => write!(f, "*{}: {}", name, wrap(ty)),
             Param::VarArg(None, ty) => write!(f, "*{}", wrap(ty)),
@@ -579,7 +606,7 @@ impl FunctionKind {
 
 pub fn unexpected_keyword(error: &dyn Fn(String), func: &str, keyword: &Keyword) {
     let desc = if let Some(id) = &keyword.arg {
-        format!(" `{}`", id)
+        format!(" `{id}`")
     } else {
         "".to_owned()
     };
