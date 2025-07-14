@@ -510,7 +510,7 @@ pub enum GetDocstringRequest {}
 impl lsp_types::request::Request for GetDocstringRequest {
     type Params = GetDocstringParams;
     type Result = Option<String>;
-    const METHOD: &'static str = "typeServer/getDocstring";
+    const METHOD: &'static str = "typeServer/getDocString";
 }
 
 // Flags that are used for searching for attributes of a class Type

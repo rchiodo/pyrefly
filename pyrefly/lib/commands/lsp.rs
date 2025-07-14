@@ -1575,7 +1575,8 @@ impl Server {
 
         // Get the type at the position
         let Some(type_info) = transaction.get_type_at(&handle, position) else {
-            eprintln!("Warning: No type found at position {} in {}", position.to_usize(), uri);
+            let short_uri = uri.to_string().chars().take(100).collect::<String>();
+            eprintln!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
             return Ok(None);
         };
 
