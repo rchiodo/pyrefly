@@ -942,6 +942,15 @@ struct LspConfig {
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
+    /// Helper function to create a consistent "Snapshot is outdated" error response
+    fn snapshot_outdated_error() -> ResponseError {
+        ResponseError {
+            code: ErrorCode::ServerCancelled as i32,
+            message: "Snapshot is outdated".to_string(),
+            data: None,
+        }
+    }
+
     /// Process the event and return next step.
     fn process_event<'a>(
         &'a self,
@@ -1547,11 +1556,7 @@ impl Server {
     ) -> Result<Option<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Convert Node to URI and position
@@ -1591,11 +1596,7 @@ impl Server {
     ) -> Result<Option<tsp::Symbol>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Convert Node to URI and position
@@ -1804,11 +1805,7 @@ impl Server {
     ) -> Result<Option<tsp::Declaration>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Only resolve import declarations
@@ -2169,11 +2166,7 @@ impl Server {
     ) -> Result<tsp::Type, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Extract the location information from the declaration
@@ -2267,11 +2260,7 @@ impl Server {
     ) -> Result<String, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Use the handle mapping to get the actual pyrefly type
@@ -2323,11 +2312,7 @@ impl Server {
     ) -> Result<Option<String>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         // Extract the location information from the declaration
@@ -2394,11 +2379,7 @@ impl Server {
     ) -> Result<Option<tsp::Attribute>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(ResponseError {
-                code: ErrorCode::ServerCancelled as i32,
-                message: "Snapshot is outdated".to_string(),
-                data: None,
-            });
+            return Err(Self::snapshot_outdated_error());
         }
 
         eprintln!(
