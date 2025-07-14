@@ -1912,16 +1912,15 @@ impl Server {
             }
         };
 
-        // Get the configuration for the importing file to get proper search paths
-        let config = self.state.config_finder().python_file(
-            pyrefly_python::module_name::ModuleName::unknown(),
-            &pyrefly_python::module_path::ModulePath::filesystem(importing_path),
-        );
-        
-        // Get all search paths: regular search paths + site packages
-        let mut all_search_paths = Vec::new();
-        all_search_paths.extend(config.search_path());
-        all_search_paths.extend(config.site_package_path());
+        // Get all search paths using the centralized get_python_search_paths method
+        let search_paths_params = tsp::GetPythonSearchPathsParams {
+            from_uri: importing_uri.to_string(),
+            snapshot: params.snapshot,
+        };
+        let search_paths_result = self.get_python_search_paths(transaction, search_paths_params);
+        let all_search_paths: Vec<PathBuf> = search_paths_result.into_iter()
+            .filter_map(|path_str| PathBuf::from(path_str).canonicalize().ok())
+            .collect();
         
         // Try to find the module file in all search paths
         let mut target_module_path = None;
@@ -2096,34 +2095,8 @@ impl Server {
             Err(_) => return Vec::new(), // Return empty vector on error
         };
 
-        // Get the configuration - use different methods for directories vs files
-        let config = if path.is_dir() {
-            // For directories, use the directory method directly
-            self.state.config_finder().directory(&path)
-                .unwrap_or_else(|| {
-                    // If no config found for directory, create a module path and use python_file
-                    let module_path = pyrefly_python::module_path::ModulePath::filesystem(path.clone());
-                    self.state.config_finder().python_file(
-                        pyrefly_python::module_name::ModuleName::unknown(),
-                        &module_path,
-                    )
-                })
-        } else {
-            // For files, use the existing python_file method
-            let module_path = if self.open_files.read().contains_key(&path) {
-                pyrefly_python::module_path::ModulePath::memory(path.clone())
-            } else {
-                pyrefly_python::module_path::ModulePath::filesystem(path.clone())
-            };
-            
-            self.state.config_finder().python_file(
-                pyrefly_python::module_name::ModuleName::unknown(),
-                &module_path,
-            )
-        };
-
         // Check if language services are disabled for this workspace
-        let workspace_disabled = self.workspaces.get_with(path, |workspace| {
+        let workspace_disabled = self.workspaces.get_with(path.clone(), |workspace| {
             workspace.disable_language_services
         });
 
@@ -2131,24 +2104,87 @@ impl Server {
             return Vec::new();
         }
 
-        // Collect search paths from the configuration
-        let mut search_paths = Vec::new();
-        
-        // Add search paths from config
-        for path in config.search_path() {
-            if let Some(path_str) = path.to_str() {
-                search_paths.push(path_str.to_string());
+        // Try to get configuration from config finder first
+        let config_opt = if path.is_dir() {
+            // For directories, use the directory method directly
+            self.state.config_finder().directory(&path)
+        } else {
+            // For files, try to get config from python_file method
+            let module_path = if self.open_files.read().contains_key(&path) {
+                pyrefly_python::module_path::ModulePath::memory(path.clone())
+            } else {
+                pyrefly_python::module_path::ModulePath::filesystem(path.clone())
+            };
+            
+            // python_file always returns a config, but check if it's synthetic
+            let config = self.state.config_finder().python_file(
+                pyrefly_python::module_name::ModuleName::unknown(),
+                &module_path,
+            );
+            
+            // If it's a real config file (not synthetic), use it
+            match &config.source {
+                crate::config::config::ConfigSource::File(_) 
+                | crate::config::config::ConfigSource::Marker(_) => Some(config),
+                crate::config::config::ConfigSource::Synthetic => None,
             }
-        }
+        };
 
-        // Add site package paths from config
-        for path in config.site_package_path() {
-            if let Some(path_str) = path.to_str() {
-                search_paths.push(path_str.to_string());
+        if let Some(config) = config_opt {
+            // We found a real config file, use its search paths
+            let mut search_paths = Vec::new();
+            
+            // Add search paths from config
+            for path in config.search_path() {
+                if let Some(path_str) = path.to_str() {
+                    search_paths.push(path_str.to_string());
+                }
             }
-        }
 
-        search_paths
+            // Add site package paths from config
+            for path in config.site_package_path() {
+                if let Some(path_str) = path.to_str() {
+                    search_paths.push(path_str.to_string());
+                }
+            }
+
+            search_paths
+        } else {
+            // No config file found, use workspace python_info as fallback
+            self.workspaces.get_with(path, |workspace| {
+                let mut search_paths = Vec::new();
+
+                // Add workspace-specific search paths if available
+                if let Some(workspace_search_paths) = &workspace.search_path {
+                    for path in workspace_search_paths {
+                        if let Some(path_str) = path.to_str() {
+                            search_paths.push(path_str.to_string());
+                        }
+                    }
+                }
+
+                // Add search paths from workspace python environment
+                if let Some(python_info) = &workspace.python_info {
+                    // Add site package paths from the python environment
+                    if let Some(site_packages) = &python_info.env.site_package_path {
+                        for path in site_packages {
+                            if let Some(path_str) = path.to_str() {
+                                search_paths.push(path_str.to_string());
+                            }
+                        }
+                    }
+
+                    // Add interpreter site package paths from the python environment
+                    for path in &python_info.env.interpreter_site_package_path {
+                        if let Some(path_str) = path.to_str() {
+                            search_paths.push(path_str.to_string());
+                        }
+                    }
+                }
+
+                search_paths
+            })
+        }
     }
 
     /// Load a module in a fresh transaction if it's not available in the current transaction
