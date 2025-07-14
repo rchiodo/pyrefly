@@ -1138,37 +1138,37 @@ impl Server {
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.get_type(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.get_type(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.get_symbol(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.get_symbol(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.resolve_import_declaration(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.get_type_of_declaration(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_of_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetReprRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.get_repr(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.get_repr(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.get_docstring(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.get_docstring(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, self.search_for_type_attribute(&transaction, params).map_err(|e| anyhow::anyhow!("{}", e.message))));
+                    self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -3525,6 +3525,24 @@ where
                 message: format!("{:#?}", e),
                 data: None,
             }),
+        },
+    }
+}
+
+fn new_response_with_error_code<T>(id: RequestId, params: Result<T, ResponseError>) -> Response
+where
+    T: serde::Serialize,
+{
+    match params {
+        Ok(params) => Response {
+            id,
+            result: Some(serde_json::to_value(params).unwrap()),
+            error: None,
+        },
+        Err(error) => Response {
+            id,
+            result: None,
+            error: Some(error),
         },
     }
 }
