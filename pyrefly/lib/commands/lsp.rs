@@ -2090,28 +2090,58 @@ impl Server {
             Err(_) => return Vec::new(), // Return empty vector on error
         };
 
+        // Convert URI to file path using our helper function to handle percent-encoding
         let path = match Self::url_to_file_path(&uri) {
             Ok(path) => path,
             Err(_) => return Vec::new(), // Return empty vector on error
         };
 
-        // Get the configuration for this file
-        let config = self.state.config_finder().python_file(
-            pyrefly_python::module_name::ModuleName::unknown(),
-            &pyrefly_python::module_path::ModulePath::filesystem(path),
-        );
+        // Get the configuration - use different methods for directories vs files
+        let config = if path.is_dir() {
+            // For directories, use the directory method directly
+            self.state.config_finder().directory(&path)
+                .unwrap_or_else(|| {
+                    // If no config found for directory, create a module path and use python_file
+                    let module_path = pyrefly_python::module_path::ModulePath::filesystem(path.clone());
+                    self.state.config_finder().python_file(
+                        pyrefly_python::module_name::ModuleName::unknown(),
+                        &module_path,
+                    )
+                })
+        } else {
+            // For files, use the existing python_file method
+            let module_path = if self.open_files.read().contains_key(&path) {
+                pyrefly_python::module_path::ModulePath::memory(path.clone())
+            } else {
+                pyrefly_python::module_path::ModulePath::filesystem(path.clone())
+            };
+            
+            self.state.config_finder().python_file(
+                pyrefly_python::module_name::ModuleName::unknown(),
+                &module_path,
+            )
+        };
 
-        // Collect all search paths: search_path + site_package_path
+        // Check if language services are disabled for this workspace
+        let workspace_disabled = self.workspaces.get_with(path, |workspace| {
+            workspace.disable_language_services
+        });
+
+        if workspace_disabled {
+            return Vec::new();
+        }
+
+        // Collect search paths from the configuration
         let mut search_paths = Vec::new();
-
-        // Add regular search paths
+        
+        // Add search paths from config
         for path in config.search_path() {
             if let Some(path_str) = path.to_str() {
                 search_paths.push(path_str.to_string());
             }
         }
 
-        // Add site package paths
+        // Add site package paths from config
         for path in config.site_package_path() {
             if let Some(path_str) = path.to_str() {
                 search_paths.push(path_str.to_string());

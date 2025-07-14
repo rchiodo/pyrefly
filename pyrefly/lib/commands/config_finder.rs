@@ -285,4 +285,44 @@ mod tests {
                 .collect::<Vec<PathBuf>>(),
         );
     }
+
+    #[test]
+    fn test_directory_vs_file_config_access() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        TestPath::setup_test_directory(
+            root,
+            vec![
+                TestPath::dir(
+                    "project",
+                    vec![
+                        TestPath::file("pyrefly.toml"),
+                        TestPath::dir("src", vec![TestPath::file("main.py")]),
+                    ],
+                ),
+            ],
+        );
+
+        let args = Args::parse_from(Vec::<OsString>::new().iter());
+        let config_finder = standard_config_finder(Arc::new(move |_, x| args.override_config(x)));
+
+        // Test directory access using the directory method
+        let config_from_directory = config_finder.directory(&root.join("project/src"));
+        
+        // Test file access using the python_file method
+        let config_from_file = config_finder.python_file(
+            ModuleName::unknown(),
+            &ModulePath::filesystem(root.join("project/src/main.py")),
+        );
+
+        // Both should find the same config file at the project root
+        assert!(config_from_directory.is_some());
+        let dir_config = config_from_directory.unwrap();
+        
+        assert_eq!(dir_config.source, config_from_file.source);
+        assert_eq!(dir_config.search_path().collect::<Vec<_>>(), config_from_file.search_path().collect::<Vec<_>>());
+        
+        // Verify they both found the actual config file
+        assert_eq!(dir_config.source, ConfigSource::File(root.join("project/pyrefly.toml")));
+    }
 }
