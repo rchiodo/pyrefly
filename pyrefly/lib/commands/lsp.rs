@@ -24,6 +24,7 @@ use clap::ValueEnum;
 use crossbeam_channel::Select;
 use crossbeam_channel::Sender;
 use dupe::Dupe;
+use percent_encoding::percent_decode_str;
 use itertools::__std_iter::once;
 use itertools::Itertools;
 use lsp_server::Connection;
@@ -951,6 +952,54 @@ impl Server {
         }
     }
 
+    /// Helper function to safely convert a URL to a file path, handling percent-encoded characters
+    fn url_to_file_path(url: &Url) -> Result<PathBuf, ()> {
+        // First, try the standard method
+        if let Ok(path) = url.to_file_path() {
+            // Check if the path looks corrupted (contains unusual byte sequences)
+            if let Some(path_str) = path.to_str() {
+                // If the path contains control characters or non-printable characters,
+                // it's likely incorrectly decoded
+                if !path_str.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+                    return Ok(path);
+                }
+            }
+        }
+
+        // If standard method fails or produces corrupted output, manually decode
+        if url.scheme() != "file" {
+            return Err(());
+        }
+
+        let url_path = url.path();
+        
+        // Decode percent-encoded characters
+        let decoded_path = match percent_decode_str(url_path).decode_utf8() {
+            Ok(decoded) => decoded.into_owned(),
+            Err(_) => return Err(()),
+        };
+
+        // Handle Windows paths
+        #[cfg(target_os = "windows")]
+        {
+            if decoded_path.starts_with('/') {
+                // Remove leading slash and handle drive letters like "/C:/path"
+                let without_slash = &decoded_path[1..];
+                if without_slash.len() >= 2 && without_slash.chars().nth(1) == Some(':') {
+                    return Ok(PathBuf::from(without_slash));
+                }
+                // Handle UNC paths or other cases
+                return Ok(PathBuf::from(without_slash));
+            }
+            Ok(PathBuf::from(decoded_path))
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            Ok(PathBuf::from(decoded_path))
+        }
+    }
+
     /// Process the event and return next step.
     fn process_event<'a>(
         &'a self,
@@ -1132,7 +1181,10 @@ impl Server {
                     ));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
-                    self.send_response(new_response(x.id, Ok(self.get_python_search_paths(params))));
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, Ok(self.get_python_search_paths(&transaction, params))));
+                    ide_transaction_manager.save(transaction);
                 } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
                     self.send_response(new_response(x.id, Ok(self.current_snapshot())));
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
@@ -2031,14 +2083,14 @@ impl Server {
         Ok(Some(resolved_declaration))
     }
 
-    fn get_python_search_paths(&self, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
+    fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
         // Parse the URI to get the file path
         let uri = match Url::parse(&params.from_uri) {
             Ok(uri) => uri,
             Err(_) => return Vec::new(), // Return empty vector on error
         };
 
-        let path = match uri.to_file_path() {
+        let path = match Self::url_to_file_path(&uri) {
             Ok(path) => path,
             Err(_) => return Vec::new(), // Return empty vector on error
         };

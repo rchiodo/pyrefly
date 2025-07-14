@@ -2005,6 +2005,7 @@ dependencies = [
  "parse-display",
  "paste",
  "path-absolutize",
+ "percent-encoding",
  "pretty_assertions",
  "pulldown-cmark",
  "pyrefly_derive",
