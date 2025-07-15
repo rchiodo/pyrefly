@@ -268,7 +268,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             })
             .collect();
 
-        let iterable_ty = self.stdlib.iterable(Type::Union(tuple_types)).to_type();
+        let iterable_ty = self.stdlib.iterable(self.unions(tuple_types)).to_type();
 
         let tuple_overload = OverloadType::Callable(Callable::list(
             ParamList::new(vec![
@@ -342,7 +342,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // (self, key: Literal["key"]) -> ValueType | None
                 literal_signatures.push(OverloadType::Callable(Callable::list(
                     ParamList::new(vec![self_param.clone(), key_param.clone()]),
-                    Type::Union(vec![field.ty.clone(), Type::None]),
+                    Type::optional(field.ty.clone()),
                 )));
                 // (self, key: Literal["key"], default: T) -> ValueType | T
                 let q = Quantified::type_var(
@@ -370,7 +370,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     Required::Required,
                                 ),
                             ]),
-                            Type::Union(vec![field.ty.clone(), q.to_type()]),
+                            self.union(field.ty.clone(), q.to_type()),
                         ),
                         metadata: metadata.clone(),
                     },
@@ -437,7 +437,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // 1) no default: (self, key: Literal["field_name"]) -> Optional[FieldType]
                 literal_signatures.push(OverloadType::Callable(Callable::list(
                     ParamList::new(vec![self_param.clone(), key_param.clone()]),
-                    Type::Union(vec![field.ty.clone(), Type::None]),
+                    Type::optional(field.ty.clone()),
                 )));
 
                 // 2) default: (self, key: Literal["field_name"], default: _T) -> Union[FieldType, _T]
@@ -454,7 +454,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     Required::Required,
                                 ),
                             ]),
-                            Type::Union(vec![field.ty.clone(), q.clone().to_type()]),
+                            self.union(field.ty.clone(), q.clone().to_type()),
                         ),
                         metadata: metadata.clone(),
                     },

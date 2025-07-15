@@ -13,7 +13,7 @@ use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
 use pyrefly_util::display::commas_iter;
 
-use crate::types::types::Type;
+use crate::types::Type;
 
 /*
 Eventually this will have to be generalized enough to handle at least four cases:
@@ -42,6 +42,14 @@ impl Default for Tuple {
 }
 
 impl Tuple {
+    // Check if this is tuple[Any, ...]
+    pub fn is_any_tuple(&self) -> bool {
+        match self {
+            Self::Unbounded(ty) => ty.is_any(),
+            _ => false,
+        }
+    }
+
     pub fn concrete(elts: Vec<Type>) -> Self {
         Self::Concrete(elts)
     }

@@ -27,6 +27,7 @@ use ruff_python_ast::Number;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::Hashed;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
@@ -747,12 +748,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
+    fn intercept_typing_self_use(&self, x: &Expr) -> Option<TypeInfo> {
+        match x {
+            Expr::Name(..) | Expr::Attribute(..) => {
+                let key = Key::SelfTypeLiteral(x.range());
+                let self_type_form = self.get_hashed_opt(Hashed::new(&key))?;
+                Some(self_type_form.arc_clone())
+            }
+            _ => None,
+        }
+    }
+
     fn expr_infer_type_info_with_hint(
         &self,
         x: &Expr,
         hint: Option<&Type>,
         errors: &ErrorCollector,
     ) -> TypeInfo {
+        if let Some(self_type_annotation) = self.intercept_typing_self_use(x) {
+            return self_type_annotation;
+        }
         let res = match x {
             Expr::Name(x) => self
                 .get(&Key::BoundName(ShortIdentifier::expr_name(x)))
@@ -921,7 +936,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.stdlib.str().clone().to_type()
                 }
                 Type::ClassType(ref cls) | Type::SelfType(ref cls)
-                    if let Some(elts) = self.named_tuple_element_types(cls) =>
+                    if let Some(Tuple::Concrete(elts)) = self.as_tuple(cls) =>
                 {
                     self.infer_tuple_index(
                         elts,
@@ -1326,13 +1341,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Expr::Call(x) => {
                 let mut ty_fun = self.expr_infer(&x.func, errors);
                 if matches!(&ty_fun, Type::ClassDef(cls) if cls.is_builtin("super")) {
-                    if is_special_name(&x.func, "super") {
-                        self.get(&Key::SuperInstance(x.range)).arc_clone_ty()
-                    } else {
-                        // Because we have to construct a binding for super in order to fill in
-                        // implicit arguments, we can't handle things like local aliases to super.
-                        Type::any_implicit()
-                    }
+                    // Because we have to construct a binding for super in order to fill in implicit arguments,
+                    // we can't handle things like local aliases to super. If we hit a case where the binding
+                    // wasn't constructed, fall back to `Any`.
+                    self.get_hashed_opt(Hashed::new(&Key::SuperInstance(x.range)))
+                        .map_or_else(Type::any_implicit, |type_info| type_info.arc_clone_ty())
                 } else {
                     self.expand_type_mut(&mut ty_fun);
 

@@ -2,7 +2,7 @@
 
 [package]
 name = "pyrefly"
-version = "0.24.1"
+version = "0.24.2"
 authors = ["Meta"]
 edition = "2024"
 repository = "https://github.com/facebook/pyrefly"
@@ -31,14 +31,15 @@ indicatif = { version = "0.17.6", features = ["futures", "improved_unicode", "ra
 itertools = "0.14.0"
 lsp-server = "0.7.2"
 lsp-types = "0.94.1"
-num-bigint = { version = "0.4.4", features = ["rand"] }
 num-traits = { version = "0.2.18", default-features = false }
 parse-display = "0.8.2"
 paste = "1.0.14"
 path-absolutize = { version = "3.0", features = ["use_unix_paths_on_wasm"] }
 pyrefly_derive = { path = "../crates/pyrefly_derive" }
 pyrefly_python = { path = "../crates/pyrefly_python" }
+pyrefly_types = { path = "../crates/pyrefly_types" }
 pyrefly_util = { path = "../crates/pyrefly_util" }
+rayon = "1.9.0"
 regex = "1.11.1"
 regex-syntax = "0.7.5"
 ruff_annotate_snippets = { git = "https://github.com/astral-sh/ruff/", rev = "9bee8376a17401f9736b45fdefffb62edc2f1668" }

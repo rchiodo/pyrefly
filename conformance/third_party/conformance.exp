@@ -1707,22 +1707,12 @@
     },
     {
       "code": -2,
-      "column": 10,
-      "concise_description": "Missing argument `v1` in function `func1`",
-      "description": "Missing argument `v1` in function `func1`",
+      "column": 11,
+      "concise_description": "Expected argument `v1` to be passed by name in function `func1`",
+      "description": "Expected argument `v1` to be passed by name in function `func1`",
       "line": 52,
-      "name": "missing-argument",
-      "stop_column": 22,
-      "stop_line": 52
-    },
-    {
-      "code": -2,
-      "column": 10,
-      "concise_description": "Missing argument `v3` in function `func1`",
-      "description": "Missing argument `v3` in function `func1`",
-      "line": 52,
-      "name": "missing-argument",
-      "stop_column": 22,
+      "name": "unexpected-positional-argument",
+      "stop_column": 12,
       "stop_line": 52
     },
     {
@@ -1733,6 +1723,16 @@
       "line": 52,
       "name": "bad-argument-count",
       "stop_column": 12,
+      "stop_line": 52
+    },
+    {
+      "code": -2,
+      "column": 14,
+      "concise_description": "Expected argument `v3` to be passed by name in function `func1`",
+      "description": "Expected argument `v3` to be passed by name in function `func1`",
+      "line": 52,
+      "name": "unexpected-positional-argument",
+      "stop_column": 16,
       "stop_line": 52
     },
     {
@@ -3101,6 +3101,16 @@
     {
       "code": -2,
       "column": 1,
+      "concise_description": "Cannot set field `final_classvar`",
+      "description": "Cannot set field `final_classvar`\n  This field is marked as Final",
+      "line": 27,
+      "name": "read-only",
+      "stop_column": 17,
+      "stop_line": 27
+    },
+    {
+      "code": -2,
+      "column": 1,
       "concise_description": "Cannot set field `final_with_default`",
       "description": "Cannot set field `final_with_default`\n  This field is marked as Final",
       "line": 36,
@@ -3117,6 +3127,16 @@
       "name": "no-access",
       "stop_column": 19,
       "stop_line": 37
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Cannot set field `final_with_default`",
+      "description": "Cannot set field `final_with_default`\n  This field is marked as Final",
+      "line": 38,
+      "name": "read-only",
+      "stop_column": 21,
+      "stop_line": 38
     }
   ],
   "dataclasses_frozen.py": [
@@ -3386,32 +3406,22 @@
     },
     {
       "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `id` in function `Customer1.__init__`",
-      "description": "Missing argument `id` in function `Customer1.__init__`",
-      "line": 66,
-      "name": "missing-argument",
-      "stop_column": 27,
-      "stop_line": 66
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `name` in function `Customer1.__init__`",
-      "description": "Missing argument `name` in function `Customer1.__init__`",
-      "line": 66,
-      "name": "missing-argument",
-      "stop_column": 27,
-      "stop_line": 66
-    },
-    {
-      "code": -2,
       "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
+      "concise_description": "Expected argument `id` to be passed by name in function `Customer1.__init__`",
+      "description": "Expected argument `id` to be passed by name in function `Customer1.__init__`",
       "line": 66,
-      "name": "bad-argument-count",
+      "name": "unexpected-positional-argument",
       "stop_column": 19,
+      "stop_line": 66
+    },
+    {
+      "code": -2,
+      "column": 21,
+      "concise_description": "Expected argument `name` to be passed by name in function `Customer1.__init__`",
+      "description": "Expected argument `name` to be passed by name in function `Customer1.__init__`",
+      "line": 66,
+      "name": "unexpected-positional-argument",
+      "stop_column": 26,
       "stop_line": 66
     },
     {
@@ -3426,12 +3436,12 @@
     },
     {
       "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
-      "description": "Missing argument `id` in function `Customer2.__init__`",
+      "column": 18,
+      "concise_description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
+      "description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
       "line": 82,
-      "name": "missing-argument",
-      "stop_column": 28,
+      "name": "unexpected-positional-argument",
+      "stop_column": 19,
       "stop_line": 82
     },
     {
@@ -3560,21 +3570,11 @@
     },
     {
       "code": -2,
-      "column": 15,
-      "concise_description": "Missing argument `name` in function `CustomerModel2.__init__`",
-      "description": "Missing argument `name` in function `CustomerModel2.__init__`",
-      "line": 75,
-      "name": "missing-argument",
-      "stop_column": 18,
-      "stop_line": 75
-    },
-    {
-      "code": -2,
       "column": 16,
-      "concise_description": "Expected 0 positional arguments, got 1 in function `CustomerModel2.__init__`",
-      "description": "Expected 0 positional arguments, got 1 in function `CustomerModel2.__init__`",
+      "concise_description": "Expected argument `name` to be passed by name in function `CustomerModel2.__init__`",
+      "description": "Expected argument `name` to be passed by name in function `CustomerModel2.__init__`",
       "line": 75,
-      "name": "bad-argument-count",
+      "name": "unexpected-positional-argument",
       "stop_column": 17,
       "stop_line": 75
     }
@@ -3612,32 +3612,22 @@
     },
     {
       "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
-      "description": "Missing argument `id` in function `Customer2.__init__`",
-      "line": 71,
-      "name": "missing-argument",
-      "stop_column": 28,
-      "stop_line": 71
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `name` in function `Customer2.__init__`",
-      "description": "Missing argument `name` in function `Customer2.__init__`",
-      "line": 71,
-      "name": "missing-argument",
-      "stop_column": 28,
-      "stop_line": 71
-    },
-    {
-      "code": -2,
       "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `Customer2.__init__`",
+      "concise_description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
+      "description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
       "line": 71,
-      "name": "bad-argument-count",
+      "name": "unexpected-positional-argument",
       "stop_column": 19,
+      "stop_line": 71
+    },
+    {
+      "code": -2,
+      "column": 21,
+      "concise_description": "Expected argument `name` to be passed by name in function `Customer2.__init__`",
+      "description": "Expected argument `name` to be passed by name in function `Customer2.__init__`",
+      "line": 71,
+      "name": "unexpected-positional-argument",
+      "stop_column": 27,
       "stop_line": 71
     },
     {
@@ -3684,32 +3674,22 @@
     },
     {
       "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `id` in function `Customer1.__init__`",
-      "description": "Missing argument `id` in function `Customer1.__init__`",
-      "line": 66,
-      "name": "missing-argument",
-      "stop_column": 27,
-      "stop_line": 66
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `name` in function `Customer1.__init__`",
-      "description": "Missing argument `name` in function `Customer1.__init__`",
-      "line": 66,
-      "name": "missing-argument",
-      "stop_column": 27,
-      "stop_line": 66
-    },
-    {
-      "code": -2,
       "column": 18,
-      "concise_description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
-      "description": "Expected 0 positional arguments, got 2 in function `Customer1.__init__`",
+      "concise_description": "Expected argument `id` to be passed by name in function `Customer1.__init__`",
+      "description": "Expected argument `id` to be passed by name in function `Customer1.__init__`",
       "line": 66,
-      "name": "bad-argument-count",
+      "name": "unexpected-positional-argument",
       "stop_column": 19,
+      "stop_line": 66
+    },
+    {
+      "code": -2,
+      "column": 21,
+      "concise_description": "Expected argument `name` to be passed by name in function `Customer1.__init__`",
+      "description": "Expected argument `name` to be passed by name in function `Customer1.__init__`",
+      "line": 66,
+      "name": "unexpected-positional-argument",
+      "stop_column": 26,
       "stop_line": 66
     },
     {
@@ -3724,12 +3704,12 @@
     },
     {
       "code": -2,
-      "column": 17,
-      "concise_description": "Missing argument `id` in function `Customer2.__init__`",
-      "description": "Missing argument `id` in function `Customer2.__init__`",
+      "column": 18,
+      "concise_description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
+      "description": "Expected argument `id` to be passed by name in function `Customer2.__init__`",
       "line": 83,
-      "name": "missing-argument",
-      "stop_column": 28,
+      "name": "unexpected-positional-argument",
+      "stop_column": 19,
       "stop_line": 83
     },
     {
@@ -5511,32 +5491,12 @@
     {
       "code": -2,
       "column": 38,
-      "concise_description": "Argument `LinkedList[int]` is not assignable to parameter `next` with type `Self | None` in function `OrdinalLinkedList.__init__`",
-      "description": "Argument `LinkedList[int]` is not assignable to parameter `next` with type `Self | None` in function `OrdinalLinkedList.__init__`",
+      "concise_description": "Argument `LinkedList[int]` is not assignable to parameter `next` with type `OrdinalLinkedList | None` in function `OrdinalLinkedList.__init__`",
+      "description": "Argument `LinkedList[int]` is not assignable to parameter `next` with type `OrdinalLinkedList | None` in function `OrdinalLinkedList.__init__`",
       "line": 26,
       "name": "bad-argument-type",
       "stop_column": 62,
       "stop_line": 26
-    },
-    {
-      "code": -2,
-      "column": 15,
-      "concise_description": "`OrdinalLinkedList` is not assignable to attribute `next` with type `Self | None`",
-      "description": "`OrdinalLinkedList` is not assignable to attribute `next` with type `Self | None`",
-      "line": 29,
-      "name": "bad-assignment",
-      "stop_column": 52,
-      "stop_line": 29
-    },
-    {
-      "code": -2,
-      "column": 15,
-      "concise_description": "`LinkedList[int]` is not assignable to attribute `next` with type `Self | None`",
-      "description": "`LinkedList[int]` is not assignable to attribute `next` with type `Self | None`",
-      "line": 32,
-      "name": "bad-assignment",
-      "stop_column": 50,
-      "stop_line": 32
     }
   ],
   "generics_self_basic.py": [
@@ -5594,16 +5554,6 @@
     }
   ],
   "generics_self_usage.py": [
-    {
-      "code": -2,
-      "column": 34,
-      "concise_description": "`(self: Self@CallableAttribute) -> int` is not assignable to `(Self) -> int`",
-      "description": "`(self: Self@CallableAttribute) -> int` is not assignable to `(Self) -> int`",
-      "line": 50,
-      "name": "bad-assignment",
-      "stop_column": 37,
-      "stop_line": 50
-    },
     {
       "code": -2,
       "column": 19,
@@ -8766,6 +8716,16 @@
       "name": "bad-assignment",
       "stop_column": 11,
       "stop_line": 71
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Cannot set field `DEFAULT_ID`",
+      "description": "Cannot set field `DEFAULT_ID`\n  This field is marked as Final",
+      "line": 81,
+      "name": "read-only",
+      "stop_column": 18,
+      "stop_line": 81
     },
     {
       "code": -2,

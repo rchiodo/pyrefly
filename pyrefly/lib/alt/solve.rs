@@ -585,7 +585,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Special cases like Tuple should be intercepted first.
         let context = || ErrorContext::Iteration(self.for_display(iterable.clone()));
         match iterable {
-            Type::ClassType(cls) if let Some(elts) = self.named_tuple_element_types(cls) => {
+            Type::ClassType(cls) if let Some(Tuple::Concrete(elts)) = self.as_tuple(cls) => {
                 vec![Iterable::FixedLen(elts.clone())]
             }
             Type::Tuple(Tuple::Concrete(elts)) => vec![Iterable::FixedLen(elts.clone())],
@@ -934,15 +934,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Type {
         let base_exception_class_type =
             Type::type_form(self.stdlib.base_exception().clone().to_type());
-        let arg1 = Type::Union(vec![base_exception_class_type, Type::None]);
-        let arg2 = Type::Union(vec![
-            self.stdlib.base_exception().clone().to_type(),
-            Type::None,
-        ]);
-        let arg3 = Type::Union(vec![
-            self.stdlib.traceback_type().clone().to_type(),
-            Type::None,
-        ]);
+        let arg1 = Type::optional(base_exception_class_type);
+        let arg2 = Type::optional(self.stdlib.base_exception().clone().to_type());
+        let arg3 = Type::optional(self.stdlib.traceback_type().clone().to_type());
         let exit_arg_types = [
             CallArg::ty(&arg1, range),
             CallArg::ty(&arg2, range),
@@ -994,7 +988,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let exit_type =
                 self.context_value_exit(context_manager_type, kind, range, errors, Some(&context));
             self.check_type(
-                &Type::Union(vec![self.stdlib.bool().clone().to_type(), Type::None]),
+                &Type::optional(self.stdlib.bool().clone().to_type()),
                 &exit_type,
                 range,
                 errors,
@@ -1968,6 +1962,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // These forms require propagating attribute narrowing information, so they
                 // are handled in `binding_to_type_info`
                 self.binding_to_type_info(binding, errors).into_ty()
+            }
+            Binding::SelfTypeLiteral(class_key, r) => {
+                if let Some(cls) = &self.get_idx(*class_key).as_ref().0 {
+                    match self.instantiate(cls) {
+                        Type::ClassType(class_type) => Type::type_form(Type::SelfType(class_type)),
+                        ty => self.error(
+                            errors,
+                            *r,
+                            ErrorKind::InvalidSelfType,
+                            None,
+                            format!(
+                                "Cannot apply `typing.Self` to non-class-instance type `{}`",
+                                self.for_display(ty)
+                            ),
+                        ),
+                    }
+                } else {
+                    self.error(
+                        errors,
+                        *r,
+                        ErrorKind::InvalidSelfType,
+                        None,
+                        "Could not resolve the class for `typing.Self` (may indicate unexpected recursion resolving types)".to_owned(),
+                    )
+                }
             }
             Binding::Pin(unpinned_idx, first_use) => {
                 // Calclulate the first use for its side-effects (it might pin `Var`s)

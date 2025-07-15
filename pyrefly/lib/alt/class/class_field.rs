@@ -378,6 +378,14 @@ impl ClassField {
         }
     }
 
+    pub fn read_only_reason(&self) -> &Option<ReadOnlyReason> {
+        match &self.0 {
+            ClassFieldInner::Simple {
+                read_only_reason, ..
+            } => read_only_reason,
+        }
+    }
+
     /// Check if this field is read-only for any reason.
     pub fn is_read_only(&self) -> bool {
         match &self.0 {
@@ -485,8 +493,17 @@ impl<'a> Instance<'a> {
     }
 }
 
-fn bind_class_attribute(cls: &Class, attr: Type) -> Attribute {
-    Attribute::read_write(make_bound_classmethod(cls, attr).into_inner())
+fn bind_class_attribute(
+    cls: &Class,
+    attr: Type,
+    read_only_reason: &Option<ReadOnlyReason>,
+) -> Attribute {
+    let ty = make_bound_classmethod(cls, attr).into_inner();
+    if let Some(reason) = read_only_reason {
+        Attribute::read_only(ty, reason.clone())
+    } else {
+        Attribute::read_write(ty)
+    }
 }
 
 /// Return the type of making it bound, or if not,
@@ -733,7 +750,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         let annotation = direct_annotation.or(inherited_annotation.as_ref());
         let read_only_reason =
-            self.determine_read_only_reason(class, name, &annotation.cloned(), &initialization);
+            self.determine_read_only_reason(class, name, annotation, &value_ty, &initialization);
         let is_namedtuple_member = metadata
             .named_tuple_metadata()
             .is_some_and(|nt| nt.elements.contains(name));
@@ -891,7 +908,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         cls: &Class,
         name: &Name,
-        annotation: &Option<Annotation>,
+        annotation: Option<&Annotation>,
+        ty: &Type,
         initialization: &ClassFieldInitialization,
     ) -> Option<ReadOnlyReason> {
         if let Some(ann) = annotation {
@@ -917,6 +935,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && dm.fields.contains(name)
         {
             return Some(ReadOnlyReason::FrozenDataclass);
+        }
+        // A `type[X]` that is initialized on the class is assumed to be ReadOnly. This
+        // is partly because that's what nested class defs look like to Pyrefly. But even
+        // for assignments of class objects, this implies covariance and is probably more
+        // useful than allowing reassignment but forcing invariance.
+        //
+        // TODO(stroxler): We may need to revisit this if we find projects that require
+        // read-write behavior. Covariance is known to be strictly necessary for many
+        // projects, so the obvious alternative to read-only semantics is likely to
+        // allow covariance unsoundly.
+        let is_class_object_type = match ty {
+            Type::ClassDef(..) => true,
+            Type::Type(c) if matches!(**c, Type::ClassType(..)) => true,
+            _ => false,
+        };
+        if is_class_object_type && matches!(initialization, ClassFieldInitialization::ClassBody(..))
+        {
+            return Some(ReadOnlyReason::ClassObjectInitializedOnBody);
         }
         // Default: the field is read-write
         None
@@ -1154,7 +1190,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             ))
                         })
                 } else {
-                    bind_class_attribute(cls, ty.clone())
+                    bind_class_attribute(cls, ty.clone(), field.read_only_reason())
                 }
             }
         }
@@ -1221,7 +1257,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         foralled.subst_self_type_mut(&self.instantiate(cls), &|a, b| self.is_subset_eq(a, b));
-        Some(bind_class_attribute(cls, foralled))
+        Some(bind_class_attribute(cls, foralled, &None))
     }
 
     fn check_class_field_for_override_mismatch(

@@ -128,6 +128,8 @@ pub enum ErrorKind {
     DeleteError,
     /// Calling a function marked with `@deprecated`
     Deprecated,
+    /// Usage of a module that was not actually imported, but does exist.
+    ImplicitImport,
     /// An attribute was implicitly defined by assignment to `self` in a method that we
     /// do not recognize as always executing (we recognize constructors and some test setup
     /// methods).
@@ -154,6 +156,9 @@ pub enum ErrorKind {
     InvalidOverload,
     /// An error related to ParamSpec definition or usage.
     InvalidParamSpec,
+    /// A use of `typing.Self` in a context where Pyrefly does not recognize it as
+    /// mapping to a valid class type.
+    InvalidSelfType,
     /// Attempting to call `super()` in a way that is not allowed.
     /// e.g. calling `super(Y, x)` on an object `x` that does not match the class `Y`.
     InvalidSuperCall,
@@ -203,6 +208,8 @@ pub enum ErrorKind {
     UnboundName,
     /// An error caused by a keyword argument used in the wrong place.
     UnexpectedKeyword,
+    /// An error caused by passing a positional argument for a keyword-only parameter.
+    UnexpectedPositionalArgument,
     /// Attempting to use a name that is not defined.
     UnknownName,
     /// Attempting to use a feature that is not yet supported.

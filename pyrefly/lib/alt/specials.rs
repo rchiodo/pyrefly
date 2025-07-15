@@ -296,10 +296,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         match special_form {
-            SpecialForm::Optional if arguments.len() == 1 => Type::type_form(Type::Union(vec![
+            SpecialForm::Optional if arguments.len() == 1 => Type::type_form(Type::optional(
                 self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors),
-                Type::None,
-            ])),
+            )),
             SpecialForm::Optional => self.error(
                 errors,
                 range,
@@ -310,11 +309,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     arguments.len()
                 ),
             ),
-            SpecialForm::Union => {
-                Type::type_form(Type::Union(arguments.map(|arg| {
-                    self.expr_untype(arg, TypeFormContext::TypeArgument, errors)
-                })))
-            }
+            SpecialForm::Union => Type::type_form(self.unions(
+                arguments.map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors)),
+            )),
             SpecialForm::Tuple => match self.check_args_and_construct_tuple(arguments, errors) {
                 Some((tuple, _)) => Type::type_form(Type::Tuple(tuple)),
                 None => Type::type_form(Type::Tuple(Tuple::unbounded(Type::any_error()))),
