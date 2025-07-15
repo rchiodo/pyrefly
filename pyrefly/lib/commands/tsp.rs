@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use lsp_types::Url;
 
 pub enum GetTypeRequest {}
 
@@ -28,7 +29,7 @@ pub enum TypeHandle {
     Integer(i32),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeCategory(i32);
 
 impl TypeCategory {
@@ -94,7 +95,7 @@ pub struct ModuleName {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Node {
-    pub uri: String,
+    pub uri: Url,
     pub start: i32,
     pub length: i32,
 }
@@ -112,7 +113,7 @@ pub struct Attribute {
     pub decls: Vec<Declaration>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeclarationCategory(i32);
 
 impl DeclarationCategory {
@@ -182,7 +183,7 @@ pub struct Declaration {
     #[serde(rename = "moduleName")]
     pub module_name: ModuleName, // Dot-separated import name for the file
     pub name: String, // Symbol name as the user sees it
-    pub uri: String, // File that contains the declaration
+    pub uri: Url, // File that contains the declaration
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -221,7 +222,7 @@ pub struct GetSymbolParams {
 #[derive(Serialize, Deserialize)]
 pub struct GetPythonSearchPathsParams {
     #[serde(rename = "fromUri")]
-    pub from_uri: String,          // File URI to determine which config to use
+    pub from_uri: Url,          // File URI to determine which config to use
     pub snapshot: i32,        // Snapshot version
 }
 
@@ -355,17 +356,17 @@ fn extract_module_name(py_type: &crate::types::types::Type) -> Option<ModuleName
     use crate::types::types::Type as PyType;
     
     match py_type {
-        PyType::ClassType(ct) => Some(convert_module_name(&ct.qname().module_name())),
-        PyType::ClassDef(cd) => Some(convert_module_name(&cd.qname().module_name())),
+        PyType::ClassType(ct) => Some(convert_module_name(ct.qname().module_name().clone())),
+        PyType::ClassDef(cd) => Some(convert_module_name(cd.qname().module_name().clone())),
         PyType::Module(m) => Some(convert_module_name_from_string(&m.to_string())), // Fixed this line
         _ => None,
     }
 }
 
-fn convert_module_name(pyrefly_module: &pyrefly_python::module_name::ModuleName) -> ModuleName {
+fn convert_module_name(pyrefly_module: pyrefly_python::module_name::ModuleName) -> ModuleName {
     ModuleName {
         leading_dots: 0, // pyrefly modules don't have leading dots in this context
-        name_parts: pyrefly_module.as_str().split('.').map(|s| s.to_string()).collect(),
+        name_parts: pyrefly_module.as_str().split('.').map(|s| s.to_owned()).collect(),
     }
 }
 
@@ -373,7 +374,7 @@ fn convert_module_name(pyrefly_module: &pyrefly_python::module_name::ModuleName)
 fn convert_module_name_from_string(module_str: &str) -> ModuleName {
     ModuleName {
         leading_dots: 0,
-        name_parts: module_str.split('.').map(|s| s.to_string()).collect(),
+        name_parts: module_str.split('.').map(|s| s.to_owned()).collect(),
     }
 }
 
@@ -464,15 +465,15 @@ impl TypeReprFlags {
     pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1 << 1);
     pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(1 << 2);
     
-    pub fn has_expand_type_aliases(&self) -> bool {
+    pub fn has_expand_type_aliases(self) -> bool {
         self.0 & Self::EXPAND_TYPE_ALIASES.0 != 0
     }
     
-    pub fn has_print_type_var_variance(&self) -> bool {
+    pub fn has_print_type_var_variance(self) -> bool {
         self.0 & Self::PRINT_TYPE_VAR_VARIANCE.0 != 0
     }
     
-    pub fn has_convert_to_instance_type(&self) -> bool {
+    pub fn has_convert_to_instance_type(self) -> bool {
         self.0 & Self::CONVERT_TO_INSTANCE_TYPE.0 != 0
     }
 }

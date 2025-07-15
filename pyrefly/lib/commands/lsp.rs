@@ -22,7 +22,6 @@ use clap::ValueEnum;
 use crossbeam_channel::Select;
 use crossbeam_channel::Sender;
 use dupe::Dupe;
-use percent_encoding::percent_decode_str;
 use itertools::__std_iter::once;
 use itertools::Itertools;
 use lsp_server::Connection;
@@ -937,54 +936,6 @@ impl Server {
         }
     }
 
-    /// Helper function to safely convert a URL to a file path, handling percent-encoded characters
-    fn url_to_file_path(url: &Url) -> Result<PathBuf, ()> {
-        // First, try the standard method
-        if let Ok(path) = url.to_file_path() {
-            // Check if the path looks corrupted (contains unusual byte sequences)
-            if let Some(path_str) = path.to_str() {
-                // If the path contains control characters or non-printable characters,
-                // it's likely incorrectly decoded
-                if !path_str.chars().any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t') {
-                    return Ok(path);
-                }
-            }
-        }
-
-        // If standard method fails or produces corrupted output, manually decode
-        if url.scheme() != "file" {
-            return Err(());
-        }
-
-        let url_path = url.path();
-        
-        // Decode percent-encoded characters
-        let decoded_path = match percent_decode_str(url_path).decode_utf8() {
-            Ok(decoded) => decoded.into_owned(),
-            Err(_) => return Err(()),
-        };
-
-        // Handle Windows paths
-        #[cfg(target_os = "windows")]
-        {
-            if decoded_path.starts_with('/') {
-                // Remove leading slash and handle drive letters like "/C:/path"
-                let without_slash = &decoded_path[1..];
-                if without_slash.len() >= 2 && without_slash.chars().nth(1) == Some(':') {
-                    return Ok(PathBuf::from(without_slash));
-                }
-                // Handle UNC paths or other cases
-                return Ok(PathBuf::from(without_slash));
-            }
-            Ok(PathBuf::from(decoded_path))
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            Ok(PathBuf::from(decoded_path))
-        }
-    }
-
     /// Process the event and return next step.
     fn process_event<'a>(
         &'a self,
@@ -1614,14 +1565,10 @@ impl Server {
         }
 
         // Convert Node to URI and position
-        let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
-            code: ErrorCode::InvalidParams as i32,
-            message: "Invalid URI".to_string(),
-            data: None,
-        })?;
+        let uri = &params.node.uri;
 
         // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_string(),
@@ -1654,14 +1601,10 @@ impl Server {
         }
 
         // Convert Node to URI and position
-        let uri = Url::parse(&params.node.uri).map_err(|_| ResponseError {
-            code: ErrorCode::InvalidParams as i32,
-            message: "Invalid URI".to_string(),
-            data: None,
-        })?;
+        let uri = &params.node.uri;
 
         // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_string(),
@@ -1792,7 +1735,7 @@ impl Server {
 
                 // Create node pointing to the actual definition location using the same logic as goto_definition
                 let definition_uri = module_info_to_uri(&definition.module_info);
-                let definition_uri_str = definition_uri.map(|uri| uri.to_string()).unwrap_or_else(|| params.node.uri.clone());
+                let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
 
                 // Add the primary declaration
                 decls.push(tsp::Declaration {
@@ -1800,13 +1743,13 @@ impl Server {
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: definition_uri_str.clone(),
+                        uri: definition_uri_final.clone(),
                         start: u32::from(definition.range.start()) as i32,
                         length: u32::from(definition.range.end() - definition.range.start()) as i32,
                     }),
                     module_name,
                     name: name.clone(),
-                    uri: definition_uri_str,
+                    uri: definition_uri_final,
                 });
 
                 // Get synthesized types if available
@@ -1876,22 +1819,9 @@ impl Server {
         
         // Get Python search paths from the current context
         // We need to get the search paths from the importing file's context
-        let importing_uri = match Url::parse(&params.decl.uri) {
-            Ok(uri) => uri,
-            Err(_) => {
-                return Ok(Some(tsp::Declaration {
-                    handle: params.decl.handle,
-                    category: params.decl.category,
-                    flags: params.decl.flags.with_unresolved_import(),
-                    node: params.decl.node,
-                    module_name: params.decl.module_name,
-                    name: params.decl.name,
-                    uri: params.decl.uri,
-                }));
-            }
-        };
+        let importing_uri = &params.decl.uri;
 
-        let importing_path = match importing_uri.to_file_path() {
+        let _importing_path = match importing_uri.to_file_path() {
             Ok(path) => path,
             Err(_) => {
                 return Ok(Some(tsp::Declaration {
@@ -1901,14 +1831,14 @@ impl Server {
                     node: params.decl.node,
                     module_name: params.decl.module_name,
                     name: params.decl.name,
-                    uri: params.decl.uri,
+                    uri: params.decl.uri.clone(),
                 }));
             }
         };
 
         // Get all search paths using the centralized get_python_search_paths method
         let search_paths_params = tsp::GetPythonSearchPathsParams {
-            from_uri: importing_uri.to_string(),
+            from_uri: importing_uri.clone(),
             snapshot: params.snapshot,
         };
         let search_paths_result = self.get_python_search_paths(transaction, search_paths_params);
@@ -2045,7 +1975,7 @@ impl Server {
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()),
+                        uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(),
                         start: u32::from(def_info.range.start()) as i32,
                         length: u32::from(def_info.range.end() - def_info.range.start()) as i32,
                     }),
@@ -2054,7 +1984,7 @@ impl Server {
                         name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
                     },
                     name: import_name.clone(),
-                    uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()),
+                    uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(),
                 }));
             }
         }
@@ -2070,21 +2000,18 @@ impl Server {
                 name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
             },
             name: import_name.clone(),
-            uri: format!("file://{}", target_module_info.path().as_path().to_string_lossy()), // Convert module path to URI
+            uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(), // Convert module path to URI
         };
 
         Ok(Some(resolved_declaration))
     }
 
     fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
-        // Parse the URI to get the file path
-        let uri = match Url::parse(&params.from_uri) {
-            Ok(uri) => uri,
-            Err(_) => return Vec::new(), // Return empty vector on error
-        };
+        // Get the URI directly from params
+        let uri = &params.from_uri;
 
-        // Convert URI to file path using our helper function to handle percent-encoding
-        let path = match Self::url_to_file_path(&uri) {
+        // Convert URI to file path
+        let path = match uri.to_file_path() {
             Ok(path) => path,
             Err(_) => return Vec::new(), // Return empty vector on error
         };
@@ -2218,13 +2145,9 @@ impl Server {
         
         if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
             if let Some(resolved_node) = &resolved_decl.node {
-                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
-                    code: ErrorCode::InvalidParams as i32,
-                    message: "Invalid URI in resolved declaration".to_string(),
-                    data: None,
-                })?;
+                let resolved_uri = &resolved_node.uri;
                 
-                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
                     let resolved_position = TextSize::new(resolved_node.start as u32);
                     if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
                         return Ok(Some(self.convert_and_register_type(resolved_type)));
@@ -2250,13 +2173,9 @@ impl Server {
         
         if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(fresh_transaction, resolve_params) {
             if let Some(resolved_node) = &resolved_decl.node {
-                let resolved_uri = Url::parse(&resolved_node.uri).map_err(|_| ResponseError {
-                    code: ErrorCode::InvalidParams as i32,
-                    message: "Invalid URI in resolved declaration".to_string(),
-                    data: None,
-                })?;
+                let resolved_uri = &resolved_node.uri;
                 
-                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_uri) {
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
                     // Make sure the resolved module is also loaded
                     fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
                     
@@ -2292,14 +2211,10 @@ impl Server {
         };
 
         // Convert Node URI to a handle
-        let uri = Url::parse(&node.uri).map_err(|_| ResponseError {
-            code: ErrorCode::InvalidParams as i32,
-            message: "Invalid URI in declaration node".to_string(),
-            data: None,
-        })?;
+        let uri = &node.uri;
 
         // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_string(),
@@ -2434,14 +2349,10 @@ impl Server {
         };
 
         // Convert Node URI to a handle
-        let uri = Url::parse(&node.uri).map_err(|_| ResponseError {
-            code: ErrorCode::InvalidParams as i32,
-            message: "Invalid URI in declaration node".to_string(),
-            data: None,
-        })?;
+        let uri = &node.uri;
 
         // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(&uri) else {
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Ok(None);
         };
 
