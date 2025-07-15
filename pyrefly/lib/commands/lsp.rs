@@ -2753,19 +2753,6 @@ impl Server {
 
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
     fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
-        // Handle contentsasuri scheme for bundled typeshed files
-        if uri.scheme() == "contentsasuri" {
-            // Extract the path from contentsasuri:///path?base64_content
-            let path_str = uri.path();
-            // Remove leading '/' to get the actual path
-            let path_str = path_str.strip_prefix('/').unwrap_or(path_str);
-            let path = PathBuf::from(path_str);
-            
-            // For contentsAsUri, we always use bundled typeshed module path
-            let module_path = ModulePath::bundled_typeshed(path);
-            return Some(Self::handle_from_module_path(&self.state, module_path));
-        }
-        
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
@@ -3254,9 +3241,9 @@ impl Server {
             &params.text_document.uri.to_file_path().unwrap(),
         );
         let mut items = Vec::new();
-        let open_files = self.open_files.read();
+        let open_files = &self.open_files.read();
         for e in transaction.get_errors(once(&handle)).collect_errors().shown {
-            if let Some((_, diag)) = self.get_diag_if_shown(&e, &open_files) {
+            if let Some((_, diag)) = self.get_diag_if_shown(&e, open_files) {
                 items.push(diag);
             }
         }
