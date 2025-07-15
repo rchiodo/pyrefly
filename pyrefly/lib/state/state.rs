@@ -1635,6 +1635,9 @@ pub struct State {
     run_count: AtomicUsize,
     committing_transaction_lock: Mutex<()>,
     snapshot_counter: AtomicI32,
+    /// Lookup table from TSP type handles to internal pyrefly types
+    /// This is cleared whenever the snapshot increments
+    type_handle_lookup: RwLock<(i32, HashMap<String, crate::types::types::Type>)>,
 }
 
 impl State {
@@ -1647,6 +1650,7 @@ impl State {
             run_count: AtomicUsize::new(0),
             committing_transaction_lock: Mutex::new(()),
             snapshot_counter: AtomicI32::new(1), // Start at 1
+            type_handle_lookup: RwLock::new((0, HashMap::new())),
         }
     }
 
@@ -1659,7 +1663,41 @@ impl State {
     }
     
     pub fn increment_snapshot(&self) -> i32 {
-        self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1
+        let result =self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1;
+        // Clear the lookup table when incrementing the snapshot
+        let mut lookup = self.type_handle_lookup.write();
+        lookup.0 = result;
+        lookup.1.clear();
+        result
+    }
+
+    /// Registers a type handle in the lookup table, clearing old entries if snapshot changed
+    pub fn register_type_handle(&self, handle: String, py_type: crate::types::types::Type) {
+        let current_snapshot = self.current_snapshot();
+        let mut lookup = self.type_handle_lookup.write();
+        
+        // Clear the lookup table if snapshot has changed
+        if lookup.0 != current_snapshot {
+            lookup.1.clear();
+            lookup.0 = current_snapshot;
+        }
+        
+        lookup.1.insert(handle, py_type);
+    }
+
+    /// Looks up a pyrefly type from a TSP type handle
+    pub fn lookup_type_from_handle(&self, handle: &str) -> Option<crate::types::types::Type> {
+        let current_snapshot = self.current_snapshot();
+        let mut lookup = self.type_handle_lookup.write();
+        
+        // Clear the lookup table if snapshot has changed
+        if lookup.0 != current_snapshot {
+            lookup.1.clear();
+            lookup.0 = current_snapshot;
+            return None;
+        }
+        
+        lookup.1.get(handle).cloned()
     }
 
     fn get_config(&self, name: ModuleName, path: &ModulePath) -> ArcId<ConfigFile> {

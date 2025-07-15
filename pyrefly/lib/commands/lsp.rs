@@ -364,9 +364,6 @@ struct Server {
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
     version_info: Mutex<HashMap<PathBuf, i32>>,
-    /// Lookup table from TSP type handles to internal pyrefly types
-    /// This is cleared whenever the snapshot increments
-    type_handle_lookup: Arc<RwLock<(i32, HashMap<String, crate::types::types::Type>)>>,
 }
 
 /// Information about the Python environment p
@@ -1231,7 +1228,6 @@ impl Server {
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: Arc::new(AtomicBool::new(false)),
             version_info: Mutex::new(HashMap::new()),
-            type_handle_lookup: Arc::new(RwLock::new((0, HashMap::new()))),
         };
         s.configure(&folders, &[]);
 
@@ -2566,39 +2562,10 @@ impl Server {
         
         // Register the type in the lookup table
         if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-            self.register_type_handle(handle_str.clone(), py_type);
+            self.state.register_type_handle(handle_str.clone(), py_type);
         }
         
         tsp_type
-    }
-
-    /// Registers a type handle in the lookup table, clearing old entries if snapshot changed
-    fn register_type_handle(&self, handle: String, py_type: crate::types::types::Type) {
-        let current_snapshot = self.current_snapshot();
-        let mut lookup = self.type_handle_lookup.write();
-        
-        // Clear the lookup table if snapshot has changed
-        if lookup.0 != current_snapshot {
-            lookup.1.clear();
-            lookup.0 = current_snapshot;
-        }
-        
-        lookup.1.insert(handle, py_type);
-    }
-
-    /// Looks up a pyrefly type from a TSP type handle
-    fn lookup_type_from_handle(&self, handle: &str) -> Option<crate::types::types::Type> {
-        let current_snapshot = self.current_snapshot();
-        let mut lookup = self.type_handle_lookup.write();
-        
-        // Clear the lookup table if snapshot has changed
-        if lookup.0 != current_snapshot {
-            lookup.1.clear();
-            lookup.0 = current_snapshot;
-            return None;
-        }
-        
-        lookup.1.get(handle).cloned()
     }
 
     /// Looks up a pyrefly type from an integer TSP type handle
@@ -2606,13 +2573,13 @@ impl Server {
         // For now, convert integer handle to string and use the existing lookup
         // In a more sophisticated implementation, we might have separate integer and string lookups
         let handle_str = format!("{}", id);
-        self.lookup_type_from_handle(&handle_str)
+        self.state.lookup_type_from_handle(&handle_str)
     }
 
     /// Looks up a pyrefly type from a TSP Type
     fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
         match &tsp_type.handle {
-            tsp::TypeHandle::String(handle_str) => self.lookup_type_from_handle(handle_str),
+            tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
             tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
         }
     }
