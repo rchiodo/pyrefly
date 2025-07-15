@@ -1791,15 +1791,7 @@ impl Server {
                 };
 
                 // Create node pointing to the actual definition location using the same logic as goto_definition
-                let definition_uri = match &self.initialize_params.initialization_options {
-                    Some(serde_json::Value::Object(map))
-                        if (map.get("supportContentsAsUri")
-                            == Some(&serde_json::Value::Bool(true))) =>
-                    {
-                        module_info_to_uri_with_document_content_provider(&definition.module_info)
-                    }
-                    Some(_) | None => module_info_to_uri(&definition.module_info),
-                };
+                let definition_uri = module_info_to_uri(&definition.module_info);
                 let definition_uri_str = definition_uri.map(|uri| uri.to_string()).unwrap_or_else(|| params.node.uri.clone());
 
                 // Add the primary declaration
