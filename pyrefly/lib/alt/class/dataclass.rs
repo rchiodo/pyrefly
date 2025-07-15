@@ -264,8 +264,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && let Type::Overload(overload) = func
         {
             // Overloaded function. Call it to see which signature is actually used.
+            let owned_sigs: Vec<Callable> = sigs.into_iter().map(|sig| sig.clone()).collect();
             self.call_overloads(
-                Vec1::try_from_vec(sigs).unwrap(),
+                Vec1::try_from_vec(owned_sigs).unwrap(),
                 (*overload.metadata).clone(),
                 None,
                 &args.args.map(CallArg::expr_maybe_starred),
