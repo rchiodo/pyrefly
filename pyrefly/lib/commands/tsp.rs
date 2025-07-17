@@ -370,6 +370,12 @@ fn convert_module_name(pyrefly_module: pyrefly_python::module_name::ModuleName) 
     }
 }
 
+// Convert TSP ModuleName back to pyrefly ModuleName
+pub fn convert_tsp_module_name_to_pyrefly(tsp_module: &ModuleName) -> pyrefly_python::module_name::ModuleName {
+    let module_str = tsp_module.name_parts.join(".");
+    pyrefly_python::module_name::ModuleName::from_str(&module_str)
+}
+
 // Add this new function to handle Module objects
 fn convert_module_name_from_string(module_str: &str) -> ModuleName {
     ModuleName {
@@ -600,4 +606,27 @@ impl lsp_types::request::Request for GetDiagnosticsVersionRequest {
     type Params = GetDiagnosticsVersionParams;
     type Result = u32;
     const METHOD: &'static str = "typeServer/getDiagnosticsVersion";
+}
+
+// Parameters for resolving an import
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolveImportParams {
+    /// The URI of the source file where the import is referenced.
+    #[serde(rename = "sourceUri")]
+    pub source_uri: Url,
+    /// The descriptor of the imported module.
+    #[serde(rename = "moduleDescriptor")]
+    pub module_descriptor: ModuleName,
+    /// The snapshot number for validation
+    pub snapshot: i32,
+}
+
+// LSP request type for resolveImport
+pub enum ResolveImportRequest {}
+
+impl lsp_types::request::Request for ResolveImportRequest {
+    type Params = ResolveImportParams;
+    type Result = Option<Url>;
+    const METHOD: &'static str = "typeServer/resolveImport";
 }

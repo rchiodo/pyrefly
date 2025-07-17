@@ -194,6 +194,7 @@ use crate::commands::tsp::GetDocstringRequest;
 use crate::commands::tsp::SearchForTypeAttributeRequest;
 use crate::commands::tsp::GetFunctionPartsRequest;
 use crate::commands::tsp::GetDiagnosticsVersionRequest;
+use crate::commands::tsp::ResolveImportRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -1192,6 +1193,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<ResolveImportRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2648,6 +2654,56 @@ impl Server {
 
         // Return the current load version
         Ok(load_data.version())
+    }
+
+    fn resolve_import(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::ResolveImportParams,
+    ) -> Result<Option<lsp_types::Url>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert source URI to file path (validation only)
+        if params.source_uri.to_file_path().is_err() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid source URI - cannot convert to file path".to_string(),
+                data: None,
+            });
+        }
+
+        // Check if workspace has language services enabled and get the source handle
+        let Some(source_handle) = self.make_handle_if_enabled(&params.source_uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled for this workspace".to_string(),
+                data: None,
+            });
+        };
+
+        // Use the transaction to resolve the import
+        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
+        match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
+            Ok(resolved_handle) => {
+                // Convert the resolved handle back to a URL
+                let url = lsp_types::Url::from_file_path(resolved_handle.path().as_path())
+                    .map_err(|_| ResponseError {
+                        code: ErrorCode::InternalError as i32,
+                        message: "Failed to convert resolved path to URL".to_string(),
+                        data: None,
+                    })?;
+                Ok(Some(url))
+            },
+            Err(e) => {
+                // For debugging, use {:?} instead of {}
+                eprintln!("Import resolution failed: {:?}", e);
+                // Return None instead of an error if the import cannot be resolved
+                Ok(None)
+            }
+        }
     }
 
     fn extract_function_parts_from_function(
