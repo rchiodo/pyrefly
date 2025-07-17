@@ -1953,7 +1953,7 @@ impl Server {
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(),
+                        uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
                         start: u32::from(def_info.range.start()) as i32,
                         length: u32::from(def_info.range.end() - def_info.range.start()) as i32,
                     }),
@@ -1962,7 +1962,7 @@ impl Server {
                         name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
                     },
                     name: import_name.clone(),
-                    uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(),
+                    uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
                 }));
             }
         }
@@ -1978,7 +1978,7 @@ impl Server {
                 name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
             },
             name: import_name.clone(),
-            uri: Url::from_file_path(target_module_info.path().as_path()).unwrap(), // Convert module path to URI
+            uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()), // Convert module info to URI
         };
 
         Ok(Some(resolved_declaration))
@@ -2633,14 +2633,20 @@ impl Server {
         let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
-                // Convert the resolved handle back to a URL
-                let url = lsp_types::Url::from_file_path(resolved_handle.path().as_path())
-                    .map_err(|_| ResponseError {
-                        code: ErrorCode::InternalError as i32,
-                        message: "Failed to convert resolved path to URL".to_string(),
-                        data: None,
-                    })?;
-                Ok(Some(url))
+                // Get module info for the resolved handle
+                let Some(module_info) = transaction.get_module_info(&resolved_handle) else {
+                    eprintln!("Could not get module info for resolved handle: {:?}", resolved_handle);
+                    return Ok(None);
+                };
+
+                // Convert module info to URI using existing logic that handles bundled modules
+                match module_info_to_uri(&module_info) {
+                    Some(url) => Ok(Some(url)),
+                    None => {
+                        eprintln!("Could not convert module info to URI for: {:?}", module_info.name());
+                        Ok(None)
+                    }
+                }
             },
             Err(e) => {
                 // For debugging, use {:?} instead of {}
