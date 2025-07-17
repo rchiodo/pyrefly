@@ -1837,84 +1837,9 @@ impl Server {
         let module_name = &params.decl.module_name;
         let import_name = &params.decl.name;
 
-        // Construct the full module path
-        let full_module_path = if module_name.name_parts.is_empty() {
-            return Ok(None);
-        } else {
-            module_name.name_parts.join(".")
-        };
-
-        // Try to find the module and resolve the imported symbol
-        let pyrefly_module_name = pyrefly_python::module_name::ModuleName::from_str(&full_module_path);
-        
-        // Get Python search paths from the current context
-        // We need to get the search paths from the importing file's context
+        // Convert source URI to file path (validation only)
         let importing_uri = &params.decl.uri;
-
-        let _importing_path = match importing_uri.to_file_path() {
-            Ok(path) => path,
-            Err(_) => {
-                return Ok(Some(tsp::Declaration {
-                    handle: params.decl.handle,
-                    category: params.decl.category,
-                    flags: params.decl.flags.with_unresolved_import(),
-                    node: params.decl.node,
-                    module_name: params.decl.module_name,
-                    name: params.decl.name,
-                    uri: params.decl.uri.clone(),
-                }));
-            }
-        };
-
-        // Get all search paths using the centralized get_python_search_paths method
-        let search_paths_params = tsp::GetPythonSearchPathsParams {
-            from_uri: importing_uri.clone(),
-            snapshot: params.snapshot,
-        };
-        let search_paths_result = self.get_python_search_paths(transaction, search_paths_params);
-        let all_search_paths: Vec<PathBuf> = search_paths_result.into_iter()
-            .filter_map(|url| {
-                // Convert URL directly to file path
-                url.to_file_path().ok().and_then(|path| path.canonicalize().ok())
-            })
-            .collect();
-        
-        // Try to find the module file in all search paths
-        let mut target_module_path = None;
-        let module_path_components = full_module_path.replace('.', "/");
-        
-        for search_path in &all_search_paths {
-            // Try as a regular .py file
-            let potential_py_file = search_path.join(&module_path_components).with_extension("py");
-            if potential_py_file.exists() {
-                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_py_file));
-                break;
-            }
-            
-            // Try as a package with __init__.py
-            let potential_package_init = search_path.join(&module_path_components).join("__init__.py");
-            if potential_package_init.exists() {
-                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_package_init));
-                break;
-            }
-            
-            // Try as a .pyi stub file
-            let potential_pyi_file = search_path.join(&module_path_components).with_extension("pyi");
-            if potential_pyi_file.exists() {
-                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_pyi_file));
-                break;
-            }
-            
-            // Try as a package with __init__.pyi stub
-            let potential_package_pyi = search_path.join(&module_path_components).join("__init__.pyi");
-            if potential_package_pyi.exists() {
-                target_module_path = Some(pyrefly_python::module_path::ModulePath::filesystem(potential_package_pyi));
-                break;
-            }
-        }
-        
-        let Some(module_path) = target_module_path else {
-            // Module file not found, return unresolved import
+        if importing_uri.to_file_path().is_err() {
             return Ok(Some(tsp::Declaration {
                 handle: params.decl.handle,
                 category: params.decl.category,
@@ -1922,22 +1847,42 @@ impl Server {
                 node: params.decl.node,
                 module_name: params.decl.module_name,
                 name: params.decl.name,
-                uri: params.decl.uri,
+                uri: params.decl.uri.clone(),
+            }));
+        }
+
+        // Check if workspace has language services enabled and get the source handle
+        let Some(source_handle) = self.make_handle_if_enabled(importing_uri) else {
+            return Ok(Some(tsp::Declaration {
+                handle: params.decl.handle,
+                category: params.decl.category,
+                flags: params.decl.flags.with_unresolved_import(),
+                node: params.decl.node,
+                module_name: params.decl.module_name,
+                name: params.decl.name,
+                uri: params.decl.uri.clone(),
             }));
         };
 
-        // Get the configuration for this module
-        let config = self.state.config_finder().python_file(
-            pyrefly_module_name,
-            &module_path,
-        );
+        // Convert TSP ModuleName to pyrefly ModuleName
+        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(module_name);
 
-        // Create a handle for the target module
-        let target_handle = crate::state::handle::Handle::new(
-            pyrefly_module_name,
-            module_path.clone(),
-            config.get_sys_info(),
-        );
+        // Use the transaction to resolve the import - same logic as resolve_import
+        let target_handle = match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
+            Ok(resolved_handle) => resolved_handle,
+            Err(_) => {
+                // Import resolution failed, return unresolved import
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            }
+        };
 
         // Try to get module info for the target module
         let Some(target_module_info) = transaction.get_module_info(&target_handle) else {
@@ -2004,7 +1949,7 @@ impl Server {
                 };
 
                 return Ok(Some(tsp::Declaration {
-                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", full_module_path, import_name)),
+                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
                     category,
                     flags,
                     node: Some(tsp::Node {
@@ -2024,7 +1969,7 @@ impl Server {
 
         // Fallback: create a generic resolved declaration pointing to the target module
         let resolved_declaration = tsp::Declaration {
-            handle: tsp::TypeHandle::String(format!("resolved_{}_{}", full_module_path, import_name)),
+            handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
             category: tsp::DeclarationCategory::VARIABLE, // Default to variable since we couldn't determine the type
             flags: tsp::DeclarationFlags::new(),
             node: None, // We don't have the exact location in the target module
