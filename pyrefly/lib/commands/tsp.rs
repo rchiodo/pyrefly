@@ -373,7 +373,15 @@ fn convert_module_name(pyrefly_module: pyrefly_python::module_name::ModuleName) 
 // Convert TSP ModuleName back to pyrefly ModuleName
 pub fn convert_tsp_module_name_to_pyrefly(tsp_module: &ModuleName) -> pyrefly_python::module_name::ModuleName {
     let module_str = tsp_module.name_parts.join(".");
-    pyrefly_python::module_name::ModuleName::from_str(&module_str)
+    
+    // Normalize __builtins__ to builtins so that the builtins module can be found
+    let normalized_module_str = if module_str == "__builtins__" {
+        "builtins".to_string()
+    } else {
+        module_str
+    };
+    
+    pyrefly_python::module_name::ModuleName::from_str(&normalized_module_str)
 }
 
 // Add this new function to handle Module objects
