@@ -559,3 +559,29 @@ impl lsp_types::request::Request for SearchForTypeAttributeRequest {
     type Result = Option<Attribute>;
     const METHOD: &'static str = "typeServer/searchForTypeAttribute";
 }
+
+// Parts of a function, including its parameters and return type.
+// This is used to provide a string representation of a function's signature.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FunctionParts {
+    pub params: Vec<String>,
+    #[serde(rename = "returnType")]
+    pub return_type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetFunctionPartsParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub flags: TypeReprFlags,
+    pub snapshot: i32,
+}
+
+// LSP request type for getFunctionParts
+pub enum GetFunctionPartsRequest {}
+
+impl lsp_types::request::Request for GetFunctionPartsRequest {
+    type Params = GetFunctionPartsParams;
+    type Result = Option<FunctionParts>;
+    const METHOD: &'static str = "typeServer/getFunctionParts";
+}
