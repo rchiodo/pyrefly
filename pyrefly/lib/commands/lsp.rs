@@ -193,6 +193,7 @@ use crate::commands::tsp::GetReprRequest;
 use crate::commands::tsp::GetDocstringRequest;
 use crate::commands::tsp::SearchForTypeAttributeRequest;
 use crate::commands::tsp::GetFunctionPartsRequest;
+use crate::commands::tsp::GetDiagnosticsVersionRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -1186,6 +1187,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_function_parts(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2604,6 +2610,44 @@ impl Server {
                 Ok(None)
             }
         }
+    }
+
+    fn get_diagnostics_version(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetDiagnosticsVersionParams,
+    ) -> Result<u32, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert URI to file path (validation only)
+        if params.uri.to_file_path().is_err() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid URI - cannot convert to file path".to_string(),
+                data: None,
+            });
+        }
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&params.uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled for this workspace".to_string(),
+                data: None,
+            });
+        };
+
+        // Try to get load data for this module
+        let Some(load_data) = transaction.get_load(&handle) else {
+            // If load data doesn't exist, return version 0 to indicate no diagnostics available
+            return Ok(0);
+        };
+
+        // Return the current load version
+        Ok(load_data.version())
     }
 
     fn extract_function_parts_from_function(

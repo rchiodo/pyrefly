@@ -585,3 +585,19 @@ impl lsp_types::request::Request for GetFunctionPartsRequest {
     type Result = Option<FunctionParts>;
     const METHOD: &'static str = "typeServer/getFunctionParts";
 }
+
+// Request/Response types for getDiagnosticsVersion
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetDiagnosticsVersionParams {
+    pub uri: Url,
+    pub snapshot: i32,
+}
+
+// LSP request type for getDiagnosticsVersion
+pub enum GetDiagnosticsVersionRequest {}
+
+impl lsp_types::request::Request for GetDiagnosticsVersionRequest {
+    type Params = GetDiagnosticsVersionParams;
+    type Result = u32;
+    const METHOD: &'static str = "typeServer/getDiagnosticsVersion";
+}
