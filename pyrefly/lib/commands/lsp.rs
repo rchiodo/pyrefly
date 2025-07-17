@@ -1861,7 +1861,10 @@ impl Server {
         };
         let search_paths_result = self.get_python_search_paths(transaction, search_paths_params);
         let all_search_paths: Vec<PathBuf> = search_paths_result.into_iter()
-            .filter_map(|path_str| PathBuf::from(path_str).canonicalize().ok())
+            .filter_map(|url| {
+                // Convert URL directly to file path
+                url.to_file_path().ok().and_then(|path| path.canonicalize().ok())
+            })
             .collect();
         
         // Try to find the module file in all search paths
@@ -2024,7 +2027,7 @@ impl Server {
         Ok(Some(resolved_declaration))
     }
 
-    fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<String> {
+    fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<Url> {
         // Get the URI directly from params
         let uri = &params.from_uri;
 
@@ -2075,15 +2078,15 @@ impl Server {
             
             // Add search paths from config
             for path in config.search_path() {
-                if let Some(path_str) = path.to_str() {
-                    search_paths.push(path_str.to_string());
+                if let Ok(uri) = Url::from_file_path(path) {
+                    search_paths.push(uri);
                 }
             }
 
             // Add site package paths from config
             for path in config.site_package_path() {
-                if let Some(path_str) = path.to_str() {
-                    search_paths.push(path_str.to_string());
+                if let Ok(uri) = Url::from_file_path(path) {
+                    search_paths.push(uri);
                 }
             }
 
@@ -2096,8 +2099,8 @@ impl Server {
                 // Add workspace-specific search paths if available
                 if let Some(workspace_search_paths) = &workspace.search_path {
                     for path in workspace_search_paths {
-                        if let Some(path_str) = path.to_str() {
-                            search_paths.push(path_str.to_string());
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            search_paths.push(uri);
                         }
                     }
                 }
@@ -2107,16 +2110,16 @@ impl Server {
                     // Add site package paths from the python environment
                     if let Some(site_packages) = &python_info.env.site_package_path {
                         for path in site_packages {
-                            if let Some(path_str) = path.to_str() {
-                                search_paths.push(path_str.to_string());
+                            if let Ok(uri) = Url::from_file_path(path) {
+                                search_paths.push(uri);
                             }
                         }
                     }
 
                     // Add interpreter site package paths from the python environment
                     for path in &python_info.env.interpreter_site_package_path {
-                        if let Some(path_str) = path.to_str() {
-                            search_paths.push(path_str.to_string());
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            search_paths.push(uri);
                         }
                     }
                 }

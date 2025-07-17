@@ -301,7 +301,7 @@ impl lsp_types::request::Request for GetSymbolRequest {
 
 impl lsp_types::request::Request for GetPythonSearchPathsRequest {
     type Params = GetPythonSearchPathsParams;
-    type Result = Vec<String>;
+    type Result = Vec<Url>;
     const METHOD: &'static str = "typeServer/getPythonSearchPaths";
 }
 
