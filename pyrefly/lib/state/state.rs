@@ -25,6 +25,7 @@ use std::sync::MutexGuard;
 use std::sync::RwLockReadGuard;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
@@ -662,6 +663,7 @@ impl<'a> Transaction<'a> {
                     old_load.errors.style(),
                     code,
                     self_error,
+                    self.data.state.next_load_version(),
                 )));
                 rebuild(write, true);
                 return;
@@ -676,6 +678,7 @@ impl<'a> Transaction<'a> {
             write.steps.load = Some(Arc::new(Load {
                 errors: ErrorCollector::new(old_load.module_info.dupe(), old_load.errors.style()),
                 module_info: old_load.module_info.clone(),
+                version: self.data.state.next_load_version(),
             }));
             rebuild(write, false);
             return;
@@ -765,6 +768,7 @@ impl<'a> Transaction<'a> {
                     .config
                     .read()
                     .untyped_def_behavior(module_data.handle.path().as_path()),
+                next_load_version: &|| self.data.state.next_load_version(),
             });
             {
                 let mut changed = false;
@@ -1410,6 +1414,7 @@ impl<'a> Transaction<'a> {
                     .config
                     .read()
                     .untyped_def_behavior(m.handle.path().as_path()),
+                next_load_version: &|| self.data.state.next_load_version(),
             };
             let mut step = Step::Load; // Start at AST (Load.next)
             alt.load = lock.steps.load.dupe();
@@ -1635,6 +1640,8 @@ pub struct State {
     run_count: AtomicUsize,
     committing_transaction_lock: Mutex<()>,
     snapshot_counter: AtomicI32,
+    /// Counter for tracking load data versions (diagnostics versioning)
+    load_version_counter: AtomicU32,
     /// Lookup table from TSP type handles to internal pyrefly types
     /// This is cleared whenever the snapshot increments
     type_handle_lookup: RwLock<(i32, HashMap<String, crate::types::types::Type>)>,
@@ -1650,6 +1657,7 @@ impl State {
             run_count: AtomicUsize::new(0),
             committing_transaction_lock: Mutex::new(()),
             snapshot_counter: AtomicI32::new(1), // Start at 1
+            load_version_counter: AtomicU32::new(1), // Start at 1
             type_handle_lookup: RwLock::new((0, HashMap::new())),
         }
     }
@@ -1669,6 +1677,11 @@ impl State {
         lookup.0 = result;
         lookup.1.clear();
         result
+    }
+
+    /// Get the next load version number for tracking diagnostics versions
+    pub fn next_load_version(&self) -> u32 {
+        self.load_version_counter.fetch_add(1, Ordering::AcqRel) + 1
     }
 
     /// Registers a type handle in the lookup table, clearing old entries if snapshot changed
