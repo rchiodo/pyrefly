@@ -1606,11 +1606,30 @@ impl Server {
             });
         };
 
+        // Try to get module info, loading it if necessary
+        let (_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
+            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+            Ok((None, _)) => {
+                eprintln!("Warning: Could not load module for get_type request: {}", uri);
+                return Ok(None);
+            },
+            Err(_) => {
+                return Err(ResponseError {
+                    code: ErrorCode::InternalError as i32,
+                    message: "Failed to load module".to_string(),
+                    data: None,
+                });
+            }
+        };
+
+        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
+        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
+
         // Convert offset to TextSize
         let position = TextSize::new(params.node.start as u32);
 
         // Get the type at the position
-        let Some(type_info) = transaction.get_type_at(&handle, position) else {
+        let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
             let short_uri = uri.to_string().chars().take(100).collect::<String>();
             eprintln!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
             return Ok(None);
@@ -1884,19 +1903,32 @@ impl Server {
             }
         };
 
-        // Try to get module info for the target module
-        let Some(target_module_info) = transaction.get_module_info(&target_handle) else {
-            // Module not found, possibly an unresolved import
-            return Ok(Some(tsp::Declaration {
-                handle: params.decl.handle,
-                category: params.decl.category,
-                flags: params.decl.flags.with_unresolved_import(),
-                node: params.decl.node,
-                module_name: params.decl.module_name,
-                name: params.decl.name,
-                uri: params.decl.uri,
-            }));
+        // Try to get module info for the target module, loading it if necessary
+        let (target_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &target_handle) {
+            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+            Ok((None, _)) => {
+                // Module not found, possibly an unresolved import
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            },
+            Err(_) => {
+                return Err(ResponseError {
+                    code: ErrorCode::InternalError as i32,
+                    message: "Failed to load target module".to_string(),
+                    data: None,
+                });
+            }
         };
+
+        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
+        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
 
         // Look for the specific symbol in the target module
         // We'll use find_definition with a synthetic position to locate the symbol
@@ -1929,7 +1961,7 @@ impl Server {
         // If we found the symbol, try to get its definition info
         if let Some(pos) = found_position {
             let text_pos = TextSize::new(pos as u32);
-            if let Some(first_definition) = transaction.find_definition(&target_handle, text_pos, true).first() {
+            if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).first() {
                 let def_metadata = &first_definition.metadata;
                 let def_info = &first_definition.location;
                 let _docstring = &first_definition.docstring;
@@ -2107,6 +2139,28 @@ impl Server {
         } else {
             None // Module couldn't be loaded even with fresh transaction
         }
+    }
+
+    /// Helper function to get module info from either the current transaction or a fresh one if needed
+    fn get_module_info_with_loading(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+        // Try to get module info from the current transaction first
+        if let Some(module_info) = transaction.get_module_info(handle) {
+            return Ok((Some(module_info), None));
+        }
+
+        // Module not loaded, try to load it in a fresh transaction
+        if let Some(fresh_transaction) = self.load_module_if_needed(transaction, handle) {
+            if let Some(module_info) = fresh_transaction.get_module_info(handle) {
+                return Ok((Some(module_info), Some(fresh_transaction)));
+            }
+        }
+
+        // Could not load the module
+        Ok((None, None))
     }
 
     /// Try to get type information for an import declaration by resolving the import
@@ -2633,10 +2687,20 @@ impl Server {
         let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
-                // Get module info for the resolved handle
-                let Some(module_info) = transaction.get_module_info(&resolved_handle) else {
-                    eprintln!("Could not get module info for resolved handle: {:?}", resolved_handle);
-                    return Ok(None);
+                // Try to get module info, loading it if necessary
+                let (module_info, _fresh_transaction) = match self.get_module_info_with_loading(transaction, &resolved_handle) {
+                    Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+                    Ok((None, _)) => {
+                        eprintln!("Could not load module for resolved handle: {:?}", resolved_handle);
+                        return Ok(None);
+                    },
+                    Err(_) => {
+                        return Err(ResponseError {
+                            code: ErrorCode::InternalError as i32,
+                            message: "Failed to load resolved module".to_string(),
+                            data: None,
+                        });
+                    }
                 };
 
                 // Convert module info to URI using existing logic that handles bundled modules
