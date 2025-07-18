@@ -638,3 +638,22 @@ impl lsp_types::request::Request for ResolveImportRequest {
     type Result = Option<Url>;
     const METHOD: &'static str = "typeServer/resolveImport";
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTypeArgsParams {
+    /// The type to get arguments from (union members or generic arguments)
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    /// The snapshot number for validation
+    pub snapshot: i32,
+}
+
+// LSP request type for getTypeArgs
+pub enum GetTypeArgsRequest {}
+
+impl lsp_types::request::Request for GetTypeArgsRequest {
+    type Params = GetTypeArgsParams;
+    type Result = Vec<Type>;
+    const METHOD: &'static str = "typeServer/getTypeArgs";
+}

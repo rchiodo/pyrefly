@@ -195,6 +195,7 @@ use crate::commands::tsp::SearchForTypeAttributeRequest;
 use crate::commands::tsp::GetFunctionPartsRequest;
 use crate::commands::tsp::GetDiagnosticsVersionRequest;
 use crate::commands::tsp::ResolveImportRequest;
+use crate::commands::tsp::GetTypeArgsRequest;
 use crate::commands::util::module_from_path;
 use crate::common::files::PYTHON_FILE_SUFFIXES_TO_WATCH;
 use crate::config::config::ConfigFile;
@@ -1198,6 +1199,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2717,6 +2723,113 @@ impl Server {
                 eprintln!("Import resolution failed: {:?}", e);
                 // Return None instead of an error if the import cannot be resolved
                 Ok(None)
+            }
+        }
+    }
+
+    fn get_type_args(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetTypeArgsParams,
+    ) -> Result<Vec<tsp::Type>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Get the internal type from the type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+            Some(t) => t,
+            None => {
+                eprintln!("Could not resolve type handle: {:?}", params.type_param.handle);
+                return Ok(Vec::new());
+            }
+        };
+
+        // Extract type arguments based on the type
+        match &internal_type {
+            // Union types: return the constituent types
+            crate::types::types::Type::Union(union_type) => {
+                let mut result_types = Vec::new();
+                for union_member in union_type.iter() {
+                    result_types.push(self.convert_and_register_type(union_member.clone()));
+                }
+                Ok(result_types)
+            },
+            
+            // Class types with generic arguments
+            crate::types::types::Type::ClassType(class_type) => {
+                let type_args = class_type.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // TypedDict types with generic arguments  
+            crate::types::types::Type::TypedDict(typed_dict) => {
+                let type_args = typed_dict.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // Partial TypedDict types with generic arguments
+            crate::types::types::Type::PartialTypedDict(typed_dict) => {
+                let type_args = typed_dict.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // Tuple types
+            crate::types::types::Type::Tuple(tuple_type) => {
+                match tuple_type {
+                    crate::types::tuple::Tuple::Concrete(element_types) => {
+                        let mut result_types = Vec::new();
+                        for element_type in element_types.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        Ok(result_types)
+                    },
+                    crate::types::tuple::Tuple::Unbounded(element_type) => {
+                        // For unbounded tuples like Tuple[int, ...], return the element type
+                        Ok(vec![self.convert_and_register_type(element_type.as_ref().clone())])
+                    },
+                    crate::types::tuple::Tuple::Unpacked(unpacked) => {
+                        // For unpacked tuples like Tuple[int, str, *T, bool], return all the types
+                        let mut result_types = Vec::new();
+                        // Add prefix types
+                        for element_type in unpacked.0.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        // Add the unpacked type (the variadic part)
+                        result_types.push(self.convert_and_register_type(unpacked.1.clone()));
+                        // Add suffix types
+                        for element_type in unpacked.2.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        Ok(result_types)
+                    },
+                }
+            },
+
+            // Generic class definitions might have type parameters
+            crate::types::types::Type::ClassDef(_class_def) => {
+                // For class definitions, we can't return type arguments since they aren't instantiated
+                // Return empty array as this represents the uninstantiated generic
+                Ok(Vec::new())
+            },
+
+            // Other types don't have type arguments
+            _ => {
+                eprintln!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
+                Ok(Vec::new())
             }
         }
     }
