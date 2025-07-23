@@ -188,6 +188,7 @@ use crate::commands::tsp::GetPythonSearchPathsRequest;
 use crate::commands::tsp::GetSnapshotRequest;
 use crate::commands::tsp::GetSymbolRequest;
 use crate::commands::tsp::GetTypeRequest;
+use crate::commands::tsp::GetOverloadsRequest;
 use crate::commands::tsp::ResolveImportDeclarationRequest;
 use crate::commands::tsp::GetTypeOfDeclarationRequest;
 use crate::commands::tsp::GetReprRequest;
@@ -1210,6 +1211,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
@@ -2885,6 +2891,62 @@ impl Server {
             _ => {
                 eprintln!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
                 Ok(Vec::new())
+            }
+        }
+    }
+
+    fn get_overloads(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetOverloadsParams,
+    ) -> Result<Option<Vec<tsp::Type>>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Get the internal type from the type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+            Some(t) => t,
+            None => {
+                eprintln!("Could not resolve type handle: {:?}", params.type_param.handle);
+                return Ok(None);
+            }
+        };
+
+        // Only process overloaded function types
+        match &internal_type {
+            crate::types::types::Type::Overload(overload_type) => {
+                let mut result_types = Vec::new();
+                
+                // Convert each overload signature to a TSP Type
+                for signature in overload_type.signatures.iter() {
+                    match signature {
+                        crate::types::types::OverloadType::Callable(callable) => {
+                            // Convert Callable to Function type
+                            let function_type = crate::types::types::Type::Function(
+                                Box::new(crate::types::callable::Function {
+                                    signature: callable.clone(),
+                                    metadata: *overload_type.metadata.clone(),
+                                })
+                            );
+                            result_types.push(self.convert_and_register_type(function_type));
+                        },
+                        crate::types::types::OverloadType::Forall(forall) => {
+                            // Convert Forall<Function> to Function type
+                            let function_type = crate::types::types::Type::Function(Box::new(forall.body.clone()));
+                            result_types.push(self.convert_and_register_type(function_type));
+                        },
+                    }
+                }
+                
+                Ok(Some(result_types))
+            },
+
+            // Non-overloaded types return None
+            _ => {
+                eprintln!("get_overloads called on non-overloaded type: {:?}", internal_type);
+                Ok(None)
             }
         }
     }

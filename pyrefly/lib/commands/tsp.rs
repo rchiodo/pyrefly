@@ -657,3 +657,22 @@ impl lsp_types::request::Request for GetTypeArgsRequest {
     type Result = Vec<Type>;
     const METHOD: &'static str = "typeServer/getTypeArgs";
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetOverloadsParams {
+    /// The overloaded type to get individual overloads from
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    /// The snapshot number for validation
+    pub snapshot: i32,
+}
+
+// LSP request type for getOverloads
+pub enum GetOverloadsRequest {}
+
+impl lsp_types::request::Request for GetOverloadsRequest {
+    type Params = GetOverloadsParams;
+    type Result = Option<Vec<Type>>;
+    const METHOD: &'static str = "typeServer/getOverloads";
+}
