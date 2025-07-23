@@ -2751,28 +2751,24 @@ impl Server {
         let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
-                // Try to get module info, loading it if necessary
-                // For import resolution, we only need basic export info, not full analysis
-                let (module_info, _fresh_transaction) = match self.get_module_info_with_loading_level(transaction, &resolved_handle, Require::Exports) {
-                    Ok((Some(info), fresh_tx)) => (info, fresh_tx),
-                    Ok((None, _)) => {
-                        eprintln!("Could not load module for resolved handle: {:?}", resolved_handle);
+                // For import resolution, we don't need to load the module at all.
+                // We can get the path directly from the resolved handle and convert it to a URI.
+                // This avoids the expensive module loading operation.
+                let path = match to_real_path(resolved_handle.path()) {
+                    Some(path) => path,
+                    None => {
+                        eprintln!("Could not get real path for: {:?}", resolved_handle.path());
                         return Ok(None);
-                    },
-                    Err(_) => {
-                        return Err(ResponseError {
-                            code: ErrorCode::InternalError as i32,
-                            message: "Failed to load resolved module".to_string(),
-                            data: None,
-                        });
                     }
                 };
-
-                // Convert module info to URI using existing logic that handles bundled modules
-                match module_info_to_uri(&module_info) {
-                    Some(url) => Ok(Some(url)),
-                    None => {
-                        eprintln!("Could not convert module info to URI for: {:?}", module_info.name());
+                
+                let abs_path = path.absolutize();
+                let abs_path = abs_path.as_deref().unwrap_or(&path);
+                
+                match Url::from_file_path(abs_path) {
+                    Ok(url) => Ok(Some(url)),
+                    Err(_) => {
+                        eprintln!("Could not convert path to URI for: {:?}", resolved_handle.path());
                         Ok(None)
                     }
                 }
