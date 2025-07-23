@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
 
@@ -368,6 +369,8 @@ struct Server {
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
     version_info: Mutex<HashMap<PathBuf, i32>>,
+    /// Track current request for duration logging
+    current_request: Arc<Mutex<Option<(RequestId, String, Instant)>>>,
 }
 
 /// Information about the Python environment p
@@ -1014,6 +1017,9 @@ impl Server {
                     return Ok(ProcessEvent::Continue);
                 }
                 eprintln!("Handling non-canceled request {} ({})", x.method, x.id);
+                eprintln!("Request parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+                // Store request info for duration logging in send_response
+                *self.current_request.lock() = Some((x.id.clone(), x.method.clone(), Instant::now()));
                 if let Some(params) = as_request::<GotoDefinition>(&x) {
                     let default_response = GotoDefinitionResponse::Array(Vec::new());
                     let transaction =
@@ -1207,6 +1213,10 @@ impl Server {
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
+                    // Log duration for unhandled requests since they don't call send_response
+                    if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
+                        eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                    }
                 }
             }
         }
@@ -1252,6 +1262,7 @@ impl Server {
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: Arc::new(AtomicBool::new(false)),
             version_info: Mutex::new(HashMap::new()),
+            current_request: Arc::new(Mutex::new(None)),
         };
         s.configure(&folders, &[]);
 
@@ -1259,6 +1270,15 @@ impl Server {
     }
 
     fn send_response(&self, x: Response) {
+        // Check if this response corresponds to a tracked request and log duration
+        if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
+            if request_id == x.id {
+                eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+            } else {
+                // Put it back if it doesn't match (shouldn't happen in normal flow)
+                *self.current_request.lock() = Some((request_id, method, start_time));
+            }
+        }
         self.connection.send(Message::Response(x))
     }
 
@@ -1673,7 +1693,7 @@ impl Server {
             Some(info) => (info, None), // Use the existing transaction
             None => {
                 // Module not loaded in transaction, try to load it
-                let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+                let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
                     return Err(ResponseError {
                         code: ErrorCode::RequestFailed as i32,
                         message: "Failed to load module".to_string(),
@@ -2125,19 +2145,34 @@ impl Server {
     }
 
     /// Load a module in a fresh transaction if it's not available in the current transaction
+    /// or if it doesn't meet the required level
     fn load_module_if_needed(
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
     ) -> Option<Transaction> {
         // Check if module is already loaded in the current transaction
-        if transaction.get_module_info(handle).is_some() {
-            return None; // Module already loaded, no need for fresh transaction
+        // For now, we'll be conservative and always reload if Everything is required
+        // but the module exists (since we can't easily check the current requirement level)
+        let should_reload = match required_level {
+            crate::state::require::Require::Everything => {
+                // For Everything requirement, reload even if module exists to ensure full analysis
+                transaction.get_module_info(handle).is_some()
+            },
+            _ => {
+                // For lighter requirements, don't reload if module already exists
+                transaction.get_module_info(handle).is_none()
+            }
+        };
+
+        if !should_reload && transaction.get_module_info(handle).is_some() {
+            return None; // Module already loaded and sufficient
         }
 
-        // Module not loaded, create a fresh transaction and load it
+        // Module not loaded or needs upgrade, create a fresh transaction and load it
         let mut fresh_transaction = self.state.transaction();
-        fresh_transaction.run(&[(handle.clone(), crate::state::require::Require::Everything)]);
+        fresh_transaction.run(&[(handle.clone(), required_level)]);
         
         // Verify the module was loaded successfully
         if fresh_transaction.get_module_info(handle).is_some() {
@@ -2153,13 +2188,36 @@ impl Server {
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
     ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+        self.get_module_info_with_loading_level(transaction, handle, crate::state::require::Require::Everything)
+    }
+
+    /// Helper function to get module info with a specific requirement level
+    fn get_module_info_with_loading_level(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
+    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
         // Try to get module info from the current transaction first
         if let Some(module_info) = transaction.get_module_info(handle) {
-            return Ok((Some(module_info), None));
+            // For lighter requirements, existing module info is usually sufficient
+            match required_level {
+                crate::state::require::Require::Exports | 
+                crate::state::require::Require::Errors |
+                crate::state::require::Require::Indexing => {
+                    return Ok((Some(module_info), None));
+                },
+                crate::state::require::Require::Everything => {
+                    // For Everything requirement, we may need to reload
+                    // For now, we'll assume existing module info is sufficient
+                    // unless explicitly requested to reload
+                    return Ok((Some(module_info), None));
+                }
+            }
         }
 
-        // Module not loaded, try to load it in a fresh transaction
-        if let Some(fresh_transaction) = self.load_module_if_needed(transaction, handle) {
+        // Module not loaded or needs specific requirement level, try to load it
+        if let Some(fresh_transaction) = self.load_module_if_needed(transaction, handle, required_level) {
             if let Some(module_info) = fresh_transaction.get_module_info(handle) {
                 return Ok((Some(module_info), Some(fresh_transaction)));
             }
@@ -2268,7 +2326,7 @@ impl Server {
             Some(info) => info,
             None => {
                 // Module not loaded in transaction, try to load it
-                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
                     // If we still can't load the module, fall back to default type
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
@@ -2397,7 +2455,7 @@ impl Server {
         // Get module info for position conversion
         let Some(_module_info) = transaction.get_module_info(&handle) else {
             // If module not loaded in transaction, try to load it
-            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle) else {
+            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
                 return Ok(None);
             };
             
@@ -2694,7 +2752,8 @@ impl Server {
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
                 // Try to get module info, loading it if necessary
-                let (module_info, _fresh_transaction) = match self.get_module_info_with_loading(transaction, &resolved_handle) {
+                // For import resolution, we only need basic export info, not full analysis
+                let (module_info, _fresh_transaction) = match self.get_module_info_with_loading_level(transaction, &resolved_handle, Require::Exports) {
                     Ok((Some(info), fresh_tx)) => (info, fresh_tx),
                     Ok((None, _)) => {
                         eprintln!("Could not load module for resolved handle: {:?}", resolved_handle);
