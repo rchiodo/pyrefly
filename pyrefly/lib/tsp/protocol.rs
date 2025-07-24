@@ -676,3 +676,22 @@ impl lsp_types::request::Request for GetOverloadsRequest {
     type Result = Option<Vec<Type>>;
     const METHOD: &'static str = "typeServer/getOverloads";
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetMatchingOverloadsParams {
+    /// The call site node to analyze for matching overloads
+    #[serde(rename = "callNode")]
+    pub call_node: Node,
+    /// The snapshot number for validation
+    pub snapshot: i32,
+}
+
+// LSP request type for getMatchingOverloads
+pub enum GetMatchingOverloadsRequest {}
+
+impl lsp_types::request::Request for GetMatchingOverloadsRequest {
+    type Params = GetMatchingOverloadsParams;
+    type Result = Option<Vec<Type>>;
+    const METHOD: &'static str = "typeServer/getMatchingOverloads";
+}

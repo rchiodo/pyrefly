@@ -19,4 +19,5 @@ pub mod get_function_parts;
 pub mod get_diagnostics_version;
 pub mod get_type_args;
 pub mod get_overloads;
+pub mod get_matching_overloads;
 pub mod resolve_import;

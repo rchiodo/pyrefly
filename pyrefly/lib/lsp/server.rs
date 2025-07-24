@@ -174,6 +174,7 @@ use crate::tsp::GetSnapshotRequest;
 use crate::tsp::GetSymbolRequest;
 use crate::tsp::GetTypeRequest;
 use crate::tsp::GetOverloadsRequest;
+use crate::tsp::GetMatchingOverloadsRequest;
 use crate::tsp::ResolveImportDeclarationRequest;
 use crate::tsp::GetTypeOfDeclarationRequest;
 use crate::tsp::GetReprRequest;
@@ -758,6 +759,11 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     lsp_debug!("Unhandled request: {x:?}");
