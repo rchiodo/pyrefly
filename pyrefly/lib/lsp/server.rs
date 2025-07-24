@@ -282,12 +282,12 @@ pub struct Server {
     priority_events_sender: Arc<Sender<ServerEvent>>,
     initialize_params: InitializeParams,
     indexing_mode: IndexingMode,
-    state: Arc<State>,
-    open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
+    pub(crate) state: Arc<State>,
+    pub(crate) open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
     /// A set of configs where we have already indexed all the files within the config.
     indexed_configs: Mutex<HashSet<ArcId<ConfigFile>>>,
     cancellation_handles: Arc<Mutex<HashMap<RequestId, CancellationHandle>>>,
-    workspaces: Arc<Workspaces>,
+    pub(crate) workspaces: Arc<Workspaces>,
     outgoing_request_id: Arc<AtomicI32>,
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
@@ -469,79 +469,8 @@ pub enum ProcessEvent {
     Exit,
 }
 
-/// Format a TSP Type into a human-readable string representation
-fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags) -> String {
-    use tsp::TypeCategory;
-    
-    let mut result = String::new();
-    
-    // Handle different type categories
-    match type_param.category {
-        TypeCategory::ANY => result.push_str("Any"),
-        TypeCategory::FUNCTION => {
-            // For functions, show signature if available
-            if type_param.name.is_empty() {
-                result.push_str("Callable[..., Any]");
-            } else {
-                result.push_str(&type_param.name);
-            }
-        },
-        TypeCategory::OVERLOADED => {
-            result.push_str("Overload[");
-            result.push_str(&type_param.name);
-            result.push(']');
-        },
-        TypeCategory::CLASS => {
-            // For classes, show the class name
-            if flags.has_convert_to_instance_type() {
-                // Convert to instance type representation
-                result.push_str(&type_param.name);
-            } else {
-                // Show as type
-                result.push_str("type[");
-                result.push_str(&type_param.name);
-                result.push(']');
-            }
-        },
-        TypeCategory::MODULE => {
-            result.push_str("Module[");
-            result.push_str(&type_param.name);
-            result.push(']');
-        },
-        TypeCategory::UNION => {
-            // For unions, we'd need to format multiple types
-            result.push_str("Union[");
-            result.push_str(&type_param.name);
-            result.push(']');
-        },
-        TypeCategory::TYPE_VAR => {
-            result.push_str(&type_param.name);
-            // Add variance information if requested
-            if flags.has_print_type_var_variance() {
-                // This would require additional metadata about variance
-                // For now, just show the basic type var name
-            }
-        },
-        _ => {
-            // Default case for unknown categories
-            if type_param.name.is_empty() {
-                result.push_str("Unknown");
-            } else {
-                result.push_str(&type_param.name);
-            }
-        }
-    }
-    
-    // Add module information if available and it's not a builtin
-    if let Some(module_name) = &type_param.module_name {
-        if !module_name.name_parts.is_empty() && module_name.name_parts[0] != "builtins" {
-            let module_path = module_name.name_parts.join(".");
-            result = format!("{}.{}", module_path, result);
-        }
-    }
 
-    result
-}
+
 const PYTHON_SECTION: &str = "python";
 
 #[derive(Debug, Default, Deserialize)]
@@ -563,7 +492,7 @@ impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
     /// Helper function to create a consistent "Snapshot is outdated" error response
-    fn snapshot_outdated_error() -> ResponseError {
+    pub(crate) fn snapshot_outdated_error() -> ResponseError {
         ResponseError {
             code: ErrorCode::ServerCancelled as i32,
             message: "Snapshot is outdated".to_string(),
@@ -1229,536 +1158,9 @@ impl Server {
         self.validate_in_memory(ide_transaction_manager)
     }
 
-    fn get_type(
-        &self,
-        transaction: &Transaction<'_>,
-        params: tsp::GetTypeParams,
-    ) -> Result<Option<tsp::Type>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Convert Node to URI and position
-        let uri = &params.node.uri;
-
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
-                data: None,
-            });
-        };
-
-        // Try to get module info, loading it if necessary
-        let (_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
-            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
-            Ok((None, _)) => {
-                lsp_debug!("Warning: Could not load module for get_type request: {}", uri);
-                return Ok(None);
-            },
-            Err(_) => {
-                return Err(ResponseError {
-                    code: ErrorCode::InternalError as i32,
-                    message: "Failed to load module".to_string(),
-                    data: None,
-                });
-            }
-        };
-
-        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
-        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
-
-        // Convert offset to TextSize
-        let position = TextSize::new(params.node.start as u32);
-
-        // Get the type at the position
-        let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
-            let short_uri = uri.to_string().chars().take(100).collect::<String>();
-            lsp_debug!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
-            return Ok(None);
-        };
-
-        // Convert pyrefly Type to TSP Type format
-        Ok(Some(self.convert_and_register_type(type_info)))
-    }
-
-    fn get_symbol(
-        &self,
-        transaction: &Transaction<'_>,
-        params: tsp::GetSymbolParams,
-    ) -> Result<Option<tsp::Symbol>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Convert Node to URI and position
-        let uri = &params.node.uri;
-
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
-                data: None,
-            });
-        };
-
-        // Get module info for position conversion
-        // If the module is not loaded in the transaction, try to load it
-        let (module_info, transaction_to_use) = match transaction.get_module_info(&handle) {
-            Some(info) => (info, None), // Use the existing transaction
-            None => {
-                // Module not loaded in transaction, try to load it
-                let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
-                    return Err(ResponseError {
-                        code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to load module".to_string(),
-                        data: None,
-                    });
-                };
-                
-                let Some(info) = fresh_transaction.get_module_info(&handle) else {
-                    return Err(ResponseError {
-                        code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to get module info after loading".to_string(),
-                        data: None,
-                    });
-                };
-                
-                (info, Some(fresh_transaction))
-            }
-        };
-
-        // Use the appropriate transaction for the rest of the function
-        let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
-
-        // Convert offset to TextSize
-        let position = TextSize::new(params.node.start as u32);
-
-        // First, check if we can get type information at this position
-        let type_info = active_transaction.get_type_at(&handle, position);
-
-        // Try to find definition at the position
-        let (symbol_name, declarations, synthesized_types) = 
-            if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).into_iter().next() {
-                let definition_metadata = &first_definition.metadata;
-                let definition_range = first_definition.definition_range;
-                let definition_module = &first_definition.module;
-                
-                // Use provided name or extract from definition
-                let name = params.name.unwrap_or_else(|| {
-                    // Try to extract symbol name from the source code at the position
-                    let start = position;
-                    let end = TextSize::new((params.node.start + params.node.length) as u32);
-                    module_info.code_at(TextRange::new(start, end)).to_string()
-                });
-
-                // Create declarations from the definition
-                let mut decls = Vec::new();
-                
-                // Generate a unique handle for this declaration
-                let declaration_handle = tsp::TypeHandle::String(format!("decl_{:p}_{}", &definition_metadata as *const _, u32::from(position)));
-                
-                // Determine the category and flags based on definition metadata
-                let (category, flags) = match &definition_metadata {
-                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-                        match symbol_kind {
-                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
-                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
-                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                        }
-                    },
-                    crate::state::lsp::DefinitionMetadata::Module => {
-                        // For module imports, check if type info is available to determine if resolved
-                        let mut import_flags = tsp::DeclarationFlags::new();
-                        if type_info.is_none() {
-                            // If we can't get type info for an import, it might be unresolved
-                            import_flags = import_flags.with_unresolved_import();
-                        }
-                        (tsp::DeclarationCategory::IMPORT, import_flags)
-                    },
-                    crate::state::lsp::DefinitionMetadata::Attribute(_) => {
-                        // Attributes are typically class members
-                        (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member())
-                    },
-                    crate::state::lsp::DefinitionMetadata::VariableOrAttribute(_, Some(symbol_kind)) => {
-                        match symbol_kind {
-                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new().with_class_member()),
-                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
-                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member().with_constant()),
-                            pyrefly_python::symbol_kind::SymbolKind::Attribute => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
-                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
-                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
-                        }
-                    },
-                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                };
-
-                // Extract module name from the definition's module (where the symbol is actually defined)
-                let definition_module_name = definition_module.name();
-                let module_parts: Vec<String> = definition_module_name.as_str().split('.').map(|s| s.to_string()).collect();
-                let module_name = tsp::ModuleName {
-                    leading_dots: 0,
-                    name_parts: module_parts.clone(),
-                };
-
-                // Check if this is from builtins and update category/flags accordingly
-                let (category, flags) = if module_parts.first().map_or(false, |first| first == "builtins") {
-                    match category {
-                        tsp::DeclarationCategory::FUNCTION | 
-                        tsp::DeclarationCategory::CLASS | 
-                        tsp::DeclarationCategory::VARIABLE => {
-                            (tsp::DeclarationCategory::INTRINSIC, flags)
-                        },
-                        _ => (category, flags),
-                    }
-                } else {
-                    (category, flags)
-                };
-
-                // Create node pointing to the actual definition location using the same logic as goto_definition
-                let definition_uri = module_info_to_uri(definition_module);
-                let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
-
-                // Add the primary declaration
-                decls.push(tsp::Declaration {
-                    handle: declaration_handle,
-                    category,
-                    flags,
-                    node: Some(tsp::Node {
-                        uri: definition_uri_final.clone(),
-                        start: u32::from(definition_range.start()) as i32,
-                        length: u32::from(definition_range.end() - definition_range.start()) as i32,
-                    }),
-                    module_name,
-                    name: name.clone(),
-                    uri: definition_uri_final,
-                });
-
-                // Get synthesized types if available
-                let mut synth_types = Vec::new();
-                if let Some(type_info) = type_info {
-                    synth_types.push(self.convert_and_register_type(type_info));
-                }
-
-                (name, decls, synth_types)
-            } else {
-                // If no definition found, try to get type information at least
-                let name = params.name.unwrap_or_else(|| {
-                    let start = position;
-                    let end = TextSize::new((params.node.start + params.node.length) as u32);
-                    module_info.code_at(TextRange::new(start, end)).to_string()
-                });
-
-                let mut synth_types = Vec::new();
-                if let Some(type_info) = type_info {
-                    synth_types.push(self.convert_and_register_type(type_info));
-                } else {
-                    // No definition found and no type information available
-                    lsp_debug!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
-                    return Ok(None);
-                }
-
-                (name, Vec::new(), synth_types)
-            };
-
-        Ok(Some(tsp::Symbol {
-            node: params.node,
-            name: symbol_name,
-            decls: declarations,
-            synthesized_types,
-        }))
-    }
-
-    fn resolve_import_declaration(
-        &self,
-        transaction: &Transaction<'_>,
-        params: tsp::ResolveImportDeclarationParams,
-    ) -> Result<Option<tsp::Declaration>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Only resolve import declarations
-        if params.decl.category != tsp::DeclarationCategory::IMPORT {
-            // Return the same declaration if it's not an import
-            return Ok(Some(params.decl));
-        }
-
-        // Parse the module name from the declaration
-        let module_name = &params.decl.module_name;
-        let import_name = &params.decl.name;
-
-        // Convert source URI to file path (validation only)
-        let importing_uri = &params.decl.uri;
-        if importing_uri.to_file_path().is_err() {
-            return Ok(Some(tsp::Declaration {
-                handle: params.decl.handle,
-                category: params.decl.category,
-                flags: params.decl.flags.with_unresolved_import(),
-                node: params.decl.node,
-                module_name: params.decl.module_name,
-                name: params.decl.name,
-                uri: params.decl.uri.clone(),
-            }));
-        }
-
-        // Check if workspace has language services enabled and get the source handle
-        let Some(source_handle) = self.make_handle_if_enabled(importing_uri) else {
-            return Ok(Some(tsp::Declaration {
-                handle: params.decl.handle,
-                category: params.decl.category,
-                flags: params.decl.flags.with_unresolved_import(),
-                node: params.decl.node,
-                module_name: params.decl.module_name,
-                name: params.decl.name,
-                uri: params.decl.uri.clone(),
-            }));
-        };
-
-        // Convert TSP ModuleName to pyrefly ModuleName
-        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(module_name);
-
-        // Use the transaction to resolve the import - same logic as resolve_import
-        let target_handle = match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
-            Ok(resolved_handle) => resolved_handle,
-            Err(_) => {
-                // Import resolution failed, return unresolved import
-                return Ok(Some(tsp::Declaration {
-                    handle: params.decl.handle,
-                    category: params.decl.category,
-                    flags: params.decl.flags.with_unresolved_import(),
-                    node: params.decl.node,
-                    module_name: params.decl.module_name,
-                    name: params.decl.name,
-                    uri: params.decl.uri,
-                }));
-            }
-        };
-
-        // Try to get module info for the target module, loading it if necessary
-        let (target_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &target_handle) {
-            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
-            Ok((None, _)) => {
-                // Module not found, possibly an unresolved import
-                return Ok(Some(tsp::Declaration {
-                    handle: params.decl.handle,
-                    category: params.decl.category,
-                    flags: params.decl.flags.with_unresolved_import(),
-                    node: params.decl.node,
-                    module_name: params.decl.module_name,
-                    name: params.decl.name,
-                    uri: params.decl.uri,
-                }));
-            },
-            Err(_) => {
-                return Err(ResponseError {
-                    code: ErrorCode::InternalError as i32,
-                    message: "Failed to load target module".to_string(),
-                    data: None,
-                });
-            }
-        };
-
-        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
-        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
-
-        // Look for the specific symbol in the target module
-        // We'll use find_definition with a synthetic position to locate the symbol
-        // This is a simplified approach - a full implementation would need to:
-        // 1. Parse the target module's AST to find all exports
-        // 2. Check __all__ if it exists
-        // 3. Handle star imports properly
-        // 4. Respect visibility rules (private vs public symbols)
-        
-        // Try to find all identifiers in the target module that match our import name
-        // For simplicity, we'll search through the module content for the symbol definition
-        let module_content = target_module_info.contents();
-        
-        // Look for function, class, or variable definitions of the imported name
-        let patterns = [
-            format!("def {}(", import_name),      // Function definition
-            format!("class {}(", import_name),    // Class definition  
-            format!("class {}:", import_name),    // Class definition without inheritance
-            format!("{} =", import_name),         // Variable assignment
-        ];
-        
-        let mut found_position = None;
-        for pattern in &patterns {
-            if let Some(pos) = module_content.find(pattern) {
-                found_position = Some(pos);
-                break;
-            }
-        }
-
-        // If we found the symbol, try to get its definition info
-        if let Some(pos) = found_position {
-            let text_pos = TextSize::new(pos as u32);
-            if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).into_iter().next() {
-                let def_metadata = &first_definition.metadata;
-                let def_range = first_definition.definition_range;
-                let def_module = &first_definition.module;
-                
-                // Create a resolved declaration with proper category and flags
-                let (category, flags) = match &def_metadata {
-                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-                        match symbol_kind {
-                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
-                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                        }
-                    },
-                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
-                };
-
-                return Ok(Some(tsp::Declaration {
-                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", def_module.name().as_str(), import_name)),
-                    category,
-                    flags,
-                    node: Some(tsp::Node {
-                        uri: module_info_to_uri(def_module).unwrap_or_else(|| params.decl.uri.clone()),
-                        start: u32::from(def_range.start()) as i32,
-                        length: u32::from(def_range.end() - def_range.start()) as i32,
-                    }),
-                    module_name: tsp::ModuleName {
-                        leading_dots: 0,
-                        name_parts: def_module.name().as_str().split('.').map(|s| s.to_string()).collect(),
-                    },
-                    name: import_name.clone(),
-                    uri: module_info_to_uri(def_module).unwrap_or_else(|| params.decl.uri.clone()),
-                }));
-            }
-        }
-
-        // Fallback: create a generic resolved declaration pointing to the target module
-        let resolved_declaration = tsp::Declaration {
-            handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
-            category: tsp::DeclarationCategory::VARIABLE, // Default to variable since we couldn't determine the type
-            flags: tsp::DeclarationFlags::new(),
-            node: None, // We don't have the exact location in the target module
-            module_name: tsp::ModuleName {
-                leading_dots: 0,
-                name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
-            },
-            name: import_name.clone(),
-            uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()), // Convert module info to URI
-        };
-
-        Ok(Some(resolved_declaration))
-    }
-
-    fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<Url> {
-        // Get the URI directly from params
-        let uri = &params.from_uri;
-
-        // Convert URI to file path
-        let path = match uri.to_file_path() {
-            Ok(path) => path,
-            Err(_) => return Vec::new(), // Return empty vector on error
-        };
-
-        // Check if language services are disabled for this workspace
-        let workspace_disabled = self.workspaces.get_with(path.clone(), |workspace| {
-            workspace.disable_language_services
-        });
-
-        if workspace_disabled {
-            return Vec::new();
-        }
-
-        // Try to get configuration from config finder first
-        let config_opt = if path.is_dir() {
-            // For directories, use the directory method directly
-            self.state.config_finder().directory(&path)
-        } else {
-            // For files, try to get config from python_file method
-            let module_path = if self.open_files.read().contains_key(&path) {
-                pyrefly_python::module_path::ModulePath::memory(path.clone())
-            } else {
-                pyrefly_python::module_path::ModulePath::filesystem(path.clone())
-            };
-            
-            // python_file always returns a config, but check if it's synthetic
-            let config = self.state.config_finder().python_file(
-                pyrefly_python::module_name::ModuleName::unknown(),
-                &module_path,
-            );
-            
-            // If it's a real config file (not synthetic), use it
-            match &config.source {
-                crate::config::config::ConfigSource::File(_) 
-                | crate::config::config::ConfigSource::Marker(_) => Some(config),
-                crate::config::config::ConfigSource::Synthetic => None,
-            }
-        };
-
-        if let Some(config) = config_opt {
-            // We found a real config file, use its search paths
-            let mut search_paths = Vec::new();
-            
-            // Add search paths from config
-            for path in config.search_path() {
-                if let Ok(uri) = Url::from_file_path(path) {
-                    search_paths.push(uri);
-                }
-            }
-
-            // Add site package paths from config
-            for path in config.site_package_path() {
-                if let Ok(uri) = Url::from_file_path(path) {
-                    search_paths.push(uri);
-                }
-            }
-
-            search_paths
-        } else {
-            // No config file found, use workspace python_info as fallback
-            self.workspaces.get_with(path, |workspace| {
-                let mut search_paths = Vec::new();
-
-                // Add workspace-specific search paths if available
-                if let Some(workspace_search_paths) = &workspace.search_path {
-                    for path in workspace_search_paths {
-                        if let Ok(uri) = Url::from_file_path(path) {
-                            search_paths.push(uri);
-                        }
-                    }
-                }
-
-                // Add Python environment site package paths if available
-                if let Some(python_info) = &workspace.python_info {
-                    let env = python_info.env();
-                    
-                    // Add all site package paths from the Python environment
-                    for path in env.all_site_package_paths() {
-                        if let Ok(uri) = Url::from_file_path(path) {
-                            search_paths.push(uri);
-                        }
-                    }
-                }
-
-                search_paths
-            })
-        }
-    }
-
     /// Load a module in a fresh transaction if it's not available in the current transaction
     /// or if it doesn't meet the required level
-    fn load_module_if_needed(
+    pub(crate) fn load_module_if_needed(
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
@@ -1795,7 +1197,7 @@ impl Server {
     }
 
     /// Helper function to get module info from either the current transaction or a fresh one if needed
-    fn get_module_info_with_loading(
+    pub(crate) fn get_module_info_with_loading(
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
@@ -1840,7 +1242,7 @@ impl Server {
     }
 
     /// Try to get type information for an import declaration by resolving the import
-    fn get_type_for_import_declaration(
+    pub(crate) fn get_type_for_import_declaration(
         &self,
         transaction: &Transaction<'_>,
         params: &tsp::GetTypeOfDeclarationParams,
@@ -1868,7 +1270,7 @@ impl Server {
     }
 
     /// Try to get type information for an import declaration using a fresh transaction
-    fn get_type_for_import_declaration_with_fresh_transaction(
+    pub(crate) fn get_type_for_import_declaration_with_fresh_transaction(
         &self,
         fresh_transaction: &mut Transaction,
         params: &tsp::GetTypeOfDeclarationParams,
@@ -1898,216 +1300,11 @@ impl Server {
         Ok(None)
     }
 
-    fn get_type_of_declaration(
-        &self,
-        transaction: &Transaction<'_>,
-        params: tsp::GetTypeOfDeclarationParams,
-    ) -> Result<tsp::Type, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
 
-        // Extract the location information from the declaration
-        let Some(node) = &params.decl.node else {
-            // If there's no node information, we can't get the type
-            return Err(ResponseError {
-                code: ErrorCode::InvalidParams as i32,
-                message: "Declaration has no node information".to_string(),
-                data: None,
-            });
-        };
 
-        // Convert Node URI to a handle
-        let uri = &node.uri;
 
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
-                data: None,
-            });
-        };
 
-        // Get module info for position conversion
-        // Note: If the module is not loaded in the transaction, we'll load it ourselves
-        // If we can't get module info, the file might not be loaded in the transaction
-        // This can happen when the declaration points to a definition in a file that's not currently loaded
-        let _module_info = match transaction.get_module_info(&handle) {
-            Some(info) => info,
-            None => {
-                // Module not loaded in transaction, try to load it
-                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
-                    // If we still can't load the module, fall back to default type
-                    return Ok(create_default_type_for_declaration(&params.decl));
-                };
-                
-                // Convert declaration position to TextSize
-                let position = TextSize::new(node.start as u32);
-                
-                // Try to get the type at the declaration's position using the fresh transaction
-                let Some(type_info) = fresh_transaction.get_type_at(&handle, position) else {
-                    // If we can't get type info from the position, try alternative approaches
-                    
-                    // For imports, we might need to resolve the imported symbol first
-                    if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                        if let Ok(Some(import_type)) = self.get_type_for_import_declaration_with_fresh_transaction(&mut fresh_transaction, &params) {
-                            return Ok(import_type);
-                        }
-                    }
-                    
-                    // If still no type found, create a generic type based on the declaration category
-                    return Ok(create_default_type_for_declaration(&params.decl));
-                };
-                
-                // Convert pyrefly Type to TSP Type format using the fresh transaction result
-                return Ok(self.convert_and_register_type(type_info));
-            }
-        };
 
-        // Convert declaration position to TextSize
-        let position = TextSize::new(node.start as u32);
-
-        // Try to get the type at the declaration's position
-        let Some(type_info) = transaction.get_type_at(&handle, position) else {
-            // If we can't get type info from the position, try alternative approaches
-            
-            // For imports, we might need to resolve the imported symbol first
-            if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                if let Ok(Some(import_type)) = self.get_type_for_import_declaration(transaction, &params) {
-                    return Ok(import_type);
-                }
-            }
-            
-            // If still no type found, create a generic type based on the declaration category
-            return Ok(create_default_type_for_declaration(&params.decl));
-        };
-
-        // Convert pyrefly Type to TSP Type format
-        Ok(self.convert_and_register_type(type_info))
-    }
-
-    fn get_repr(
-        &self,
-        _transaction: &Transaction<'_>,
-        params: tsp::GetReprParams,
-    ) -> Result<String, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Use the handle mapping to get the actual pyrefly type
-        let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
-            // If we can't find the internal type, fall back to the basic formatter
-            lsp_debug!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
-            let type_repr = format_type_representation(&params.type_param, params.flags);
-            return Ok(type_repr);
-        };
-
-        // Use pyrefly's native type formatting
-        let type_repr = if params.flags.has_convert_to_instance_type() {
-            // Convert class types to instance types
-            match &internal_type {
-                crate::types::types::Type::ClassDef(class) => {
-                    // Convert ClassDef to ClassType (instance)
-                    let empty_tparams = std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
-                    let empty_targs = crate::types::types::TArgs::new(empty_tparams, Vec::new());
-                    let class_type = crate::types::class::ClassType::new(
-                        class.clone(),
-                        empty_targs,
-                    );
-                    format!("{}", crate::types::types::Type::ClassType(class_type))
-                }
-                _ => format!("{}", internal_type)
-            }
-        } else {
-            // Standard type representation
-            format!("{}", internal_type)
-        };
-
-        // Apply additional formatting based on flags
-        let final_repr = if params.flags.has_expand_type_aliases() {
-            // For now, we don't have specific alias expansion logic in the Display impl,
-            // but this is where we would implement it if needed
-            type_repr
-        } else {
-            type_repr
-        };
-
-        lsp_debug!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
-        Ok(final_repr)
-    }
-
-    fn get_docstring(
-        &self,
-        transaction: &Transaction<'_>,
-        params: tsp::GetDocstringParams,
-    ) -> Result<Option<String>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Extract the location information from the declaration
-        let Some(node) = &params.decl.node else {
-            // If there's no node information, we can't find the docstring
-            return Ok(None);
-        };
-
-        // Convert Node URI to a handle
-        let uri = &node.uri;
-
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Ok(None);
-        };
-
-        // Get module info for position conversion
-        let Some(_module_info) = transaction.get_module_info(&handle) else {
-            // If module not loaded in transaction, try to load it
-            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
-                return Ok(None);
-            };
-            
-            return self.extract_docstring_from_transaction(&fresh_transaction, &handle, node);
-        };
-
-        // Use the current transaction to find the docstring
-        self.extract_docstring_from_transaction(transaction, &handle, node)
-    }
-
-    /// Helper method to extract docstring from a transaction, reusing hover logic
-    fn extract_docstring_from_transaction(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        node: &tsp::Node,
-    ) -> Result<Option<String>, ResponseError> {
-        // Convert position to TextSize
-        let position = TextSize::new(node.start as u32);
-
-        // Try to find definition at the position - this is the same logic as hover
-        if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {
-            let _definition_metadata = &first_definition.metadata;
-            let _definition_range = first_definition.definition_range;
-            let docstring_range = first_definition.docstring_range;
-            
-            if let Some(docstring_range) = docstring_range {
-                // Get the docstring content from the module info
-                let module_info = match transaction.get_module_info(handle) {
-                    Some(info) => info,
-                    None => return Ok(None),
-                };
-                let docstring_content = module_info.code_at(docstring_range);
-                return Ok(Some(docstring_content.trim().to_string()));
-            }
-        }
-
-        // No docstring found
-        Ok(None)
-    }
 
     fn search_for_type_attribute(
         &self,
@@ -2668,12 +1865,12 @@ impl Server {
         type_obj.to_string()
     }
 
-    fn current_snapshot(&self) -> i32 {
+    pub(crate) fn current_snapshot(&self) -> i32 {
         self.state.current_snapshot()
     }
 
     /// Converts a pyrefly type to TSP type and registers it in the lookup table
-    fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
+    pub(crate) fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
         let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
         
         // Register the type in the lookup table
@@ -2693,7 +1890,7 @@ impl Server {
     }
 
     /// Looks up a pyrefly type from a TSP Type
-    fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
+    pub(crate) fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
         match &tsp_type.handle {
             tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
             tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
@@ -2821,7 +2018,7 @@ impl Server {
     }
 
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
-    fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
+    pub(crate) fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
@@ -3527,26 +2724,6 @@ impl Server {
 }
 
 // Helper function to create a default type when we can't determine the actual type
-fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
-    let (category, flags) = match decl.category {
-        tsp::DeclarationCategory::FUNCTION => (tsp::TypeCategory::FUNCTION, tsp::TypeFlags::new().with_callable()),
-        tsp::DeclarationCategory::CLASS => (tsp::TypeCategory::CLASS, tsp::TypeFlags::new().with_instantiable()),
-        tsp::DeclarationCategory::IMPORT => (tsp::TypeCategory::MODULE, tsp::TypeFlags::new()),
-        tsp::DeclarationCategory::TYPE_ALIAS => (tsp::TypeCategory::ANY, tsp::TypeFlags::new().with_from_alias()),
-        tsp::DeclarationCategory::TYPE_PARAM => (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new()),
-        _ => (tsp::TypeCategory::ANY, tsp::TypeFlags::new()),
-    };
-
-    tsp::Type {
-        handle: decl.handle.clone(),
-        category,
-        flags,
-        module_name: Some(decl.module_name.clone()),
-        name: decl.name.clone(),
-        category_flags: 0,
-        decl: None,
-    }
-}
 
 fn as_notification<T>(x: &Notification) -> Option<T::Params>
 where
