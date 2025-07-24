@@ -104,4 +104,63 @@ impl Server {
         // Convert pyrefly Type to TSP Type format
         Ok(self.convert_and_register_type(type_info))
     }
+
+    /// Try to get type information for an import declaration by resolving the import
+    pub(crate) fn get_type_for_import_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = &resolved_node.uri;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Try to get type information for an import declaration using a fresh transaction
+    pub(crate) fn get_type_for_import_declaration_with_fresh_transaction(
+        &self,
+        fresh_transaction: &mut Transaction,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(fresh_transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = &resolved_node.uri;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                    // Make sure the resolved module is also loaded
+                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
+                    
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
 }

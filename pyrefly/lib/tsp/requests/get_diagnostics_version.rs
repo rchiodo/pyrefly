@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+//! TSP get diagnostics version request implementation
+
+use crate::lsp::server::Server;
+use crate::state::state::Transaction;
+use crate::tsp;
+use lsp_server::{ErrorCode, ResponseError};
+
+impl Server {
+    pub(crate) fn get_diagnostics_version(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetDiagnosticsVersionParams,
+    ) -> Result<u32, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert URI to file path (validation only)
+        if params.uri.to_file_path().is_err() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid URI - cannot convert to file path".to_string(),
+                data: None,
+            });
+        }
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&params.uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled for this workspace".to_string(),
+                data: None,
+            });
+        };
+
+        // Try to get load data for this module
+        let Some(load_data) = transaction.get_load(&handle) else {
+            // If load data doesn't exist, return version 0 to indicate no diagnostics available
+            return Ok(0);
+        };
+
+        // Return the current load version
+        Ok(load_data.version())
+    }
+}
