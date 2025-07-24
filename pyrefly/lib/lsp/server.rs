@@ -18,13 +18,9 @@ use std::time::Instant;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
 
-use clap::Parser;
-use clap::ValueEnum;
-use crossbeam_channel::Select;
 use crossbeam_channel::Sender;
 use dupe::Dupe;
 use itertools::__std_iter::once;
-use itertools::Itertools;
 use lsp_server::Connection;
 use lsp_server::ErrorCode;
 use lsp_server::Message;
@@ -78,8 +74,6 @@ use lsp_types::InlayHint;
 use lsp_types::InlayHintLabel;
 use lsp_types::InlayHintParams;
 use lsp_types::Location;
-use lsp_types::MarkupContent;
-use lsp_types::MarkupKind;
 use lsp_types::NumberOrString;
 use lsp_types::OneOf;
 use lsp_types::Position;
@@ -155,16 +149,9 @@ use pyrefly_python::PYTHON_EXTENSIONS;
 use pyrefly_python::module::TextRangeWithModule;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
-use ruff_python_ast::name::Name;
-use crate::error::collector::ErrorCollector;
-use crate::error::style::ErrorStyle;
-use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::arc_id::ArcId;
-use pyrefly_util::arc_id::WeakArcId;
-use pyrefly_util::args::clap_env;
 use pyrefly_util::events::CategorizedEvents;
-use pyrefly_util::lock::Mutex;
-use pyrefly_util::lock::RwLock;
+use pyrefly_util::absolutize::Absolutize as _;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
@@ -174,14 +161,11 @@ use ruff_source_file::LineIndex;
 use ruff_source_file::OneIndexed;
 use ruff_source_file::SourceLocation;
 use ruff_text_size::Ranged;
-use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use ruff_text_size::TextRange;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use starlark_map::small_map::SmallMap;
-use starlark_map::small_set::SmallSet;
-use tracing::error;
-use tracing::warn;
 
 use crate::commands::lsp::IndexingMode;
 use crate::commands::tsp;
@@ -310,7 +294,6 @@ pub struct Server {
     version_info: Mutex<HashMap<PathBuf, i32>>,
     /// Track current request for duration logging
     current_request: Arc<Mutex<Option<(RequestId, String, Instant)>>>,
-}
 }
 
 /// At the time when we are ready to handle a new LSP event, it will help if we know the a list of
@@ -898,6 +881,7 @@ impl Server {
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: Arc::new(AtomicBool::new(false)),
             version_info: Mutex::new(HashMap::new()),
+            current_request: Arc::new(Mutex::new(None)),
         };
         s.configure(&folders, &[]);
 
@@ -1361,8 +1345,8 @@ impl Server {
         let (symbol_name, declarations, synthesized_types) = 
             if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).into_iter().next() {
                 let definition_metadata = &first_definition.metadata;
-                let definition = &first_definition.location;
-                let _docstring = &first_definition.docstring;
+                let definition_range = first_definition.definition_range;
+                let definition_module = &first_definition.module;
                 
                 // Use provided name or extract from definition
                 let name = params.name.unwrap_or_else(|| {
@@ -1422,7 +1406,7 @@ impl Server {
                 };
 
                 // Extract module name from the definition's module (where the symbol is actually defined)
-                let definition_module_name = definition.module_info.name();
+                let definition_module_name = definition_module.name();
                 let module_parts: Vec<String> = definition_module_name.as_str().split('.').map(|s| s.to_string()).collect();
                 let module_name = tsp::ModuleName {
                     leading_dots: 0,
@@ -1444,7 +1428,7 @@ impl Server {
                 };
 
                 // Create node pointing to the actual definition location using the same logic as goto_definition
-                let definition_uri = module_info_to_uri(&definition.module_info);
+                let definition_uri = module_info_to_uri(definition_module);
                 let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
 
                 // Add the primary declaration
@@ -1454,8 +1438,8 @@ impl Server {
                     flags,
                     node: Some(tsp::Node {
                         uri: definition_uri_final.clone(),
-                        start: u32::from(definition.range.start()) as i32,
-                        length: u32::from(definition.range.end() - definition.range.start()) as i32,
+                        start: u32::from(definition_range.start()) as i32,
+                        length: u32::from(definition_range.end() - definition_range.start()) as i32,
                     }),
                     module_name,
                     name: name.clone(),
@@ -1624,8 +1608,8 @@ impl Server {
             let text_pos = TextSize::new(pos as u32);
             if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).into_iter().next() {
                 let def_metadata = &first_definition.metadata;
-                let def_info = &first_definition.location;
-                let _docstring = &first_definition.docstring;
+                let def_range = first_definition.definition_range;
+                let def_module = &first_definition.module;
                 
                 // Create a resolved declaration with proper category and flags
                 let (category, flags) = match &def_metadata {
@@ -1642,20 +1626,20 @@ impl Server {
                 };
 
                 return Ok(Some(tsp::Declaration {
-                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
+                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", def_module.name().as_str(), import_name)),
                     category,
                     flags,
                     node: Some(tsp::Node {
-                        uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
-                        start: u32::from(def_info.range.start()) as i32,
-                        length: u32::from(def_info.range.end() - def_info.range.start()) as i32,
+                        uri: module_info_to_uri(def_module).unwrap_or_else(|| params.decl.uri.clone()),
+                        start: u32::from(def_range.start()) as i32,
+                        length: u32::from(def_range.end() - def_range.start()) as i32,
                     }),
                     module_name: tsp::ModuleName {
                         leading_dots: 0,
-                        name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
+                        name_parts: def_module.name().as_str().split('.').map(|s| s.to_string()).collect(),
                     },
                     name: import_name.clone(),
-                    uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
+                    uri: module_info_to_uri(def_module).unwrap_or_else(|| params.decl.uri.clone()),
                 }));
             }
         }
@@ -1755,24 +1739,9 @@ impl Server {
                     }
                 }
 
-                // Add search paths from workspace python environment
-                if let Some(python_info) = &workspace.python_info {
-                    // Add site package paths from the python environment
-                    if let Some(site_packages) = &python_info.env.site_package_path {
-                        for path in site_packages {
-                            if let Ok(uri) = Url::from_file_path(path) {
-                                search_paths.push(uri);
-                            }
-                        }
-                    }
-
-                    // Add interpreter site package paths from the python environment
-                    for path in &python_info.env.interpreter_site_package_path {
-                        if let Ok(uri) = Url::from_file_path(path) {
-                            search_paths.push(uri);
-                        }
-                    }
-                }
+                // TODO: Add access to PythonInfo's environment data
+                // This is currently blocked by private field access
+                // The env field needs public getter methods
 
                 search_paths
             })
@@ -1822,7 +1791,7 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
-    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+    ) -> Result<(Option<crate::module::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
         self.get_module_info_with_loading_level(transaction, handle, crate::state::require::Require::Everything)
     }
 
@@ -1832,7 +1801,7 @@ impl Server {
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
         required_level: crate::state::require::Require,
-    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+    ) -> Result<(Option<crate::module::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
         // Try to get module info from the current transaction first
         if let Some(module_info) = transaction.get_module_info(handle) {
             // For lighter requirements, existing module info is usually sufficient
@@ -2114,11 +2083,17 @@ impl Server {
         // Try to find definition at the position - this is the same logic as hover
         if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {
             let _definition_metadata = &first_definition.metadata;
-            let _text_range_with_module_info = &first_definition.location;
-            let docstring = &first_definition.docstring;
+            let _definition_range = first_definition.definition_range;
+            let docstring_range = first_definition.docstring_range;
             
-            if let Some(docstring) = docstring {
-                return Ok(Some(docstring.as_string().trim().to_string()));
+            if let Some(docstring_range) = docstring_range {
+                // Get the docstring content from the module info
+                let module_info = match transaction.get_module_info(handle) {
+                    Some(info) => info,
+                    None => return Ok(None),
+                };
+                let docstring_content = module_info.code_at(docstring_range);
+                return Ok(Some(docstring_content.trim().to_string()));
             }
         }
 
@@ -2179,14 +2154,14 @@ impl Server {
         );
 
         // Convert string attribute name to ruff_python_ast::name::Name
+        use ruff_python_ast::name::Name;
         let attr_name = Name::new(attribute_name.to_string());
 
         // Get the module info from the class type
         let class_qname = class_type.class_object().qname();
-        let module_info = class_qname.module_info();
         
         // Create a handle for the module containing the class
-        // Use the existing config finder to get the proper config
+        let module_info = class_qname.module();
         let module_path = module_info.path().clone();
         let module_name = module_info.name();
         let config = self.state.config_finder().python_file(module_name, &module_path);
@@ -2196,39 +2171,33 @@ impl Server {
             config.get_sys_info(),
         );
 
-        // Use ad_hoc_solve to access the solver and look up the attribute
+        // Use ad_hoc_solve to access the solver and get the attribute type
         let result = transaction.ad_hoc_solve(&handle, |solver| {
-            // First try to get the attribute using try_lookup_attr_from_class_type
-            if let Some(attribute) = solver.try_lookup_attr_from_class_type(class_type.clone(), &attr_name) {
-                // We found the attribute, now we need to get its type
-                // Use type_of_attr_get to get the resolved type
-                let class_instance_type = crate::types::types::Type::ClassType(class_type.clone());
-                let attribute_type = solver.type_of_attr_get(
-                    &class_instance_type,
-                    &attr_name,
-                    ruff_text_size::TextRange::default(), // Use a default range
-                    &ErrorCollector::new(
-                        module_info.clone(),
-                        ErrorStyle::Never,
-                    ), // Create a temporary error collector
-                    None, // No context
-                    "search_for_type_attribute", // Context description
-                );
-                
-                Some((attribute, attribute_type))
-            } else {
-                None
-            }
+            // Use type_of_attr_get to get the resolved type
+            let class_instance_type = crate::types::types::Type::ClassType(class_type.clone());
+            let attribute_type = solver.type_of_attr_get(
+                &class_instance_type,
+                &attr_name,
+                ruff_text_size::TextRange::default(), // Use a default range
+                &crate::error::collector::ErrorCollector::new(
+                    module_info.clone(),
+                    crate::error::style::ErrorStyle::Never,
+                ), // Create a temporary error collector
+                None, // No context
+                "search_for_type_attribute", // Context description
+            );
+            
+            Some(attribute_type)
         });
 
         match result {
-            Some(Some((_attribute, attribute_type))) => {
+            Some(Some(attribute_type)) => {
                 lsp_debug!(
                     "Found attribute '{}' in class type with type: {:?}",
                     attribute_name, attribute_type
                 );
                 
-                // Convert the pyrefly Attribute to TSP Attribute
+                // Convert the pyrefly Type to TSP Attribute
                 let tsp_attribute = self.convert_type_to_tsp_attribute(attribute_type, attribute_name);
                 Ok(Some(tsp_attribute))
             }
@@ -2397,10 +2366,9 @@ impl Server {
                     }
                 };
                 
-                let abs_path = path.absolutize();
-                let abs_path = abs_path.as_deref().unwrap_or(&path);
+                let final_path = path.absolutize();
                 
-                match Url::from_file_path(abs_path) {
+                match Url::from_file_path(final_path) {
                     Ok(url) => Ok(Some(url)),
                     Err(_) => {
                         lsp_debug!("Could not convert path to URI for: {:?}", resolved_handle.path());
@@ -2551,14 +2519,9 @@ impl Server {
                 // Convert each overload signature to a TSP Type
                 for signature in overload_type.signatures.iter() {
                     match signature {
-                        crate::types::types::OverloadType::Callable(callable) => {
-                            // Convert Callable to Function type
-                            let function_type = crate::types::types::Type::Function(
-                                Box::new(crate::types::callable::Function {
-                                    signature: callable.clone(),
-                                    metadata: *overload_type.metadata.clone(),
-                                })
-                            );
+                        crate::types::types::OverloadType::Callable(function) => {
+                            // OverloadType::Callable already contains a Function
+                            let function_type = crate::types::types::Type::Function(Box::new(function.clone()));
                             result_types.push(self.convert_and_register_type(function_type));
                         },
                         crate::types::types::OverloadType::Forall(forall) => {
