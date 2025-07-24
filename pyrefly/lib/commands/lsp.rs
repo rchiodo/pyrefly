@@ -970,9 +970,11 @@ impl Server {
                     };
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
+                    let response = self.hover(&transaction, params);
+                    let result = response.unwrap_or(default_response);
                     self.send_response(new_response(
                         x.id,
-                        Ok(self.hover(&transaction, params).unwrap_or(default_response)),
+                        Ok(result),
                     ));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<InlayHintRequest>(&x) {
@@ -1887,6 +1889,7 @@ impl Server {
                 docstring_formatted = format!("\n---\n{}", docstring.as_string().trim());
             }
         }
+        eprintln!("Hover found {kind_formatted}{t}");
         Some(Hover {
             contents: HoverContents::Markup(MarkupContent {
                 kind: MarkupKind::Markdown,
