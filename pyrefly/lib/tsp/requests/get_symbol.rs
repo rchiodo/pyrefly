@@ -164,16 +164,66 @@ impl Server {
                 let definition_uri = module_info_to_uri(definition_module);
                 let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
 
+                // Create the declaration node
+                let declaration_node = tsp::Node {
+                    uri: definition_uri_final.clone(),
+                    start: u32::from(definition_range.start()) as i32,
+                    length: u32::from(definition_range.end() - definition_range.start()) as i32,
+                };
+
+                // Verify that the declaration node's text matches the expected name
+                // Check if the definition is in the same module as the current one
+                if definition_module.name() == module_info.name() {
+                    // Same module, use current module_info for validation
+                    let declaration_text_range = TextRange::new(
+                        TextSize::new(declaration_node.start as u32),
+                        TextSize::new((declaration_node.start + declaration_node.length) as u32)
+                    );
+                    let declaration_text = module_info.code_at(declaration_text_range);
+                    
+                    if declaration_text != name {
+                        panic!(
+                            "Declaration node text '{}' doesn't match expected name '{}' at range {:?} in module {} (definition in module {})",
+                            declaration_text,
+                            name,
+                            declaration_text_range,
+                            module_info.name(),
+                            definition_module.name()
+                        );
+                    }
+                } else {
+                    // Different module - we can't easily get its module info without a handle
+                    // For now, skip the validation for cross-module definitions
+                    // TODO: Consider finding a way to get the handle for the definition module
+                    
+                    // Get synthesized types if available
+                    let mut synth_types = Vec::new();
+                    if let Some(type_info) = type_info {
+                        synth_types.push(self.convert_and_register_type(type_info));
+                    }
+                    
+                    return Ok(Some(tsp::Symbol {
+                        node: params.node,
+                        name: name.clone(),
+                        decls: vec![tsp::Declaration {
+                            handle: declaration_handle,
+                            category,
+                            flags,
+                            node: Some(declaration_node),
+                            module_name,
+                            name: name.clone(),
+                            uri: definition_uri_final,
+                        }],
+                        synthesized_types: synth_types,
+                    }));
+                }
+
                 // Add the primary declaration
                 decls.push(tsp::Declaration {
                     handle: declaration_handle,
                     category,
                     flags,
-                    node: Some(tsp::Node {
-                        uri: definition_uri_final.clone(),
-                        start: u32::from(definition_range.start()) as i32,
-                        length: u32::from(definition_range.end() - definition_range.start()) as i32,
-                    }),
+                    node: Some(declaration_node),
                     module_name,
                     name: name.clone(),
                     uri: definition_uri_final,
