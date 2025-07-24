@@ -14,10 +14,17 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
+use pyrefly_util::lock::Mutex;
+use pyrefly_util::lock::RwLock;
 
+use clap::Parser;
+use clap::ValueEnum;
+use crossbeam_channel::Select;
 use crossbeam_channel::Sender;
 use dupe::Dupe;
 use itertools::__std_iter::once;
+use itertools::Itertools;
 use lsp_server::Connection;
 use lsp_server::ErrorCode;
 use lsp_server::Message;
@@ -71,6 +78,8 @@ use lsp_types::InlayHint;
 use lsp_types::InlayHintLabel;
 use lsp_types::InlayHintParams;
 use lsp_types::Location;
+use lsp_types::MarkupContent;
+use lsp_types::MarkupKind;
 use lsp_types::NumberOrString;
 use lsp_types::OneOf;
 use lsp_types::Position;
@@ -146,7 +155,13 @@ use pyrefly_python::PYTHON_EXTENSIONS;
 use pyrefly_python::module::TextRangeWithModule;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use ruff_python_ast::name::Name;
+use crate::error::collector::ErrorCollector;
+use crate::error::style::ErrorStyle;
+use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::arc_id::ArcId;
+use pyrefly_util::arc_id::WeakArcId;
+use pyrefly_util::args::clap_env;
 use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
@@ -159,11 +174,31 @@ use ruff_source_file::LineIndex;
 use ruff_source_file::OneIndexed;
 use ruff_source_file::SourceLocation;
 use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
+use ruff_text_size::TextSize;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use starlark_map::small_map::SmallMap;
+use starlark_map::small_set::SmallSet;
+use tracing::error;
+use tracing::warn;
 
 use crate::commands::lsp::IndexingMode;
+use crate::commands::tsp;
+use crate::commands::tsp::GetPythonSearchPathsRequest;
+use crate::commands::tsp::GetSnapshotRequest;
+use crate::commands::tsp::GetSymbolRequest;
+use crate::commands::tsp::GetTypeRequest;
+use crate::commands::tsp::GetOverloadsRequest;
+use crate::commands::tsp::ResolveImportDeclarationRequest;
+use crate::commands::tsp::GetTypeOfDeclarationRequest;
+use crate::commands::tsp::GetReprRequest;
+use crate::commands::tsp::GetDocstringRequest;
+use crate::commands::tsp::SearchForTypeAttributeRequest;
+use crate::commands::tsp::GetFunctionPartsRequest;
+use crate::commands::tsp::GetDiagnosticsVersionRequest;
+use crate::commands::tsp::ResolveImportRequest;
+use crate::commands::tsp::GetTypeArgsRequest;
 use crate::commands::lsp::LspArgs;
 use crate::config::config::ConfigFile;
 use crate::config::error_kind::Severity;
@@ -184,6 +219,20 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
+/// LSP debug logging that can be disabled in release builds
+#[cfg(debug_assertions)]
+macro_rules! lsp_debug {
+    ($($arg:tt)*) => {
+        eprintln!($($arg)*);
+    };
+}
+
+/// LSP debug logging that is disabled in release builds
+#[cfg(not(debug_assertions))]
+macro_rules! lsp_debug {
+    ($($arg:tt)*) => {};
+}
+
 
 pub enum ServerEvent {
     // Part 1: Events that the server should try to handle first.
@@ -211,10 +260,15 @@ struct ServerConnection(Arc<Connection>);
 
 impl ServerConnection {
     fn send(&self, msg: Message) {
+        // Log outgoing notifications
+        if let Message::Notification(ref notification) = msg {
+            lsp_debug!("Sending notification: {}", notification.method);
+            lsp_debug!("Notification parameters: {}", serde_json::to_string_pretty(&notification.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+        }
         if self.0.sender.send(msg).is_err() {
             // On error, we know the channel is closed.
             // https://docs.rs/crossbeam/latest/crossbeam/channel/struct.Sender.html#method.send
-            eprintln!("Connection closed.");
+            lsp_debug!("Connection closed.");
         };
     }
 
@@ -254,6 +308,9 @@ pub struct Server {
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: Arc<AtomicBool>,
     version_info: Mutex<HashMap<PathBuf, i32>>,
+    /// Track current request for duration logging
+    current_request: Arc<Mutex<Option<(RequestId, String, Instant)>>>,
+}
 }
 
 /// At the time when we are ready to handle a new LSP event, it will help if we know the a list of
@@ -299,6 +356,8 @@ pub fn dispatch_lsp_events(
                 }
             }
             Message::Notification(x) => {
+                lsp_debug!("Handling notification: {}", x.method);
+                lsp_debug!("Notification parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
                 let send_result = if let Some(params) = as_notification::<DidOpenTextDocument>(&x) {
                     queued_events_sender.send(ServerEvent::DidOpenTextDocument(params))
                 } else if let Some(params) = as_notification::<DidChangeTextDocument>(&x) {
@@ -322,7 +381,7 @@ pub fn dispatch_lsp_events(
                 } else if as_notification::<Exit>(&x).is_some() {
                     queued_events_sender.send(ServerEvent::Exit)
                 } else {
-                    eprintln!("Unhandled notification: {x:?}");
+                    lsp_debug!("Unhandled notification: {x:?}");
                     Ok(())
                 };
                 if send_result.is_err() {
@@ -427,6 +486,79 @@ pub enum ProcessEvent {
     Exit,
 }
 
+/// Format a TSP Type into a human-readable string representation
+fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags) -> String {
+    use tsp::TypeCategory;
+    
+    let mut result = String::new();
+    
+    // Handle different type categories
+    match type_param.category {
+        TypeCategory::ANY => result.push_str("Any"),
+        TypeCategory::FUNCTION => {
+            // For functions, show signature if available
+            if type_param.name.is_empty() {
+                result.push_str("Callable[..., Any]");
+            } else {
+                result.push_str(&type_param.name);
+            }
+        },
+        TypeCategory::OVERLOADED => {
+            result.push_str("Overload[");
+            result.push_str(&type_param.name);
+            result.push(']');
+        },
+        TypeCategory::CLASS => {
+            // For classes, show the class name
+            if flags.has_convert_to_instance_type() {
+                // Convert to instance type representation
+                result.push_str(&type_param.name);
+            } else {
+                // Show as type
+                result.push_str("type[");
+                result.push_str(&type_param.name);
+                result.push(']');
+            }
+        },
+        TypeCategory::MODULE => {
+            result.push_str("Module[");
+            result.push_str(&type_param.name);
+            result.push(']');
+        },
+        TypeCategory::UNION => {
+            // For unions, we'd need to format multiple types
+            result.push_str("Union[");
+            result.push_str(&type_param.name);
+            result.push(']');
+        },
+        TypeCategory::TYPE_VAR => {
+            result.push_str(&type_param.name);
+            // Add variance information if requested
+            if flags.has_print_type_var_variance() {
+                // This would require additional metadata about variance
+                // For now, just show the basic type var name
+            }
+        },
+        _ => {
+            // Default case for unknown categories
+            if type_param.name.is_empty() {
+                result.push_str("Unknown");
+            } else {
+                result.push_str(&type_param.name);
+            }
+        }
+    }
+    
+    // Add module information if available and it's not a builtin
+    if let Some(module_name) = &type_param.module_name {
+        if !module_name.name_parts.is_empty() && module_name.name_parts[0] != "builtins" {
+            let module_path = module_name.name_parts.join(".");
+            result = format!("{}.{}", module_path, result);
+        }
+    }
+
+    result
+}
 const PYTHON_SECTION: &str = "python";
 
 #[derive(Debug, Default, Deserialize)]
@@ -447,6 +579,14 @@ struct LspConfig {
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
+    /// Helper function to create a consistent "Snapshot is outdated" error response
+    fn snapshot_outdated_error() -> ResponseError {
+        ResponseError {
+            code: ErrorCode::ServerCancelled as i32,
+            message: "Snapshot is outdated".to_string(),
+            data: None,
+        }
+    }
     /// Process the event and return next step.
     pub fn process_event<'a>(
         &'a self,
@@ -462,7 +602,7 @@ impl Server {
                 self.validate_in_memory(ide_transaction_manager)?;
             }
             ServerEvent::CancelRequest(id) => {
-                eprintln!("We should cancel request {id:?}");
+                lsp_debug!("We should cancel request {id:?}");
                 if let Some(cancellation_handle) = self.cancellation_handles.lock().remove(&id) {
                     cancellation_handle.cancel();
                 }
@@ -493,13 +633,13 @@ impl Server {
                 if let Some(request) = self.outgoing_requests.lock().remove(&x.id) {
                     self.handle_response(ide_transaction_manager, &request, &x)?;
                 } else {
-                    eprintln!("Response for unknown request: {x:?}");
+                    lsp_debug!("Response for unknown request: {x:?}");
                 }
             }
             ServerEvent::LspRequest(x) => {
                 if canceled_requests.remove(&x.id) {
                     let message = format!("Request {} is canceled", x.id);
-                    eprintln!("{message}");
+                    lsp_debug!("{message}");
                     self.send_response(Response::new_err(
                         x.id,
                         ErrorCode::RequestCanceled as i32,
@@ -507,7 +647,10 @@ impl Server {
                     ));
                     return Ok(ProcessEvent::Continue);
                 }
-                eprintln!("Handling non-canceled request {} ({})", x.method, x.id);
+                lsp_debug!("Handling non-canceled request {} ({})", x.method, x.id);
+                lsp_debug!("Request parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+                // Store request info for duration logging in send_response
+                *self.current_request.lock() = Some((x.id.clone(), x.method.clone(), Instant::now()));
                 if let Some(params) = as_request::<GotoDefinition>(&x) {
                     let default_response = GotoDefinitionResponse::Array(Vec::new());
                     let transaction =
@@ -637,8 +780,79 @@ impl Server {
                         Ok(self.document_diagnostics(&transaction, params)),
                     ));
                     ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, Ok(self.get_python_search_paths(&transaction, params))));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
+                    self.send_response(new_response(x.id, Ok(self.current_snapshot())));
+                } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_symbol(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_of_declaration(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetReprRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_repr(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_docstring(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetFunctionPartsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_function_parts(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<ResolveImportRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
                 } else {
-                    eprintln!("Unhandled request: {x:?}");
+                    lsp_debug!("Unhandled request: {x:?}");
+                    // Log duration for unhandled requests since they don't call send_response
+                    if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
+                        lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                    }
                 }
             }
         }
@@ -691,6 +905,15 @@ impl Server {
     }
 
     fn send_response(&self, x: Response) {
+        // Check if this response corresponds to a tracked request and log duration
+        if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
+            if request_id == x.id {
+                lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+            } else {
+                // Put it back if it doesn't match (shouldn't happen in normal flow)
+                *self.current_request.lock() = Some((request_id, method, start_time));
+            }
+        }
         self.connection.send(Message::Response(x))
     }
 
@@ -873,6 +1096,7 @@ impl Server {
             }
             // we have to run, not just commit to process updates
             state.run_with_committing_transaction(transaction, &[]);
+            state.increment_snapshot(); // Increment snapshot after invalidation
             // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
             // the main event loop of the server. As a result, the server can do a revalidation of
             // all the in-memory files based on the fresh main State as soon as possible.
@@ -898,7 +1122,7 @@ impl Server {
     ) {
         let unknown = ModuleName::unknown();
 
-        eprintln!("Populating all files in the config ({:?}).", config.root);
+        lsp_debug!("Populating all files in the config ({:?}).", config.root);
         let mut transaction = state.new_committable_transaction(Require::Indexing, None);
 
         let project_path_blobs = config.get_filtered_globs(None);
@@ -918,14 +1142,14 @@ impl Server {
             ));
         }
 
-        eprintln!("Prepare to check {} files.", handles.len());
+        lsp_debug!("Prepare to check {} files.", handles.len());
         transaction.as_mut().run(&handles);
         state.commit_transaction(transaction);
         // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
         // the main event loop of the server. As a result, the server can do a revalidation of
         // all the in-memory files based on the fresh main State as soon as possible.
         let _ = priority_events_sender.send(ServerEvent::RecheckFinished);
-        eprintln!("Populated all files in the project path.");
+        lsp_debug!("Populated all files in the project path.");
     }
 
     fn did_save(&self, params: DidSaveTextDocumentParams) -> anyhow::Result<()> {
@@ -952,6 +1176,7 @@ impl Server {
         self.open_files
             .write()
             .insert(uri, Arc::new(params.text_document.text));
+        self.state.increment_snapshot(); // Increment snapshot on file open
         self.validate_in_memory(ide_transaction_manager)?;
         self.populate_project_files_if_necessary(config_to_populate_files);
         // rewatch files in case we loaded or dropped any configs
@@ -1018,6 +1243,1490 @@ impl Server {
             .write()
             .insert(file_path.clone(), Arc::new(new_text));
         self.validate_in_memory(ide_transaction_manager)
+    }
+
+    fn get_type(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetTypeParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert Node to URI and position
+        let uri = &params.node.uri;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Try to get module info, loading it if necessary
+        let (_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
+            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+            Ok((None, _)) => {
+                lsp_debug!("Warning: Could not load module for get_type request: {}", uri);
+                return Ok(None);
+            },
+            Err(_) => {
+                return Err(ResponseError {
+                    code: ErrorCode::InternalError as i32,
+                    message: "Failed to load module".to_string(),
+                    data: None,
+                });
+            }
+        };
+
+        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
+        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
+
+        // Convert offset to TextSize
+        let position = TextSize::new(params.node.start as u32);
+
+        // Get the type at the position
+        let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
+            let short_uri = uri.to_string().chars().take(100).collect::<String>();
+            lsp_debug!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
+            return Ok(None);
+        };
+
+        // Convert pyrefly Type to TSP Type format
+        Ok(Some(self.convert_and_register_type(type_info)))
+    }
+
+    fn get_symbol(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetSymbolParams,
+    ) -> Result<Option<tsp::Symbol>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert Node to URI and position
+        let uri = &params.node.uri;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Get module info for position conversion
+        // If the module is not loaded in the transaction, try to load it
+        let (module_info, transaction_to_use) = match transaction.get_module_info(&handle) {
+            Some(info) => (info, None), // Use the existing transaction
+            None => {
+                // Module not loaded in transaction, try to load it
+                let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
+                    return Err(ResponseError {
+                        code: ErrorCode::RequestFailed as i32,
+                        message: "Failed to load module".to_string(),
+                        data: None,
+                    });
+                };
+                
+                let Some(info) = fresh_transaction.get_module_info(&handle) else {
+                    return Err(ResponseError {
+                        code: ErrorCode::RequestFailed as i32,
+                        message: "Failed to get module info after loading".to_string(),
+                        data: None,
+                    });
+                };
+                
+                (info, Some(fresh_transaction))
+            }
+        };
+
+        // Use the appropriate transaction for the rest of the function
+        let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
+
+        // Convert offset to TextSize
+        let position = TextSize::new(params.node.start as u32);
+
+        // First, check if we can get type information at this position
+        let type_info = active_transaction.get_type_at(&handle, position);
+
+        // Try to find definition at the position
+        let (symbol_name, declarations, synthesized_types) = 
+            if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).into_iter().next() {
+                let definition_metadata = &first_definition.metadata;
+                let definition = &first_definition.location;
+                let _docstring = &first_definition.docstring;
+                
+                // Use provided name or extract from definition
+                let name = params.name.unwrap_or_else(|| {
+                    // Try to extract symbol name from the source code at the position
+                    let start = position;
+                    let end = TextSize::new((params.node.start + params.node.length) as u32);
+                    module_info.code_at(TextRange::new(start, end)).to_string()
+                });
+
+                // Create declarations from the definition
+                let mut decls = Vec::new();
+                
+                // Generate a unique handle for this declaration
+                let declaration_handle = tsp::TypeHandle::String(format!("decl_{:p}_{}", &definition_metadata as *const _, u32::from(position)));
+                
+                // Determine the category and flags based on definition metadata
+                let (category, flags) = match &definition_metadata {
+                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
+                        match symbol_kind {
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
+                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                        }
+                    },
+                    crate::state::lsp::DefinitionMetadata::Module => {
+                        // For module imports, check if type info is available to determine if resolved
+                        let mut import_flags = tsp::DeclarationFlags::new();
+                        if type_info.is_none() {
+                            // If we can't get type info for an import, it might be unresolved
+                            import_flags = import_flags.with_unresolved_import();
+                        }
+                        (tsp::DeclarationCategory::IMPORT, import_flags)
+                    },
+                    crate::state::lsp::DefinitionMetadata::Attribute(_) => {
+                        // Attributes are typically class members
+                        (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member())
+                    },
+                    crate::state::lsp::DefinitionMetadata::VariableOrAttribute(_, Some(symbol_kind)) => {
+                        match symbol_kind {
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member().with_constant()),
+                            pyrefly_python::symbol_kind::SymbolKind::Attribute => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                            pyrefly_python::symbol_kind::SymbolKind::Parameter => (tsp::DeclarationCategory::PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (tsp::DeclarationCategory::TYPE_ALIAS, tsp::DeclarationFlags::new()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member()),
+                        }
+                    },
+                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                };
+
+                // Extract module name from the definition's module (where the symbol is actually defined)
+                let definition_module_name = definition.module_info.name();
+                let module_parts: Vec<String> = definition_module_name.as_str().split('.').map(|s| s.to_string()).collect();
+                let module_name = tsp::ModuleName {
+                    leading_dots: 0,
+                    name_parts: module_parts.clone(),
+                };
+
+                // Check if this is from builtins and update category/flags accordingly
+                let (category, flags) = if module_parts.first().map_or(false, |first| first == "builtins") {
+                    match category {
+                        tsp::DeclarationCategory::FUNCTION | 
+                        tsp::DeclarationCategory::CLASS | 
+                        tsp::DeclarationCategory::VARIABLE => {
+                            (tsp::DeclarationCategory::INTRINSIC, flags)
+                        },
+                        _ => (category, flags),
+                    }
+                } else {
+                    (category, flags)
+                };
+
+                // Create node pointing to the actual definition location using the same logic as goto_definition
+                let definition_uri = module_info_to_uri(&definition.module_info);
+                let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
+
+                // Add the primary declaration
+                decls.push(tsp::Declaration {
+                    handle: declaration_handle,
+                    category,
+                    flags,
+                    node: Some(tsp::Node {
+                        uri: definition_uri_final.clone(),
+                        start: u32::from(definition.range.start()) as i32,
+                        length: u32::from(definition.range.end() - definition.range.start()) as i32,
+                    }),
+                    module_name,
+                    name: name.clone(),
+                    uri: definition_uri_final,
+                });
+
+                // Get synthesized types if available
+                let mut synth_types = Vec::new();
+                if let Some(type_info) = type_info {
+                    synth_types.push(self.convert_and_register_type(type_info));
+                }
+
+                (name, decls, synth_types)
+            } else {
+                // If no definition found, try to get type information at least
+                let name = params.name.unwrap_or_else(|| {
+                    let start = position;
+                    let end = TextSize::new((params.node.start + params.node.length) as u32);
+                    module_info.code_at(TextRange::new(start, end)).to_string()
+                });
+
+                let mut synth_types = Vec::new();
+                if let Some(type_info) = type_info {
+                    synth_types.push(self.convert_and_register_type(type_info));
+                } else {
+                    // No definition found and no type information available
+                    lsp_debug!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
+                    return Ok(None);
+                }
+
+                (name, Vec::new(), synth_types)
+            };
+
+        Ok(Some(tsp::Symbol {
+            node: params.node,
+            name: symbol_name,
+            decls: declarations,
+            synthesized_types,
+        }))
+    }
+
+    fn resolve_import_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::ResolveImportDeclarationParams,
+    ) -> Result<Option<tsp::Declaration>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Only resolve import declarations
+        if params.decl.category != tsp::DeclarationCategory::IMPORT {
+            // Return the same declaration if it's not an import
+            return Ok(Some(params.decl));
+        }
+
+        // Parse the module name from the declaration
+        let module_name = &params.decl.module_name;
+        let import_name = &params.decl.name;
+
+        // Convert source URI to file path (validation only)
+        let importing_uri = &params.decl.uri;
+        if importing_uri.to_file_path().is_err() {
+            return Ok(Some(tsp::Declaration {
+                handle: params.decl.handle,
+                category: params.decl.category,
+                flags: params.decl.flags.with_unresolved_import(),
+                node: params.decl.node,
+                module_name: params.decl.module_name,
+                name: params.decl.name,
+                uri: params.decl.uri.clone(),
+            }));
+        }
+
+        // Check if workspace has language services enabled and get the source handle
+        let Some(source_handle) = self.make_handle_if_enabled(importing_uri) else {
+            return Ok(Some(tsp::Declaration {
+                handle: params.decl.handle,
+                category: params.decl.category,
+                flags: params.decl.flags.with_unresolved_import(),
+                node: params.decl.node,
+                module_name: params.decl.module_name,
+                name: params.decl.name,
+                uri: params.decl.uri.clone(),
+            }));
+        };
+
+        // Convert TSP ModuleName to pyrefly ModuleName
+        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(module_name);
+
+        // Use the transaction to resolve the import - same logic as resolve_import
+        let target_handle = match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
+            Ok(resolved_handle) => resolved_handle,
+            Err(_) => {
+                // Import resolution failed, return unresolved import
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            }
+        };
+
+        // Try to get module info for the target module, loading it if necessary
+        let (target_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &target_handle) {
+            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+            Ok((None, _)) => {
+                // Module not found, possibly an unresolved import
+                return Ok(Some(tsp::Declaration {
+                    handle: params.decl.handle,
+                    category: params.decl.category,
+                    flags: params.decl.flags.with_unresolved_import(),
+                    node: params.decl.node,
+                    module_name: params.decl.module_name,
+                    name: params.decl.name,
+                    uri: params.decl.uri,
+                }));
+            },
+            Err(_) => {
+                return Err(ResponseError {
+                    code: ErrorCode::InternalError as i32,
+                    message: "Failed to load target module".to_string(),
+                    data: None,
+                });
+            }
+        };
+
+        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
+        let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
+
+        // Look for the specific symbol in the target module
+        // We'll use find_definition with a synthetic position to locate the symbol
+        // This is a simplified approach - a full implementation would need to:
+        // 1. Parse the target module's AST to find all exports
+        // 2. Check __all__ if it exists
+        // 3. Handle star imports properly
+        // 4. Respect visibility rules (private vs public symbols)
+        
+        // Try to find all identifiers in the target module that match our import name
+        // For simplicity, we'll search through the module content for the symbol definition
+        let module_content = target_module_info.contents();
+        
+        // Look for function, class, or variable definitions of the imported name
+        let patterns = [
+            format!("def {}(", import_name),      // Function definition
+            format!("class {}(", import_name),    // Class definition  
+            format!("class {}:", import_name),    // Class definition without inheritance
+            format!("{} =", import_name),         // Variable assignment
+        ];
+        
+        let mut found_position = None;
+        for pattern in &patterns {
+            if let Some(pos) = module_content.find(pattern) {
+                found_position = Some(pos);
+                break;
+            }
+        }
+
+        // If we found the symbol, try to get its definition info
+        if let Some(pos) = found_position {
+            let text_pos = TextSize::new(pos as u32);
+            if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).into_iter().next() {
+                let def_metadata = &first_definition.metadata;
+                let def_info = &first_definition.location;
+                let _docstring = &first_definition.docstring;
+                
+                // Create a resolved declaration with proper category and flags
+                let (category, flags) = match &def_metadata {
+                    crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
+                        match symbol_kind {
+                            pyrefly_python::symbol_kind::SymbolKind::Function => (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Class => (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Variable => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                            pyrefly_python::symbol_kind::SymbolKind::Constant => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant()),
+                            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                        }
+                    },
+                    _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
+                };
+
+                return Ok(Some(tsp::Declaration {
+                    handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
+                    category,
+                    flags,
+                    node: Some(tsp::Node {
+                        uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
+                        start: u32::from(def_info.range.start()) as i32,
+                        length: u32::from(def_info.range.end() - def_info.range.start()) as i32,
+                    }),
+                    module_name: tsp::ModuleName {
+                        leading_dots: 0,
+                        name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
+                    },
+                    name: import_name.clone(),
+                    uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()),
+                }));
+            }
+        }
+
+        // Fallback: create a generic resolved declaration pointing to the target module
+        let resolved_declaration = tsp::Declaration {
+            handle: tsp::TypeHandle::String(format!("resolved_{}_{}", target_module_info.name().as_str(), import_name)),
+            category: tsp::DeclarationCategory::VARIABLE, // Default to variable since we couldn't determine the type
+            flags: tsp::DeclarationFlags::new(),
+            node: None, // We don't have the exact location in the target module
+            module_name: tsp::ModuleName {
+                leading_dots: 0,
+                name_parts: target_module_info.name().as_str().split('.').map(|s| s.to_string()).collect(),
+            },
+            name: import_name.clone(),
+            uri: module_info_to_uri(&target_module_info).unwrap_or_else(|| params.decl.uri.clone()), // Convert module info to URI
+        };
+
+        Ok(Some(resolved_declaration))
+    }
+
+    fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<Url> {
+        // Get the URI directly from params
+        let uri = &params.from_uri;
+
+        // Convert URI to file path
+        let path = match uri.to_file_path() {
+            Ok(path) => path,
+            Err(_) => return Vec::new(), // Return empty vector on error
+        };
+
+        // Check if language services are disabled for this workspace
+        let workspace_disabled = self.workspaces.get_with(path.clone(), |workspace| {
+            workspace.disable_language_services
+        });
+
+        if workspace_disabled {
+            return Vec::new();
+        }
+
+        // Try to get configuration from config finder first
+        let config_opt = if path.is_dir() {
+            // For directories, use the directory method directly
+            self.state.config_finder().directory(&path)
+        } else {
+            // For files, try to get config from python_file method
+            let module_path = if self.open_files.read().contains_key(&path) {
+                pyrefly_python::module_path::ModulePath::memory(path.clone())
+            } else {
+                pyrefly_python::module_path::ModulePath::filesystem(path.clone())
+            };
+            
+            // python_file always returns a config, but check if it's synthetic
+            let config = self.state.config_finder().python_file(
+                pyrefly_python::module_name::ModuleName::unknown(),
+                &module_path,
+            );
+            
+            // If it's a real config file (not synthetic), use it
+            match &config.source {
+                crate::config::config::ConfigSource::File(_) 
+                | crate::config::config::ConfigSource::Marker(_) => Some(config),
+                crate::config::config::ConfigSource::Synthetic => None,
+            }
+        };
+
+        if let Some(config) = config_opt {
+            // We found a real config file, use its search paths
+            let mut search_paths = Vec::new();
+            
+            // Add search paths from config
+            for path in config.search_path() {
+                if let Ok(uri) = Url::from_file_path(path) {
+                    search_paths.push(uri);
+                }
+            }
+
+            // Add site package paths from config
+            for path in config.site_package_path() {
+                if let Ok(uri) = Url::from_file_path(path) {
+                    search_paths.push(uri);
+                }
+            }
+
+            search_paths
+        } else {
+            // No config file found, use workspace python_info as fallback
+            self.workspaces.get_with(path, |workspace| {
+                let mut search_paths = Vec::new();
+
+                // Add workspace-specific search paths if available
+                if let Some(workspace_search_paths) = &workspace.search_path {
+                    for path in workspace_search_paths {
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            search_paths.push(uri);
+                        }
+                    }
+                }
+
+                // Add search paths from workspace python environment
+                if let Some(python_info) = &workspace.python_info {
+                    // Add site package paths from the python environment
+                    if let Some(site_packages) = &python_info.env.site_package_path {
+                        for path in site_packages {
+                            if let Ok(uri) = Url::from_file_path(path) {
+                                search_paths.push(uri);
+                            }
+                        }
+                    }
+
+                    // Add interpreter site package paths from the python environment
+                    for path in &python_info.env.interpreter_site_package_path {
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            search_paths.push(uri);
+                        }
+                    }
+                }
+
+                search_paths
+            })
+        }
+    }
+
+    /// Load a module in a fresh transaction if it's not available in the current transaction
+    /// or if it doesn't meet the required level
+    fn load_module_if_needed(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
+    ) -> Option<Transaction> {
+        // Check if module is already loaded in the current transaction
+        // For now, we'll be conservative and always reload if Everything is required
+        // but the module exists (since we can't easily check the current requirement level)
+        let should_reload = match required_level {
+            crate::state::require::Require::Everything => {
+                // For Everything requirement, reload even if module exists to ensure full analysis
+                transaction.get_module_info(handle).is_some()
+            },
+            _ => {
+                // For lighter requirements, don't reload if module already exists
+                transaction.get_module_info(handle).is_none()
+            }
+        };
+
+        if !should_reload && transaction.get_module_info(handle).is_some() {
+            return None; // Module already loaded and sufficient
+        }
+
+        // Module not loaded or needs upgrade, create a fresh transaction and load it
+        let mut fresh_transaction = self.state.transaction();
+        fresh_transaction.run(&[(handle.clone(), required_level)]);
+        
+        // Verify the module was loaded successfully
+        if fresh_transaction.get_module_info(handle).is_some() {
+            Some(fresh_transaction)
+        } else {
+            None // Module couldn't be loaded even with fresh transaction
+        }
+    }
+
+    /// Helper function to get module info from either the current transaction or a fresh one if needed
+    fn get_module_info_with_loading(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+        self.get_module_info_with_loading_level(transaction, handle, crate::state::require::Require::Everything)
+    }
+
+    /// Helper function to get module info with a specific requirement level
+    fn get_module_info_with_loading_level(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
+    ) -> Result<(Option<pyrefly_python::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+        // Try to get module info from the current transaction first
+        if let Some(module_info) = transaction.get_module_info(handle) {
+            // For lighter requirements, existing module info is usually sufficient
+            match required_level {
+                crate::state::require::Require::Exports | 
+                crate::state::require::Require::Errors |
+                crate::state::require::Require::Indexing => {
+                    return Ok((Some(module_info), None));
+                },
+                crate::state::require::Require::Everything => {
+                    // For Everything requirement, we may need to reload
+                    // For now, we'll assume existing module info is sufficient
+                    // unless explicitly requested to reload
+                    return Ok((Some(module_info), None));
+                }
+            }
+        }
+
+        // Module not loaded or needs specific requirement level, try to load it
+        if let Some(fresh_transaction) = self.load_module_if_needed(transaction, handle, required_level) {
+            if let Some(module_info) = fresh_transaction.get_module_info(handle) {
+                return Ok((Some(module_info), Some(fresh_transaction)));
+            }
+        }
+
+        // Could not load the module
+        Ok((None, None))
+    }
+
+    /// Try to get type information for an import declaration by resolving the import
+    fn get_type_for_import_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = &resolved_node.uri;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
+    /// Try to get type information for an import declaration using a fresh transaction
+    fn get_type_for_import_declaration_with_fresh_transaction(
+        &self,
+        fresh_transaction: &mut Transaction,
+        params: &tsp::GetTypeOfDeclarationParams,
+    ) -> Result<Option<tsp::Type>, ResponseError> {
+        let resolve_params = tsp::ResolveImportDeclarationParams {
+            decl: params.decl.clone(),
+            options: tsp::ResolveImportOptions::default(),
+            snapshot: params.snapshot,
+        };
+        
+        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(fresh_transaction, resolve_params) {
+            if let Some(resolved_node) = &resolved_decl.node {
+                let resolved_uri = &resolved_node.uri;
+                
+                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                    // Make sure the resolved module is also loaded
+                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
+                    
+                    let resolved_position = TextSize::new(resolved_node.start as u32);
+                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    }
+                }
+            }
+        }
+        
+        Ok(None)
+    }
+
+    fn get_type_of_declaration(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetTypeOfDeclarationParams,
+    ) -> Result<tsp::Type, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Extract the location information from the declaration
+        let Some(node) = &params.decl.node else {
+            // If there's no node information, we can't get the type
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Declaration has no node information".to_string(),
+                data: None,
+            });
+        };
+
+        // Convert Node URI to a handle
+        let uri = &node.uri;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_string(),
+                data: None,
+            });
+        };
+
+        // Get module info for position conversion
+        // Note: If the module is not loaded in the transaction, we'll load it ourselves
+        // If we can't get module info, the file might not be loaded in the transaction
+        // This can happen when the declaration points to a definition in a file that's not currently loaded
+        let _module_info = match transaction.get_module_info(&handle) {
+            Some(info) => info,
+            None => {
+                // Module not loaded in transaction, try to load it
+                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
+                    // If we still can't load the module, fall back to default type
+                    return Ok(create_default_type_for_declaration(&params.decl));
+                };
+                
+                // Convert declaration position to TextSize
+                let position = TextSize::new(node.start as u32);
+                
+                // Try to get the type at the declaration's position using the fresh transaction
+                let Some(type_info) = fresh_transaction.get_type_at(&handle, position) else {
+                    // If we can't get type info from the position, try alternative approaches
+                    
+                    // For imports, we might need to resolve the imported symbol first
+                    if params.decl.category == tsp::DeclarationCategory::IMPORT {
+                        if let Ok(Some(import_type)) = self.get_type_for_import_declaration_with_fresh_transaction(&mut fresh_transaction, &params) {
+                            return Ok(import_type);
+                        }
+                    }
+                    
+                    // If still no type found, create a generic type based on the declaration category
+                    return Ok(create_default_type_for_declaration(&params.decl));
+                };
+                
+                // Convert pyrefly Type to TSP Type format using the fresh transaction result
+                return Ok(self.convert_and_register_type(type_info));
+            }
+        };
+
+        // Convert declaration position to TextSize
+        let position = TextSize::new(node.start as u32);
+
+        // Try to get the type at the declaration's position
+        let Some(type_info) = transaction.get_type_at(&handle, position) else {
+            // If we can't get type info from the position, try alternative approaches
+            
+            // For imports, we might need to resolve the imported symbol first
+            if params.decl.category == tsp::DeclarationCategory::IMPORT {
+                if let Ok(Some(import_type)) = self.get_type_for_import_declaration(transaction, &params) {
+                    return Ok(import_type);
+                }
+            }
+            
+            // If still no type found, create a generic type based on the declaration category
+            return Ok(create_default_type_for_declaration(&params.decl));
+        };
+
+        // Convert pyrefly Type to TSP Type format
+        Ok(self.convert_and_register_type(type_info))
+    }
+
+    fn get_repr(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetReprParams,
+    ) -> Result<String, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Use the handle mapping to get the actual pyrefly type
+        let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
+            // If we can't find the internal type, fall back to the basic formatter
+            lsp_debug!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
+            let type_repr = format_type_representation(&params.type_param, params.flags);
+            return Ok(type_repr);
+        };
+
+        // Use pyrefly's native type formatting
+        let type_repr = if params.flags.has_convert_to_instance_type() {
+            // Convert class types to instance types
+            match &internal_type {
+                crate::types::types::Type::ClassDef(class) => {
+                    // Convert ClassDef to ClassType (instance)
+                    let empty_tparams = std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
+                    let empty_targs = crate::types::types::TArgs::new(empty_tparams, Vec::new());
+                    let class_type = crate::types::class::ClassType::new(
+                        class.clone(),
+                        empty_targs,
+                    );
+                    format!("{}", crate::types::types::Type::ClassType(class_type))
+                }
+                _ => format!("{}", internal_type)
+            }
+        } else {
+            // Standard type representation
+            format!("{}", internal_type)
+        };
+
+        // Apply additional formatting based on flags
+        let final_repr = if params.flags.has_expand_type_aliases() {
+            // For now, we don't have specific alias expansion logic in the Display impl,
+            // but this is where we would implement it if needed
+            type_repr
+        } else {
+            type_repr
+        };
+
+        lsp_debug!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
+        Ok(final_repr)
+    }
+
+    fn get_docstring(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetDocstringParams,
+    ) -> Result<Option<String>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Extract the location information from the declaration
+        let Some(node) = &params.decl.node else {
+            // If there's no node information, we can't find the docstring
+            return Ok(None);
+        };
+
+        // Convert Node URI to a handle
+        let uri = &node.uri;
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(uri) else {
+            return Ok(None);
+        };
+
+        // Get module info for position conversion
+        let Some(_module_info) = transaction.get_module_info(&handle) else {
+            // If module not loaded in transaction, try to load it
+            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
+                return Ok(None);
+            };
+            
+            return self.extract_docstring_from_transaction(&fresh_transaction, &handle, node);
+        };
+
+        // Use the current transaction to find the docstring
+        self.extract_docstring_from_transaction(transaction, &handle, node)
+    }
+
+    /// Helper method to extract docstring from a transaction, reusing hover logic
+    fn extract_docstring_from_transaction(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        node: &tsp::Node,
+    ) -> Result<Option<String>, ResponseError> {
+        // Convert position to TextSize
+        let position = TextSize::new(node.start as u32);
+
+        // Try to find definition at the position - this is the same logic as hover
+        if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {
+            let _definition_metadata = &first_definition.metadata;
+            let _text_range_with_module_info = &first_definition.location;
+            let docstring = &first_definition.docstring;
+            
+            if let Some(docstring) = docstring {
+                return Ok(Some(docstring.as_string().trim().to_string()));
+            }
+        }
+
+        // No docstring found
+        Ok(None)
+    }
+
+    fn search_for_type_attribute(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::SearchForTypeAttributeParams,
+    ) -> Result<Option<tsp::Attribute>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        lsp_debug!(
+            "Searching for attribute '{}' with access flags: {:?}",
+            params.attribute_name, params.access_flags
+        );
+
+        // Get the internal type from the start_type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.start_type) {
+            Some(t) => t,
+            None => {
+                lsp_debug!("Could not resolve type handle: {:?}", params.start_type.handle);
+                return Ok(None);
+            }
+        };
+
+        // Only work on class types - this method is specifically for class attribute lookup
+        match &internal_type {
+            crate::types::types::Type::ClassType(class_type) => {
+                self.search_attribute_in_class_type(class_type, &params.attribute_name, transaction, &params)
+            }
+            _ => {
+                lsp_debug!(
+                    "search_for_type_attribute only works on class types, got: {:?}",
+                    internal_type
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// Search for attribute in class types using the solver
+    fn search_attribute_in_class_type(
+        &self,
+        class_type: &crate::types::class::ClassType,
+        attribute_name: &str,
+        transaction: &Transaction,
+        _params: &tsp::SearchForTypeAttributeParams,
+    ) -> Result<Option<tsp::Attribute>, ResponseError> {
+        lsp_debug!(
+            "Searching for attribute '{}' in class type using solver",
+            attribute_name
+        );
+
+        // Convert string attribute name to ruff_python_ast::name::Name
+        let attr_name = Name::new(attribute_name.to_string());
+
+        // Get the module info from the class type
+        let class_qname = class_type.class_object().qname();
+        let module_info = class_qname.module_info();
+        
+        // Create a handle for the module containing the class
+        // Use the existing config finder to get the proper config
+        let module_path = module_info.path().clone();
+        let module_name = module_info.name();
+        let config = self.state.config_finder().python_file(module_name, &module_path);
+        let handle = crate::state::handle::Handle::new(
+            module_name,
+            module_path,
+            config.get_sys_info(),
+        );
+
+        // Use ad_hoc_solve to access the solver and look up the attribute
+        let result = transaction.ad_hoc_solve(&handle, |solver| {
+            // First try to get the attribute using try_lookup_attr_from_class_type
+            if let Some(attribute) = solver.try_lookup_attr_from_class_type(class_type.clone(), &attr_name) {
+                // We found the attribute, now we need to get its type
+                // Use type_of_attr_get to get the resolved type
+                let class_instance_type = crate::types::types::Type::ClassType(class_type.clone());
+                let attribute_type = solver.type_of_attr_get(
+                    &class_instance_type,
+                    &attr_name,
+                    ruff_text_size::TextRange::default(), // Use a default range
+                    &ErrorCollector::new(
+                        module_info.clone(),
+                        ErrorStyle::Never,
+                    ), // Create a temporary error collector
+                    None, // No context
+                    "search_for_type_attribute", // Context description
+                );
+                
+                Some((attribute, attribute_type))
+            } else {
+                None
+            }
+        });
+
+        match result {
+            Some(Some((_attribute, attribute_type))) => {
+                lsp_debug!(
+                    "Found attribute '{}' in class type with type: {:?}",
+                    attribute_name, attribute_type
+                );
+                
+                // Convert the pyrefly Attribute to TSP Attribute
+                let tsp_attribute = self.convert_type_to_tsp_attribute(attribute_type, attribute_name);
+                Ok(Some(tsp_attribute))
+            }
+            Some(None) => {
+                lsp_debug!(
+                    "Attribute '{}' not found in class type",
+                    attribute_name
+                );
+                Ok(None)
+            }
+            None => {
+                lsp_debug!(
+                    "Failed to create solver for attribute lookup of '{}'",
+                    attribute_name
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    /// Convert a pyrefly Type to TSP Attribute format
+    fn convert_type_to_tsp_attribute(
+        &self,
+        attribute_type: crate::types::types::Type,
+        attribute_name: &str,
+    ) -> tsp::Attribute {
+        // Convert the pyrefly type to TSP type and register it
+        let tsp_type = self.convert_and_register_type(attribute_type);
+
+        // For now, create default flags - we could enhance this later with more attribute metadata
+        let flags = tsp::AttributeFlags::NONE;
+
+        tsp::Attribute {
+            name: attribute_name.to_string(),
+            type_info: tsp_type,
+            owner: None, // TODO: Could set this to the class type if needed
+            bound_type: None, // TODO: Could implement bound type if needed
+            flags,
+            decls: Vec::new(), // TODO: Could add declaration information if available
+        }
+    }
+
+    fn get_function_parts(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetFunctionPartsParams,
+    ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        lsp_debug!("Getting function parts for type: {:?}", params.type_param.handle);
+
+        // Get the internal type from the type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+            Some(t) => t,
+            None => {
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
+                return Ok(None);
+            }
+        };
+
+        // Extract function parts based on the type
+        match &internal_type {
+            crate::types::types::Type::Function(func_type) => {
+                self.extract_function_parts_from_function(func_type, &params.flags, transaction)
+            }
+            crate::types::types::Type::Callable(callable_type) => {
+                self.extract_function_parts_from_callable(callable_type, &params.flags, transaction)
+            }
+            crate::types::types::Type::Overload(_overload_type) => {
+                // For overloaded functions, we could return the signature of the first overload
+                // or a combined representation. For now, let's return None as it's complex.
+                lsp_debug!("Function parts for overloaded functions not yet implemented");
+                Ok(None)
+            }
+            _ => {
+                lsp_debug!(
+                    "get_function_parts only works on function types, got: {:?}",
+                    internal_type
+                );
+                Ok(None)
+            }
+        }
+    }
+
+    fn get_diagnostics_version(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::GetDiagnosticsVersionParams,
+    ) -> Result<u32, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert URI to file path (validation only)
+        if params.uri.to_file_path().is_err() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid URI - cannot convert to file path".to_string(),
+                data: None,
+            });
+        }
+
+        // Check if workspace has language services enabled
+        let Some(handle) = self.make_handle_if_enabled(&params.uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled for this workspace".to_string(),
+                data: None,
+            });
+        };
+
+        // Try to get load data for this module
+        let Some(load_data) = transaction.get_load(&handle) else {
+            // If load data doesn't exist, return version 0 to indicate no diagnostics available
+            return Ok(0);
+        };
+
+        // Return the current load version
+        Ok(load_data.version())
+    }
+
+    fn resolve_import(
+        &self,
+        transaction: &Transaction<'_>,
+        params: tsp::ResolveImportParams,
+    ) -> Result<Option<lsp_types::Url>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert source URI to file path (validation only)
+        if params.source_uri.to_file_path().is_err() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "Invalid source URI - cannot convert to file path".to_string(),
+                data: None,
+            });
+        }
+
+        // Check if workspace has language services enabled and get the source handle
+        let Some(source_handle) = self.make_handle_if_enabled(&params.source_uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled for this workspace".to_string(),
+                data: None,
+            });
+        };
+
+        // Use the transaction to resolve the import
+        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
+        match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
+            Ok(resolved_handle) => {
+                // For import resolution, we don't need to load the module at all.
+                // We can get the path directly from the resolved handle and convert it to a URI.
+                // This avoids the expensive module loading operation.
+                let path = match to_real_path(resolved_handle.path()) {
+                    Some(path) => path,
+                    None => {
+                        lsp_debug!("Could not get real path for: {:?}", resolved_handle.path());
+                        return Ok(None);
+                    }
+                };
+                
+                let abs_path = path.absolutize();
+                let abs_path = abs_path.as_deref().unwrap_or(&path);
+                
+                match Url::from_file_path(abs_path) {
+                    Ok(url) => Ok(Some(url)),
+                    Err(_) => {
+                        lsp_debug!("Could not convert path to URI for: {:?}", resolved_handle.path());
+                        Ok(None)
+                    }
+                }
+            },
+            Err(e) => {
+                // For debugging, use {:?} instead of {}
+                lsp_debug!("Import resolution failed: {:?}", e);
+                // Return None instead of an error if the import cannot be resolved
+                Ok(None)
+            }
+        }
+    }
+
+    fn get_type_args(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetTypeArgsParams,
+    ) -> Result<Vec<tsp::Type>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Get the internal type from the type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+            Some(t) => t,
+            None => {
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
+                return Ok(Vec::new());
+            }
+        };
+
+        // Extract type arguments based on the type
+        match &internal_type {
+            // Union types: return the constituent types
+            crate::types::types::Type::Union(union_type) => {
+                let mut result_types = Vec::new();
+                for union_member in union_type.iter() {
+                    result_types.push(self.convert_and_register_type(union_member.clone()));
+                }
+                Ok(result_types)
+            },
+            
+            // Class types with generic arguments
+            crate::types::types::Type::ClassType(class_type) => {
+                let type_args = class_type.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // TypedDict types with generic arguments  
+            crate::types::types::Type::TypedDict(typed_dict) => {
+                let type_args = typed_dict.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // Partial TypedDict types with generic arguments
+            crate::types::types::Type::PartialTypedDict(typed_dict) => {
+                let type_args = typed_dict.targs();
+                let mut result_types = Vec::new();
+                for arg_type in type_args.as_slice() {
+                    result_types.push(self.convert_and_register_type(arg_type.clone()));
+                }
+                Ok(result_types)
+            },
+
+            // Tuple types
+            crate::types::types::Type::Tuple(tuple_type) => {
+                match tuple_type {
+                    crate::types::tuple::Tuple::Concrete(element_types) => {
+                        let mut result_types = Vec::new();
+                        for element_type in element_types.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        Ok(result_types)
+                    },
+                    crate::types::tuple::Tuple::Unbounded(element_type) => {
+                        // For unbounded tuples like Tuple[int, ...], return the element type
+                        Ok(vec![self.convert_and_register_type(element_type.as_ref().clone())])
+                    },
+                    crate::types::tuple::Tuple::Unpacked(unpacked) => {
+                        // For unpacked tuples like Tuple[int, str, *T, bool], return all the types
+                        let mut result_types = Vec::new();
+                        // Add prefix types
+                        for element_type in unpacked.0.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        // Add the unpacked type (the variadic part)
+                        result_types.push(self.convert_and_register_type(unpacked.1.clone()));
+                        // Add suffix types
+                        for element_type in unpacked.2.iter() {
+                            result_types.push(self.convert_and_register_type(element_type.clone()));
+                        }
+                        Ok(result_types)
+                    },
+                }
+            },
+
+            // Generic class definitions might have type parameters
+            crate::types::types::Type::ClassDef(_class_def) => {
+                // For class definitions, we can't return type arguments since they aren't instantiated
+                // Return empty array as this represents the uninstantiated generic
+                Ok(Vec::new())
+            },
+
+            // Other types don't have type arguments
+            _ => {
+                lsp_debug!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    fn get_overloads(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetOverloadsParams,
+    ) -> Result<Option<Vec<tsp::Type>>, ResponseError> {
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Get the internal type from the type handle
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+            Some(t) => t,
+            None => {
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
+                return Ok(None);
+            }
+        };
+
+        // Only process overloaded function types
+        match &internal_type {
+            crate::types::types::Type::Overload(overload_type) => {
+                let mut result_types = Vec::new();
+                
+                // Convert each overload signature to a TSP Type
+                for signature in overload_type.signatures.iter() {
+                    match signature {
+                        crate::types::types::OverloadType::Callable(callable) => {
+                            // Convert Callable to Function type
+                            let function_type = crate::types::types::Type::Function(
+                                Box::new(crate::types::callable::Function {
+                                    signature: callable.clone(),
+                                    metadata: *overload_type.metadata.clone(),
+                                })
+                            );
+                            result_types.push(self.convert_and_register_type(function_type));
+                        },
+                        crate::types::types::OverloadType::Forall(forall) => {
+                            // Convert Forall<Function> to Function type
+                            let function_type = crate::types::types::Type::Function(Box::new(forall.body.clone()));
+                            result_types.push(self.convert_and_register_type(function_type));
+                        },
+                    }
+                }
+                
+                Ok(Some(result_types))
+            },
+
+            // Non-overloaded types return None
+            _ => {
+                lsp_debug!("get_overloads called on non-overloaded type: {:?}", internal_type);
+                Ok(None)
+            }
+        }
+    }
+
+    fn extract_function_parts_from_function(
+        &self,
+        func_type: &crate::types::callable::Function,
+        flags: &tsp::TypeReprFlags,
+        transaction: &Transaction<'_>,
+    ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
+        // Extract parameter information from the function's signature
+        let signature = &func_type.signature;
+        self.extract_function_parts_from_callable(signature, flags, transaction)
+    }
+
+    fn extract_function_parts_from_callable(
+        &self,
+        callable_type: &crate::types::callable::Callable,
+        flags: &tsp::TypeReprFlags,
+        transaction: &Transaction<'_>,
+    ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
+        // Extract parameter information from callable
+        let mut params = Vec::new();
+        
+        // Handle different types of params
+        match &callable_type.params {
+            crate::types::callable::Params::List(param_list) => {
+                for param in param_list.items() {
+                    let param_str = self.format_param_for_display(param, flags, transaction);
+                    params.push(param_str);
+                }
+            }
+            crate::types::callable::Params::Ellipsis => {
+                params.push("...".to_string());
+            }
+            crate::types::callable::Params::ParamSpec(types, param_spec) => {
+                // Handle concatenated parameters with a ParamSpec
+                for (i, param_type) in types.iter().enumerate() {
+                    let type_str = self.format_type_for_display(param_type, flags, transaction);
+                    params.push(format!("param{}: {}", i, type_str));
+                }
+                let param_spec_str = self.format_type_for_display(param_spec, flags, transaction);
+                params.push(format!("*{}", param_spec_str));
+            }
+        }
+
+        // Get return type
+        let return_type_str = self.format_type_for_display(&callable_type.ret, flags, transaction);
+
+        Ok(Some(tsp::FunctionParts {
+            params,
+            return_type: return_type_str,
+        }))
+    }
+
+    fn format_param_for_display(
+        &self,
+        param: &crate::types::callable::Param,
+        flags: &tsp::TypeReprFlags,
+        transaction: &Transaction<'_>,
+    ) -> String {
+        use crate::types::callable::Param;
+        
+        match param {
+            Param::PosOnly(name, param_type, _required) => {
+                let type_str = self.format_type_for_display(param_type, flags, transaction);
+                if let Some(name) = name {
+                    format!("{}: {}", name, type_str)
+                } else {
+                    type_str
+                }
+            }
+            Param::Pos(name, param_type, _required) => {
+                let type_str = self.format_type_for_display(param_type, flags, transaction);
+                format!("{}: {}", name, type_str)
+            }
+            Param::VarArg(name, param_type) => {
+                let type_str = self.format_type_for_display(param_type, flags, transaction);
+                if let Some(name) = name {
+                    format!("*{}: {}", name, type_str)
+                } else {
+                    format!("*{}", type_str)
+                }
+            }
+            Param::KwOnly(name, param_type, _required) => {
+                let type_str = self.format_type_for_display(param_type, flags, transaction);
+                format!("{}: {}", name, type_str)
+            }
+            Param::Kwargs(name, param_type) => {
+                let type_str = self.format_type_for_display(param_type, flags, transaction);
+                if let Some(name) = name {
+                    format!("**{}: {}", name, type_str)
+                } else {
+                    format!("**{}", type_str)
+                }
+            }
+        }
+    }
+
+    fn format_type_for_display(
+        &self,
+        type_obj: &crate::types::types::Type,
+        flags: &tsp::TypeReprFlags,
+        _transaction: &Transaction<'_>,
+    ) -> String {
+        // This is a simplified implementation. You might want to use a more sophisticated
+        // type formatting system that respects the TypeReprFlags
+        if flags.has_expand_type_aliases() {
+            // Expand type aliases if requested
+            // This would require more complex logic to expand aliases
+        }
+        
+        if flags.has_convert_to_instance_type() {
+            // Convert class types to instance types if requested
+            // This would require type conversion logic
+        }
+        
+        // For now, just use the default string representation
+        type_obj.to_string()
+    }
+
+    fn current_snapshot(&self) -> i32 {
+        self.state.current_snapshot()
+    }
+
+    /// Converts a pyrefly type to TSP type and registers it in the lookup table
+    fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
+        let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
+        
+        // Register the type in the lookup table
+        if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
+            self.state.register_type_handle(handle_str.clone(), py_type);
+        }
+        
+        tsp_type
+    }
+
+    /// Looks up a pyrefly type from an integer TSP type handle
+    fn lookup_type_by_int_handle(&self, id: i32) -> Option<crate::types::types::Type> {
+        // For now, convert integer handle to string and use the existing lookup
+        // In a more sophisticated implementation, we might have separate integer and string lookups
+        let handle_str = format!("{}", id);
+        self.state.lookup_type_from_handle(&handle_str)
+    }
+
+    /// Looks up a pyrefly type from a TSP Type
+    fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
+        match &tsp_type.handle {
+            tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
+            tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
+        }
     }
 
     pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
@@ -1093,6 +2802,7 @@ impl Server {
             .map(|x| x.uri.to_file_path().unwrap())
             .collect::<Vec<_>>();
 
+        self.state.increment_snapshot(); // Increment snapshot on workspace change
         self.configure(&added, &removed);
     }
 
@@ -1139,12 +2849,25 @@ impl Server {
         self.request_settings_for_all_workspaces();
     }
 
+    fn handle_from_module_path(state: &State, path: ModulePath) -> Handle {
+        let unknown = ModuleName::unknown();
+        let config = state.config_finder().python_file(unknown, &path);
+        let module_name = to_real_path(&path)
+            .and_then(|path| module_from_path(&path, config.search_path()))
+            .unwrap_or(unknown);
+        Handle::new(module_name, path, config.get_sys_info())
+    }
+
+    fn make_open_handle(state: &State, path: &Path) -> Handle {
+        let path = ModulePath::memory(path.to_owned());
+        Self::handle_from_module_path(state, path)
+    }
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
     fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
-                eprintln!("Skipping request - language services disabled");
+                lsp_debug!("Skipping request - language services disabled");
                 None
             } else {
                 let module_path = if self.open_files.read().contains_key(&path) {
@@ -1814,6 +3537,9 @@ impl Server {
                 self.workspaces.default.write().python_info = python_info;
             }
         }
+        if *modified {
+            self.state.increment_snapshot(); // Increment snapshot on python path change
+        }
         self.invalidate_config();
     }
 
@@ -1839,6 +3565,28 @@ impl Server {
             }
         }
         self.invalidate_config();
+    }
+}
+
+// Helper function to create a default type when we can't determine the actual type
+fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
+    let (category, flags) = match decl.category {
+        tsp::DeclarationCategory::FUNCTION => (tsp::TypeCategory::FUNCTION, tsp::TypeFlags::new().with_callable()),
+        tsp::DeclarationCategory::CLASS => (tsp::TypeCategory::CLASS, tsp::TypeFlags::new().with_instantiable()),
+        tsp::DeclarationCategory::IMPORT => (tsp::TypeCategory::MODULE, tsp::TypeFlags::new()),
+        tsp::DeclarationCategory::TYPE_ALIAS => (tsp::TypeCategory::ANY, tsp::TypeFlags::new().with_from_alias()),
+        tsp::DeclarationCategory::TYPE_PARAM => (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new()),
+        _ => (tsp::TypeCategory::ANY, tsp::TypeFlags::new()),
+    };
+
+    tsp::Type {
+        handle: decl.handle.clone(),
+        category,
+        flags,
+        module_name: Some(decl.module_name.clone()),
+        name: decl.name.clone(),
+        category_flags: 0,
+        decl: None,
     }
 }
 
@@ -1931,3 +3679,22 @@ where
         },
     }
 }
+
+fn new_response_with_error_code<T>(id: RequestId, params: Result<T, ResponseError>) -> Response
+where
+    T: serde::Serialize,
+{
+    match params {
+        Ok(params) => Response {
+            id,
+            result: Some(serde_json::to_value(params).unwrap()),
+            error: None,
+        },
+        Err(error) => Response {
+            id,
+            result: None,
+            error: Some(error),
+        },
+    }
+}
+
