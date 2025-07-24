@@ -1752,7 +1752,7 @@ impl Server {
 
         // Try to find definition at the position
         let (symbol_name, declarations, synthesized_types) = 
-            if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).first() {
+            if let Some(first_definition) = active_transaction.find_definition(&handle, position, true).into_iter().next() {
                 let definition_metadata = &first_definition.metadata;
                 let definition = &first_definition.location;
                 let _docstring = &first_definition.docstring;
@@ -2015,7 +2015,7 @@ impl Server {
         // If we found the symbol, try to get its definition info
         if let Some(pos) = found_position {
             let text_pos = TextSize::new(pos as u32);
-            if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).first() {
+            if let Some(first_definition) = active_transaction.find_definition(&target_handle, text_pos, true).into_iter().next() {
                 let def_metadata = &first_definition.metadata;
                 let def_info = &first_definition.location;
                 let _docstring = &first_definition.docstring;
@@ -2505,7 +2505,7 @@ impl Server {
         let position = TextSize::new(node.start as u32);
 
         // Try to find definition at the position - this is the same logic as hover
-        if let Some(first_definition) = transaction.find_definition(handle, position, true).first() {
+        if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {
             let _definition_metadata = &first_definition.metadata;
             let _text_range_with_module_info = &first_definition.location;
             let docstring = &first_definition.docstring;
