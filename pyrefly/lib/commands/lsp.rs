@@ -220,6 +220,20 @@ use crate::state::state::Transaction;
 use crate::state::state::TransactionData;
 use crate::types::display::TypeDisplayContext;
 
+/// LSP debug logging that can be disabled in release builds
+#[cfg(debug_assertions)]
+macro_rules! lsp_debug {
+    ($($arg:tt)*) => {
+        eprintln!($($arg)*);
+    };
+}
+
+/// LSP debug logging that is disabled in release builds
+#[cfg(not(debug_assertions))]
+macro_rules! lsp_debug {
+    ($($arg:tt)*) => {};
+}
+
 /// Pyrefly's indexing strategy for open projects when performing go-to-definition
 /// requests.
 #[deny(clippy::missing_docs_in_private_items)]
@@ -327,10 +341,16 @@ struct ServerConnection(Arc<Connection>);
 
 impl ServerConnection {
     fn send(&self, msg: Message) {
+        // Log outgoing notifications
+        if let Message::Notification(ref notification) = msg {
+            lsp_debug!("Sending notification: {}", notification.method);
+            lsp_debug!("Notification parameters: {}", serde_json::to_string_pretty(&notification.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+        }
+        
         if self.0.sender.send(msg).is_err() {
             // On error, we know the channel is closed.
             // https://docs.rs/crossbeam/latest/crossbeam/channel/struct.Sender.html#method.send
-            eprintln!("Connection closed.");
+            lsp_debug!("Connection closed.");
         };
     }
 
@@ -457,7 +477,7 @@ impl WeakConfigCache {
         let mut configs = self.0.lock();
         let purged_config_count = configs.extract_if(|c| c.vacant()).count();
         if purged_config_count != 0 {
-            eprintln!("Cleared {purged_config_count} dropped configs from config cache");
+            lsp_debug!("Cleared {purged_config_count} dropped configs from config cache");
         }
         SmallSet::from_iter(configs.iter().filter_map(|c| c.upgrade()))
     }
@@ -613,6 +633,8 @@ fn dispatch_lsp_events(
                 }
             }
             Message::Notification(x) => {
+                lsp_debug!("Handling notification: {}", x.method);
+                lsp_debug!("Notification parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
                 let send_result = if let Some(params) = as_notification::<DidOpenTextDocument>(&x) {
                     queued_events_sender.send(ServerEvent::DidOpenTextDocument(params))
                 } else if let Some(params) = as_notification::<DidChangeTextDocument>(&x) {
@@ -636,7 +658,7 @@ fn dispatch_lsp_events(
                 } else if as_notification::<Exit>(&x).is_some() {
                     queued_events_sender.send(ServerEvent::Exit)
                 } else {
-                    eprintln!("Unhandled notification: {x:?}");
+                    lsp_debug!("Unhandled notification: {x:?}");
                     Ok(())
                 };
                 if send_result.is_err() {
@@ -751,7 +773,7 @@ pub fn run_lsp(
             return Err(e.into());
         }
     };
-    eprintln!("Reading messages");
+    lsp_debug!("Reading messages");
     let connection_for_dispatcher = connection.dupe();
     let (queued_events_sender, queued_events_receiver) = crossbeam_channel::unbounded();
     let (priority_events_sender, priority_events_receiver) = crossbeam_channel::unbounded();
@@ -796,19 +818,19 @@ pub fn run_lsp(
             break;
         }
     }
-    eprintln!("waiting for connection to close");
+    lsp_debug!("waiting for connection to close");
     drop(server); // close connection
     wait_on_connection()?;
 
     // Shut down gracefully.
-    eprintln!("shutting down server");
+    lsp_debug!("shutting down server");
     Ok(CommandExitStatus::Success)
 }
 
 impl Args {
     pub fn run(self) -> anyhow::Result<CommandExitStatus> {
         // Note that  we must have our logging only write out to stderr.
-        eprintln!("starting generic LSP server");
+        lsp_debug!("starting generic LSP server");
 
         // Create the transport. Includes the stdio (stdin and stdout) versions but this could
         // also be implemented to use sockets or HTTP.
@@ -972,7 +994,7 @@ impl Server {
                 self.validate_in_memory(ide_transaction_manager)?;
             }
             ServerEvent::CancelRequest(id) => {
-                eprintln!("We should cancel request {id:?}");
+                lsp_debug!("We should cancel request {id:?}");
                 if let Some(cancellation_handle) = self.cancellation_handles.lock().remove(&id) {
                     cancellation_handle.cancel();
                 }
@@ -1003,13 +1025,13 @@ impl Server {
                 if let Some(request) = self.outgoing_requests.lock().remove(&x.id) {
                     self.handle_response(ide_transaction_manager, &request, &x)?;
                 } else {
-                    eprintln!("Response for unknown request: {x:?}");
+                    lsp_debug!("Response for unknown request: {x:?}");
                 }
             }
             ServerEvent::LspRequest(x) => {
                 if canceled_requests.remove(&x.id) {
                     let message = format!("Request {} is canceled", x.id);
-                    eprintln!("{message}");
+                    lsp_debug!("{message}");
                     self.send_response(Response::new_err(
                         x.id,
                         ErrorCode::RequestCanceled as i32,
@@ -1017,8 +1039,8 @@ impl Server {
                     ));
                     return Ok(ProcessEvent::Continue);
                 }
-                eprintln!("Handling non-canceled request {} ({})", x.method, x.id);
-                eprintln!("Request parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+                lsp_debug!("Handling non-canceled request {} ({})", x.method, x.id);
+                lsp_debug!("Request parameters: {}", serde_json::to_string_pretty(&x.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
                 // Store request info for duration logging in send_response
                 *self.current_request.lock() = Some((x.id.clone(), x.method.clone(), Instant::now()));
                 if let Some(params) = as_request::<GotoDefinition>(&x) {
@@ -1218,10 +1240,10 @@ impl Server {
                     self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
-                    eprintln!("Unhandled request: {x:?}");
+                    lsp_debug!("Unhandled request: {x:?}");
                     // Log duration for unhandled requests since they don't call send_response
                     if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
-                        eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                        lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
                     }
                 }
             }
@@ -1279,7 +1301,7 @@ impl Server {
         // Check if this response corresponds to a tracked request and log duration
         if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
             if request_id == x.id {
-                eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
             } else {
                 // Put it back if it doesn't match (shouldn't happen in normal flow)
                 *self.current_request.lock() = Some((request_id, method, start_time));
@@ -1493,7 +1515,7 @@ impl Server {
     ) {
         let unknown = ModuleName::unknown();
 
-        eprintln!("Populating all files in the config ({:?}).", config.root);
+        lsp_debug!("Populating all files in the config ({:?}).", config.root);
         let mut transaction = state.new_committable_transaction(Require::Indexing, None);
 
         let project_path_blobs = config.get_filtered_globs(None);
@@ -1513,14 +1535,14 @@ impl Server {
             ));
         }
 
-        eprintln!("Prepare to check {} files.", handles.len());
+        lsp_debug!("Prepare to check {} files.", handles.len());
         transaction.as_mut().run(&handles);
         state.commit_transaction(transaction);
         // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
         // the main event loop of the server. As a result, the server can do a revalidation of
         // all the in-memory files based on the fresh main State as soon as possible.
         let _ = priority_events_sender.send(ServerEvent::RecheckFinished);
-        eprintln!("Populated all files in the project path.");
+        lsp_debug!("Populated all files in the project path.");
     }
 
     fn did_save(&self, params: DidSaveTextDocumentParams) -> anyhow::Result<()> {
@@ -1642,7 +1664,7 @@ impl Server {
         let (_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
             Ok((Some(info), fresh_tx)) => (info, fresh_tx),
             Ok((None, _)) => {
-                eprintln!("Warning: Could not load module for get_type request: {}", uri);
+                lsp_debug!("Warning: Could not load module for get_type request: {}", uri);
                 return Ok(None);
             },
             Err(_) => {
@@ -1663,7 +1685,7 @@ impl Server {
         // Get the type at the position
         let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
             let short_uri = uri.to_string().chars().take(100).collect::<String>();
-            eprintln!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
+            lsp_debug!("Warning: No type found at position {} in {}", position.to_usize(), short_uri);
             return Ok(None);
         };
 
@@ -1853,7 +1875,7 @@ impl Server {
                     synth_types.push(self.convert_and_register_type(type_info));
                 } else {
                     // No definition found and no type information available
-                    eprintln!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
+                    lsp_debug!("Warning: No symbol definition or type information found at position {} in {}", position.to_usize(), uri);
                     return Ok(None);
                 }
 
@@ -2395,7 +2417,7 @@ impl Server {
         // Use the handle mapping to get the actual pyrefly type
         let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
             // If we can't find the internal type, fall back to the basic formatter
-            eprintln!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
+            lsp_debug!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
             let type_repr = format_type_representation(&params.type_param, params.flags);
             return Ok(type_repr);
         };
@@ -2430,7 +2452,7 @@ impl Server {
             type_repr
         };
 
-        eprintln!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
+        lsp_debug!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
         Ok(final_repr)
     }
 
@@ -2507,7 +2529,7 @@ impl Server {
             return Err(Self::snapshot_outdated_error());
         }
 
-        eprintln!(
+        lsp_debug!(
             "Searching for attribute '{}' with access flags: {:?}",
             params.attribute_name, params.access_flags
         );
@@ -2516,7 +2538,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.start_type) {
             Some(t) => t,
             None => {
-                eprintln!("Could not resolve type handle: {:?}", params.start_type.handle);
+                lsp_debug!("Could not resolve type handle: {:?}", params.start_type.handle);
                 return Ok(None);
             }
         };
@@ -2527,7 +2549,7 @@ impl Server {
                 self.search_attribute_in_class_type(class_type, &params.attribute_name, transaction, &params)
             }
             _ => {
-                eprintln!(
+                lsp_debug!(
                     "search_for_type_attribute only works on class types, got: {:?}",
                     internal_type
                 );
@@ -2544,7 +2566,7 @@ impl Server {
         transaction: &Transaction,
         _params: &tsp::SearchForTypeAttributeParams,
     ) -> Result<Option<tsp::Attribute>, ResponseError> {
-        eprintln!(
+        lsp_debug!(
             "Searching for attribute '{}' in class type using solver",
             attribute_name
         );
@@ -2594,7 +2616,7 @@ impl Server {
 
         match result {
             Some(Some((_attribute, attribute_type))) => {
-                eprintln!(
+                lsp_debug!(
                     "Found attribute '{}' in class type with type: {:?}",
                     attribute_name, attribute_type
                 );
@@ -2604,14 +2626,14 @@ impl Server {
                 Ok(Some(tsp_attribute))
             }
             Some(None) => {
-                eprintln!(
+                lsp_debug!(
                     "Attribute '{}' not found in class type",
                     attribute_name
                 );
                 Ok(None)
             }
             None => {
-                eprintln!(
+                lsp_debug!(
                     "Failed to create solver for attribute lookup of '{}'",
                     attribute_name
                 );
@@ -2652,13 +2674,13 @@ impl Server {
             return Err(Self::snapshot_outdated_error());
         }
 
-        eprintln!("Getting function parts for type: {:?}", params.type_param.handle);
+        lsp_debug!("Getting function parts for type: {:?}", params.type_param.handle);
 
         // Get the internal type from the type handle
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                eprintln!("Could not resolve type handle: {:?}", params.type_param.handle);
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
                 return Ok(None);
             }
         };
@@ -2674,11 +2696,11 @@ impl Server {
             crate::types::types::Type::Overload(_overload_type) => {
                 // For overloaded functions, we could return the signature of the first overload
                 // or a combined representation. For now, let's return None as it's complex.
-                eprintln!("Function parts for overloaded functions not yet implemented");
+                lsp_debug!("Function parts for overloaded functions not yet implemented");
                 Ok(None)
             }
             _ => {
-                eprintln!(
+                lsp_debug!(
                     "get_function_parts only works on function types, got: {:?}",
                     internal_type
                 );
@@ -2763,7 +2785,7 @@ impl Server {
                 let path = match to_real_path(resolved_handle.path()) {
                     Some(path) => path,
                     None => {
-                        eprintln!("Could not get real path for: {:?}", resolved_handle.path());
+                        lsp_debug!("Could not get real path for: {:?}", resolved_handle.path());
                         return Ok(None);
                     }
                 };
@@ -2774,14 +2796,14 @@ impl Server {
                 match Url::from_file_path(abs_path) {
                     Ok(url) => Ok(Some(url)),
                     Err(_) => {
-                        eprintln!("Could not convert path to URI for: {:?}", resolved_handle.path());
+                        lsp_debug!("Could not convert path to URI for: {:?}", resolved_handle.path());
                         Ok(None)
                     }
                 }
             },
             Err(e) => {
                 // For debugging, use {:?} instead of {}
-                eprintln!("Import resolution failed: {:?}", e);
+                lsp_debug!("Import resolution failed: {:?}", e);
                 // Return None instead of an error if the import cannot be resolved
                 Ok(None)
             }
@@ -2802,7 +2824,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                eprintln!("Could not resolve type handle: {:?}", params.type_param.handle);
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
                 return Ok(Vec::new());
             }
         };
@@ -2889,7 +2911,7 @@ impl Server {
 
             // Other types don't have type arguments
             _ => {
-                eprintln!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
+                lsp_debug!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
                 Ok(Vec::new())
             }
         }
@@ -2909,7 +2931,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                eprintln!("Could not resolve type handle: {:?}", params.type_param.handle);
+                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
                 return Ok(None);
             }
         };
@@ -2945,7 +2967,7 @@ impl Server {
 
             // Non-overloaded types return None
             _ => {
-                eprintln!("get_overloads called on non-overloaded type: {:?}", internal_type);
+                lsp_debug!("get_overloads called on non-overloaded type: {:?}", internal_type);
                 Ok(None)
             }
         }
@@ -3239,7 +3261,7 @@ impl Server {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
-                eprintln!("Skipping request - language services disabled");
+                lsp_debug!("Skipping request - language services disabled");
                 None
             } else {
                 let module_path = if self.open_files.read().contains_key(&path) {
@@ -3439,7 +3461,7 @@ impl Server {
                 }
                 Err(Cancelled) => {
                     let message = format!("Find reference request {request_id} is canceled");
-                    eprintln!("{message}");
+                    lsp_debug!("{message}");
                     connection.send(Message::Response(Response::new_err(
                         request_id,
                         ErrorCode::RequestCanceled as i32,
@@ -4129,4 +4151,5 @@ where
         },
     }
 }
+
 
