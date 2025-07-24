@@ -19,7 +19,7 @@ use parse_display::Display;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
-use pyrefly_python::module_info::ModuleInfo;
+use pyrefly_python::module::Module;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_util::visit::Visit;
@@ -152,8 +152,11 @@ impl ClassKind {
     fn from_qname(qname: &QName) -> Self {
         match (qname.module_name().as_str(), qname.id().as_str()) {
             ("builtins", "staticmethod") => Self::StaticMethod,
+            ("abc", "abstractstaticmethod") => Self::StaticMethod,
             ("builtins", "classmethod") => Self::ClassMethod,
+            ("abc", "abstractclassmethod") => Self::ClassMethod,
             ("builtins", "property") => Self::Property,
+            ("abc", "abstractproperty") => Self::Property,
             ("functools", "cached_property") => Self::Property,
             ("cached_property", "cached_property") => Self::Property,
             ("cinder", "cached_property") => Self::Property,
@@ -183,13 +186,13 @@ impl Class {
     pub fn new(
         def_index: ClassDefIndex,
         name: Identifier,
-        module_info: ModuleInfo,
+        module: Module,
         precomputed_tparams: Option<Arc<TParams>>,
         fields: SmallMap<Name, ClassFieldProperties>,
     ) -> Self {
         Self(Arc::new(ClassInner {
             def_index,
-            qname: QName::new(name, module_info),
+            qname: QName::new(name, module),
             precomputed_tparams,
             fields,
         }))
@@ -231,8 +234,8 @@ impl Class {
         self.0.qname.module_path()
     }
 
-    pub fn module_info(&self) -> &ModuleInfo {
-        self.0.qname.module_info()
+    pub fn module(&self) -> &Module {
+        self.0.qname.module()
     }
 
     pub fn fields(&self) -> impl ExactSizeIterator<Item = &Name> {

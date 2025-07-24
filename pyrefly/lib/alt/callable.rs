@@ -24,12 +24,13 @@ use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
+use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
+use crate::error::context::ErrorInfo;
 use crate::error::context::TypeCheckContext;
 use crate::error::context::TypeCheckKind;
 use crate::error::display::function_suffix;
-use crate::error::kind::ErrorKind;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncId;
 use crate::types::callable::Param;
@@ -59,6 +60,12 @@ impl CallWithTypes {
         errors: &ErrorCollector,
     ) -> TypeOrExpr<'a> {
         match x {
+            TypeOrExpr::Expr(e @ (Expr::Dict(_) | Expr::List(_) | Expr::Set(_))) => {
+                // Hack: don't flatten mutable builtin containers into types before calling a
+                // function, as we know these containers often need to be contextually typed using
+                // the function's parameter types.
+                TypeOrExpr::Expr(e)
+            }
             TypeOrExpr::Expr(e) => {
                 let t = solver.expr_infer(e, errors);
                 TypeOrExpr::Type(self.0.push(t), e.range())
@@ -90,15 +97,6 @@ impl CallWithTypes {
             arg: x.arg,
             value: self.type_or_expr(x.value, solver, errors),
         }
-    }
-
-    pub fn opt_call_arg<'a, 'b: 'a, Ans: LookupAnswer>(
-        &'a self,
-        x: Option<&CallArg<'b>>,
-        solver: &AnswersSolver<Ans>,
-        errors: &ErrorCollector,
-    ) -> Option<CallArg<'a>> {
-        x.map(|x| self.call_arg(x, solver, errors))
     }
 
     pub fn vec_call_arg<'a, 'b: 'a, Ans: LookupAnswer>(
@@ -411,12 +409,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.error(
                 errors,
                 range,
-                kind,
-                context,
+                ErrorInfo::new(kind, context),
                 format!(
                     "{}{}",
                     msg,
-                    function_suffix(callable_name.as_ref(), self.module_info().name())
+                    function_suffix(callable_name.as_ref(), self.module().name())
                 ),
             )
         };
@@ -899,14 +896,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         callable: Callable,
         callable_name: Option<FuncId>,
-        self_arg: Option<CallArg>,
+        self_obj: Option<Type>,
         args: &[CallArg],
         keywords: &[CallKeyword],
         range: TextRange,
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
+        _hint: Option<&Type>,
     ) -> Type {
+        let self_arg = self_obj.as_ref().map(|ty| CallArg::ty(ty, range));
         match callable.params {
             Params::List(params) => {
                 self.callable_infer_params(
@@ -968,8 +967,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             self.error(
                                 call_errors,
                                 range,
-                                ErrorKind::InvalidParamSpec,
-                                context,
+                                ErrorInfo::new(ErrorKind::InvalidParamSpec, context),
                                 format!(
                                     "Expected *-unpacked {}.args and **-unpacked {}.kwargs",
                                     q.name(),
@@ -997,8 +995,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         self.error(
                             call_errors,
                             range,
-                            ErrorKind::InvalidParamSpec,
-                            context,
+                            ErrorInfo::new(ErrorKind::InvalidParamSpec, context),
                             format!("Unexpected ParamSpec type: `{}`", self.for_display(p)),
                         );
                     }

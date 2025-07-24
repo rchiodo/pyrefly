@@ -34,15 +34,15 @@ use crate::types::TArgs;
 use crate::types::TParam;
 use crate::types::Type;
 
-/// Information about the classes we have seen.
+/// Information about the qnames we have seen.
 /// Set to None to indicate we have seen different values, or Some if they are all the same.
 #[derive(Clone, Debug)]
-struct ClassInfo {
+struct QNameInfo {
     /// For each module, record either the one unique range, or None if there are multiple.
     info: SmallMap<ModuleName, Option<TextRange>>,
 }
 
-impl ClassInfo {
+impl QNameInfo {
     fn new(qname: &QName) -> Self {
         Self {
             info: smallmap! {qname.module_name() => Some(qname.range())},
@@ -78,9 +78,9 @@ impl ClassInfo {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct TypeDisplayContext<'a> {
-    classes: SmallMap<&'a Name, ClassInfo>,
+    qnames: SmallMap<&'a Name, QNameInfo>,
 }
 
 impl<'a> TypeDisplayContext<'a> {
@@ -93,9 +93,9 @@ impl<'a> TypeDisplayContext<'a> {
     }
 
     fn add_qname(&mut self, qname: &'a QName) {
-        match self.classes.entry(qname.id()) {
+        match self.qnames.entry(qname.id()) {
             Entry::Vacant(e) => {
-                e.insert(ClassInfo::new(qname));
+                e.insert(QNameInfo::new(qname));
             }
             Entry::Occupied(mut e) => e.get_mut().update(qname),
         }
@@ -103,17 +103,7 @@ impl<'a> TypeDisplayContext<'a> {
 
     pub fn add(&mut self, t: &'a Type) {
         t.universe(&mut |t| {
-            let qname = match t {
-                Type::ClassDef(cls) => Some(cls.qname()),
-                Type::ClassType(c) => Some(c.qname()),
-                Type::TypedDict(c) => Some(c.qname()),
-                Type::TypeVar(t) => Some(t.qname()),
-                Type::TypeVarTuple(t) => Some(t.qname()),
-                Type::ParamSpec(t) => Some(t.qname()),
-                Type::SelfType(cls) => Some(cls.qname()),
-                _ => None,
-            };
-            if let Some(qname) = qname {
+            if let Some(qname) = t.qname() {
                 self.add_qname(qname);
             }
         })
@@ -123,7 +113,7 @@ impl<'a> TypeDisplayContext<'a> {
     pub fn always_display_module_name(&mut self) {
         // We pretend that every qname is also in a fake module, and thus requires disambiguating.
         let fake_module = ModuleName::from_str("__pyrefly__type__display__context__");
-        for c in self.classes.values_mut() {
+        for c in self.qnames.values_mut() {
             c.info.insert(fake_module, None);
         }
     }
@@ -180,9 +170,9 @@ impl<'a> TypeDisplayContext<'a> {
     }
 
     fn fmt_qname(&self, qname: &QName, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.classes.get(&qname.id()) {
+        match self.qnames.get(&qname.id()) {
             Some(info) => info.fmt(qname, f),
-            None => ClassInfo::qualified().fmt(qname, f), // we should not get here, if we do, be safe
+            None => QNameInfo::qualified().fmt(qname, f), // we should not get here, if we do, be safe
         }
     }
 
@@ -399,7 +389,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use dupe::Dupe;
-    use pyrefly_python::module_info::ModuleInfo;
+    use pyrefly_python::module::Module;
     use pyrefly_python::module_path::ModulePath;
     use pyrefly_util::uniques::UniqueFactory;
     use ruff_python_ast::Identifier;
@@ -426,7 +416,7 @@ pub mod tests {
     use crate::types::TParams;
 
     pub fn fake_class(name: &str, module: &str, range: u32) -> Class {
-        let mi = ModuleInfo::new(
+        let mi = Module::new(
             ModuleName::from_str(module),
             ModulePath::filesystem(PathBuf::from(module)),
             Arc::new("1234567890".to_owned()),
@@ -461,7 +451,7 @@ pub mod tests {
     }
 
     fn fake_tyvar(name: &str, module: &str, range: u32) -> TypeVar {
-        let mi = ModuleInfo::new(
+        let mi = Module::new(
             ModuleName::from_str(module),
             ModulePath::filesystem(PathBuf::from(module)),
             Arc::new("1234567890".to_owned()),
