@@ -23,7 +23,6 @@ use ruff_text_size::TextRange;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
-use crate::alt::attr::Narrowable;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::binding::narrow::AtomicNarrowOp;
@@ -52,7 +51,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if cls.class_object().fields().len() > NARROW_ENUM_LIMIT {
             return Type::ClassType(cls.clone());
         }
-        let e = self.get_enum_from_class_type(cls).unwrap();
+        let e = self.get_enum_from_class(cls.class_object()).unwrap();
         // Enums derived from enum.Flag cannot be treated as a union of their members
         if e.is_flag {
             return Type::ClassType(cls.clone());
@@ -577,23 +576,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // separately for type checking, and there might be error context then we don't have here.
         let ignore_errors = self.error_swallower();
         let (first_facet, remaining_facets) = facet_chain.facets().clone().split_off_first();
-        match self.narrowable_for_facet_chain(
+        self.narrowable_for_facet_chain(
             base,
             &first_facet,
             &remaining_facets,
             range,
             &ignore_errors,
-        ) {
-            Narrowable::Simple(ty) => ty,
-            Narrowable::PropertyOrDescriptor(ty) => {
-                // TODO(stroxler): Implement plumbing to warn on downstream reads.
-                ty
-            }
-            Narrowable::UnionPropertyOrDescriptor(ty) => {
-                // TODO(stroxler): Implement plumbing to warn on downstream reads.
-                ty
-            }
-        }
+        )
     }
 
     fn narrowable_for_facet_chain(
@@ -603,11 +592,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         remaining_facets: &[FacetKind],
         range: TextRange,
         errors: &ErrorCollector,
-    ) -> Narrowable {
+    ) -> Type {
         match first_facet {
             FacetKind::Attribute(first_attr_name) => match remaining_facets.split_first() {
                 None => match base.type_at_facet(first_facet) {
-                    Some(ty) => Narrowable::Simple(ty.clone()),
+                    Some(ty) => ty.clone(),
                     None => self.narrowable_for_attr(base.ty(), first_attr_name, range, errors),
                 },
                 Some((next_name, remaining_facets)) => {
@@ -631,13 +620,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 });
                 match remaining_facets.split_first() {
                     None => match base.type_at_facet(first_facet) {
-                        Some(ty) => Narrowable::Simple(ty.clone()),
-                        None => Narrowable::Simple(self.subscript_infer_for_type(
+                        Some(ty) => ty.clone(),
+                        None => self.subscript_infer_for_type(
                             base.ty(),
                             &synthesized_slice,
                             range,
                             errors,
-                        )),
+                        ),
                     },
                     Some((next_name, remaining_facets)) => {
                         let base_ty = self.subscript_infer(base, &synthesized_slice, range, errors);
@@ -666,13 +655,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 });
                 match remaining_facets.split_first() {
                     None => match base.type_at_facet(first_facet) {
-                        Some(ty) => Narrowable::Simple(ty.clone()),
-                        None => Narrowable::Simple(self.subscript_infer_for_type(
+                        Some(ty) => ty.clone(),
+                        None => self.subscript_infer_for_type(
                             base.ty(),
                             &synthesized_slice,
                             range,
                             errors,
-                        )),
+                        ),
                     },
                     Some((next_name, remaining_facets)) => {
                         let base_ty = self.subscript_infer(base, &synthesized_slice, range, errors);

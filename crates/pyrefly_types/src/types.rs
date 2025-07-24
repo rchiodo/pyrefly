@@ -41,6 +41,7 @@ use crate::keywords::KwCall;
 use crate::literal::Lit;
 use crate::module::ModuleType;
 use crate::param_spec::ParamSpec;
+use crate::qname::QName;
 use crate::quantified::Quantified;
 use crate::quantified::QuantifiedKind;
 use crate::simplify::unions;
@@ -362,11 +363,11 @@ pub struct BoundMethod {
 }
 
 impl BoundMethod {
-    pub fn to_callable(&self) -> Option<Type> {
-        self.as_bound_function().to_unbound_callable()
+    pub fn drop_self(&self) -> Option<Type> {
+        self.as_function().drop_first_param_of_unbound_callable()
     }
 
-    pub fn as_bound_function(&self) -> Type {
+    pub fn as_function(&self) -> Type {
         self.func.as_type()
     }
 }
@@ -454,14 +455,14 @@ impl Overload {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
 pub enum OverloadType {
-    Callable(Callable),
+    Callable(Function),
     Forall(Forall<Function>),
 }
 
 impl OverloadType {
     pub fn as_type(&self) -> Type {
         match self {
-            Self::Callable(c) => Type::Callable(Box::new(c.clone())),
+            Self::Callable(f) => Type::Callable(Box::new(f.signature.clone())),
             Self::Forall(forall) => {
                 Forallable::Function(forall.body.clone()).forall(forall.tparams.clone())
             }
@@ -474,7 +475,7 @@ impl OverloadType {
         is_subset: &dyn Fn(&Type, &Type) -> bool,
     ) {
         match self {
-            Self::Callable(c) => c.subst_self_type_mut(replacement, is_subset),
+            Self::Callable(f) => f.signature.subst_self_type_mut(replacement, is_subset),
             Self::Forall(forall) => forall
                 .body
                 .signature
@@ -484,14 +485,14 @@ impl OverloadType {
 
     fn is_typeguard(&self) -> bool {
         match self {
-            Self::Callable(c) => c.is_typeguard(),
+            Self::Callable(f) => f.signature.is_typeguard(),
             Self::Forall(forall) => forall.body.signature.is_typeguard(),
         }
     }
 
     fn is_typeis(&self) -> bool {
         match self {
-            Self::Callable(c) => c.is_typeis(),
+            Self::Callable(f) => f.signature.is_typeis(),
             Self::Forall(forall) => forall.body.signature.is_typeis(),
         }
     }
@@ -606,9 +607,10 @@ pub enum Type {
     /// that TypedDict class definitions are still represented as `ClassDef(TD)`, just
     /// like regular classes.
     TypedDict(TypedDict),
-    /// Represents a "partial" version of a TypedDict.
-    /// For a TypedDict type `C`, `Partial[C]` represents an object with any subset of keys from `C`,
-    /// where each present key has the same value type as in `C`.
+    /// Represents a "partial" version of a TypedDict that can be merged into the TypedDict
+    /// (e.g., via its `update` method).
+    /// For a TypedDict type `C`, `Partial[C]` represents an object with any subset of read-write
+    /// keys from `C`, where each present key has the same value type as in `C`.
     PartialTypedDict(TypedDict),
     Tuple(Tuple),
     Module(ModuleType),
@@ -887,9 +889,9 @@ impl Type {
         }
     }
 
-    /// Convert a bound method into a callable by stripping the first argument.
+    /// If this is an unbound callable (i.e., a callable that is not BoundMethod), strip the first parameter.
     /// TODO: Does not handle generics.
-    pub fn to_unbound_callable(&self) -> Option<Type> {
+    pub fn drop_first_param_of_unbound_callable(&self) -> Option<Type> {
         match self {
             Type::Callable(callable) => callable
                 .drop_first_param()
@@ -903,7 +905,12 @@ impl Type {
             Type::Overload(overload) => overload
                 .signatures
                 .try_mapped_ref(|x| match x {
-                    OverloadType::Callable(c) => c.drop_first_param().ok_or(()),
+                    OverloadType::Callable(f) => {
+                        f.signature.drop_first_param().ok_or(()).map(|c| Function {
+                            signature: c,
+                            metadata: f.metadata.clone(),
+                        })
+                    }
                     _ => Err(()),
                 })
                 .ok()
@@ -1072,7 +1079,7 @@ impl Type {
 
     /// Apply `f` to this type if it is a callable. Note that we do *not* recurse into the type to
     /// find nested callable types.
-    fn visit_toplevel_callable<'a>(&'a self, mut f: impl FnMut(&'a Callable)) {
+    pub fn visit_toplevel_callable<'a>(&'a self, mut f: impl FnMut(&'a Callable)) {
         match self {
             Type::Callable(callable) => f(callable),
             Type::Function(box func)
@@ -1095,7 +1102,7 @@ impl Type {
             }) => {
                 for x in overload.signatures.iter() {
                     match x {
-                        OverloadType::Callable(callable) => f(callable),
+                        OverloadType::Callable(function) => f(&function.signature),
                         OverloadType::Forall(forall) => f(&forall.body.signature),
                     }
                 }
@@ -1129,7 +1136,7 @@ impl Type {
             }) => {
                 for x in overload.signatures.iter_mut() {
                     match x {
-                        OverloadType::Callable(callable) => f(callable),
+                        OverloadType::Callable(function) => f(&mut function.signature),
                         OverloadType::Forall(forall) => f(&mut forall.body.signature),
                     }
                 }
@@ -1251,6 +1258,14 @@ impl Type {
         })
     }
 
+    pub fn sort_unions(self) -> Self {
+        self.transform(&mut |ty| {
+            if let Type::Union(ts) = ty {
+                ts.sort();
+            }
+        })
+    }
+
     /// Used prior to display to ensure unique variables don't leak out non-deterministically.
     pub fn deterministic_printing(self) -> Self {
         self.transform(&mut |ty| {
@@ -1318,6 +1333,21 @@ impl Type {
                 Ordering::Less => Type::Union(vec![x, Type::None]),
                 Ordering::Greater => Type::Union(vec![Type::None, x]),
             }
+        }
+    }
+
+    /// Does this type have a QName associated with it
+    pub fn qname(&self) -> Option<&QName> {
+        match self {
+            Type::ClassDef(cls) => Some(cls.qname()),
+            Type::ClassType(c) => Some(c.qname()),
+            Type::TypedDict(c) => Some(c.qname()),
+            Type::PartialTypedDict(c) => Some(c.qname()),
+            Type::TypeVar(t) => Some(t.qname()),
+            Type::TypeVarTuple(t) => Some(t.qname()),
+            Type::ParamSpec(t) => Some(t.qname()),
+            Type::SelfType(cls) => Some(cls.qname()),
+            _ => None,
         }
     }
 
