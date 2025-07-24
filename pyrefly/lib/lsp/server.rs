@@ -1739,9 +1739,17 @@ impl Server {
                     }
                 }
 
-                // TODO: Add access to PythonInfo's environment data
-                // This is currently blocked by private field access
-                // The env field needs public getter methods
+                // Add Python environment site package paths if available
+                if let Some(python_info) = &workspace.python_info {
+                    let env = python_info.env();
+                    
+                    // Add all site package paths from the Python environment
+                    for path in env.all_site_package_paths() {
+                        if let Ok(uri) = Url::from_file_path(path) {
+                            search_paths.push(uri);
+                        }
+                    }
+                }
 
                 search_paths
             })

@@ -48,6 +48,16 @@ impl PythonInfo {
         }
         Self { interpreter, env }
     }
+
+    /// Get a reference to the Python environment
+    pub fn env(&self) -> &PythonEnvironment {
+        &self.env
+    }
+
+    /// Get a reference to the interpreter path
+    pub fn interpreter(&self) -> &PathBuf {
+        &self.interpreter
+    }
 }
 
 /// LSP workspace settings: this is all that is necessary to run an LSP at a given root.
