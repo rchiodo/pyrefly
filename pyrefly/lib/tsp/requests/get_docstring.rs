@@ -10,6 +10,7 @@
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
+use pyrefly_python::docstring::Docstring;
 use lsp_server::ResponseError;
 use ruff_text_size::TextSize;
 
@@ -69,13 +70,14 @@ impl Server {
             let docstring_range = first_definition.docstring_range;
             
             if let Some(docstring_range) = docstring_range {
-                // Get the docstring content from the module info
-                let module_info = match transaction.get_module_info(handle) {
-                    Some(info) => info,
-                    None => return Ok(None),
+                // Get the module info for this handle
+                let Some(module_info) = transaction.get_load(handle) else {
+                    return Ok(None);
                 };
-                let docstring_content = module_info.code_at(docstring_range);
-                return Ok(Some(docstring_content.trim().to_string()));
+
+                // Use the Docstring class to properly format the docstring, same as hover
+                let docstring = Docstring(docstring_range, module_info.module_info.clone());
+                return Ok(Some(docstring.resolve()));
             }
         }
 
