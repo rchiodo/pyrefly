@@ -2820,19 +2820,6 @@ impl Server {
         self.request_settings_for_all_workspaces();
     }
 
-    fn handle_from_module_path(state: &State, path: ModulePath) -> Handle {
-        let unknown = ModuleName::unknown();
-        let config = state.config_finder().python_file(unknown, &path);
-        let module_name = to_real_path(&path)
-            .and_then(|path| module_from_path(&path, config.search_path()))
-            .unwrap_or(unknown);
-        Handle::new(module_name, path, config.get_sys_info())
-    }
-
-    fn make_open_handle(state: &State, path: &Path) -> Handle {
-        let path = ModulePath::memory(path.to_owned());
-        Self::handle_from_module_path(state, path)
-    }
     /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
     fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
         let path = uri.to_file_path().unwrap();
