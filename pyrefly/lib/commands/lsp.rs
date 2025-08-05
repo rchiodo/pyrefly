@@ -17,20 +17,6 @@ use crate::commands::util::CommandExitStatus;
 use crate::lsp::server::capabilities;
 use crate::lsp::server::lsp_loop;
 
-/// LSP debug logging that can be disabled in release builds
-#[cfg(debug_assertions)]
-macro_rules! lsp_debug {
-    ($($arg:tt)*) => {
-        eprintln!($($arg)*);
-    };
-}
-
-/// LSP debug logging that is disabled in release builds
-#[cfg(not(debug_assertions))]
-macro_rules! lsp_debug {
-    ($($arg:tt)*) => {};
-}
-
 /// Pyrefly's indexing strategy for open projects when performing go-to-definition
 /// requests.
 #[deny(clippy::missing_docs_in_private_items)]
@@ -92,7 +78,7 @@ fn initialize_connection(
 impl LspArgs {
     pub fn run(self) -> anyhow::Result<CommandExitStatus> {
         // Note that  we must have our logging only write out to stderr.
-        lsp_debug!("starting generic LSP server");
+        eprintln!("starting generic LSP server");
 
         // Create the transport. Includes the stdio (stdin and stdout) versions but this could
         // also be implemented to use sockets or HTTP.

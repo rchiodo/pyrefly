@@ -200,20 +200,6 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
-/// LSP debug logging that can be disabled in release builds
-#[cfg(debug_assertions)]
-macro_rules! lsp_debug {
-    ($($arg:tt)*) => {
-        eprintln!($($arg)*);
-    };
-}
-
-/// LSP debug logging that is disabled in release builds
-#[cfg(not(debug_assertions))]
-macro_rules! lsp_debug {
-    ($($arg:tt)*) => {};
-}
-
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
@@ -222,13 +208,13 @@ impl ServerConnection {
     fn send(&self, msg: Message) {
         // Log outgoing notifications
         if let Message::Notification(ref notification) = msg {
-            lsp_debug!("Sending notification: {}", notification.method);
-            lsp_debug!("Notification parameters: {}", serde_json::to_string_pretty(&notification.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+            eprintln!("Sending notification: {}", notification.method);
+            eprintln!("Notification parameters: {}", serde_json::to_string_pretty(&notification.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
         }
         if self.0.sender.send(msg).is_err() {
             // On error, we know the channel is closed.
             // https://docs.rs/crossbeam/latest/crossbeam/channel/struct.Sender.html#method.send
-            lsp_debug!("Connection closed.");
+            eprintln!("Connection closed.");
         };
     }
 
@@ -330,7 +316,7 @@ fn dispatch_lsp_events(connection: &Connection, lsp_queue: LspQueue) {
                 } else if as_notification::<Exit>(&x).is_some() {
                     lsp_queue.send(LspEvent::Exit)
                 } else {
-                    lsp_debug!("Unhandled notification: {x:?}");
+                    eprintln!("Unhandled notification: {x:?}");
                     Ok(())
                 };
                 if send_result.is_err() {
@@ -554,7 +540,7 @@ impl Server {
                         );
                     }
                 } else {
-                    lsp_debug!("Response for unknown request: {x:?}");
+                    eprintln!("Response for unknown request: {x:?}");
                 }
             }
             LspEvent::LspRequest(x) => {
@@ -891,10 +877,10 @@ impl Server {
                     self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
-                    lsp_debug!("Unhandled request: {x:?}");
+                    eprintln!("Unhandled request: {x:?}");
                     // Log duration for unhandled requests since they don't call send_response
                     if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
-                        lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                        eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
                     }
                 }
             }
@@ -951,7 +937,7 @@ impl Server {
         // Check if this response corresponds to a tracked request and log duration
         if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
             if request_id == x.id {
-                lsp_debug!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
             } else {
                 // Put it back if it doesn't match (shouldn't happen in normal flow)
                 *self.current_request.lock() = Some((request_id, method, start_time));
@@ -1131,7 +1117,7 @@ impl Server {
     ) {
         let unknown = ModuleName::unknown();
 
-        lsp_debug!("Populating all files in the config ({:?}).", config.root);
+        eprintln!("Populating all files in the config ({:?}).", config.root);
         let mut transaction = state.new_committable_transaction(Require::Indexing, None);
 
         let project_path_blobs = config.get_filtered_globs(None);
@@ -1151,7 +1137,7 @@ impl Server {
             ));
         }
 
-        lsp_debug!("Prepare to check {} files.", handles.len());
+        eprintln!("Prepare to check {} files.", handles.len());
         transaction.as_mut().run(&handles);
         state.commit_transaction(transaction);
         // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
@@ -1461,7 +1447,7 @@ impl Server {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
-                lsp_debug!("Skipping request - language services disabled");
+                eprintln!("Skipping request - language services disabled");
                 None
             } else {
                 let module_path = if self.open_files.read().contains_key(&path) {

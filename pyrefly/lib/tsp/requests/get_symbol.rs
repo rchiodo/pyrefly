@@ -14,7 +14,7 @@ use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::{lsp_debug, get_module_info_by_name};
+use crate::tsp::common::lsp_debug;
 
 impl Server {
     pub(crate) fn get_symbol(
@@ -164,53 +164,36 @@ impl Server {
                 let definition_uri = module_info_to_uri(definition_module);
                 let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
 
-                // Create the declaration node
-                // Get the module info for the definition's module to convert TextRange to LSP Range
-                let definition_module_info = if definition_module.name() == module_info.name() {
-                    module_info
+                // For declarations in different modules, use the original input range instead of the definition range
+                // because the definition range points to the target module, not the symbol in the current module
+                // This applies to imports, import aliases, and any other cross-module references
+                let (node_range, node_uri) = if definition_module.name() != module_info.name() {
+                    // Different module: use the original range in the current module
+                    (params.node.range, params.node.uri.clone())
                 } else {
-                    // For different module, try to get its module info using the helper function
-                    match get_module_info_by_name(active_transaction, &handle, definition_module.name()) {
-                        Some(def_module_info) => def_module_info,
-                        None => {
-                            // Can't get the definition module info, skip validation and return early
-                            let mut synth_types = Vec::new();
-                            if let Some(type_info) = type_info {
-                                synth_types.push(self.convert_and_register_type(type_info));
-                            }
-                            
-                            return Ok(Some(tsp::Symbol {
-                                node: params.node,
-                                name: name.clone(),
-                                decls: vec![tsp::Declaration {
-                                    handle: declaration_handle,
-                                    category,
-                                    flags,
-                                    node: Some(tsp::Node {
-                                        uri: definition_uri_final.clone(),
-                                        range: lsp_types::Range {
-                                            start: lsp_types::Position { line: 0, character: 0 },
-                                            end: lsp_types::Position { line: 0, character: 0 },
-                                        },
-                                    }),
-                                    module_name,
-                                    name: name.clone(),
-                                    uri: definition_uri_final,
-                                }],
-                                synthesized_types: synth_types,
-                            }));
-                        }
-                    }
+                    // Same module: use the definition range and URI
+                    (module_info.lined_buffer().to_lsp_range(definition_range), definition_uri_final.clone())
                 };
-                
+
+                // Create the declaration node
                 let declaration_node = tsp::Node {
-                    uri: definition_uri_final.clone(),
-                    range: definition_module_info.lined_buffer().to_lsp_range(definition_range),
+                    uri: node_uri.clone(),
+                    range: node_range,
                 };
 
                 // Verify that the declaration node's text matches the expected name
-                let declaration_text_range = definition_module_info.lined_buffer().from_lsp_range(declaration_node.range);
-                let declaration_text = definition_module_info.code_at(declaration_text_range);
+                // For declarations in different modules, we validate using the current module since we're using the original range
+                // For other declarations, we need to use the appropriate module
+                let validation_module_info = if definition_module.name() != module_info.name() {
+                    // Different module: use the current module since we're using the original range
+                    module_info
+                } else {
+                    // Same module: use the current module (which is the same as definition module)
+                    module_info
+                };
+
+                let declaration_text_range = validation_module_info.lined_buffer().from_lsp_range(declaration_node.range);
+                let declaration_text = validation_module_info.code_at(declaration_text_range);
                 
                 if declaration_text != name {
                     panic!(
@@ -218,7 +201,7 @@ impl Server {
                         declaration_text,
                         name,
                         declaration_text_range,
-                        definition_module_info.name(),
+                        validation_module_info.name(),
                         definition_module.name()
                     );
                 }
@@ -231,7 +214,7 @@ impl Server {
                     node: Some(declaration_node),
                     module_name,
                     name: name.clone(),
-                    uri: definition_uri_final,
+                    uri: node_uri,
                 });
 
                 // Get synthesized types if available
