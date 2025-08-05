@@ -8,6 +8,8 @@
 use std::sync::Arc;
 
 use dupe::Dupe;
+use fuzzy_matcher::FuzzyMatcher;
+use fuzzy_matcher::skim::SkimMatcherV2;
 use itertools::Itertools;
 use lsp_types::CompletionItem;
 use lsp_types::CompletionItemKind;
@@ -76,7 +78,6 @@ use crate::state::state::Transaction;
 use crate::types::callable::Param;
 use crate::types::callable::Params;
 use crate::types::module::ModuleType;
-use crate::types::types::BoundMethodType;
 use crate::types::types::Type;
 
 const RESOLVE_EXPORT_INITIAL_GAS: Gas = Gas::new(100);
@@ -392,6 +393,21 @@ impl<'a> Transaction<'a> {
         Some(ans.for_display(ans.get_type_trace(range)?.arc_clone()))
     }
 
+    fn get_chosen_overload_trace(&self, handle: &Handle, range: TextRange) -> Option<Type> {
+        let ans = self.get_answers(handle)?;
+        let chosen_overload = ans.get_chosen_overload_trace(range)?;
+        Some(ans.for_display(Type::Callable(Box::new(chosen_overload))))
+    }
+
+    fn empty_line_at(&self, handle: &Handle, position: TextSize) -> bool {
+        if let Some(mod_module) = self.get_ast(handle)
+            && Ast::locate_node(&mod_module, position).is_empty()
+        {
+            return true;
+        }
+        false
+    }
+
     fn identifier_at(&self, handle: &Handle, position: TextSize) -> Option<IdentifierWithContext> {
         let mod_module = self.get_ast(handle)?;
         let covering_nodes = Ast::locate_node(&mod_module, position);
@@ -515,6 +531,26 @@ impl<'a> Transaction<'a> {
         }
     }
 
+    fn callee_at(&self, handle: &Handle, position: TextSize) -> Option<ExprCall> {
+        let mod_module = self.get_ast(handle)?;
+        fn f(x: &Expr, find: TextSize, res: &mut Option<ExprCall>) {
+            if let Expr::Call(call) = x
+                && call.func.range().contains_inclusive(find)
+            {
+                f(call.func.as_ref(), find, res);
+                if res.is_some() {
+                    return;
+                }
+                *res = Some(call.clone());
+            } else {
+                x.recurse(&mut |x| f(x, find, res));
+            }
+        }
+        let mut res = None;
+        mod_module.visit(&mut |x| f(x, position, &mut res));
+        res
+    }
+
     fn refine_param_location_for_callee(
         &self,
         ast: &ModModule,
@@ -554,25 +590,7 @@ impl<'a> Transaction<'a> {
         if let Some(key) = self.definition_at(handle, position) {
             return self.get_type(handle, &key);
         }
-        fn callee_at(mod_module: Arc<ModModule>, position: TextSize) -> Option<ExprCall> {
-            fn f(x: &Expr, find: TextSize, res: &mut Option<ExprCall>) {
-                if let Expr::Call(call) = x
-                    && call.func.range().contains_inclusive(find)
-                {
-                    f(call.func.as_ref(), find, res);
-                    if res.is_some() {
-                        return;
-                    }
-                    *res = Some(call.clone());
-                } else {
-                    x.recurse(&mut |x| f(x, find, res));
-                }
-            }
-            let mut res = None;
-            mod_module.visit(&mut |x| f(x, position, &mut res));
-            res
-        }
-        let callee = callee_at(self.get_ast(handle)?, position);
+
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: id,
@@ -585,13 +603,11 @@ impl<'a> Transaction<'a> {
                         range: _,
                         func,
                         arguments,
-                    }) = &callee
+                    }) = &self.callee_at(handle, position)
                         && func.range() == id.range
-                        && let Some(chosen_overload) = self
-                            .get_answers(handle)
-                            .and_then(|answers| answers.get_chosen_overload_trace(arguments.range))
+                        && let Some(ret) = self.get_chosen_overload_trace(handle, arguments.range)
                     {
-                        Some(Type::Callable(Box::new(chosen_overload)))
+                        Some(ret)
                     } else {
                         self.get_type(handle, &key)
                     }
@@ -677,13 +693,11 @@ impl<'a> Transaction<'a> {
                     range: _,
                     func,
                     arguments,
-                }) = &callee
+                }) = &self.callee_at(handle, position)
                     && func.range() == range
-                    && let Some(chosen_overload) = self
-                        .get_answers(handle)
-                        .and_then(|answers| answers.get_chosen_overload_trace(arguments.range))
+                    && let Some(ret) = self.get_chosen_overload_trace(handle, arguments.range)
                 {
-                    Some(Type::Callable(Box::new(chosen_overload)))
+                    Some(ret)
                 } else {
                     self.get_type_trace(handle, range)
                 }
@@ -721,11 +735,12 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn get_signature_help_at(
+    /// Finds the callable(s) (multiple if overloads exist) at position in document, returning them, chosen overload index, and arg index
+    fn get_callables_from_call(
         &self,
         handle: &Handle,
         position: TextSize,
-    ) -> Option<SignatureHelp> {
+    ) -> Option<(Vec<Type>, usize, usize)> {
         let mod_module = self.get_ast(handle)?;
         let mut res = None;
         mod_module.visit(&mut |x| Self::visit_finding_signature_range(x, position, &mut res));
@@ -734,31 +749,39 @@ impl<'a> Transaction<'a> {
         if let Some((overloads, chosen_overload_index)) =
             answers.get_all_overload_trace(call_args_range)
         {
-            let signatures = overloads.into_map(|callable| {
-                Self::create_signature_information(Type::Callable(Box::new(callable)), arg_index)
-            });
-            Some(SignatureHelp {
-                signatures,
-                active_signature: chosen_overload_index.map(|i| i as u32),
-                active_parameter: Some(arg_index as u32),
-            })
+            let callables = overloads.into_map(|callable| Type::Callable(Box::new(callable)));
+            Some((
+                callables,
+                chosen_overload_index.unwrap_or_default(),
+                arg_index,
+            ))
         } else {
             answers
                 .get_type_trace(callee_range)
-                .map(|callee_type| SignatureHelp {
-                    signatures: vec![Self::create_signature_information(
-                        callee_type.arc_clone(),
-                        arg_index,
-                    )],
-                    active_signature: Some(0),
-                    active_parameter: Some(arg_index as u32),
-                })
+                .map(|t| (vec![t.arc_clone()], 0, arg_index))
         }
+    }
+
+    pub fn get_signature_help_at(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+    ) -> Option<SignatureHelp> {
+        self.get_callables_from_call(handle, position).map(
+            |(callables, chosen_overload_index, arg_index)| SignatureHelp {
+                signatures: callables
+                    .into_iter()
+                    .map(|t| Self::create_signature_information(t, arg_index))
+                    .collect_vec(),
+                active_signature: Some(chosen_overload_index as u32),
+                active_parameter: Some(arg_index as u32),
+            },
+        )
     }
 
     fn create_signature_information(type_: Type, arg_index: usize) -> SignatureInformation {
         let type_ = type_.deterministic_printing();
-        let label = format!("{type_}");
+        let label = type_.as_hover_string();
         let (parameters, active_parameter) =
             if let Some(params) = Self::normalize_singleton_function_type_into_params(type_) {
                 let active_parameter = if arg_index < params.len() {
@@ -785,21 +808,12 @@ impl<'a> Transaction<'a> {
     }
 
     fn normalize_singleton_function_type_into_params(type_: Type) -> Option<Vec<Param>> {
-        let callable = match type_ {
-            Type::Callable(callable) => Some(*callable),
-            Type::Function(function) => Some(function.signature),
-            Type::BoundMethod(bound_method) => match bound_method.func {
-                BoundMethodType::Function(function) => Some(function.signature),
-                BoundMethodType::Forall(forall) => Some(forall.body.signature),
-                BoundMethodType::Overload(_) => None,
-            },
-            _ => None,
-        }?;
+        let callable = type_.to_callable()?;
         // We will drop the self parameter for signature help
         if let Params::List(params_list) = callable.params {
             if let Some(Param::PosOnly(Some(name), _, _) | Param::Pos(name, _, _)) =
                 params_list.items().first()
-                && name.as_str() == "self"
+                && (name.as_str() == "self" || name.as_str() == "cls")
             {
                 let mut params = params_list.into_items();
                 params.remove(0);
@@ -1482,8 +1496,8 @@ impl<'a> Transaction<'a> {
         let mut named_bindings = Vec::new();
         for idx in bindings.keys::<Key>() {
             let key = bindings.idx_to_key(idx);
-            if let Key::Phi(..) = key {
-                // Phi keys are always synthetic and never serves as a name definition.
+            if matches!(key, Key::Phi(..) | Key::Narrow(..)) {
+                // These keys are always synthetic and never serves as a name definition.
                 continue;
             }
             if let Some((definition_handle, definition_export)) =
@@ -1505,52 +1519,158 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         completions: &mut Vec<CompletionItem>,
     ) {
-        let mod_module = match self.get_ast(handle) {
-            Some(module) => module,
-            None => return,
-        };
-
-        let mut call_context = None;
-        mod_module
-            .visit(&mut |x| Self::visit_finding_signature_range(x, position, &mut call_context));
-        let (callee_range, _call_args_range, _arg_index) = match call_context {
-            Some(context) => context,
-            None => return,
-        };
-
-        let answers = match self.get_answers(handle) {
-            Some(answers) => answers,
-            None => return,
-        };
-        let callee_type = match answers.get_type_trace(callee_range) {
-            Some(ty) => ty,
-            None => return,
-        };
-
-        let params =
-            match Self::normalize_singleton_function_type_into_params(callee_type.arc_clone()) {
-                Some(params) => params,
-                None => return,
-            };
-
-        for param in params {
-            match param {
-                Param::Pos(name, ty, _)
-                | Param::PosOnly(Some(name), ty, _)
-                | Param::KwOnly(name, ty, _)
-                | Param::VarArg(Some(name), ty) => {
-                    if name.as_str() != "self" {
-                        completions.push(CompletionItem {
-                            label: format!("{}=", name.as_str()),
-                            detail: Some(ty.to_string()),
-                            kind: Some(CompletionItemKind::VARIABLE),
-                            ..Default::default()
-                        });
+        if let Some((callables, overload_idx, _)) = self.get_callables_from_call(handle, position)
+            && let Some(callable) = callables.get(overload_idx).cloned()
+            && let Some(params) = Self::normalize_singleton_function_type_into_params(callable)
+        {
+            for param in params {
+                match param {
+                    Param::Pos(name, ty, _)
+                    | Param::PosOnly(Some(name), ty, _)
+                    | Param::KwOnly(name, ty, _)
+                    | Param::VarArg(Some(name), ty) => {
+                        if name.as_str() != "self" {
+                            completions.push(CompletionItem {
+                                label: format!("{}=", name.as_str()),
+                                detail: Some(ty.to_string()),
+                                kind: Some(CompletionItemKind::VARIABLE),
+                                ..Default::default()
+                            });
+                        }
                     }
+                    Param::VarArg(None, _) | Param::Kwargs(_, _) | Param::PosOnly(None, _, _) => {}
                 }
-                Param::VarArg(None, _) | Param::Kwargs(_, _) | Param::PosOnly(None, _, _) => {}
             }
         }
+    }
+
+    fn add_builtins_autoimport_completions(
+        &self,
+        handle: &Handle,
+        identifier: Option<&Identifier>,
+        completions: &mut Vec<CompletionItem>,
+    ) {
+        if let Ok(builtin_handle) = self.import_handle(handle, ModuleName::builtins(), None) {
+            let builtin_exports = self.get_exports(&builtin_handle);
+            for (name, location) in builtin_exports.iter() {
+                if let Some(identifier) = identifier
+                    && SkimMatcherV2::default()
+                        .smart_case()
+                        .fuzzy_match(name.as_str(), identifier.as_str())
+                        .is_none()
+                {
+                    continue;
+                }
+                let kind = match location {
+                    ExportLocation::OtherModule(_) => continue,
+                    ExportLocation::ThisModule(export) => export
+                        .symbol_kind
+                        .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                            Some(k.to_lsp_completion_item_kind())
+                        }),
+                };
+                completions.push(CompletionItem {
+                    label: name.as_str().to_owned(),
+                    detail: None,
+                    kind,
+                    data: Some(serde_json::json!("builtin")),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    fn add_autoimport_completions(
+        &self,
+        handle: &Handle,
+        identifier: &Identifier,
+        completions: &mut Vec<CompletionItem>,
+    ) {
+        // Auto-import can be slow. Let's only return results if there are no local
+        // results for now. TODO: re-enable it once we no longer have perf issues.
+        // We should not try to generate autoimport when the user has typed very few
+        // characters. It's unhelpful to narrow down suggestions.
+        if identifier.as_str().len() >= MIN_CHARACTERS_TYPED_AUTOIMPORT
+            && let Some(ast) = self.get_ast(handle)
+            && let Some(module_info) = self.get_module_info(handle)
+        {
+            for (handle_to_import_from, name, export) in
+                self.search_exports_fuzzy(identifier.as_str())
+            {
+                // Using handle itself doesn't always work because handles can be made separately and have different hashes
+                if handle_to_import_from.module() == handle.module()
+                    || handle_to_import_from.module() == ModuleName::builtins()
+                {
+                    continue;
+                }
+                let (insert_text, additional_text_edits) = {
+                    let (position, insert_text) =
+                        insert_import_edit(&ast, handle_to_import_from, &name);
+                    let import_text_edit = TextEdit {
+                        range: module_info
+                            .lined_buffer()
+                            .to_lsp_range(TextRange::at(position, TextSize::new(0))),
+                        new_text: insert_text.clone(),
+                    };
+                    (Some(insert_text), Some(vec![import_text_edit]))
+                };
+                completions.push(CompletionItem {
+                    label: name,
+                    detail: insert_text,
+                    kind: export
+                        .symbol_kind
+                        .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                            Some(k.to_lsp_completion_item_kind())
+                        }),
+                    additional_text_edits,
+                    ..Default::default()
+                });
+            }
+        }
+    }
+
+    /// Adds completions for local variables and returns true if we have added any
+    /// If an identifier is present, filter matches
+    fn add_local_variable_completions(
+        &self,
+        handle: &Handle,
+        identifier: Option<&Identifier>,
+        position: TextSize,
+        completions: &mut Vec<CompletionItem>,
+    ) -> bool {
+        let mut has_added_any = false;
+        if let Some(bindings) = self.get_bindings(handle)
+            && let Some(module_info) = self.get_module_info(handle)
+        {
+            for idx in bindings.available_definitions(position) {
+                let key = bindings.idx_to_key(idx);
+                let label = match key {
+                    Key::Definition(id) => module_info.code_at(id.range()),
+                    Key::Anywhere(id, _) => id,
+                    _ => continue,
+                };
+                if let Some(identifier) = identifier
+                    && SkimMatcherV2::default()
+                        .fuzzy_match(label, identifier.as_str())
+                        .is_none()
+                {
+                    continue;
+                }
+                let binding = bindings.get(idx);
+                let detail = self.get_type(handle, key).map(|t| t.to_string());
+                has_added_any = true;
+                completions.push(CompletionItem {
+                    label: label.to_owned(),
+                    detail,
+                    kind: binding
+                        .symbol_kind()
+                        .map_or(Some(CompletionItemKind::VARIABLE), |k| {
+                            Some(k.to_lsp_completion_item_kind())
+                        }),
+                    ..Default::default()
+                })
+            }
+        }
+        has_added_any
     }
 
     fn add_keyword_completions(&self, handle: &Handle, completions: &mut Vec<CompletionItem>) {
@@ -1593,7 +1713,6 @@ impl<'a> Transaction<'a> {
 
     fn completion_unsorted_opt(&self, handle: &Handle, position: TextSize) -> Vec<CompletionItem> {
         let mut result = Vec::new();
-        self.add_keyword_completions(handle, &mut result);
         self.add_kwargs_completions(handle, position, &mut result);
 
         match self.identifier_at(handle, position) {
@@ -1651,7 +1770,7 @@ impl<'a> Transaction<'a> {
                                 };
                                 result.push(CompletionItem {
                                     label: x.name.as_str().to_owned(),
-                                    detail: x.ty.clone().map(|t| t.to_string()),
+                                    detail: x.ty.clone().map(|t| t.as_hover_string()),
                                     kind,
                                     ..Default::default()
                                 });
@@ -1660,72 +1779,24 @@ impl<'a> Transaction<'a> {
                 }
             }
             Some(IdentifierWithContext { identifier, .. }) => {
-                if let Some(bindings) = self.get_bindings(handle)
-                    && let Some(module_info) = self.get_module_info(handle)
-                {
-                    bindings
-                        .available_definitions(position)
-                        .into_iter()
-                        .for_each(|idx| {
-                            let key = bindings.idx_to_key(idx);
-                            if let Key::Definition(id) = key {
-                                let binding = bindings.get(idx);
-                                let detail = self.get_type(handle, key).map(|t| t.to_string());
-                                result.push(CompletionItem {
-                                    label: module_info.code_at(id.range()).to_owned(),
-                                    detail,
-                                    kind: binding
-                                        .symbol_kind()
-                                        .map_or(Some(CompletionItemKind::VARIABLE), |k| {
-                                            Some(k.to_lsp_completion_item_kind())
-                                        }),
-                                    ..Default::default()
-                                })
-                            }
-                        });
-                    // We should not try to generate autoimport when the user has typed very few
-                    // characters. It's unhelpful to narrow down suggestions.
-                    if identifier.as_str().len() >= MIN_CHARACTERS_TYPED_AUTOIMPORT
-                        && let Some(ast) = self.get_ast(handle)
-                    {
-                        for (handle_to_import_from, name, export) in
-                            self.search_exports_fuzzy(identifier.as_str())
-                        {
-                            // Using handle itself doesn't always work because handles can be made separately and have different hashes
-                            if handle_to_import_from.module() == handle.module() {
-                                continue;
-                            }
-                            let (insert_text, additional_text_edits) =
-                                match handle_to_import_from.module().as_str() {
-                                    "builtins" => (None, None),
-                                    _ => {
-                                        let (position, insert_text) =
-                                            insert_import_edit(&ast, handle_to_import_from, &name);
-                                        let import_text_edit = TextEdit {
-                                            range: module_info.lined_buffer().to_lsp_range(
-                                                TextRange::at(position, TextSize::new(0)),
-                                            ),
-                                            new_text: insert_text.clone(),
-                                        };
-                                        (Some(insert_text), Some(vec![import_text_edit]))
-                                    }
-                                };
-                            result.push(CompletionItem {
-                                label: name,
-                                detail: insert_text,
-                                kind: export
-                                    .symbol_kind
-                                    .map_or(Some(CompletionItemKind::VARIABLE), |k| {
-                                        Some(k.to_lsp_completion_item_kind())
-                                    }),
-                                additional_text_edits,
-                                ..Default::default()
-                            });
-                        }
-                    }
+                self.add_keyword_completions(handle, &mut result);
+                if !self.add_local_variable_completions(
+                    handle,
+                    Some(&identifier),
+                    position,
+                    &mut result,
+                ) {
+                    self.add_autoimport_completions(handle, &identifier, &mut result);
+                }
+                self.add_builtins_autoimport_completions(handle, Some(&identifier), &mut result);
+            }
+            None => {
+                if self.empty_line_at(handle, position) {
+                    self.add_keyword_completions(handle, &mut result);
+                    self.add_local_variable_completions(handle, None, position, &mut result);
+                    self.add_builtins_autoimport_completions(handle, None, &mut result);
                 }
             }
-            None => {}
         }
         result
     }

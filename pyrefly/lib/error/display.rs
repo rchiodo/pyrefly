@@ -230,6 +230,19 @@ impl TypeCheckKind {
             Self::PostInit => format!(
                 "`__post_init__` type `{got}` is not assignable to expected type `{want}` generated from the dataclass's `InitVar` fields"
             ),
+            Self::OverloadReturn => format!(
+                "Overload return type `{got}` is not assignable to implementation return type `{want}`",
+            ),
+            Self::OverloadInput(overload_sig, impl_sig) => {
+                format!(
+                    "Implementation signature `{impl_sig}` does not accept all arguments that overload signature `{overload_sig}` accepts"
+                )
+            }
+            Self::TypeVarSpecialization(name) => {
+                format!(
+                    "Type `{got}` is not assignable to upper bound `{want}` of type variable `{name}`"
+                )
+            }
         }
     }
 }

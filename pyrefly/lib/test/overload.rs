@@ -353,7 +353,7 @@ std_aggs[0][1].append('foo')
 );
 
 testcase!(
-    test_constructor_overload,
+    test_constructor_overload_with_hint,
     r#"
 from typing import Callable, overload
 class defaulty[K, V]:
@@ -361,7 +361,7 @@ class defaulty[K, V]:
     def __init__(self: defaulty[str, V], **kwargs: V) -> None: ...
     @overload
     def __init__(self, default_factory: Callable[[], V] | None, /) -> None: ...
-    def __init__() -> None:
+    def __init__(self, *args, **kwargs) -> None:
         return None
 badge: defaulty[bool, list[str]] = defaulty(list)
     "#,
@@ -475,5 +475,102 @@ testcase!(
     r#"
 def foo() -> int: # E: Function declared to return `int` but is missing an explicit `return`
     """hello"""
+    "#,
+);
+
+testcase!(
+    test_return_consistency,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int) -> int: ...
+@overload
+def f(x: str) -> str: ...  # E: Overload return type `str` is not assignable to implementation return type `int`
+def f(x: int | str) -> int:
+    return int(x)
+    "#,
+);
+
+testcase!(
+    test_generic_overloads_are_consistent,
+    r#"
+from typing import Any, overload
+
+@overload
+def f(a: int, b: Any) -> float: ...
+@overload
+def f[T](a: float, b: T) -> T: ...
+def f[T](a: float, b: T) -> T: ...
+    "#,
+);
+
+testcase!(
+    test_overloads_are_consistent_with_generic_impl,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int) -> int: ...
+@overload
+def f(x: str) -> str: ...
+def f[T](x: T) -> T:
+    return x
+    "#,
+);
+
+testcase!(
+    test_param_consistency,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int) -> int: ...
+@overload
+def f(x: str) -> int: ...  # E: Implementation signature `(x: int) -> int` does not accept all arguments that overload signature `(x: str) -> int` accepts
+def f(x: int) -> int:
+    return x
+    "#,
+);
+
+testcase!(
+    test_generic_implementation_multiple_typevars,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int, y: str) -> tuple[str, int]: ...
+@overload
+def f(x: bool, y: float) -> tuple[float, bool]: ...
+def f[T1, T2](x: T1, y: T2) -> tuple[T2, T1]:
+    return (y, x)
+
+@overload
+def g(x: int, y: str) -> tuple[str, int]: ...  # E: `tuple[str, int]` is not assignable to implementation return type `tuple[int, str]`
+@overload
+def g(x: bool, y: float) -> tuple[float, bool]: ...  # E: `tuple[float, bool]` is not assignable to implementation return type `tuple[bool, float]`
+def g[T1, T2](x: T1, y: T2) -> tuple[T1, T2]:
+    return (x, y)
+    "#,
+);
+
+testcase!(
+    test_generic_overload_nongeneric_impl,
+    r#"
+from typing import Any, overload
+
+@overload
+def f[T](x: T, y=None) -> T: ...  # E: does not accept all arguments  # E: not assignable to implementation return type
+@overload
+def f(x, y) -> Any: ...
+def f(x: int, y=None) -> int:
+    return x
+
+@overload
+def g[T: int](x: T, y=None) -> T: ...
+@overload
+def g(x, y) -> Any: ...
+def g(x: int, y=None) -> int:
+    return x
     "#,
 );

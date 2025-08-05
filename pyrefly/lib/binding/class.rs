@@ -26,13 +26,13 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
-use starlark_map::small_set::SmallSet;
 
-use crate::alt::class::base_class::BaseClass;
+use crate::binding::base_class::BaseClass;
 use crate::binding::binding::AnnotationTarget;
 use crate::binding::binding::Binding;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
+use crate::binding::binding::BindingClassBaseType;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
@@ -45,6 +45,7 @@ use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
+use crate::binding::binding::KeyClassBaseType;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
@@ -62,7 +63,6 @@ use crate::binding::scope::Scope;
 use crate::binding::scope::ScopeKind;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
-use crate::graph::index::Idx;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
 use crate::types::types::Type;
@@ -93,6 +93,7 @@ impl<'a> BindingsBuilder<'a> {
         let class_indices = ClassIndices {
             def_index,
             class_idx: self.idx_for_promise(KeyClass(ShortIdentifier::new(class_name))),
+            base_type_idx: self.idx_for_promise(KeyClassBaseType(def_index)),
             metadata_idx: self.idx_for_promise(KeyClassMetadata(def_index)),
             mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
             synthesized_fields_idx: self.idx_for_promise(KeyClassSynthesizedFields(def_index)),
@@ -118,7 +119,6 @@ impl<'a> BindingsBuilder<'a> {
         }
 
         let (mut class_object, class_indices) = self.class_object_and_indices(&x.name);
-        let mut key_class_fields: SmallSet<Idx<KeyClassField>> = SmallSet::new();
 
         let docstring_range = Docstring::range_from_stmts(x.body.as_slice());
         let body = mem::take(&mut x.body);
@@ -160,7 +160,7 @@ impl<'a> BindingsBuilder<'a> {
                 &mut legacy
             };
             self.ensure_type(&mut base, legacy);
-            base
+            self.base_class_of(base)
         });
 
         let mut keywords = Vec::new();
@@ -182,6 +182,15 @@ impl<'a> BindingsBuilder<'a> {
             });
         }
 
+        self.insert_binding_idx(
+            class_indices.base_type_idx,
+            BindingClassBaseType {
+                class_idx: class_indices.class_idx,
+                is_new_type: false,
+                bases: bases.clone().into_boxed_slice(),
+                special_base: None,
+            },
+        );
         self.insert_binding_idx(
             class_indices.metadata_idx,
             BindingClassMetadata {
@@ -273,7 +282,6 @@ impl<'a> BindingsBuilder<'a> {
                     ),
                 );
                 let key_field = KeyClassField(class_indices.def_index, name.into_key().clone());
-                key_class_fields.insert(self.idx_for_promise(key_field.clone()));
                 self.insert_binding(key_field, binding);
             }
         }
@@ -288,8 +296,6 @@ impl<'a> BindingsBuilder<'a> {
                     );
 
                     let key_field = KeyClassField(class_indices.def_index, name.key().clone());
-                    key_class_fields.insert(self.idx_for_promise(key_field.clone()));
-
                     self.insert_binding(
                         key_field,
                         BindingClassField {
@@ -312,7 +318,7 @@ impl<'a> BindingsBuilder<'a> {
         let decorator_keys = decorators_with_ranges
             .map(|(idx, _)| *idx)
             .into_boxed_slice();
-        self.bind_definition_current(
+        self.bind_current_as(
             &x.name,
             class_object,
             Binding::ClassDef(class_indices.class_idx, decorator_keys),
@@ -430,20 +436,28 @@ impl<'a> BindingsBuilder<'a> {
         class_kind: SynthesizedClassKind,
         special_base: Option<Box<BaseClass>>,
     ) {
-        let mut key_class_fields: SmallSet<Idx<KeyClassField>> = SmallSet::new();
-
+        let base_classes = base
+            .into_iter()
+            .map(|base| self.base_class_of(base))
+            .collect::<Vec<_>>();
+        let is_new_type = class_kind == SynthesizedClassKind::NewType;
+        self.insert_binding_idx(
+            class_indices.base_type_idx,
+            BindingClassBaseType {
+                class_idx: class_indices.class_idx,
+                is_new_type,
+                bases: base_classes.clone().into_boxed_slice(),
+                special_base: special_base.clone(),
+            },
+        );
         self.insert_binding_idx(
             class_indices.metadata_idx,
             BindingClassMetadata {
                 class_idx: class_indices.class_idx,
-                bases: base
-                    .clone()
-                    .into_iter()
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice(),
+                bases: base_classes.into_boxed_slice(),
                 keywords,
                 decorators: Box::new([]),
-                is_new_type: class_kind == SynthesizedClassKind::NewType,
+                is_new_type,
                 special_base,
             },
         );
@@ -539,7 +553,7 @@ impl<'a> BindingsBuilder<'a> {
                     None => ClassFieldDefinition::DeclaredWithoutAnnotation,
                 },
             };
-            let idx = self.insert_binding(
+            self.insert_binding(
                 KeyClassField(class_indices.def_index, member_name.clone()),
                 BindingClassField {
                     class_idx: class_indices.class_idx,
@@ -548,9 +562,8 @@ impl<'a> BindingsBuilder<'a> {
                     definition,
                 },
             );
-            key_class_fields.insert(idx);
         }
-        self.bind_definition_current(
+        self.bind_current_as(
             &class_name,
             class_object,
             Binding::ClassDef(class_indices.class_idx, Box::new([])),

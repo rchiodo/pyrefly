@@ -15,7 +15,8 @@ use pyrefly_derive::VisitMut;
 use pyrefly_python::dunder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_util::display::commas_iter;
-use pyrefly_util::prelude::SliceExt;
+use pyrefly_util::prelude::VecExt;
+use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::Keyword;
 use ruff_python_ast::name::Name;
 
@@ -46,8 +47,8 @@ impl ParamList {
     }
 
     /// Create a new ParamList from a list of types, as required position-only parameters.
-    pub fn new_types(xs: &[Type]) -> Self {
-        Self(xs.map(|t| Param::PosOnly(None, t.clone(), Required::Required)))
+    pub fn new_types(xs: Vec<Type>) -> Self {
+        Self(xs.into_map(|t| Param::PosOnly(None, t, Required::Required)))
     }
 
     /// Prepend some required position-only parameters.
@@ -93,6 +94,42 @@ impl ParamList {
         if named_posonly {
             write!(f, ", /")?;
         }
+        Ok(())
+    }
+
+    /// Format parameters each parameter on a new line
+    pub fn fmt_with_type_with_newlines<'a, D: Display + 'a>(
+        &'a self,
+        f: &mut fmt::Formatter<'_>,
+        wrap: &'a impl Fn(&'a Type) -> D,
+    ) -> fmt::Result {
+        let mut named_posonly = false;
+        let mut kwonly = false;
+
+        for (i, param) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, ",\n    ")?;
+            }
+
+            if matches!(param, Param::PosOnly(Some(_), _, _)) {
+                named_posonly = true;
+            } else if named_posonly {
+                named_posonly = false;
+                write!(f, "/,\n    ")?;
+            }
+
+            if !kwonly && matches!(param, Param::KwOnly(..)) {
+                kwonly = true;
+                write!(f, "*,\n    ")?;
+            }
+
+            param.fmt_with_type(f, wrap)?;
+        }
+
+        if named_posonly {
+            write!(f, ",\n    /")?;
+        }
+
         Ok(())
     }
 
@@ -200,7 +237,9 @@ pub struct FuncFlags {
     /// A `foo.setter` function, where `foo` is some `@property`-decorated function.
     /// When used to decorate a function, turns the decorated function into a property setter.
     pub is_property_setter_decorator: bool,
-    /// A function decorated with `@foo.setter`, where `foo` is some `@property`-decorated function.
+    /// If None, this is a function decorated with `@foo.setter`, where `foo` is
+    /// a property (i.e. a function decoratoed with `@property`)
+    ///
     /// The stored type is `foo` (the getter).
     pub is_property_setter_with_getter: Option<Type>,
     pub has_enum_member_decoration: bool,
@@ -305,6 +344,26 @@ impl Callable {
         }
     }
 
+    /// Format the function type for use in a hover tooltip. This is similar to `fmt_with_type`, but
+    /// it puts args on new lines if there is more than one argument
+    pub fn fmt_with_type_with_newlines<'a, D: Display + 'a>(
+        &'a self,
+        f: &mut fmt::Formatter<'_>,
+        wrap: &'a impl Fn(&'a Type) -> D,
+    ) -> fmt::Result {
+        match &self.params {
+            Params::List(params) if params.len() > 1 => {
+                // For multiple parameters, put each on a new line with indentation
+                write!(f, "(\n    ")?;
+                params.fmt_with_type_with_newlines(f, wrap)?;
+                write!(f, "\n) -> {}", wrap(&self.ret))
+            }
+            Params::List(..) | Params::ParamSpec(..) | Params::Ellipsis => {
+                self.fmt_with_type(f, wrap)
+            }
+        }
+    }
+
     pub fn list(params: ParamList, ret: Type) -> Self {
         Self {
             params: Params::List(params),
@@ -395,21 +454,7 @@ impl Callable {
         replacement: &Type,
         is_subset: &dyn Fn(&Type, &Type) -> bool,
     ) {
-        match &mut self.params {
-            Params::List(params) => {
-                for param in params.0.iter_mut() {
-                    param.subst_self_type_mut(replacement, is_subset);
-                }
-            }
-            Params::Ellipsis => {}
-            Params::ParamSpec(ts, t) => {
-                for t in ts.iter_mut() {
-                    t.subst_self_type_mut(replacement, is_subset);
-                }
-                t.subst_self_type_mut(replacement, is_subset);
-            }
-        }
-        self.ret.subst_self_type_mut(replacement, is_subset);
+        self.visit_mut(&mut |t: &mut Type| t.subst_self_type_mut(replacement, is_subset));
     }
 }
 
@@ -433,22 +478,33 @@ impl Param {
                 write!(f, "_: {} = {}", wrap(ty), self.fmt_default(default))
             }
             Param::PosOnly(Some(name), ty, Required::Required)
-            | Param::Pos(name, ty, Required::Required) => {
+            | Param::Pos(name, ty, Required::Required)
+            | Param::KwOnly(name, ty, Required::Required) => {
                 write!(f, "{}: {}", name, wrap(ty),)
             }
             Param::PosOnly(Some(name), ty, Required::Optional(default))
-            | Param::Pos(name, ty, Required::Optional(default)) => {
+            | Param::Pos(name, ty, Required::Optional(default))
+            | Param::KwOnly(name, ty, Required::Optional(default)) => {
                 write!(f, "{}: {} = {}", name, wrap(ty), self.fmt_default(default))
             }
             Param::VarArg(Some(name), ty) => write!(f, "*{}: {}", name, wrap(ty)),
             Param::VarArg(None, ty) => write!(f, "*{}", wrap(ty)),
-            Param::KwOnly(name, ty, _required) => write!(f, "{}: {}", name, wrap(ty)),
             Param::Kwargs(Some(name), ty) => write!(f, "**{}: {}", name, wrap(ty)),
             Param::Kwargs(None, ty) => write!(f, "**{}", wrap(ty)),
         }
     }
 
-    pub fn param_to_type(&self) -> &Type {
+    pub fn as_type(&self) -> &Type {
+        match self {
+            Param::PosOnly(_, ty, _)
+            | Param::Pos(_, ty, _)
+            | Param::VarArg(_, ty)
+            | Param::KwOnly(_, ty, _)
+            | Param::Kwargs(_, ty) => ty,
+        }
+    }
+
+    pub fn as_type_mut(&mut self) -> &mut Type {
         match self {
             Param::PosOnly(_, ty, _)
             | Param::Pos(_, ty, _)
@@ -465,20 +521,6 @@ impl Param {
             | Param::Pos(_, _, Required::Required)
             | Param::KwOnly(_, _, Required::Required) => true,
             _ => false,
-        }
-    }
-
-    fn subst_self_type_mut(
-        &mut self,
-        replacement: &Type,
-        is_subset: &dyn Fn(&Type, &Type) -> bool,
-    ) {
-        match self {
-            Param::PosOnly(_, ty, _)
-            | Param::Pos(_, ty, _)
-            | Param::VarArg(_, ty)
-            | Param::KwOnly(_, ty, _)
-            | Param::Kwargs(_, ty) => ty.subst_self_type_mut(replacement, is_subset),
         }
     }
 }

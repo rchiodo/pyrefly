@@ -35,6 +35,7 @@ use crate::binding::binding::KeyExpect;
 use crate::binding::binding::LinkedKey;
 use crate::binding::binding::RaisedException;
 use crate::binding::bindings::BindingsBuilder;
+use crate::binding::bindings::LookupKind;
 use crate::binding::bindings::MutableCaptureLookupKind;
 use crate::binding::expr::Usage;
 use crate::binding::narrow::NarrowOps;
@@ -157,8 +158,8 @@ impl<'a> BindingsBuilder<'a> {
         })
     }
 
-    fn define_nonlocal_name(&mut self, name: &Identifier) {
-        let key = Key::Definition(ShortIdentifier::new(name));
+    fn declare_nonlocal_name(&mut self, name: &Identifier) {
+        let key = Key::Declaration(ShortIdentifier::new(name));
         let binding =
             match self.lookup_mutable_captured_name(&name.id, MutableCaptureLookupKind::Nonlocal) {
                 Ok(found) => Binding::Forward(found),
@@ -173,14 +174,19 @@ impl<'a> BindingsBuilder<'a> {
             };
         let binding_key = self.insert_binding(key, binding);
 
-        self.scopes
-            .add_to_current_static(name.id.clone(), name.range, SymbolKind::Variable, None);
+        self.scopes.add_to_current_static(
+            name.id.clone(),
+            name.range,
+            SymbolKind::Variable,
+            None,
+            true,
+        );
 
         self.bind_name(&name.id, binding_key, FlowStyle::Other);
     }
 
-    fn define_global_name(&mut self, name: &Identifier) {
-        let key = Key::Definition(ShortIdentifier::new(name));
+    fn declare_global_name(&mut self, name: &Identifier) {
+        let key = Key::Declaration(ShortIdentifier::new(name));
         let binding =
             match self.lookup_mutable_captured_name(&name.id, MutableCaptureLookupKind::Global) {
                 Ok(found) => Binding::Forward(found),
@@ -195,8 +201,13 @@ impl<'a> BindingsBuilder<'a> {
             };
         let binding_key = self.insert_binding(key, binding);
 
-        self.scopes
-            .add_to_current_static(name.id.clone(), name.range, SymbolKind::Variable, None);
+        self.scopes.add_to_current_static(
+            name.id.clone(),
+            name.range,
+            SymbolKind::Variable,
+            None,
+            true,
+        );
 
         self.bind_name(&name.id, binding_key, FlowStyle::Other);
     }
@@ -418,7 +429,7 @@ impl<'a> BindingsBuilder<'a> {
                             _ => Initialized::Yes,
                         },
                     );
-                    let cannonical_ann_idx = match value {
+                    let canonical_ann_idx = match value {
                         Some(value) => self.bind_single_name_assign(
                             &name,
                             value,
@@ -435,14 +446,19 @@ impl<'a> BindingsBuilder<'a> {
                                     initial_value: maybe_ellipses,
                                 }
                             } else {
-                                FlowStyle::Uninitialized
+                                // A flow style might be already set for the
+                                // name, e.g. if it was defined previously.
+                                // If so, we use that style; otherwise, the flow
+                                // style lookup would return an uninitialized
+                                // flow style, which is what we want here.
+                                self.scopes.get_flow_style(&name.id, false).clone()
                             },
                         ),
                     };
                     // This assignment gets checked with the provided annotation. But if there exists a prior
                     // annotation, we might be invalidating it unless the annotations are the same. Insert a
                     // check that in that case the annotations match.
-                    if let Some(ann) = cannonical_ann_idx {
+                    if let Some(ann) = canonical_ann_idx {
                         self.insert_binding(
                             KeyExpect(name.range),
                             BindingExpect::Redefinition {
@@ -740,27 +756,65 @@ impl<'a> BindingsBuilder<'a> {
                     base = self.scopes.clone_current_flow();
                     let range = h.range();
                     let h = h.except_handler().unwrap(); // Only one variant for now
-                    if let Some(name) = h.name
-                        && let Some(mut type_) = h.type_
-                    {
-                        let mut handler =
-                            self.declare_current_idx(Key::Definition(ShortIdentifier::new(&name)));
-                        self.ensure_expr(&mut type_, handler.usage());
-                        self.bind_definition_current(
-                            &name,
-                            handler,
-                            Binding::ExceptionHandler(type_, x.is_star),
-                            FlowStyle::Other,
-                        );
-                    } else if let Some(mut type_) = h.type_ {
-                        let mut handler = self.declare_current_idx(Key::Anon(range));
-                        self.ensure_expr(&mut type_, handler.usage());
-                        self.insert_binding_current(
-                            handler,
-                            Binding::ExceptionHandler(type_, x.is_star),
-                        );
+                    match (&h.name, h.type_) {
+                        (Some(name), Some(mut type_)) => {
+                            let mut handler = self
+                                .declare_current_idx(Key::Definition(ShortIdentifier::new(name)));
+                            self.ensure_expr(&mut type_, handler.usage());
+                            self.bind_current_as(
+                                name,
+                                handler,
+                                Binding::ExceptionHandler(type_, x.is_star),
+                                FlowStyle::Other,
+                            );
+                        }
+                        (None, Some(mut type_)) => {
+                            let mut handler = self.declare_current_idx(Key::Anon(range));
+                            self.ensure_expr(&mut type_, handler.usage());
+                            self.insert_binding_current(
+                                handler,
+                                Binding::ExceptionHandler(type_, x.is_star),
+                            );
+                        }
+                        (Some(name), None) => {
+                            // Must be a syntax error. But make sure we bind name to something.
+                            let handler = self
+                                .declare_current_idx(Key::Definition(ShortIdentifier::new(name)));
+                            self.bind_current_as(
+                                name,
+                                handler,
+                                Binding::Type(Type::any_error()),
+                                FlowStyle::Other,
+                            );
+                        }
+                        (None, None) => {}
                     }
+
                     self.stmts(h.body);
+
+                    if let Some(name) = &h.name {
+                        // Mark the current caught exception name as
+                        // uninitialized in the current scope, so that it cannot
+                        // be used later.
+                        // https://docs.python.org/3/reference/compound_stmts.html#except-clause
+                        let idx = self.lookup_name(
+                            Hashed::new(&name.id),
+                            LookupKind::Regular,
+                            &mut Usage::MutableLookup,
+                        );
+                        if let Ok(idx) = idx {
+                            self.scopes.upsert_flow_info(
+                                Hashed::new(&name.id),
+                                idx,
+                                Some(FlowStyle::Uninitialized),
+                            );
+                        } else {
+                            panic!(
+                                "Should have found the exception name `{name}` in the current scope"
+                            );
+                        }
+                    }
+
                     self.scopes.swap_current_flow_with(&mut base);
                     branches.push(base);
                 }
@@ -918,11 +972,7 @@ impl<'a> BindingsBuilder<'a> {
                             }
                         }
                         Err(FindError::Ignored) => self.bind_unimportable_names(&x, false),
-                        Err(
-                            err @ (FindError::NoPyTyped
-                            | FindError::NoSource(_)
-                            | FindError::NotFound(..)),
-                        ) => {
+                        Err(err @ (FindError::NoSource(_) | FindError::NotFound(..))) => {
                             let (ctx, msg) = err.display();
                             self.error_multiline(
                                 x.range,
@@ -946,12 +996,12 @@ impl<'a> BindingsBuilder<'a> {
             }
             Stmt::Global(x) => {
                 for name in x.names {
-                    self.define_global_name(&name);
+                    self.declare_global_name(&name);
                 }
             }
             Stmt::Nonlocal(x) => {
                 for name in x.names {
-                    self.define_nonlocal_name(&name);
+                    self.declare_nonlocal_name(&name);
                 }
             }
             Stmt::Expr(mut x) => {

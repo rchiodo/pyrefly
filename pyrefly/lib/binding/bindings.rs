@@ -649,7 +649,7 @@ impl<'a> BindingsBuilder<'a> {
                     msg,
                 );
             }
-            Err(FindError::Ignored | FindError::NoPyTyped | FindError::NoSource(_)) => (),
+            Err(FindError::Ignored | FindError::NoSource(_)) => (),
         }
     }
 
@@ -988,7 +988,8 @@ impl<'a> BindingsBuilder<'a> {
         self.bind_name(&name.id, idx, style).0
     }
 
-    pub fn bind_definition_current(
+    /// Bind a name in scope to the idx of `current`, inserting `binding` as the binding.
+    pub fn bind_current_as(
         &mut self,
         name: &Identifier,
         current: CurrentIdx,
@@ -999,6 +1000,10 @@ impl<'a> BindingsBuilder<'a> {
         self.bind_name(&name.id, idx, style).0
     }
 
+    /// Bind a name in scope to the idx of `current`, without inserting a binding.
+    ///
+    /// Returns the same data as `bind_name`, which a caller might use to produce the binding
+    /// for `current` (which they are responsible for inserting later).
     pub fn bind_current(
         &mut self,
         name: &Name,
@@ -1085,6 +1090,7 @@ impl<'a> BindingsBuilder<'a> {
                 name.range,
                 SymbolKind::TypeParameter,
                 None,
+                false,
             );
             self.bind_definition(
                 &name,
@@ -1120,8 +1126,13 @@ impl<'a> BindingsBuilder<'a> {
             Key::Definition(ShortIdentifier::new(name)),
             Binding::LambdaParameter(var),
         );
-        self.scopes
-            .add_to_current_static(name.id.clone(), name.range, SymbolKind::Parameter, None);
+        self.scopes.add_to_current_static(
+            name.id.clone(),
+            name.range,
+            SymbolKind::Parameter,
+            None,
+            false,
+        );
         self.bind_name(&name.id, idx, FlowStyle::Other);
     }
 
@@ -1158,6 +1169,7 @@ impl<'a> BindingsBuilder<'a> {
             name.range,
             SymbolKind::Parameter,
             Some(annot),
+            false,
         );
         self.bind_name(&name.id, key, FlowStyle::Other);
     }
@@ -1233,6 +1245,7 @@ impl LegacyTParamBuilder {
                     name.range,
                     SymbolKind::TypeParameter,
                     None,
+                    false,
                 );
                 builder.bind_definition(
                     name,
@@ -1241,7 +1254,7 @@ impl LegacyTParamBuilder {
                     // tparams, and we only want to do that once (which we do in
                     // the binding created by `forward_lookup`).
                     Binding::CheckLegacyTypeParam(*idx, None),
-                    FlowStyle::Other,
+                    builder.scopes.get_flow_style(&name.id, true).clone(),
                 );
             }
         }

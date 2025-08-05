@@ -21,8 +21,10 @@ use pyrefly_util::visit::Visit;
 use ruff_python_ast::Arguments;
 use ruff_python_ast::BoolOp;
 use ruff_python_ast::Comprehension;
+use ruff_python_ast::DictItem;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprCall;
+use ruff_python_ast::ExprDict;
 use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::ExprSlice;
 use ruff_python_ast::ExprStarred;
@@ -450,102 +452,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.stdlib.list(self.unions(elem_tys)).to_type()
                 }
             }
-            Expr::Dict(x) => {
-                let flattened_items = Ast::flatten_dict_items(&x.items);
-                if let Some(hint @ Type::TypedDict(typed_dict)) = hint {
-                    self.check_dict_items_against_typed_dict(
-                        flattened_items,
-                        typed_dict,
-                        false,
-                        x.range,
-                        errors,
-                    );
-                    hint.clone()
-                } else if let Some(hint @ Type::PartialTypedDict(typed_dict)) = hint {
-                    self.check_dict_items_against_typed_dict(
-                        flattened_items,
-                        typed_dict,
-                        true,
-                        x.range,
-                        errors,
-                    );
-                    hint.clone()
-                } else {
-                    let (key_hint, value_hint) =
-                        hint.map_or((None, None), |ty| self.decompose_dict(ty));
-                    if x.is_empty() {
-                        let key_ty = key_hint.unwrap_or_else(|| {
-                            self.solver().fresh_contained(self.uniques).to_type()
-                        });
-                        let value_ty = value_hint.unwrap_or_else(|| {
-                            self.solver().fresh_contained(self.uniques).to_type()
-                        });
-                        self.stdlib.dict(key_ty, value_ty).to_type()
-                    } else {
-                        let mut key_tys = Vec::new();
-                        let mut value_tys = Vec::new();
-                        flattened_items.iter().for_each(|x| match &x.key {
-                            Some(key) => {
-                                let key_t = self.expr_infer_with_hint_promote(
-                                    key,
-                                    key_hint.as_ref(),
-                                    errors,
-                                );
-                                let value_t = self.expr_infer_with_hint_promote(
-                                    &x.value,
-                                    value_hint.as_ref(),
-                                    errors,
-                                );
-                                if key_t != Type::any_error() {
-                                    key_tys.push(key_t);
-                                }
-                                if value_t != Type::any_error() {
-                                    value_tys.push(value_t);
-                                }
-                            }
-                            None => {
-                                let ty = self.expr_infer(&x.value, errors);
-                                if let Some((key_t, value_t)) = self.unwrap_mapping(&ty) {
-                                    if key_t != Type::any_error() {
-                                        if let Some(key_hint) = &key_hint
-                                            && self.is_subset_eq(&key_t, key_hint)
-                                        {
-                                            key_tys.push(key_hint.clone());
-                                        } else {
-                                            key_tys.push(key_t);
-                                        }
-                                    }
-                                    if value_t != Type::any_error() {
-                                        if let Some(value_hint) = &value_hint
-                                            && self.is_subset_eq(&value_t, value_hint)
-                                        {
-                                            value_tys.push(value_hint.clone());
-                                        } else {
-                                            value_tys.push(value_t);
-                                        }
-                                    }
-                                } else {
-                                    self.error(
-                                        errors,
-                                        x.value.range(),
-                                        ErrorInfo::Kind(ErrorKind::InvalidArgument),
-                                        format!("Expected a mapping, got {}", self.for_display(ty)),
-                                    );
-                                }
-                            }
-                        });
-                        if key_tys.is_empty() {
-                            key_tys.push(Type::any_error())
-                        }
-                        if value_tys.is_empty() {
-                            value_tys.push(Type::any_error())
-                        }
-                        let key_ty = self.unions(key_tys);
-                        let value_ty = self.unions(value_tys);
-                        self.stdlib.dict(key_ty, value_ty).to_type()
-                    }
-                }
-            }
+            Expr::Dict(x) => self.dict_infer(x, hint, errors),
             Expr::Set(x) => {
                 let elem_hint = hint.and_then(|ty| self.decompose_set(ty));
                 if x.is_empty() {
@@ -712,6 +619,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 errors,
                                 None,
                                 hint,
+                                None,
                             )
                         }
                     })
@@ -787,6 +695,113 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    fn dict_infer(&self, x: &ExprDict, hint: Option<&Type>, errors: &ErrorCollector) -> Type {
+        let flattened_items = Ast::flatten_dict_items(&x.items);
+        let hints = match hint {
+            Some(Type::Union(ts)) => ts.iter().collect(),
+            Some(t) => vec![t],
+            None => Vec::new(),
+        };
+        for hint in hints.iter() {
+            let (typed_dict, is_update) = match hint {
+                Type::TypedDict(td) => (td, false),
+                Type::PartialTypedDict(td) => (td, true),
+                _ => continue,
+            };
+            let check_errors = self.error_collector();
+            let item_errors = self.error_collector();
+            self.check_dict_items_against_typed_dict(
+                &flattened_items,
+                typed_dict,
+                is_update,
+                x.range,
+                &check_errors,
+                &item_errors,
+            );
+            // We use the TypedDict hint if it is the only one or if it is successfully matched.
+            if hints.len() == 1 || check_errors.is_empty() {
+                errors.extend(check_errors);
+                errors.extend(item_errors);
+                return (*hint).clone();
+            }
+        }
+        // Note that we don't need to filter out the TypedDict options here; any non-`dict` options
+        // are ignored when decomposing the hint.
+        self.dict_items_infer(flattened_items, hint, errors)
+    }
+
+    /// Infers a `dict` type for dictionary items. Note: does not handle TypedDict!
+    fn dict_items_infer(
+        &self,
+        items: Vec<&DictItem>,
+        hint: Option<&Type>,
+        errors: &ErrorCollector,
+    ) -> Type {
+        let (key_hint, value_hint) = hint.map_or((None, None), |ty| self.decompose_dict(ty));
+        if items.is_empty() {
+            let key_ty =
+                key_hint.unwrap_or_else(|| self.solver().fresh_contained(self.uniques).to_type());
+            let value_ty =
+                value_hint.unwrap_or_else(|| self.solver().fresh_contained(self.uniques).to_type());
+            self.stdlib.dict(key_ty, value_ty).to_type()
+        } else {
+            let mut key_tys = Vec::new();
+            let mut value_tys = Vec::new();
+            items.iter().for_each(|x| match &x.key {
+                Some(key) => {
+                    let key_t = self.expr_infer_with_hint_promote(key, key_hint.as_ref(), errors);
+                    let value_t =
+                        self.expr_infer_with_hint_promote(&x.value, value_hint.as_ref(), errors);
+                    if !key_t.is_error() {
+                        key_tys.push(key_t);
+                    }
+                    if !value_t.is_error() {
+                        value_tys.push(value_t);
+                    }
+                }
+                None => {
+                    let ty = self.expr_infer(&x.value, errors);
+                    if let Some((key_t, value_t)) = self.unwrap_mapping(&ty) {
+                        if !key_t.is_error() {
+                            if let Some(key_hint) = &key_hint
+                                && self.is_subset_eq(&key_t, key_hint)
+                            {
+                                key_tys.push(key_hint.clone());
+                            } else {
+                                key_tys.push(key_t);
+                            }
+                        }
+                        if !value_t.is_error() {
+                            if let Some(value_hint) = &value_hint
+                                && self.is_subset_eq(&value_t, value_hint)
+                            {
+                                value_tys.push(value_hint.clone());
+                            } else {
+                                value_tys.push(value_t);
+                            }
+                        }
+                    } else {
+                        self.error(
+                            errors,
+                            x.value.range(),
+                            ErrorInfo::Kind(ErrorKind::InvalidArgument),
+                            format!("Expected a mapping, got {}", self.for_display(ty)),
+                        );
+                    }
+                }
+            });
+            if key_tys.is_empty() {
+                key_tys.push(Type::any_error())
+            }
+            if value_tys.is_empty() {
+                value_tys.push(Type::any_error())
+            }
+            let key_ty = self.unions(key_tys);
+            let value_ty = self.unions(value_tys);
+            self.stdlib.dict(key_ty, value_ty).to_type()
+        }
+    }
+
     // Helper method for inferring the type of a boolean operation over a sequence of values.
     fn boolop(&self, values: &[Expr], op: BoolOp, errors: &ErrorCollector) -> Type {
         let target = match op {
@@ -815,7 +830,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         types.push(Lit::Int(LitInt::new(0)).to_type());
                     } else if i != last_index && t == self.stdlib.str().clone().to_type() && !target
                     {
-                        types.push(Lit::Str(String::new().into_boxed_str()).to_type());
+                        types.push(Lit::Str(Default::default()).to_type());
                     } else {
                         types.push(t);
                     }
@@ -1327,7 +1342,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let call_target =
             self.as_call_target_or_error(ty_decorator, CallStyle::FreeForm, range, errors, None);
         let arg = CallArg::ty(&decoratee, range);
-        self.call_infer(call_target, &[arg], &[], range, errors, None, None)
+        self.call_infer(call_target, &[arg], &[], range, errors, None, None, None)
     }
 
     /// Helper to infer element types for a list or set.
@@ -1558,11 +1573,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 t => self.error(
                     errors,
                     range,
-                    ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                    format!(
-                        "Can't apply arguments to non-class, got {}",
-                        self.for_display(t)
-                    ),
+                    ErrorInfo::Kind(ErrorKind::UnsupportedOperation),
+                    format!("`{}` is not subscriptable", self.for_display(t)),
                 ),
             }
         })

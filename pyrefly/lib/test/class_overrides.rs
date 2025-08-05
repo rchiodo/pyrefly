@@ -253,7 +253,6 @@ class ChildA(ParentA):
 );
 
 testcase!(
-    bug = "TODO: method4 should be marked as an error since it doesn't exist in the parent class",
     test_overload_override_error,
     r#"
 
@@ -264,7 +263,7 @@ class ParentA:
 
 class ChildA(ParentA):
     @overload
-    def method4(self, x: int) -> int:
+    def method4(self, x: int) -> int:  # E: no parent class has a matching attribute
         ...
 
     @overload
@@ -390,5 +389,31 @@ class B(A):
     # If A.test3 passes x positionally then it will crash
     def test3(self, *args: int, x: int): ...  # E: Class member `B.test3` overrides parent class `A` in an inconsistent manner
     def test4(self, *args: int, x: int = 1): ...
+    "#,
+);
+
+testcase!(
+    test_unannotated_descriptor_override_error,
+    r#"
+class D:
+    def __get__(self, obj, classobj) -> int: ...
+    def __set__(self, obj, value: str) -> None: ...
+class A:
+    d = D()
+class B(A):
+    d = 42  # E: `B.d` and `A.d` must both be descriptors
+    "#,
+);
+
+testcase!(
+    test_annotated_descriptor_override_error,
+    r#"
+class D:
+    def __get__(self, obj, classobj) -> int: ...
+    def __set__(self, obj, value: str) -> None: ...
+class A:
+    d: D = D()
+class B(A):
+    d: int = 42  # E: `B.d` and `A.d` must both be descriptors
     "#,
 );

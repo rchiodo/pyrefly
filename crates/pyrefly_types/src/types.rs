@@ -189,6 +189,10 @@ impl TArgs {
         self.0.0.iter().zip(self.0.1.iter())
     }
 
+    pub fn iter_paired_mut(&mut self) -> impl ExactSizeIterator<Item = (&TParam, &mut Type)> {
+        self.0.0.iter().zip(self.0.1.iter_mut())
+    }
+
     pub fn len(&self) -> usize {
         self.0.1.len()
     }
@@ -213,12 +217,12 @@ impl TArgs {
     /// This is mainly useful to take ancestors coming from the MRO (which are always in terms
     /// of the current class's type parameters) and re-express them in terms of the current
     /// class specialized with type arguments.
-    pub fn apply_substitution(&self, substitution: &Substitution) -> Self {
+    pub fn substitute_with(&self, substitution: &Substitution) -> Self {
         let tys = self
             .0
             .1
             .iter()
-            .map(|ty| substitution.substitute(ty.clone()))
+            .map(|ty| substitution.substitute_into(ty.clone()))
             .collect();
         Self::new(self.0.0.dupe(), tys)
     }
@@ -229,16 +233,20 @@ impl TArgs {
         Substitution(tparams.quantifieds().zip(tys.iter()).collect())
     }
 
-    pub fn substitute(&self, ty: Type) -> Type {
-        self.substitution().substitute(ty)
+    pub fn substitute_into(&self, ty: Type) -> Type {
+        self.substitution().substitute_into(ty)
     }
 }
 
 pub struct Substitution<'a>(SmallMap<&'a Quantified, &'a Type>);
 
 impl<'a> Substitution<'a> {
-    pub fn substitute(&self, ty: Type) -> Type {
+    pub fn substitute_into(&self, ty: Type) -> Type {
         ty.subst(&self.0)
+    }
+
+    pub fn as_map(&self) -> &SmallMap<&Quantified, &Type> {
+        &self.0
     }
 }
 
@@ -364,10 +372,13 @@ pub struct BoundMethod {
 
 impl BoundMethod {
     pub fn drop_self(&self) -> Option<Type> {
-        self.as_function().drop_first_param_of_unbound_callable()
+        self.func
+            .clone()
+            .as_type()
+            .drop_first_param_of_unbound_callable()
     }
 
-    pub fn as_function(&self) -> Type {
+    pub fn as_function(self) -> Type {
         self.func.as_type()
     }
 }
@@ -381,13 +392,11 @@ pub enum BoundMethodType {
 }
 
 impl BoundMethodType {
-    pub fn as_type(&self) -> Type {
+    pub fn as_type(self) -> Type {
         match self {
-            Self::Function(func) => Type::Function(Box::new(func.clone())),
-            Self::Forall(forall) => {
-                Forallable::Function(forall.body.clone()).forall(forall.tparams.clone())
-            }
-            Self::Overload(overload) => Type::Overload(overload.clone()),
+            Self::Function(func) => Type::Function(Box::new(func)),
+            Self::Forall(forall) => Forallable::Function(forall.body).forall(forall.tparams),
+            Self::Overload(overload) => Type::Overload(overload),
         }
     }
 
@@ -507,7 +516,7 @@ pub struct Forall<T> {
 
 impl Forall<Forallable> {
     pub fn apply_targs(self, targs: TArgs) -> Type {
-        targs.substitute(self.body.as_type())
+        targs.substitute_into(self.body.as_type())
     }
 }
 
@@ -616,7 +625,7 @@ pub enum Type {
     Module(ModuleType),
     Forall(Box<Forall<Forallable>>),
     Var(Var),
-    Quantified(Quantified),
+    Quantified(Box<Quantified>),
     TypeGuard(Box<Type>),
     TypeIs(Box<Type>),
     Unpack(Box<Type>),
@@ -628,8 +637,8 @@ pub enum Type {
     ParamSpecValue(ParamList),
     /// Used to represent `P.args`. The spec describes it as an annotation,
     /// but it's easier to think of it as a type that can't occur in nested positions.
-    Args(Quantified),
-    Kwargs(Quantified),
+    Args(Box<Quantified>),
+    Kwargs(Box<Quantified>),
     /// Used to represent a type that has a value representation, e.g. a class
     Type(Box<Type>),
     Ellipsis,
@@ -940,12 +949,12 @@ impl Type {
         }
     }
 
-    pub fn subst(mut self, mp: &SmallMap<&Quantified, &Type>) -> Self {
+    pub fn subst_mut(&mut self, mp: &SmallMap<&Quantified, &Type>) {
         // We are looking up Quantified in a map, and Quantified may contain a Quantified within it.
         // Therefore, to make sure we still get matches, work top-down (not using `transform`).
         fn f(ty: &mut Type, mp: &SmallMap<&Quantified, &Type>) {
             if let Type::Quantified(x) = ty {
-                if let Some(w) = mp.get(x) {
+                if let Some(w) = mp.get(&**x) {
                     *ty = (*w).clone();
                 }
             } else {
@@ -953,8 +962,12 @@ impl Type {
             }
         }
         if !mp.is_empty() {
-            f(&mut self, mp);
+            f(self, mp);
         }
+    }
+
+    pub fn subst(mut self, mp: &SmallMap<&Quantified, &Type>) -> Self {
+        self.subst_mut(mp);
         self
     }
 
@@ -1191,6 +1204,7 @@ impl Type {
     pub fn promote_literals(self, stdlib: &Stdlib) -> Type {
         self.transform(&mut |ty| match &ty {
             Type::Literal(lit) => *ty = lit.general_class_type(stdlib).clone().to_type(),
+            Type::LiteralString => *ty = stdlib.str().clone().to_type(),
             _ => {}
         })
     }
@@ -1304,7 +1318,7 @@ impl Type {
 
     pub fn as_quantified(&self) -> Option<Quantified> {
         match self {
-            Type::Quantified(q) => Some(q.clone()),
+            Type::Quantified(q) => Some((**q).clone()),
             _ => None,
         }
     }
@@ -1373,6 +1387,19 @@ impl Type {
                 }
                 answer
             }
+            _ => None,
+        }
+    }
+
+    pub fn to_callable(self) -> Option<Callable> {
+        match self {
+            Type::Callable(callable) => Some(*callable),
+            Type::Function(function) => Some(function.signature),
+            Type::BoundMethod(bound_method) => match bound_method.func {
+                BoundMethodType::Function(function) => Some(function.signature),
+                BoundMethodType::Forall(forall) => Some(forall.body.signature),
+                BoundMethodType::Overload(_) => None,
+            },
             _ => None,
         }
     }

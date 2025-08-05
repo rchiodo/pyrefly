@@ -33,7 +33,6 @@ use crate::types::display::ClassDisplayContext;
 use crate::types::keywords::DataclassKeywords;
 use crate::types::keywords::DataclassTransformKeywords;
 use crate::types::stdlib::Stdlib;
-use crate::types::tuple::Tuple;
 use crate::types::types::CalleeKind;
 use crate::types::types::Type;
 
@@ -46,14 +45,10 @@ pub struct ClassMetadata {
     enum_metadata: Option<EnumMetadata>,
     protocol_metadata: Option<ProtocolMetadata>,
     dataclass_metadata: Option<DataclassMetadata>,
-    tuple_base: Option<Tuple>,
-    bases_with_metadata: Vec<(ClassType, Arc<ClassMetadata>)>,
+    bases: Vec<Class>,
     has_base_any: bool,
     is_new_type: bool,
     is_final: bool,
-    /// Is it possible for this class to have type parameters that we don't know about?
-    /// This can happen if, e.g., a class inherits from Any.
-    has_unknown_tparams: bool,
     total_ordering_metadata: Option<TotalOrderingMetadata>,
     /// If this class is decorated with `typing.dataclass_transform(...)`, the keyword arguments
     /// that were passed to the `dataclass_transform` call.
@@ -75,7 +70,7 @@ impl Display for ClassMetadata {
 
 impl ClassMetadata {
     pub fn new(
-        bases_with_metadata: Vec<(ClassType, Arc<ClassMetadata>)>,
+        bases: Vec<Class>,
         metaclass: Option<ClassType>,
         keywords: Vec<(Name, Type)>,
         typed_dict_metadata: Option<TypedDictMetadata>,
@@ -83,11 +78,9 @@ impl ClassMetadata {
         enum_metadata: Option<EnumMetadata>,
         protocol_metadata: Option<ProtocolMetadata>,
         dataclass_metadata: Option<DataclassMetadata>,
-        tuple_base: Option<Tuple>,
         has_base_any: bool,
         is_new_type: bool,
         is_final: bool,
-        has_unknown_tparams: bool,
         total_ordering_metadata: Option<TotalOrderingMetadata>,
         dataclass_transform_metadata: Option<DataclassTransformKeywords>,
     ) -> ClassMetadata {
@@ -99,12 +92,10 @@ impl ClassMetadata {
             enum_metadata,
             protocol_metadata,
             dataclass_metadata,
-            tuple_base,
-            bases_with_metadata,
+            bases,
             has_base_any,
             is_new_type,
             is_final,
-            has_unknown_tparams,
             total_ordering_metadata,
             dataclass_transform_metadata,
         }
@@ -119,12 +110,10 @@ impl ClassMetadata {
             enum_metadata: None,
             protocol_metadata: None,
             dataclass_metadata: None,
-            tuple_base: None,
-            bases_with_metadata: Vec::new(),
+            bases: Vec::new(),
             has_base_any: false,
             is_new_type: false,
             is_final: false,
-            has_unknown_tparams: false,
             total_ordering_metadata: None,
             dataclass_transform_metadata: None,
         }
@@ -151,10 +140,6 @@ impl ClassMetadata {
         self.has_base_any
     }
 
-    pub fn has_unknown_tparams(&self) -> bool {
-        self.has_unknown_tparams
-    }
-
     pub fn typed_dict_metadata(&self) -> Option<&TypedDictMetadata> {
         self.typed_dict_metadata.as_ref()
     }
@@ -163,16 +148,12 @@ impl ClassMetadata {
         self.named_tuple_metadata.as_ref()
     }
 
-    pub fn tuple_base(&self) -> Option<&Tuple> {
-        self.tuple_base.as_ref()
-    }
-
     pub fn enum_metadata(&self) -> Option<&EnumMetadata> {
         self.enum_metadata.as_ref()
     }
 
-    pub fn bases_with_metadata(&self) -> &[(ClassType, Arc<ClassMetadata>)] {
-        &self.bases_with_metadata
+    pub fn base_class_objects(&self) -> &[Class] {
+        &self.bases
     }
 
     pub fn is_protocol(&self) -> bool {
@@ -497,7 +478,7 @@ impl Linearization {
                 ClassMro::Resolved(ancestors) => {
                     let ancestors_through_base = ancestors
                         .iter()
-                        .map(|ancestor| ancestor.substitute(&base.substitution()))
+                        .map(|ancestor| ancestor.substitute_with(&base.substitution()))
                         .rev()
                         .collect::<Vec<_>>();
                     ancestor_chains.push(AncestorChain::from_base_and_ancestors(

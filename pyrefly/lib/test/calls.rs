@@ -58,6 +58,34 @@ assert_type(o.__new__(C[int]), Self) # E: Argument `type[C[int]]` is not assigna
 );
 
 testcase!(
+    test_self_type_subst_overloaded_dunder_new,
+    r#"
+from typing import Self, assert_type, overload
+class C:
+    @overload
+    def __new__(cls, x: int) -> Self: ...
+    @overload
+    def __new__(cls, x: str) -> Self: ...
+    def __new__(cls, x: int | str) -> Self:
+        return super().__new__(cls)
+
+assert_type(C.__new__(C, 0), C)
+assert_type(C.__new__(C, ""), C)
+    "#,
+);
+
+testcase!(
+    bug = "We use the first argument to Self specialize, but we should use the receiver.",
+    test_self_type_subst_use_receiver,
+    r#"
+from typing import assert_type, Self
+class A[T]:
+    def __new__(cls: type[Self], x: T) -> Self: ...
+A[int].__new__(A[str], "foo") # TODO: should error
+    "#,
+);
+
+testcase!(
     test_deprecated_call,
     r#"
 from warnings import deprecated

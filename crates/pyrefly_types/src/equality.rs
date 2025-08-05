@@ -8,6 +8,7 @@
 use std::hash::Hash;
 use std::sync::Arc;
 
+use compact_str::CompactString;
 use dupe::Dupe;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_util::uniques::Unique;
@@ -134,6 +135,7 @@ impl TypeEq for u64 {}
 impl TypeEq for u128 {}
 impl TypeEq for usize {}
 impl TypeEq for String {}
+impl TypeEq for CompactString {}
 impl TypeEq for str {}
 
 impl TypeEq for Name {}
@@ -271,7 +273,6 @@ mod tests {
     use crate::callable::FunctionKind;
     use crate::callable::ParamList;
     use crate::quantified::Quantified;
-    use crate::quantified::QuantifiedInfo;
     use crate::quantified::QuantifiedKind;
     use crate::type_var::PreInferenceVariance;
     use crate::type_var::Restriction;
@@ -352,12 +353,10 @@ mod tests {
         fn mk_function(uniques: &UniqueFactory) -> Type {
             let q = Quantified::new(
                 uniques.fresh(),
-                QuantifiedInfo {
-                    name: Name::new_static("test"),
-                    kind: QuantifiedKind::TypeVar,
-                    restriction: Restriction::Unrestricted,
-                    default: None,
-                },
+                Name::new_static("test"),
+                QuantifiedKind::TypeVar,
+                None,
+                Restriction::Unrestricted,
             );
 
             let tparams = TParams::new(vec![TParam {

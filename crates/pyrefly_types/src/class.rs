@@ -306,6 +306,10 @@ impl ClassType {
         &self.0
     }
 
+    pub fn into_class_object(self) -> Class {
+        self.0
+    }
+
     pub fn tparams(&self) -> &TParams {
         self.1.tparams()
     }
@@ -322,8 +326,8 @@ impl ClassType {
     ///
     /// This is used to propagate instantiation of base class type parameters when computing
     /// the MRO.
-    pub fn substitute(&self, substitution: &Substitution) -> Self {
-        Self(self.0.dupe(), self.1.apply_substitution(substitution))
+    pub fn substitute_with(&self, substitution: &Substitution) -> Self {
+        Self(self.0.dupe(), self.1.substitute_with(substitution))
     }
 
     pub fn substitution(&self) -> Substitution {

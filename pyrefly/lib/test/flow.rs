@@ -1001,7 +1001,7 @@ testcase!(
 def f(x: None):
     if x.nonsense:  # E: Object of class `NoneType` has no attribute `nonsense`
         pass
-    while x['nonsense']:  # E: Can't apply arguments to non-class
+    while x['nonsense']:  # E: `None` is not subscriptable
         pass
     "#,
 );
@@ -1061,6 +1061,33 @@ def f(cond: bool):
     while n < 10:
         n += 1
     assert_type(n, int)
+"#,
+);
+
+testcase!(
+    bug = "We don't properly restrict loop checks to the current scope",
+    test_nested_loop_increment,
+    r#"
+from typing import assert_type, Literal
+def f_toplevel(cond: bool):
+    n = "n"
+    if cond:
+        n = 1
+    else:
+        n = 1.5
+    while cond:
+        n += 1
+    assert_type(n, float | int)
+while True:
+    def f_in_loop(cond: bool):
+        n = "n"
+        if cond:
+            n = 1
+        else:
+            n = 1.5
+        while cond:
+            n += 1
+        assert_type(n, float | int)
 "#,
 );
 
@@ -1351,4 +1378,27 @@ while E.B:  # E: Enum literal `E.B` used as condition
     ...
 [x for x in range(42) if E.C]  # E: Enum literal `E.C` used as condition
     "#,
+);
+
+testcase!(
+    crash_no_try_type,
+    r#"
+# Used to crash, https://github.com/facebook/pyrefly/issues/766
+try:
+    pass
+except as r: # E: Parse error: Expected one or more exception types
+    pass
+"#,
+);
+
+testcase!(
+    bug = "Loop recursion is causing problems, see https://github.com/facebook/pyrefly/issues/778",
+    loop_with_sized_operation,
+    r#"
+intList: list[int] = [5, 6, 7, 8]
+for j in [1, 2, 3, 4]:
+    for i in range(len(intList)):  # E: `Sized | list[int]` is not assignable to `list[int]` (caused by inconsistent types when breaking cycles)
+        intList[i] *= 42
+print([value for value in intList])  # E: Type `Sized` is not iterable
+"#,
 );

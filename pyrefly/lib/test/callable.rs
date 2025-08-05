@@ -815,6 +815,49 @@ zoo(partial(bar, b=99))
 );
 
 testcase!(
+    test_callable_class_substitute_self,
+    r#"
+from typing import Callable, Self, assert_type
+
+def ret[T](f: Callable[[], T]) -> T: ...
+
+class Meta(type):
+    def __call__(self, *args, **kwargs) -> Self: ... # TODO: error invalid Self
+
+# metaclass __call__
+class A(metaclass=Meta):
+    pass
+
+# __new__
+class B:
+    def __new__(cls, *args, **kwargs) -> Self: ...
+
+# __init__
+class C:
+    def __init__(self, *args, **kwargs) -> None: ...
+
+assert_type(ret(A), A) # mypy/pyright agree, but maybe Any since metaclass Self is illegal?
+assert_type(ret(B), B)
+assert_type(ret(C), C)
+"#,
+);
+
+testcase!(
+    test_callable_class_self_confusion,
+    r#"
+from typing import Callable, Self, assert_type
+
+class A:
+    def __new__(cls) -> Self: ...
+
+class B[T]:
+    def __new__(self, f: Callable[[], T]) -> Self: ...
+
+assert_type(B(A), B[A])
+"#,
+);
+
+testcase!(
     test_call_self,
     r#"
 from typing import assert_type
@@ -866,5 +909,74 @@ def f[T](*, x: T) -> T:
 def g(f: Callable[..., Any]):
     pass
 g(f)
+    "#,
+);
+
+testcase!(
+    test_return_generic_callable,
+    r#"
+from typing import assert_type, Callable
+def f[T]() -> Callable[[T], T]:
+    return lambda x: x
+
+g = f()
+assert_type(g(0), int)
+assert_type(g(""), str)
+
+@f()
+def h(x: int) -> int:
+    return x
+assert_type(h(0), int)
+    "#,
+);
+
+testcase!(
+    test_generic_callable_union,
+    r#"
+from typing import assert_type, Callable
+def f[T]() -> Callable[[T], T] | Callable[[T], list[T]]: ...
+g = f()
+assert_type(g(0), int | list[int])
+assert_type(g(""), str | list[str])
+    "#,
+);
+
+testcase!(
+    test_callable_returns_callable_returns_callable,
+    r#"
+from typing import assert_type, Callable
+
+def f[T]() -> Callable[[], Callable[[T], T]]:
+    def f():
+        return lambda x: x
+    return f
+
+g = f()()
+assert_type(g(0), int)
+assert_type(g(""), str)
+
+    "#,
+);
+
+testcase!(
+    test_return_substituted_callable,
+    r#"
+from typing import assert_type, Callable
+def f[T](x: T) -> Callable[[T], T]: ...
+g = f(0)
+assert_type(g(0), int)
+assert_type(g(""), int)  # E: `Literal['']` is not assignable to parameter with type `int`
+    "#,
+);
+
+testcase!(
+    test_generic_callable_or_none,
+    r#"
+from typing import assert_type, Callable
+def f[T]() -> Callable[[T], T] | None: ...
+g = f()
+if g:
+    assert_type(g(0), int)
+    assert_type(g(""), str)
     "#,
 );

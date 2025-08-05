@@ -52,7 +52,7 @@ impl HoverValue {
         if linked_names.is_empty() {
             None
         } else {
-            Some(format!("\n---\nGo to {linked_names}"))
+            Some(format!("\n\nGo to {linked_names}"))
         }
     }
 
@@ -82,7 +82,7 @@ impl HoverValue {
                     "```python\n{}{}{}\n```{}{}",
                     kind_formatted,
                     name_formatted,
-                    self.type_,
+                    self.type_.as_hover_string(),
                     docstring_formatted,
                     symbol_def_formatted
                 ),

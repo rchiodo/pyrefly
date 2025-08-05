@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use dupe::Dupe;
+use pyrefly_types::callable::Function;
 use pyrefly_util::display::count;
 use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::name::Name;
@@ -19,6 +20,8 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorInfo;
+use crate::error::context::TypeCheckContext;
+use crate::error::context::TypeCheckKind;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
 use crate::types::callable::Required;
@@ -60,7 +63,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
-        let targs = if !targs.is_empty() && self.get_metadata_for_class(cls).has_unknown_tparams() {
+        let targs = if !targs.is_empty() && self.get_base_types_for_class(cls).has_unknown_tparams()
+        {
             // Accept any number of arguments (by ignoring them).
             TArgs::default()
         } else {
@@ -156,7 +160,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Instantiates a class or typed dictionary with fresh variables for its type parameters.
-    pub fn instantiate_fresh(&self, cls: &Class) -> Type {
+    pub fn instantiate_fresh_class(&self, cls: &Class) -> Type {
         self.solver()
             .fresh_quantified(
                 &self.get_class_tparams(cls),
@@ -166,9 +170,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .1
     }
 
-    pub fn instantiate_forall(&self, forall: Forall<Forallable>) -> (Vec<Var>, Type) {
+    pub fn instantiate_fresh_forall(&self, forall: Forall<Forallable>) -> (Vec<Var>, Type) {
         self.solver()
             .fresh_quantified(&forall.tparams, forall.body.as_type(), self.uniques)
+    }
+
+    pub fn instantiate_fresh_function(
+        &self,
+        tparams: &TParams,
+        func: Function,
+    ) -> (Vec<Var>, Function) {
+        let (qs, t) =
+            self.solver()
+                .fresh_quantified(tparams, Type::Function(Box::new(func)), self.uniques);
+        match t {
+            Type::Function(func) => (qs, *func),
+            // We passed a Function to fresh_quantified(), so we know we get a Function back out.
+            _ => unreachable!(),
+        }
     }
 
     /// Creates default type arguments for a class, falling back to Any for type parameters without defaults.
@@ -451,6 +470,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         "`ParamSpec` cannot be used for type parameter".to_owned(),
                     )
                 } else {
+                    let restriction = param.restriction();
+                    if restriction.is_restricted() {
+                        let tcc = &|| {
+                            TypeCheckContext::of_kind(TypeCheckKind::TypeVarSpecialization(
+                                param.name().clone(),
+                            ))
+                        };
+                        // In a legacy type alias, one old-style TypeVar can be specialized with
+                        // another, which we handle by checking their upper bounds against each other.
+                        let arg_for_check = {
+                            let arg = arg.clone();
+                            arg.transform(&mut |x| {
+                                if let Type::TypeVar(tv) = x {
+                                    *x = tv.restriction().as_type(self.stdlib);
+                                }
+                            })
+                        };
+                        self.check_type(
+                            &restriction.as_type(self.stdlib),
+                            &arg_for_check,
+                            range,
+                            errors,
+                            tcc,
+                        );
+                    }
                     arg.clone()
                 }
             }

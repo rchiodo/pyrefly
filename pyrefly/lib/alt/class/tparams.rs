@@ -9,8 +9,6 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use dupe::Dupe;
-use pyrefly_util::prelude::SliceExt;
-use ruff_python_ast::Expr;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::TypeParams;
 use starlark_map::small_map::SmallMap;
@@ -18,7 +16,8 @@ use starlark_map::small_set::SmallSet;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
-use crate::alt::class::base_class::BaseClass;
+use crate::alt::solve::TypeFormContext;
+use crate::binding::base_class::BaseClass;
 use crate::binding::binding::KeyLegacyTypeParam;
 use crate::binding::binding::KeyTParams;
 use crate::config::error_kind::ErrorKind;
@@ -26,7 +25,6 @@ use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorInfo;
 use crate::graph::index::Idx;
 use crate::types::class::Class;
-use crate::types::types::AnyStyle;
 use crate::types::types::TParams;
 use crate::types::types::Type;
 
@@ -47,11 +45,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         name: &Identifier,
         scoped_type_params: Option<&TypeParams>,
-        bases: &[Expr],
+        bases: &[BaseClass],
         legacy: &[Idx<KeyLegacyTypeParam>],
         errors: &ErrorCollector,
     ) -> Arc<TParams> {
-        let bases = bases.map(|x| self.base_class_of(x, errors));
         let scoped_tparams = self.scoped_type_params(scoped_type_params, errors);
         let legacy_tparams = legacy
             .iter()
@@ -66,7 +63,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::Unpack(t) => (t.as_quantified(), "TypeVarTuple"),
                 _ => (t.as_quantified(), "type variable"),
             };
-            if q.is_none() && !matches!(t, Type::Any(AnyStyle::Error)) {
+            if q.is_none() && !t.is_error() {
                 self.error(
                     errors,
                     name.range,
@@ -95,16 +92,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut protocol_tparams = SmallSet::new();
         for base in bases.iter() {
             match base {
-                BaseClass::Generic(ts) => {
-                    for t in ts {
-                        if let Some(p) = lookup_tparam(t) {
+                BaseClass::Generic(xs, ..) => {
+                    for x in xs {
+                        let ty = self.expr_untype(x, TypeFormContext::GenericBase, errors);
+                        if let Some(p) = lookup_tparam(&ty) {
                             generic_tparams.insert(p);
                         }
                     }
                 }
-                BaseClass::Protocol(ts) if !ts.is_empty() => {
-                    for t in ts {
-                        if let Some(p) = lookup_tparam(t) {
+                BaseClass::Protocol(xs, ..) => {
+                    for x in xs {
+                        let ty = self.expr_untype(x, TypeFormContext::GenericBase, errors);
+                        if let Some(p) = lookup_tparam(&ty) {
                             protocol_tparams.insert(p);
                         }
                     }

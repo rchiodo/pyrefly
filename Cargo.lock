@@ -185,9 +185,9 @@ checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
 
 [[package]]
 name = "arrayvec"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
+checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
 
 [[package]]
 name = "atomic"
@@ -346,9 +346,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-if"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
+checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 
 [[package]]
 name = "chrono"
@@ -1509,9 +1509,9 @@ checksum = "643cb0b8d4fcc284004d5fd0d67ccf61dfffadb7f75e1e71bc420f4688a3a704"
 
 [[package]]
 name = "lock_api"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07af8b9cdd281b7915f413fa73f29ebd5d55d0d3f0155584dade1ff18cea1b17"
+checksum = "96936507f153605bddfcda068dd804796c84324ed2510809e5b2a624c81da765"
 dependencies = [
  "autocfg",
  "scopeguard",
@@ -1928,9 +1928,9 @@ checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
 name = "pkg-config"
-version = "0.3.30"
+version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d231b230927b5e4ad203db57bbcbee2802f6bce620b1e4a9024a07d94e2907ec"
+checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "portable-atomic"
@@ -2029,7 +2029,7 @@ dependencies = [
 
 [[package]]
 name = "pyrefly"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "anstream",
  "anyhow",
@@ -2063,6 +2063,7 @@ dependencies = [
  "ruff_text_size",
  "serde",
  "serde_json",
+ "serde_repr",
  "starlark_map",
  "static_assertions",
  "tempfile",
@@ -2076,7 +2077,7 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_bundled"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "starlark_map",
@@ -2086,7 +2087,7 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_config"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2119,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_derive"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2128,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_python"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "dupe",
@@ -2150,8 +2151,9 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_types"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
+ "compact_str 0.8.0",
  "dupe",
  "itertools 0.14.0",
  "num-bigint",
@@ -2169,13 +2171,14 @@ dependencies = [
 
 [[package]]
 name = "pyrefly_util"
-version = "0.25.0"
+version = "0.27.0"
 dependencies = [
  "anstream",
  "anyhow",
  "append-only-vec",
  "argfile",
  "bstr",
+ "compact_str 0.8.0",
  "const-str",
  "dupe",
  "equivalent",

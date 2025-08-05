@@ -38,6 +38,7 @@ use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
+use crate::binding::binding::KeyClassBaseType;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSynthesizedFields;
@@ -70,6 +71,8 @@ pub struct StaticInfo {
     /// How many times this will be redefined
     pub count: usize,
     pub style: DefinitionStyle,
+    /// Is this just a name declaration (i.e. a global or a nonlocal)?
+    pub is_declaration: bool,
 }
 
 impl StaticInfo {
@@ -81,11 +84,16 @@ impl StaticInfo {
                 _ => {
                     // We are constructing an identifier, but it must have been one that we saw earlier
                     assert_ne!(self.loc, TextRange::default());
-                    Key::Definition(ShortIdentifier::new(&Identifier {
+                    let short_identifier = ShortIdentifier::new(&Identifier {
                         node_index: AtomicNodeIndex::dummy(),
                         id: name.clone(),
                         range: self.loc,
-                    }))
+                    });
+                    if self.is_declaration {
+                        Key::Declaration(short_identifier)
+                    } else {
+                        Key::Definition(short_identifier)
+                    }
                 }
             }
         } else {
@@ -101,6 +109,7 @@ impl Static {
         loc: TextRange,
         symbol_kind: SymbolKind,
         annot: Option<Idx<KeyAnnotation>>,
+        is_declaration: bool,
         count: usize,
     ) -> &mut StaticInfo {
         // Use whichever one we see first
@@ -109,6 +118,7 @@ impl Static {
             annot,
             count: 0,
             style: DefinitionStyle::Local(symbol_kind),
+            is_declaration,
         });
         res.count += count;
         res
@@ -120,8 +130,16 @@ impl Static {
         range: TextRange,
         symbol_kind: SymbolKind,
         annot: Option<Idx<KeyAnnotation>>,
+        is_declaration: bool,
     ) {
-        self.add_with_count(Hashed::new(name), range, symbol_kind, annot, 1);
+        self.add_with_count(
+            Hashed::new(name),
+            range,
+            symbol_kind,
+            annot,
+            is_declaration,
+            1,
+        );
     }
 
     pub fn stmts(
@@ -160,21 +178,35 @@ impl Static {
 
         for (name, def) in d.definitions.into_iter_hashed() {
             let annot = def.annot.map(&mut get_annotation_idx);
-            let info = self.add_with_count(name, def.range, SymbolKind::Variable, annot, def.count);
+            let info = self.add_with_count(
+                name,
+                def.range,
+                SymbolKind::Variable,
+                annot,
+                false,
+                def.count,
+            );
             info.style = def.style;
         }
         for (range, wildcard) in wildcards {
             for name in wildcard.iter_hashed() {
                 // TODO: semantics of import * and global var with same name
-                self.add_with_count(name.cloned(), range, SymbolKind::Module, None, 1)
+                self.add_with_count(name.cloned(), range, SymbolKind::Module, None, false, 1)
                     .style = DefinitionStyle::ImportModule(module_info.name());
             }
         }
     }
 
     pub fn expr_lvalue(&mut self, x: &Expr) {
-        let mut add =
-            |name: &ExprName| self.add(name.id.clone(), name.range, SymbolKind::Variable, None);
+        let mut add = |name: &ExprName| {
+            self.add(
+                name.id.clone(),
+                name.range,
+                SymbolKind::Variable,
+                None,
+                false,
+            )
+        };
         Ast::expr_lvalue(x, &mut add);
     }
 }
@@ -334,6 +366,7 @@ impl FlowInfo {
 pub struct ClassIndices {
     pub def_index: ClassDefIndex,
     pub class_idx: Idx<KeyClass>,
+    pub base_type_idx: Idx<KeyClassBaseType>,
     pub metadata_idx: Idx<KeyClassMetadata>,
     pub mro_idx: Idx<KeyClassMro>,
     pub synthesized_fields_idx: Idx<KeyClassSynthesizedFields>,
@@ -492,11 +525,18 @@ pub struct Scope {
     /// All flow bindings will have a static binding, _usually_ in this scope, but occasionally
     /// in a parent scope (e.g. for narrowing operations).
     pub flow: Flow,
-    /// Are Flow types above this unreachable.
-    /// Set when we enter something like a function, and can't guarantee what flow values are in scope.
+    /// Are Flow types from containing scopes unreachable from this scope?
+    ///
+    /// Set when we enter a scope like a function body with deferred evaluation, where the
+    /// values we might see from containing scopes may not match their current values.
     pub barrier: bool,
+    /// What kind of scope is this? Used for a few purposes, including propagating
+    /// information down from scopes (e.g. to figure out when we're in a class) and
+    /// storing data from the current AST traversal for later analysis, especially
+    /// self-attribute-assignments in methods.
     pub kind: ScopeKind,
-    /// Stack of for/while loops we're in. Does not include comprehensions.
+    /// Stack of for/while loops we're in. Does not include comprehensions, which
+    /// define a new scope.
     pub loops: Vec<Loop>,
 }
 
@@ -757,10 +797,8 @@ impl Scopes {
         false
     }
 
-    pub fn loop_depth(&self) -> u32 {
-        self.scopes
-            .iter()
-            .fold(0, |depth, node| depth + node.scope.loops.len() as u32)
+    pub fn loop_depth(&self) -> usize {
+        self.current().loops.len()
     }
 
     /// Set the flow info to bind `name` to `key`, maybe with `FlowStyle` `style`
@@ -904,8 +942,11 @@ impl Scopes {
         range: TextRange,
         symbol_kind: SymbolKind,
         ann: Option<Idx<KeyAnnotation>>,
+        is_declaration: bool,
     ) {
-        self.current_mut().stat.add(name, range, symbol_kind, ann);
+        self.current_mut()
+            .stat
+            .add(name, range, symbol_kind, ann, is_declaration);
     }
 
     pub fn add_lvalue_to_current_static(&mut self, x: &Expr) {

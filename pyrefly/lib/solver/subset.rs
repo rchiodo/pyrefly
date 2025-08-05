@@ -217,6 +217,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         return false;
                     }
                 }
+                (Some(Param::VarArg(_, Type::Any(_))), Some(Param::VarArg(_, Type::Unpack(_)))) => {
+                    l_arg = l_args.next();
+                    u_arg = u_args.next();
+                }
                 (Some(Param::VarArg(_, l)), Some(Param::VarArg(_, Type::Unpack(u)))) => {
                     if self.is_subset_eq(u, &Type::Tuple(Tuple::unbounded(l.clone()))) {
                         l_arg = l_args.next();
@@ -369,9 +373,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 got,
                 Type::Callable(_) | Type::Function(_) | Type::BoundMethod(_)
             ) && name == dunder::CALL
-                && let Some(want) = self
-                    .type_order
-                    .try_lookup_instance_method(protocol.clone(), &dunder::CALL)
+                && let Some(want) = self.type_order.instance_as_dunder_call(&protocol)
             {
                 if let Type::BoundMethod(method) = &want
                     && let Some(want_no_self) = method.drop_self()
@@ -520,10 +522,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         want_ts: &[Type],
         want_pspec: &Type,
     ) -> bool {
-        let args = ParamList::new_types(want_ts);
-        if got.len() < args.len() {
+        if got.len() < want_ts.len() {
             return false;
         }
+        let args = ParamList::new_types(want_ts.to_owned());
         let (pre, post) = got.items().split_at(args.len());
         if !self.is_subset_param_list(pre, args.items()) {
             return false;
@@ -540,10 +542,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         got_pspec: &Type,
         want: &ParamList,
     ) -> bool {
-        let args = ParamList::new_types(got_ts);
-        if want.len() < args.len() {
+        if want.len() < got_ts.len() {
             return false;
         }
+        let args = ParamList::new_types(got_ts.to_owned());
         let (pre, post) = want.items().split_at(args.len());
         if !self.is_subset_param_list(args.items(), pre) {
             return false;
@@ -650,8 +652,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 .all(|u| self.is_subset_eq(l, &u.as_type())),
             (l, Type::Union(us)) => us.iter().any(|u| self.is_subset_eq(l, u)),
             (Type::Intersect(ls), u) => ls.iter().any(|l| self.is_subset_eq(l, u)),
-            (Type::Quantified(q), u) if let Restriction::Unrestricted = q.restriction() => {
-                self.is_subset_eq_impl(&self.type_order.stdlib().object().clone().to_type(), u)
+            (Type::Quantified(q), u) if !q.restriction().is_restricted() => {
+                self.is_subset_eq(&self.type_order.stdlib().object().clone().to_type(), u)
             }
             (Type::Module(_), Type::ClassType(cls)) if cls.has_qname("types", "ModuleType") => true,
             (
@@ -675,18 +677,18 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::BoundMethod(method), Type::Callable(_) | Type::Function(_))
                 if let Some(l_no_self) = method.drop_self() =>
             {
-                self.is_subset_eq_impl(&l_no_self, want)
+                self.is_subset_eq(&l_no_self, want)
             }
             (Type::Callable(_) | Type::Function(_), Type::BoundMethod(method))
                 if let Some(u_no_self) = method.drop_self() =>
             {
-                self.is_subset_eq_impl(got, &u_no_self)
+                self.is_subset_eq(got, &u_no_self)
             }
             (Type::BoundMethod(l), Type::BoundMethod(u))
                 if let Some(l_no_self) = l.drop_self()
                     && let Some(u_no_self) = u.drop_self() =>
             {
-                self.is_subset_eq_impl(&l_no_self, &u_no_self)
+                self.is_subset_eq(&l_no_self, &u_no_self)
             }
             (
                 Type::Callable(box l)
@@ -847,10 +849,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (
                 Type::ClassType(got),
                 Type::BoundMethod(_) | Type::Callable(_) | Type::Function(_),
-            ) if let Some(call_ty) = self
-                .type_order
-                .try_lookup_instance_method(got.clone(), &dunder::CALL) =>
-            {
+            ) if let Some(call_ty) = self.type_order.instance_as_dunder_call(got) => {
                 self.is_subset_eq(&call_ty, want)
             }
             // Constructors as callables
@@ -1015,11 +1014,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 self.is_subset_eq(got, &self.type_order.stdlib().none_type().clone().to_type())
             }
             (Type::Forall(forall), _) => {
-                let (_, got) = self.type_order.instantiate_forall((**forall).clone());
+                let (_, got) = self.type_order.instantiate_fresh_forall((**forall).clone());
                 self.is_subset_eq(&got, want)
             }
             (Type::TypeAlias(ta), _) => {
-                self.is_subset_eq_impl(&ta.as_value(self.type_order.stdlib()), want)
+                self.is_subset_eq(&ta.as_value(self.type_order.stdlib()), want)
             }
             _ => false,
         }

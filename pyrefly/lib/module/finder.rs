@@ -8,10 +8,7 @@
 use std::iter;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::LazyLock;
-use std::sync::Mutex;
 
-use dupe::Dupe;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use ruff_python_ast::name::Name;
@@ -22,24 +19,16 @@ use crate::config::config::ConfigFile;
 use crate::module::typeshed::typeshed;
 use crate::state::loader::FindError;
 
-static PY_TYPED_CACHE: LazyLock<Mutex<SmallMap<PathBuf, PyTyped>>> =
-    LazyLock::new(|| Mutex::new(SmallMap::new()));
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default, Clone, Dupe)]
-enum PyTyped {
-    #[default]
-    Missing,
-    Complete,
-    Partial,
-    Hidden,
-}
-
 #[derive(Debug, PartialEq)]
 enum FindResult {
-    /// Found a single-file module. The path must not point to an __init__ file.
-    SingleFileModule(PathBuf),
-    /// Found a regular package. First path must point to an __init__ file.
+    /// Found a single-file .pyi module. The path must not point to an __init__ file.
+    SingleFilePyiModule(PathBuf),
+    /// Found a single-file .py module. The path must not point to an __init__ file.
+    SingleFilePyModule(PathBuf),
+    /// Found regular packages. First path must point to an __init__ file.
     /// Second path indicates where to continue search next. It should always point to the parent of the __init__ file.
+    /// The ordering of packages should be the same as the order they're found
+    /// in the `includes`.
     RegularPackage(PathBuf, PathBuf),
     /// Found a namespace package.
     /// The path component indicates where to continue search next. It may contain more than one directories as the namespace package
@@ -53,52 +42,52 @@ enum FindResult {
 }
 
 impl FindResult {
-    fn py_typed(&self) -> PyTyped {
-        /// Finds a `py.typed` file for the given path, if it exists, and
-        /// returns a boolean representing if it is partial or not.
-        ///
-        /// If we get an error on reading the `py.typed`, treat it as partial,
-        /// since that's the most permissive behavior.
-        fn py_typed_cached(candidate_path: &Path) -> PyTyped {
-            fn get_py_typed(candidate_path: &Path) -> PyTyped {
-                let py_typed = candidate_path.join("py.typed");
-                if py_typed.exists() {
-                    if std::fs::read_to_string(py_typed)
-                        .ok()
-                        // if we fail to read it (ok() returns None), then treat as partial
-                        .is_none_or(|contents| contents.trim() == "partial")
-                    {
-                        return PyTyped::Partial;
-                    } else {
-                        return PyTyped::Complete;
-                    }
-                }
-                PyTyped::Missing
-            }
-            PY_TYPED_CACHE
-                .lock()
-                .unwrap()
-                .entry(candidate_path.to_path_buf())
-                .or_insert_with(|| get_py_typed(candidate_path))
-                .dupe()
-        }
-        match self {
-            Self::SingleFileModule(candidate_path) | Self::RegularPackage(_, candidate_path) => {
-                py_typed_cached(candidate_path)
-            }
-            Self::NamespacePackage(paths) => paths
-                .iter()
-                .map(|path| py_typed_cached(path))
-                .max()
-                .unwrap_or_default(),
-            Self::CompiledModule(_) => PyTyped::Hidden,
+    fn single_file(path: PathBuf, ext: &str) -> Self {
+        if ext == "pyi" {
+            Self::SingleFilePyiModule(path)
+        } else {
+            Self::SingleFilePyModule(path)
         }
     }
 }
 
-/// Finds the first package (regular, single file, or namespace) in search roots. Returns None if no module is found.
-/// name: module name
-/// roots: search roots
+/// In the given root, attempt to find a match for the given [`Name`].
+fn find_one_part_in_root(name: &Name, root: &Path) -> Option<FindResult> {
+    let candidate_dir = root.join(name.as_str());
+    // First check if `name` corresponds to a regular package.
+    for candidate_init_suffix in ["__init__.pyi", "__init__.py"] {
+        let init_path = candidate_dir.join(candidate_init_suffix);
+        if init_path.exists() {
+            return Some(FindResult::RegularPackage(init_path, candidate_dir));
+        }
+    }
+    // Second check if `name` corresponds to a single-file module.
+    for candidate_file_suffix in ["pyi", "py"] {
+        let candidate_path = root.join(format!("{name}.{candidate_file_suffix}"));
+        if candidate_path.exists() {
+            return Some(FindResult::single_file(
+                candidate_path,
+                candidate_file_suffix,
+            ));
+        }
+    }
+    // Check if `name` corresponds to a compiled module.
+    for candidate_compiled_suffix in ["pyc", "pyx", "pyd"] {
+        let candidate_path = root.join(format!("{name}.{candidate_compiled_suffix}"));
+        if candidate_path.exists() {
+            return Some(FindResult::CompiledModule(candidate_path));
+        }
+    }
+    // Finally check if `name` corresponds to a namespace package.
+    if candidate_dir.is_dir() {
+        return Some(FindResult::NamespacePackage(Vec1::new(candidate_dir)));
+    }
+    None
+}
+
+/// Finds the first package (regular, single file, or namespace) in all search roots.
+/// Returns None if no module is found. If `name` is `__pycache__`, we always
+/// return `None`.
 fn find_one_part<'a>(name: &Name, roots: impl Iterator<Item = &'a PathBuf>) -> Option<FindResult> {
     // skip looking in `__pycache__`, since those modules are not accessible
     if name == &Name::new_static("__pycache__") {
@@ -106,31 +95,13 @@ fn find_one_part<'a>(name: &Name, roots: impl Iterator<Item = &'a PathBuf>) -> O
     }
     let mut namespace_roots = Vec::new();
     for root in roots {
-        let candidate_dir = root.join(name.as_str());
-        // First check if `name` corresponds to a regular package.
-        for candidate_init_suffix in ["__init__.pyi", "__init__.py"] {
-            let init_path = candidate_dir.join(candidate_init_suffix);
-            if init_path.exists() {
-                return Some(FindResult::RegularPackage(init_path, candidate_dir));
+        match find_one_part_in_root(name, root) {
+            None => (),
+            Some(FindResult::NamespacePackage(package)) => {
+                namespace_roots.push(package.first().clone())
             }
-        }
-        // Second check if `name` corresponds to a single-file module.
-        for candidate_file_suffix in ["pyi", "py"] {
-            let candidate_path = root.join(format!("{name}.{candidate_file_suffix}"));
-            if candidate_path.exists() {
-                return Some(FindResult::SingleFileModule(candidate_path));
-            }
-        }
-        // Check if `name` corresponds to a compiled module.
-        for candidate_compiled_suffix in ["pyc", "pyx", "pyd"] {
-            let candidate_path = root.join(format!("{name}.{candidate_compiled_suffix}"));
-            if candidate_path.exists() {
-                return Some(FindResult::CompiledModule(candidate_path));
-            }
-        }
-        // Finally check if `name` corresponds to a namespace package.
-        if candidate_dir.is_dir() {
-            namespace_roots.push(candidate_dir);
+            result @ Some(FindResult::RegularPackage(..)) => return result,
+            result @ Some(_) => return result,
         }
     }
     match Vec1::try_from_vec(namespace_roots) {
@@ -139,8 +110,8 @@ fn find_one_part<'a>(name: &Name, roots: impl Iterator<Item = &'a PathBuf>) -> O
     }
 }
 
-/// Finds all packages (regular, single file, or namespace) in search roots where the name starts with the given prefix.
-/// prefix: module name prefix
+/// Finds the first package (regular, single file, or namespace) in search roots. Returns None if no module is found.
+/// name: module name
 /// roots: search roots
 fn find_one_part_prefix<'a>(
     prefix: &Name,
@@ -187,7 +158,7 @@ fn find_one_part_prefix<'a>(
                             && path.is_file()
                         {
                             results.push((
-                                FindResult::SingleFileModule(path.clone()),
+                                FindResult::single_file(path.clone(), ext),
                                 ModuleName::from_str(stem),
                             ));
                         }
@@ -220,7 +191,9 @@ fn continue_find_module(
                 // Nothing has been found in the previous round. No point keep looking.
                 break;
             }
-            Some(FindResult::SingleFileModule(_)) | Some(FindResult::CompiledModule(_)) => {
+            Some(FindResult::SingleFilePyiModule(_))
+            | Some(FindResult::SingleFilePyModule(_))
+            | Some(FindResult::CompiledModule(_)) => {
                 // We've already reached leaf nodes. Cannot keep searching
                 current_result = None;
                 break;
@@ -234,9 +207,9 @@ fn continue_find_module(
         }
     }
     current_result.map_or(Ok(None), |x| match x {
-        FindResult::SingleFileModule(path) | FindResult::RegularPackage(path, _) => {
-            Ok(Some(ModulePath::filesystem(path)))
-        }
+        FindResult::SingleFilePyiModule(path)
+        | FindResult::SingleFilePyModule(path)
+        | FindResult::RegularPackage(path, _) => Ok(Some(ModulePath::filesystem(path))),
         FindResult::NamespacePackage(roots) => {
             // TODO(grievejia): Preserving all info in the list instead of dropping all but the first one.
             Ok(Some(ModulePath::namespace(roots.first().clone())))
@@ -299,7 +272,6 @@ where
 fn find_module_in_site_package_path<'a, I>(
     module: ModuleName,
     include: I,
-    use_untyped_imports: bool,
     ignore_missing_source: bool,
 ) -> Result<Option<ModulePath>, FindError>
 where
@@ -314,26 +286,16 @@ where
         .clone()
         .filter_map(|root| find_one_part(&stub_first, iter::once(root)));
 
-    let mut any_has_partial_py_typed = false;
-    let mut checked_one_stub = false;
     let mut found_stubs = None;
     for stub_module_import in stub_module_imports {
-        let stub_module_py_typed = stub_module_import.py_typed();
-        any_has_partial_py_typed |= stub_module_py_typed == PyTyped::Partial;
-        checked_one_stub = true;
         if let Some(stub_result) = continue_find_module(stub_module_import, rest)? {
             found_stubs = Some(stub_result);
             break;
         }
     }
 
-    if found_stubs.is_some() {
-        if ignore_missing_source {
-            return Ok(found_stubs);
-        }
-    } else if !use_untyped_imports && checked_one_stub && !any_has_partial_py_typed {
-        // return none and stop the search if no stubs declared partial, but we searched at least one module
-        return Ok(None);
+    if found_stubs.is_some() && ignore_missing_source {
+        return Ok(found_stubs);
     }
 
     let mut fallback_modules = include
@@ -348,20 +310,10 @@ where
         return Err(FindError::no_source(module));
     }
 
-    let mut any_has_none_py_typed = false;
     for module in fallback_modules {
-        if !use_untyped_imports
-            && !any_has_partial_py_typed
-            && module.py_typed() == PyTyped::Missing
-        {
-            any_has_none_py_typed = true;
-        } else if let Some(module_result) = continue_find_module(module, rest)? {
+        if let Some(module_result) = continue_find_module(module, rest)? {
             return Ok(Some(module_result));
         }
-    }
-
-    if any_has_none_py_typed {
-        return Err(FindError::NoPyTyped);
     }
 
     Ok(None)
@@ -385,7 +337,11 @@ fn find_module_prefixes<'a>(
                 None => {
                     break;
                 }
-                Some(FindResult::SingleFileModule(_) | FindResult::CompiledModule(_)) => {
+                Some(
+                    FindResult::SingleFilePyiModule(_)
+                    | FindResult::SingleFilePyModule(_)
+                    | FindResult::CompiledModule(_),
+                ) => {
                     break;
                 }
                 Some(FindResult::RegularPackage(_, next_root)) => {
@@ -444,7 +400,6 @@ pub fn find_import(
     } else if let Some(path) = find_module_in_site_package_path(
         module,
         config.site_package_path(),
-        config.use_untyped_imports,
         config.ignore_missing_source,
     )? {
         Ok(path)
@@ -461,10 +416,21 @@ pub fn find_import(
 
 /// Find all legitimate imports that start with `module`
 pub fn find_import_prefixes(config: &ConfigFile, module: ModuleName) -> Vec<ModuleName> {
-    find_module_prefixes(
+    let mut results = find_module_prefixes(
         module,
         config.search_path().chain(config.site_package_path()),
-    )
+    );
+
+    if let Ok(ts) = typeshed() {
+        let module_str = module.as_str();
+        let typeshed_modules = ts
+            .modules()
+            .filter(|m| module_str.is_empty() || m.as_str().starts_with(module_str));
+
+        results.extend(typeshed_modules);
+    }
+
+    results
 }
 
 #[cfg(test)]
@@ -722,27 +688,15 @@ mod tests {
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .unwrap()
             .unwrap(),
             ModulePath::filesystem(root.join("foo-stubs/bar/__init__.py")),
         );
-        assert!(
-            find_module_in_site_package_path(
-                ModuleName::from_str("foo.baz"),
-                [root.to_path_buf()].iter(),
-                false,
-                false,
-            )
-            .unwrap()
-            .is_none()
-        );
         assert_eq!(
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.baz"),
                 [root.to_path_buf()].iter(),
-                true,
                 false,
             )
             .unwrap()
@@ -753,7 +707,6 @@ mod tests {
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.qux"),
                 [root.to_path_buf()].iter(),
-                false,
                 false,
             )
             .unwrap()
@@ -776,55 +729,34 @@ mod tests {
                 ],
             )],
         );
-        assert!(
-            find_module_in_site_package_path(
-                ModuleName::from_str("foo.bar"),
-                [root.to_path_buf()].iter(),
-                false,
-                false,
-            )
-            .is_err()
-        );
         assert_eq!(
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
-                true,
                 false
             )
             .unwrap()
             .unwrap(),
             ModulePath::filesystem(root.join("foo/bar/__init__.py"))
         );
-        assert!(
-            find_module_in_site_package_path(
-                ModuleName::from_str("foo.baz"),
-                [root.to_path_buf()].iter(),
-                false,
-                false,
-            )
-            .is_err()
-        );
         assert_eq!(
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.baz"),
                 [root.to_path_buf()].iter(),
-                true,
                 false,
             )
             .unwrap()
             .unwrap(),
             ModulePath::filesystem(root.join("foo/baz/__init__.pyi"))
         );
-        assert!(
+        assert!(matches!(
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.qux"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
-            )
-            .is_err()
-        );
+            ),
+            Ok(None)
+        ));
     }
 
     #[test]
@@ -853,7 +785,6 @@ mod tests {
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .unwrap()
             .unwrap(),
@@ -864,7 +795,6 @@ mod tests {
                 ModuleName::from_str("foo.baz"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .unwrap()
             .unwrap(),
@@ -874,7 +804,6 @@ mod tests {
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.qux"),
                 [root.to_path_buf()].iter(),
-                false,
                 false,
             )
             .unwrap()
@@ -903,7 +832,6 @@ mod tests {
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .unwrap()
             .unwrap(),
@@ -914,7 +842,6 @@ mod tests {
                 ModuleName::from_str("foo.baz"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .unwrap()
             .unwrap(),
@@ -924,7 +851,6 @@ mod tests {
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.qux"),
                 [root.to_path_buf()].iter(),
-                false,
                 false,
             )
             .unwrap()
@@ -961,7 +887,6 @@ mod tests {
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
                 false,
-                false,
             )
             .is_err()
         );
@@ -969,7 +894,6 @@ mod tests {
             find_module_in_site_package_path(
                 ModuleName::from_str("foo.bar"),
                 [root.to_path_buf()].iter(),
-                false,
                 true,
             )
             .unwrap()
@@ -980,7 +904,6 @@ mod tests {
             find_module_in_site_package_path(
                 ModuleName::from_str("baz.qux"),
                 [root.to_path_buf()].iter(),
-                false,
                 false,
             )
             .unwrap()
@@ -1176,38 +1099,6 @@ mod tests {
     }
 
     #[test]
-    fn test_pyc_file_treated_as_hidden() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let root = tempdir.path();
-        TestPath::setup_test_directory(
-            root,
-            vec![TestPath::dir(
-                "subdir",
-                vec![TestPath::file("compiled_module.pyc")],
-            )],
-        );
-        let find_result =
-            find_one_part(&Name::new("compiled_module"), [root.join("subdir")].iter()).unwrap();
-        assert_eq!(find_result.py_typed(), PyTyped::Hidden);
-    }
-
-    #[test]
-    fn test_non_pyc_file_not_hidden() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let root = tempdir.path();
-        TestPath::setup_test_directory(
-            root,
-            vec![TestPath::dir(
-                "subdir",
-                vec![TestPath::file("non_pyc_module.py")],
-            )],
-        );
-        let find_result =
-            find_one_part(&Name::new("non_pyc_module"), [root.join("subdir")].iter()).unwrap();
-        assert_ne!(find_result.py_typed(), PyTyped::Hidden);
-    }
-
-    #[test]
     fn test_find_one_part_with_pyc() {
         let tempdir = tempfile::tempdir().unwrap();
         let root = tempdir.path();
@@ -1241,7 +1132,7 @@ mod tests {
         );
         assert_eq!(
             result,
-            Some(FindResult::SingleFileModule(
+            Some(FindResult::SingleFilePyModule(
                 root.join("another_nested_module.py")
             ))
         );

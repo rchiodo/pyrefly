@@ -2,7 +2,6 @@
 {
   "aliases_explicit.py": [],
   "aliases_implicit.py": [
-    "Line 81: Expected 1 errors",
     "Line 106: Expected 1 errors",
     "Line 111: Expected 1 errors",
     "Line 112: Expected 1 errors",
@@ -23,17 +22,15 @@
     "Line 30: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveTuple']`\"]",
     "Line 42: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveMapping']`\"]",
     "Line 58: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
-    "Line 59: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
-    "Line 62: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
+    "Line 59: Unexpected errors ['`type[list[Unknown]]` is not subscriptable']",
+    "Line 62: Unexpected errors ['`type[list[Unknown]]` is not subscriptable']",
     "Line 65: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
-    "Line 67: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]",
-    "Line 68: Unexpected errors [\"Can't apply arguments to non-class, got type[list[Unknown]]\"]"
+    "Line 67: Unexpected errors ['`type[list[Unknown]]` is not subscriptable']",
+    "Line 68: Unexpected errors ['`type[list[Unknown]]` is not subscriptable']"
   ],
   "aliases_type_statement.py": [
     "Line 26: Expected 1 errors",
     "Line 56: Expected 1 errors",
-    "Line 77: Expected 1 errors",
-    "Line 79: Expected 1 errors",
     "Line 82: Expected 1 errors",
     "Line 84: Expected 1 errors",
     "Lines 51, 52: Expected error (tag 'TA14')",
@@ -84,8 +81,6 @@
     "Line 96: Unexpected errors ['assert_type(Any, int) failed']"
   ],
   "annotations_generators.py": [
-    "Line 87: Expected 1 errors",
-    "Line 92: Expected 1 errors",
     "Line 190: Unexpected errors ['Expected to yield a value of type `int`, but a bare `yield` gives `None` instead']"
   ],
   "annotations_methods.py": [],
@@ -101,13 +96,9 @@
   "callables_protocol.py": [],
   "callables_subtyping.py": [],
   "classes_classvar.py": [],
-  "classes_override.py": [
-    "Lines 56, 64, 65: Expected error (tag 'method4')"
-  ],
+  "classes_override.py": [],
   "constructors_call_init.py": [
-    "Line 107: Expected 1 errors",
-    "Line 74: Unexpected errors ['assert_type(Class5[list[int]], Class5[set[str]]) failed', 'No matching overload found for function `Class5.__init__`\\n  Possible overloads:\\n  (value: int) -> None [closest match]\\n  (value: str) -> None\\n  (value: list[int]) -> None']",
-    "Line 75: Unexpected errors ['assert_type(Class5[list[int]], Class5[float]) failed', 'No matching overload found for function `Class5.__init__`\\n  Possible overloads:\\n  (value: int) -> None [closest match]\\n  (value: str) -> None\\n  (value: list[int]) -> None']"
+    "Line 107: Expected 1 errors"
   ],
   "constructors_call_metaclass.py": [],
   "constructors_call_new.py": [],
@@ -123,11 +114,10 @@
     "Line 67: Expected 1 errors",
     "Line 184: Expected 1 errors",
     "Line 195: Expected 1 errors",
-    "Line 62: Unexpected errors ['Argument `type[Class3]` is not assignable to parameter `cb` with type `(*args: Unknown, **kwargs: Unknown) -> Self@Class3` in function `accepts_callable`']",
-    "Line 64: Unexpected errors ['assert_type(Self, Class3) failed']",
+    "Line 62: Unexpected errors ['Argument `type[Class3]` is not assignable to parameter `cb` with type `(*args: Unknown, **kwargs: Unknown) -> Class3` in function `accepts_callable`']",
     "Line 164: Unexpected errors ['assert_type(Class7[Any], Class7[int]) failed']",
     "Line 165: Unexpected errors ['assert_type(Class7[Any], Class7[str]) failed', \"Argument `Literal['']` is not assignable to parameter `x` with type `int`\"]",
-    "Line 183: Unexpected errors ['assert_type(Self, Class8[str]) failed']",
+    "Line 183: Unexpected errors ['assert_type(Class8[Any], Class8[str]) failed']",
     "Line 192: Unexpected errors ['Argument `type[Class9]` is not assignable to parameter `cb` with type `(ParamSpec(@_)) -> @_` in function `accepts_callable`']",
     "Line 194: Unexpected errors ['assert_type(Any, Class9) failed']"
   ],
@@ -306,7 +296,8 @@
   "literals_literalstring.py": [
     "Line 120: Expected 1 errors",
     "Line 52: Unexpected errors ['assert_type(str, LiteralString) failed']",
-    "Line 111: Unexpected errors [\"assert_type(str, Literal['hello']) failed\"]"
+    "Line 111: Unexpected errors [\"assert_type(str, Literal['hello']) failed\"]",
+    "Line 116: Unexpected errors ['assert_type(str, LiteralString) failed']"
   ],
   "literals_parameterizations.py": [],
   "literals_semantics.py": [],
@@ -317,19 +308,15 @@
   "narrowing_typeguard.py": [],
   "narrowing_typeis.py": [],
   "overloads_basic.py": [],
-  "overloads_consistency.py": [
-    "Lines 25, 28: Expected error (tag 'return_type')",
-    "Lines 41, 44: Expected error (tag 'parameter_type')"
-  ],
+  "overloads_consistency.py": [],
   "overloads_definitions.py": [
     "Lines 71, 73, 78, 81: Expected error (tag 'func5')",
-    "Lines 84, 86, 90, 94: Expected error (tag 'func6')",
     "Lines 121, 123, 127: Expected error (tag 'invalid_final')",
     "Lines 135, 136, 137, 141, 142: Expected error (tag 'invalid_final_2+')",
     "Lines 170, 175, 181, 183: Expected error (tag 'override-final')",
-    "Lines 190, 191, 197, 198: Expected error (tag 'bad_override')",
     "Lines 220, 221, 222, 225, 226: Expected error (tag 'override_impl+')",
-    "Line 49: Unexpected errors ['Overloaded function must have an implementation']"
+    "Line 49: Unexpected errors ['Overloaded function must have an implementation']",
+    "Line 176: Unexpected errors ['`final_method` is declared as final in parent class `Base`']"
   ],
   "overloads_evaluation.py": [
     "Line 105: Unexpected errors ['No matching overload found for function `example2`\\n  Possible overloads:\\n  (x: int, y: str, z: int) -> str [closest match]\\n  (x: int, y: int, z: int) -> int']",
@@ -422,7 +409,6 @@
     "Line 133: Unexpected errors ['Unexpected keyword argument `x` in function `N.__new__`', 'Unexpected keyword argument `y` in function `N.__new__`']"
   ],
   "qualifiers_final_decorator.py": [
-    "Lines 67, 68, 75: Expected error (tag 'method4')",
     "Lines 84, 85, 86: Expected error (tag 'Derived3-2')",
     "Lines 125, 126: Expected error (tag 'func')"
   ],
@@ -466,8 +452,6 @@
     "Line 62: Expected 1 errors",
     "Line 74: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveMovie']`\"]"
   ],
-  "typeddicts_type_consistency.py": [
-    "Line 151: Unexpected errors [\"`dict[str, int]` is not assignable to TypedDict key `z` with type `Literal[''] | TypedDict[Inner3]`\"]"
-  ],
+  "typeddicts_type_consistency.py": [],
   "typeddicts_usage.py": []
 }

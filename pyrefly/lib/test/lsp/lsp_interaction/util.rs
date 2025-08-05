@@ -6,6 +6,7 @@
  */
 
 use core::panic;
+use std::iter::once;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -35,6 +36,8 @@ use lsp_types::TextDocumentSyncKind;
 use lsp_types::Url;
 use lsp_types::WorkspaceFoldersServerCapabilities;
 use lsp_types::WorkspaceServerCapabilities;
+use lsp_types::notification::Exit;
+use lsp_types::notification::Notification as _;
 use pretty_assertions::assert_eq;
 use pyrefly_util::fs_anyhow;
 use tempfile::TempDir;
@@ -85,20 +88,26 @@ pub fn run_test_lsp(test_case: TestCase) {
     thread::scope(|scope| {
         // this thread runs the language server
         scope.spawn(move || {
-            run_lsp(Arc::new(connection), || Ok(()), args)
+            run_lsp(Arc::new(connection), args)
                 .map(|_| ())
                 .map_err(|e| std::io::Error::other(e.to_string()))
         });
         // this thread sends messages to the language server (from test case)
         scope.spawn(move || {
-            for msg in
+            let exit_message= Message::Notification(Notification {method: Exit::METHOD.to_owned(), params: serde_json::json!(null)});
+            for  msg in
                 get_initialize_messages(&test_case.workspace_folders, test_case.configuration, test_case.file_watch)
                     .into_iter()
                     .chain(test_case.messages_from_language_client)
+                     .chain(once(exit_message.clone()))
             {
+                let stop_language_server = || {
+                    language_server_sender.send_timeout(exit_message.clone(), timeout).unwrap();
+                };
                 let send = || {
                     eprintln!("client--->server {}", serde_json::to_string(&msg).unwrap());
                     if let Err(err) = language_server_sender.send_timeout(msg.clone(), timeout) {
+                        // no need to stop_language_server, the channel is closed
                         panic!("Failed to send message to language server: {:?}", err);
                     }
                 };
@@ -115,6 +124,7 @@ pub fn run_test_lsp(test_case: TestCase) {
                         {
                             // continue
                         } else {
+                            stop_language_server();
                             panic!("Did not receive response for request {:?}", id);
                         }
                     }
@@ -131,6 +141,7 @@ pub fn run_test_lsp(test_case: TestCase) {
                         if request_id == *response_id {
                             send();
                         } else {
+                            stop_language_server();
                             panic!(
                                 "language client received request {}, expecting to send response for {}",
                                 request_id, response_id

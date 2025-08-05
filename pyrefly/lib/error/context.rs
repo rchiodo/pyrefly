@@ -6,6 +6,7 @@
  */
 
 use pyrefly_python::module_name::ModuleName;
+use pyrefly_types::callable::Callable;
 use ruff_python_ast::name::Name;
 
 use crate::binding::binding::AnnotationTarget;
@@ -164,6 +165,12 @@ pub enum TypeCheckKind {
     UnexpectedBareYield,
     /// Check on the type of the dataclass `__post_init__` method.
     PostInit,
+    /// Consistency check for overload return types.
+    OverloadReturn,
+    /// Consistency check for overload input signature, as (overload_signature, implementation_signature)
+    OverloadInput(Callable, Callable),
+    /// Check that the type a TypeVar is specialized with is compatible with its type restriction.
+    TypeVarSpecialization(Name),
 }
 
 impl TypeCheckKind {
@@ -203,6 +210,9 @@ impl TypeCheckKind {
             Self::YieldFrom => ErrorKind::InvalidYield,
             Self::UnexpectedBareYield => ErrorKind::InvalidYield,
             Self::PostInit => ErrorKind::BadFunctionDefinition,
+            Self::OverloadReturn => ErrorKind::InvalidOverload,
+            Self::OverloadInput(..) => ErrorKind::InvalidOverload,
+            Self::TypeVarSpecialization(..) => ErrorKind::BadSpecialization,
         }
     }
 }

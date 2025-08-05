@@ -34,15 +34,15 @@ pub struct ExecEnv {
 }
 
 impl ExecEnv {
-    pub fn convert(self) -> SubConfig {
+    pub fn convert(self) -> anyhow::Result<SubConfig> {
         let settings = ConfigBase {
             errors: self.errors.to_config(),
             ..Default::default()
         };
-        SubConfig {
-            matches: Glob::new(self.root),
+        Ok(SubConfig {
+            matches: Glob::new(self.root)?,
             settings,
-        }
+        })
     }
 }
 
@@ -74,7 +74,6 @@ use crate::migration::python_platform::PythonPlatformConfig;
 use crate::migration::python_version::PythonVersionConfig;
 use crate::migration::search_path::SearchPath;
 use crate::migration::sub_configs::SubConfigs;
-use crate::migration::use_untyped_imports::UseUntypedImports;
 
 impl PyrightConfig {
     pub fn parse(text: &str) -> anyhow::Result<Self> {
@@ -92,7 +91,6 @@ impl PyrightConfig {
             Box::new(PythonVersionConfig),
             Box::new(PythonPlatformConfig),
             Box::new(SearchPath),
-            Box::new(UseUntypedImports),
             Box::new(IgnoreMissingImports),
             Box::new(ErrorCodes),
             Box::new(SubConfigs),
@@ -255,8 +253,9 @@ mod tests {
                 project_includes: Globs::new(vec![
                     "src/**/*.py".to_owned(),
                     "test/**/*.py".to_owned()
-                ]),
-                project_excludes: Globs::new(vec!["src/excluded/**/*.py".to_owned()]),
+                ])
+                .unwrap(),
+                project_excludes: Globs::new(vec!["src/excluded/**/*.py".to_owned()]).unwrap(),
                 search_path_from_file: vec![PathBuf::from("src/extra")],
                 python_environment: PythonEnvironment {
                     python_platform: Some(PythonPlatform::linux()),
@@ -292,7 +291,8 @@ mod tests {
                 project_includes: Globs::new(vec![
                     "src/**/*.py".to_owned(),
                     "test/**/*.py".to_owned()
-                ]),
+                ])
+                .unwrap(),
                 python_environment: PythonEnvironment {
                     python_version: Some(PythonVersion::new(3, 11, 0)),
                     python_platform: None,

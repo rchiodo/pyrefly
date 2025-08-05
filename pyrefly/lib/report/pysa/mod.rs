@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufWriter;
+use std::ops::Not;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -20,22 +21,25 @@ use pyrefly_python::module_path::ModulePath;
 use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_python::symbol_kind::SymbolKind;
 use pyrefly_types::class::Class;
-use pyrefly_types::types::Type;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::lined_buffer::DisplayRange;
 use pyrefly_util::visit::Visit;
 use rayon::prelude::*;
+use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprContext;
+use ruff_python_ast::ModModule;
 use ruff_python_ast::Stmt;
-use ruff_python_ast::StmtClassDef;
 use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
 use serde::Serialize;
 use tracing::debug;
 use tracing::info;
 
 use crate::alt::answers::Answers;
+use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassMetadata;
+use crate::binding::binding::KeyFunction;
 use crate::binding::bindings::Bindings;
 use crate::module::module_info::ModuleInfo;
 use crate::module::typeshed::typeshed;
@@ -78,6 +82,29 @@ struct PysaProjectFile {
 }
 
 #[derive(Debug, Clone, Serialize)]
+enum ScopeParent {
+    Function { location: String },
+    Class { location: String },
+    TopLevel,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FunctionDefinition {
+    name: String,
+    parent: ScopeParent,
+    #[serde(skip_serializing_if = "<&bool>::not")]
+    is_overload: bool,
+    #[serde(skip_serializing_if = "<&bool>::not")]
+    is_staticmethod: bool,
+    #[serde(skip_serializing_if = "<&bool>::not")]
+    is_classmethod: bool,
+    #[serde(skip_serializing_if = "<&bool>::not")]
+    is_property_getter: bool,
+    #[serde(skip_serializing_if = "<&bool>::not")]
+    is_property_setter: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct DefinitionRef {
     module_id: ModuleId,
     module_name: String, // For debugging purposes only. Reader should use the module id.
@@ -98,6 +125,7 @@ struct ClassDefinition {
     class_id: ClassId,
     name: String,
     bases: Vec<ClassRef>,
+    parent: ScopeParent,
 }
 
 /// Format of a module file `my.module:id.json`
@@ -110,6 +138,7 @@ struct PysaModuleFile {
     source_path: ModulePathDetails,
     type_of_expression: HashMap<String, String>,
     goto_definitions_of_expression: HashMap<String, Vec<DefinitionRef>>,
+    function_definitions: HashMap<String, FunctionDefinition>,
     class_definitions: HashMap<String, ClassDefinition>,
 }
 
@@ -183,13 +212,11 @@ struct VisitorContext<'a> {
     handle: &'a Handle,
     module_ids: &'a ModuleIds,
     module_info: &'a ModuleInfo,
-    bindings: &'a Bindings,
     answers: &'a Answers,
     stdlib: &'a Stdlib,
     transaction: &'a Transaction<'a>,
     type_of_expression: &'a mut HashMap<String, String>,
     definitions_of_expression: &'a mut HashMap<String, Vec<DefinitionRef>>,
-    class_definitions: &'a mut HashMap<String, ClassDefinition>,
 }
 
 fn add_expression_definitions(
@@ -307,56 +334,6 @@ fn visit_expression(e: &Expr, context: &mut VisitorContext) {
     e.recurse(&mut |e| visit_expression(e, context));
 }
 
-fn visit_class_definition(class_def: &StmtClassDef, context: &mut VisitorContext) {
-    let class = context
-        .bindings
-        .definition_at_position(class_def.name.range().start())
-        .map(|k| context.bindings.key_to_idx(k))
-        .and_then(|idx| context.answers.get_idx(idx))
-        .and_then(|type_info| match type_info.ty() {
-            Type::ClassDef(class) => Some(class.clone()),
-            _ => None,
-        });
-
-    if let Some(class) = class {
-        let display_range = context.module_info.display_range(class_def.range());
-        let class_index = class.index();
-        let metadata = context
-            .answers
-            .get_idx(context.bindings.key_to_idx(&KeyClassMetadata(class_index)))
-            .unwrap();
-
-        let class_definition = ClassDefinition {
-            class_id: ClassId::from_class(&class),
-            name: class.qname().id().to_string(),
-            bases: metadata
-                .bases_with_metadata()
-                .iter()
-                .map(|(class_type, _)| {
-                    let base_class = class_type.class_object();
-                    ClassRef {
-                        module_id: context
-                            .module_ids
-                            .get(ModuleKey::from_module(base_class.module()))
-                            .unwrap(),
-                        module_name: base_class.module_name().to_string(),
-                        class_id: ClassId::from_class(base_class),
-                        class_name: base_class.qname().id().to_string(),
-                    }
-                })
-                .collect::<Vec<_>>(),
-        };
-
-        assert!(
-            context
-                .class_definitions
-                .insert(location_key(&display_range), class_definition)
-                .is_none(),
-            "Found class definitions with the same location"
-        );
-    }
-}
-
 fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
     match stmt {
         Stmt::FunctionDef(function_def) => {
@@ -394,7 +371,6 @@ fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
             visit_statements(function_def.body.iter(), context);
         }
         Stmt::ClassDef(class_def) => {
-            visit_class_definition(class_def, context);
             visit_expressions(
                 class_def
                     .decorator_list
@@ -507,6 +483,114 @@ fn visit_statements<'a>(statements: impl Iterator<Item = &'a Stmt>, context: &mu
     }
 }
 
+fn get_scope_parent(ast: &ModModule, module_info: &Module, range: TextRange) -> ScopeParent {
+    Ast::locate_node(ast, range.start())
+        .iter()
+        .find_map(|node| match node {
+            AnyNodeRef::Identifier(id) if id.range() == range => None,
+            AnyNodeRef::StmtClassDef(class_def) if class_def.name.range() == range => None,
+            AnyNodeRef::StmtFunctionDef(fun_def) if fun_def.name.range() == range => None,
+            AnyNodeRef::StmtClassDef(class_def) => Some(ScopeParent::Class {
+                location: location_key(&module_info.display_range(class_def.name.range())),
+            }),
+            AnyNodeRef::StmtFunctionDef(fun_def) => Some(ScopeParent::Function {
+                location: location_key(&module_info.display_range(fun_def.name.range())),
+            }),
+            _ => None,
+        })
+        .unwrap_or(ScopeParent::TopLevel)
+}
+
+fn get_all_functions(
+    ast: &ModModule,
+    module_info: &Module,
+    bindings: &Bindings,
+    answers: &Answers,
+) -> HashMap<String, FunctionDefinition> {
+    let mut function_definitions = HashMap::new();
+
+    bindings
+        .keys::<KeyFunction>()
+        .map(|idx| answers.get_idx(idx).unwrap().clone())
+        .for_each(|function| {
+            let display_range = module_info.display_range(function.id_range);
+            let name = function.metadata.kind.as_func_id().func.to_string();
+            let parent = get_scope_parent(ast, module_info, function.id_range);
+            assert!(
+                function_definitions
+                    .insert(
+                        location_key(&display_range),
+                        FunctionDefinition {
+                            name,
+                            parent,
+                            is_overload: function.metadata.flags.is_overload,
+                            is_staticmethod: function.metadata.flags.is_staticmethod,
+                            is_classmethod: function.metadata.flags.is_classmethod,
+                            is_property_getter: function.metadata.flags.is_property_getter,
+                            is_property_setter: function
+                                .metadata
+                                .flags
+                                .is_property_setter_with_getter
+                                .is_some(),
+                        }
+                    )
+                    .is_none(),
+                "Found function definitions with the same location"
+            );
+        });
+
+    function_definitions
+}
+
+fn get_all_classes(
+    ast: &ModModule,
+    module_info: &Module,
+    bindings: &Bindings,
+    answers: &Answers,
+    module_ids: &ModuleIds,
+) -> HashMap<String, ClassDefinition> {
+    let mut class_definitions = HashMap::new();
+
+    bindings
+        .keys::<KeyClass>()
+        .filter_map(|idx| answers.get_idx(idx).unwrap().0.clone())
+        .for_each(|class| {
+            let display_range = module_info.display_range(class.qname().range());
+            let class_index = class.index();
+            let parent = get_scope_parent(ast, module_info, class.qname().range());
+            let metadata = answers
+                .get_idx(bindings.key_to_idx(&KeyClassMetadata(class_index)))
+                .unwrap();
+
+            let class_definition = ClassDefinition {
+                class_id: ClassId::from_class(&class),
+                name: class.qname().id().to_string(),
+                parent,
+                bases: metadata
+                    .base_class_objects()
+                    .iter()
+                    .map(|base_class| ClassRef {
+                        module_id: module_ids
+                            .get(ModuleKey::from_module(base_class.module()))
+                            .unwrap(),
+                        module_name: base_class.module_name().to_string(),
+                        class_id: ClassId::from_class(base_class),
+                        class_name: base_class.qname().id().to_string(),
+                    })
+                    .collect::<Vec<_>>(),
+            };
+
+            assert!(
+                class_definitions
+                    .insert(location_key(&display_range), class_definition)
+                    .is_none(),
+                "Found class definitions with the same location"
+            );
+        });
+
+    class_definitions
+}
+
 fn get_module_file(
     handle: &Handle,
     module_id: ModuleId,
@@ -522,7 +606,6 @@ fn get_module_file(
 
     let mut type_of_expression = HashMap::new();
     let mut definitions_of_expression = HashMap::new();
-    let mut class_definitions = HashMap::new();
 
     for stmt in &ast.body {
         visit_statement(
@@ -531,16 +614,17 @@ fn get_module_file(
                 handle,
                 module_ids,
                 module_info,
-                bindings,
                 answers,
                 stdlib,
                 transaction,
                 type_of_expression: &mut type_of_expression,
                 definitions_of_expression: &mut definitions_of_expression,
-                class_definitions: &mut class_definitions,
             },
         );
     }
+
+    let function_definitions = get_all_functions(ast, module_info, bindings, answers);
+    let class_definitions = get_all_classes(ast, module_info, bindings, answers, module_ids);
 
     PysaModuleFile {
         format_version: 1,
@@ -549,6 +633,7 @@ fn get_module_file(
         source_path: module_info.path().details().clone(),
         type_of_expression,
         goto_definitions_of_expression: definitions_of_expression,
+        function_definitions,
         class_definitions,
     }
 }

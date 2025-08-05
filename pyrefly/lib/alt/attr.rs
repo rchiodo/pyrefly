@@ -470,7 +470,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             let bound_attr_base = self.as_attribute_base_no_union(bound.clone());
                             if let Some(AttributeBase::ClassInstance(cls)) = bound_attr_base {
                                 bases.push(Some(AttributeBase::TypeVar(
-                                    quantified.clone(),
+                                    (**quantified).clone(),
                                     Some(cls),
                                 )));
                             } else {
@@ -478,7 +478,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             }
                         });
                         if use_fallback {
-                            bases.push(Some(AttributeBase::TypeVar(quantified.clone(), None)));
+                            bases.push(Some(AttributeBase::TypeVar((**quantified).clone(), None)));
                         }
                     }
                     Restriction::Constraints(constraints) => {
@@ -488,7 +488,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 self.as_attribute_base_no_union(constraint.clone());
                             if let Some(AttributeBase::ClassInstance(cls)) = constraint_attr_base {
                                 bases.push(Some(AttributeBase::TypeVar(
-                                    quantified.clone(),
+                                    (**quantified).clone(),
                                     Some(cls),
                                 )));
                             } else {
@@ -496,7 +496,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             }
                         }
                         if use_fallback {
-                            bases.push(Some(AttributeBase::TypeVar(quantified.clone(), None)));
+                            bases.push(Some(AttributeBase::TypeVar((**quantified).clone(), None)));
                         }
                     }
                     Restriction::Unrestricted => bases.push(Some(AttributeBase::ClassInstance(
@@ -684,10 +684,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             LookupResult::Found(setattr_attr) => {
                 let result = self
-                    .resolve_get_access(Attribute::new(setattr_attr.inner), range, errors, context)
-                    .map(|setattr_attr_ty| {
+                    .resolve_get_access(setattr_attr, range, errors, context)
+                    .map(|setattr_ty| {
                         self.call_setattr(
-                            setattr_attr_ty,
+                            setattr_ty,
                             CallArg::Arg(got),
                             attr_name.clone(),
                             range,
@@ -731,10 +731,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             LookupResult::Found(delattr_attr) => {
                 let result = self
-                    .resolve_get_access(Attribute::new(delattr_attr.inner), range, errors, context)
-                    .map(|delattr_attr_ty| {
+                    .resolve_get_access(delattr_attr, range, errors, context)
+                    .map(|delattr_ty| {
                         self.call_getattr_or_delattr(
-                            delattr_attr_ty,
+                            delattr_ty,
                             attr_name.clone(),
                             range,
                             errors,
@@ -1251,7 +1251,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// A convenience function for callers who don't care about reasons a lookup failed and are
     /// only interested in simple, read-write attributes (in particular, this covers instance access to
     /// regular methods, and is useful for edge cases where we handle cases like `__call__` and `__new__`).
-    pub fn resolve_as_instance_method(&self, attr: Attribute) -> Option<Type> {
+    fn resolve_as_instance_method(&self, attr: Attribute) -> Option<Type> {
         self.resolve_as_instance_method_with_attribute_inner(attr.inner)
     }
 
@@ -1320,6 +1320,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         attr_name: &Name,
     ) -> LookupResult {
         match base {
+            AttributeBase::Any(style) => LookupResult::found_type(style.propagate()),
+            AttributeBase::TypeAny(style) => {
+                let builtins_type_classtype = self.stdlib.builtins_type();
+                self.get_instance_attribute(builtins_type_classtype, attr_name)
+                    .and_then(|Attribute { inner }| {
+                        self.resolve_as_instance_method_with_attribute_inner(inner)
+                            .map(LookupResult::found_type)
+                    })
+                    .map_or_else(
+                        || LookupResult::found_type(style.propagate()),
+                        |result| result,
+                    )
+            }
+            AttributeBase::Never => LookupResult::found_type(Type::never()),
             AttributeBase::EnumLiteral(_, member, _)
                 if matches!(attr_name.as_str(), "name" | "_name_") =>
             {
@@ -1430,13 +1444,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // `T` is a type variable (the latter is illegal, but a user could write it). It is
                 // not for cases where `base` is a term with a quantified type.
                 (QuantifiedKind::ParamSpec, "args") => {
-                    LookupResult::found_type(Type::type_form(Type::Args(q)))
+                    LookupResult::found_type(Type::type_form(Type::Args(Box::new(q))))
                 }
                 (QuantifiedKind::ParamSpec, "kwargs") => {
-                    LookupResult::found_type(Type::type_form(Type::Kwargs(q)))
+                    LookupResult::found_type(Type::type_form(Type::Kwargs(Box::new(q))))
                 }
                 (QuantifiedKind::TypeVar, _) if let Some(upper_bound) = bound => {
-                    match self.get_bounded_type_var_attribute(q.clone(), &upper_bound, attr_name) {
+                    match self.get_bounded_type_var_attribute(q, &upper_bound, attr_name) {
                         Some(attr) => LookupResult::Found(attr),
                         None => LookupResult::NotFound(NotFound::Attribute(
                             upper_bound.class_object().dupe(),
@@ -1453,25 +1467,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
             },
-            AttributeBase::TypeAny(style) => {
-                let builtins_type_classtype = self.stdlib.builtins_type();
-                self.get_instance_attribute(builtins_type_classtype, attr_name)
-                    .and_then(|Attribute { inner }| {
-                        self.resolve_as_instance_method_with_attribute_inner(inner)
-                            .map(LookupResult::found_type)
-                    })
-                    .map_or_else(
-                        || LookupResult::found_type(style.propagate()),
-                        |result| result,
-                    )
-            }
-            AttributeBase::Any(style) => LookupResult::found_type(style.propagate()),
-            AttributeBase::Never => LookupResult::found_type(Type::never()),
             AttributeBase::Property(mut getter) => {
                 if attr_name == "setter" {
-                    // Get the property's `setter` method, which, when called with a function, returns
-                    // a copy of the property with the passed-in function as its setter. We hack this
-                    // by updating the getter's metadata to mark it as a setter method.
+                    // When given a decorator `@some_property.setter`, instead of modeling the setter
+                    // directly at the type level we just return the getter (the raw `some_property`)
+                    // but with the function metadata marked to indicate this is a setter invocation.
+                    //
+                    // This doesn't accurately model the runtime semantics (the setter function is
+                    // not at all the same type), but makes it easy for us to use function metadata
+                    // to track both the getter and setter in a way that class field can use.
+                    //
+                    // See also the function decorator and class field code to
+                    // understand how all this works end-to-end.
+                    //
                     // TODO(stroxler): it is probably possible to synthesize a forall type here
                     // that uses a type var to propagate the setter. Investigate this option later.
                     getter.transform_toplevel_func_metadata(|meta: &mut FuncMetadata| {
@@ -1722,9 +1730,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Restriction::Bound(bound) => {
                     self.as_attribute_base_no_union(Type::type_form(bound.clone()))
                 }
-                _ => Some(AttributeBase::TypeVar(q, None)),
+                _ => Some(AttributeBase::TypeVar(*q, None)),
             },
-            Type::Type(box Type::Quantified(q)) => Some(AttributeBase::TypeVar(q, None)),
+            Type::Type(box Type::Quantified(q)) => Some(AttributeBase::TypeVar(*q, None)),
             Type::Type(box Type::Any(style)) => Some(AttributeBase::TypeAny(style)),
             Type::Module(module) => Some(AttributeBase::Module(module)),
             Type::TypeVar(_) | Type::Type(box Type::TypeVar(_)) => {
@@ -1870,8 +1878,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn try_lookup_instance_method(&self, class_type: ClassType, name: &Name) -> Option<Type> {
-        self.try_lookup_attr_from_class_type(class_type, name)
+    /// Return `__call__` as a bound method if instances of `cls` have `__call__`.
+    /// This is what the runtime automatically does when we try to call an instance.
+    pub fn instance_as_dunder_call(&self, cls: &ClassType) -> Option<Type> {
+        self.get_instance_attribute(cls, &dunder::CALL)
             .and_then(|attr| self.resolve_as_instance_method(attr))
     }
 }

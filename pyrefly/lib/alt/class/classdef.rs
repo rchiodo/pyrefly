@@ -16,9 +16,11 @@ use starlark_map::small_map::SmallMap;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::class_field::ClassField;
+use crate::alt::types::class_bases::ClassBases;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::EnumMetadata;
+use crate::binding::binding::KeyClassBaseType;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
@@ -94,6 +96,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .unwrap_or_else(|| Arc::new(ClassMetadata::recursive()))
     }
 
+    pub fn get_base_types_for_class(&self, cls: &Class) -> Arc<ClassBases> {
+        self.get_from_class(cls, &KeyClassBaseType(cls.index()))
+            .unwrap_or_else(|| Arc::new(ClassBases::recursive()))
+    }
+
     pub fn get_mro_for_class(&self, cls: &Class) -> Arc<ClassMro> {
         self.get_from_class(cls, &KeyClassMro(cls.index()))
             .unwrap_or_else(|| Arc::new(ClassMro::recursive()))
@@ -119,7 +126,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn unwrap_class_object_silently(&self, ty: &Type) -> Option<Type> {
         match ty {
             Type::ClassDef(c) if c.is_builtin("tuple") => Some(Type::any_tuple()),
-            Type::ClassDef(c) => Some(self.instantiate_fresh(c)),
+            Type::ClassDef(c) => Some(self.instantiate_fresh_class(c)),
             Type::TypeAlias(ta) => self.unwrap_class_object_silently(&ta.as_value(self.stdlib)),
             // Note that for the purposes of type narrowing, we always unwrap Type::Type(Type::ClassType),
             // but it's not always a valid argument to isinstance/issubclass. expr_infer separately checks
@@ -159,7 +166,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(class.clone())
         } else {
             self.get_ancestor(class.class_object(), want)
-                .map(|ancestor| ancestor.substitute(&class.substitution()))
+                .map(|ancestor| ancestor.substitute_with(&class.substitution()))
         }
     }
 

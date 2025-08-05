@@ -43,10 +43,10 @@ use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
-use crate::alt::class::base_class::BaseClass;
 use crate::alt::class::class_field::ClassField;
 use crate::alt::class::variance_inference::VarianceMap;
 use crate::alt::solve::TypeFormContext;
+use crate::alt::types::class_bases::ClassBases;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
@@ -54,6 +54,7 @@ use crate::alt::types::decorated_function::DecoratedFunction;
 use crate::alt::types::legacy_lookup::LegacyTypeParameterLookup;
 use crate::alt::types::yields::YieldFromResult;
 use crate::alt::types::yields::YieldResult;
+use crate::binding::base_class::BaseClass;
 use crate::binding::bindings::Bindings;
 use crate::binding::narrow::NarrowOp;
 use crate::graph::index::Idx;
@@ -77,6 +78,7 @@ assert_words!(KeyExpect, 1);
 assert_words!(KeyExport, 3);
 assert_words!(KeyClass, 1);
 assert_bytes!(KeyTParams, 4);
+assert_bytes!(KeyClassBaseType, 4);
 assert_words!(KeyClassField, 4);
 assert_bytes!(KeyClassSynthesizedFields, 4);
 assert_bytes!(KeyAnnotation, 12);
@@ -92,6 +94,7 @@ assert_words!(BindingExpect, 11);
 assert_words!(BindingAnnotation, 15);
 assert_words!(BindingClass, 22);
 assert_words!(BindingTParams, 10);
+assert_words!(BindingClassBaseType, 4);
 assert_words!(BindingClassMetadata, 8);
 assert_bytes!(BindingClassMro, 4);
 assert_words!(BindingClassField, 21);
@@ -107,6 +110,7 @@ pub enum AnyIdx {
     KeyExpect(Idx<KeyExpect>),
     KeyClass(Idx<KeyClass>),
     KeyTParams(Idx<KeyTParams>),
+    KeyClassBaseType(Idx<KeyClassBaseType>),
     KeyClassField(Idx<KeyClassField>),
     KeyVariance(Idx<KeyVariance>),
     KeyClassSynthesizedFields(Idx<KeyClassSynthesizedFields>),
@@ -127,6 +131,7 @@ impl DisplayWith<Bindings> for AnyIdx {
             Self::KeyExpect(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClass(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyTParams(idx) => write!(f, "{}", ctx.display(*idx)),
+            Self::KeyClassBaseType(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassField(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyVariance(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassSynthesizedFields(idx) => write!(f, "{}", ctx.display(*idx)),
@@ -183,6 +188,15 @@ impl Keyed for KeyTParams {
     }
 }
 impl Exported for KeyTParams {}
+impl Keyed for KeyClassBaseType {
+    const EXPORTED: bool = true;
+    type Value = BindingClassBaseType;
+    type Answer = ClassBases;
+    fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
+        AnyIdx::KeyClassBaseType(idx)
+    }
+}
+impl Exported for KeyClassBaseType {}
 impl Keyed for KeyClassField {
     const EXPORTED: bool = true;
     type Value = BindingClassField;
@@ -285,6 +299,8 @@ pub enum Key {
     Global(Name),
     /// I am defined in this module at this location.
     Definition(ShortIdentifier),
+    /// I am declared in this module at this location (for globals and nonlocals).
+    Declaration(ShortIdentifier),
     /// I am a name assignment that is also a first use of some other name assign.
     ///
     /// My raw definition contains unpinned placeholder types from both myself
@@ -331,8 +347,10 @@ pub enum Key {
     SuperInstance(TextRange),
     /// The intermediate used in an unpacking assignment.
     Unpack(TextRange),
-    /// A usage link - a placeholder used for first-usage type inference.
+    /// A usage link - a placeholder used for first-usage type inference in statements.
     UsageLink(TextRange),
+    /// A yield link - a placeholder used for first-usage type inference specifically for yield expressions.
+    YieldLink(TextRange),
     /// A use of `typing.Self` in an expression. Used to redirect to the appropriate type (which is aware of the current class).
     SelfTypeLiteral(TextRange),
 }
@@ -343,6 +361,7 @@ impl Ranged for Key {
             Self::Import(_, r) => *r,
             Self::Global(_) => TextRange::default(),
             Self::Definition(x) => x.range(),
+            Self::Declaration(x) => x.range(),
             Self::UpstreamPinnedDefinition(x) => x.range(),
             Self::PinnedDefinition(x) => x.range(),
             Self::FacetAssign(x) => x.range(),
@@ -359,6 +378,7 @@ impl Ranged for Key {
             Self::SuperInstance(r) => *r,
             Self::Unpack(r) => *r,
             Self::UsageLink(r) => *r,
+            Self::YieldLink(r) => *r,
             Self::SelfTypeLiteral(r) => *r,
             Self::PatternNarrow(r) => *r,
         }
@@ -373,6 +393,7 @@ impl DisplayWith<ModuleInfo> for Key {
             Self::Import(n, r) => write!(f, "Key::Import({n} {})", ctx.display(r)),
             Self::Global(n) => write!(f, "Key::Global({n})"),
             Self::Definition(x) => write!(f, "Key::Definition({})", short(x)),
+            Self::Declaration(x) => write!(f, "Key::Declaration({})", short(x)),
             Self::UpstreamPinnedDefinition(x) => {
                 write!(f, "Key::UpstreamPinnedDefinition({})", short(x))
             }
@@ -398,6 +419,7 @@ impl DisplayWith<ModuleInfo> for Key {
             Self::SuperInstance(r) => write!(f, "Key::SuperInstance({})", ctx.display(r)),
             Self::Unpack(r) => write!(f, "Key::Unpack({})", ctx.display(r)),
             Self::UsageLink(r) => write!(f, "Key::UsageLink({})", ctx.display(r)),
+            Self::YieldLink(r) => write!(f, "Key::YieldLink({})", ctx.display(r)),
             Self::SelfTypeLiteral(r) => write!(f, "Key::SelfTypeLiteral({})", ctx.display(r)),
             Self::PatternNarrow(r) => write!(f, "Key::PatternNarrow({})", ctx.display(r)),
         }
@@ -609,6 +631,22 @@ impl Ranged for KeyTParams {
 impl DisplayWith<ModuleInfo> for KeyTParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyTParams({})", self.0)
+    }
+}
+
+/// A reference to a class.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KeyClassBaseType(pub ClassDefIndex);
+
+impl Ranged for KeyClassBaseType {
+    fn range(&self) -> TextRange {
+        TextRange::default()
+    }
+}
+
+impl DisplayWith<ModuleInfo> for KeyClassBaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
+        write!(f, "KeyClassBaseType({})", self.0)
     }
 }
 
@@ -1390,6 +1428,8 @@ impl DisplayWith<Bindings> for Binding {
 }
 
 impl Binding {
+    /// Return the best guess for the kind of a symbol X, if this binding is pointed to by
+    /// a definition key of X.
     pub fn symbol_kind(&self) -> Option<SymbolKind> {
         match self {
             Binding::TypeVar(_, _, _)
@@ -1419,14 +1459,14 @@ impl Binding {
             Binding::LambdaParameter(_) | Binding::FunctionParameter(_) => {
                 Some(SymbolKind::Parameter)
             }
+            Binding::IterableValue(_, _, _) => Some(SymbolKind::Variable),
+            Binding::UnpackedValue(_, _, _, _) => Some(SymbolKind::Variable),
             Binding::Expr(_, _)
             | Binding::MultiTargetAssign(_, _, _)
             | Binding::ReturnExplicit(_)
             | Binding::ReturnImplicit(_)
             | Binding::ReturnType(_)
-            | Binding::IterableValue(_, _, _)
             | Binding::ContextValue(_, _, _, _)
-            | Binding::UnpackedValue(_, _, _, _)
             | Binding::AnnotatedType(_, _)
             | Binding::AugAssign(_, _)
             | Binding::Type(_)
@@ -1607,13 +1647,36 @@ impl DisplayWith<Bindings> for BindingClass {
 pub struct BindingTParams {
     pub name: Identifier,
     pub scoped_type_params: Option<Box<TypeParams>>,
-    pub bases: Box<[Expr]>,
+    pub bases: Box<[BaseClass]>,
     pub legacy_tparams: Box<[Idx<KeyLegacyTypeParam>]>,
 }
 
 impl DisplayWith<Bindings> for BindingTParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &Bindings) -> fmt::Result {
         write!(f, "BindingTParams({})", self.name)
+    }
+}
+
+/// Binding for the base class types of a class.
+#[derive(Clone, Debug)]
+pub struct BindingClassBaseType {
+    pub class_idx: Idx<KeyClass>,
+    /// The base class list, as expressions.
+    pub bases: Box<[BaseClass]>,
+    /// May contain a base class to directly inject into the base class list. This is needed
+    /// for some synthesized classes, which have no actual class body and therefore usually have no
+    /// base class expressions, but may have a known base class for the synthesized class.
+    pub special_base: Option<Box<BaseClass>>,
+    pub is_new_type: bool,
+}
+
+impl DisplayWith<Bindings> for BindingClassBaseType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, bindings: &Bindings) -> fmt::Result {
+        write!(
+            f,
+            "BindingClassBaseType({})",
+            bindings.display(self.class_idx)
+        )
     }
 }
 
@@ -1756,7 +1819,7 @@ impl DisplayWith<Bindings> for BindingVariance {
 pub struct BindingClassMetadata {
     pub class_idx: Idx<KeyClass>,
     /// The base class list, as expressions.
-    pub bases: Box<[Expr]>,
+    pub bases: Box<[BaseClass]>,
     /// The class keywords (these are keyword args that appear in the base class list, the
     /// Python runtime will dispatch most of them to the metaclass, but the metaclass
     /// itself can also potentially be one of these).
