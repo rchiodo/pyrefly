@@ -174,7 +174,6 @@ use crate::tsp::GetFunctionPartsRequest;
 use crate::tsp::GetDiagnosticsVersionRequest;
 use crate::tsp::ResolveImportRequest;
 use crate::tsp::GetTypeArgsRequest;
-use crate::commands::lsp::LspArgs;
 use crate::config::config::ConfigFile;
 use crate::error::error::Error;
 use crate::lsp::features::hover::get_hover;
@@ -252,7 +251,7 @@ impl ServerConnection {
     }
 }
 
-struct Server {
+pub(crate) struct Server {
     connection: ServerConnection,
     /// A thread pool of size one for heavy read operations on the State
     async_state_read_threads: ThreadPool,
@@ -264,7 +263,7 @@ struct Server {
     /// A set of configs where we have already indexed all the files within the config.
     indexed_configs: Mutex<HashSet<ArcId<ConfigFile>>>,
     cancellation_handles: Arc<Mutex<HashMap<RequestId, CancellationHandle>>>,
-    workspaces: Arc<Workspaces>,
+    pub(crate) workspaces: Arc<Workspaces>,
     outgoing_request_id: AtomicI32,
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: AtomicBool,
@@ -791,74 +790,102 @@ impl Server {
                         Ok(self.document_diagnostics(&transaction, params)),
                     ));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
+                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetPythonSearchPathsRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, Ok(self.get_python_search_paths(&transaction, params))));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
                     self.send_response(new_response(x.id, Ok(self.current_snapshot())));
-                } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
+                } else if let Some(params) = as_request::<GetTypeRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
+                } else if let Some(params) = as_request::<GetSymbolRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetSymbolRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_symbol(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
+                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<ResolveImportDeclarationRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
+                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeOfDeclarationRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_of_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetReprRequest>(&x) {
+                } else if let Some(params) = as_request::<GetReprRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetReprRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_repr(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
+                } else if let Some(params) = as_request::<GetDocstringRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetDocstringRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_docstring(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
+                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<SearchForTypeAttributeRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetFunctionPartsRequest>(&x) {
+                } else if let Some(params) = as_request::<GetFunctionPartsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetFunctionPartsRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_function_parts(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x) {
+                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetDiagnosticsVersionRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<ResolveImportRequest>(&x) {
+                } else if let Some(params) = as_request::<ResolveImportRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<ResolveImportRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x) {
+                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeArgsRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x) {
+                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetOverloadsRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(&x) {
+                } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetMatchingOverloadsRequest>(params, &x.id)
+                {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
@@ -1195,6 +1222,7 @@ impl Server {
         if !subsequent_mutation {
             self.validate_in_memory(ide_transaction_manager);
         }
+        Ok(())
     }
 
     /// Load a module in a fresh transaction if it's not available in the current transaction
