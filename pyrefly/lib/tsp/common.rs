@@ -9,7 +9,11 @@
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use pyrefly_python::module_name::ModuleName;
 
+use crate::module::module_info::ModuleInfo;
+use crate::state::handle::Handle;
+use crate::state::state::Transaction;
 use crate::tsp;
 
 /// LSP debug logging that can be disabled in release builds
@@ -78,4 +82,18 @@ pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type
         category_flags: 0,
         decl: None,
     }
+}
+
+/// Helper function to get module info for a module by name
+/// This is useful when you have a module name and need to get its module info for operations like text range conversion
+pub fn get_module_info_by_name(
+    transaction: &Transaction<'_>,
+    source_handle: &Handle,
+    module_name: ModuleName,
+) -> Option<ModuleInfo> {
+    // Try to get a handle for the target module using import_handle
+    let target_handle = transaction.import_handle(source_handle, module_name, None).ok()?;
+    
+    // Get the module info for the target handle
+    transaction.get_module_info(&target_handle)
 }

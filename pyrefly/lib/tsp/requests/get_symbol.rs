@@ -14,7 +14,7 @@ use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::{lsp_debug, get_module_info_by_name};
 
 impl Server {
     pub(crate) fn get_symbol(
@@ -169,9 +169,38 @@ impl Server {
                 let definition_module_info = if definition_module.name() == module_info.name() {
                     module_info
                 } else {
-                    // For different module, we would need to get its module info
-                    // For now, use the current module info as a fallback
-                    module_info
+                    // For different module, try to get its module info using the helper function
+                    match get_module_info_by_name(active_transaction, &handle, definition_module.name()) {
+                        Some(def_module_info) => def_module_info,
+                        None => {
+                            // Can't get the definition module info, skip validation and return early
+                            let mut synth_types = Vec::new();
+                            if let Some(type_info) = type_info {
+                                synth_types.push(self.convert_and_register_type(type_info));
+                            }
+                            
+                            return Ok(Some(tsp::Symbol {
+                                node: params.node,
+                                name: name.clone(),
+                                decls: vec![tsp::Declaration {
+                                    handle: declaration_handle,
+                                    category,
+                                    flags,
+                                    node: Some(tsp::Node {
+                                        uri: definition_uri_final.clone(),
+                                        range: lsp_types::Range {
+                                            start: lsp_types::Position { line: 0, character: 0 },
+                                            end: lsp_types::Position { line: 0, character: 0 },
+                                        },
+                                    }),
+                                    module_name,
+                                    name: name.clone(),
+                                    uri: definition_uri_final,
+                                }],
+                                synthesized_types: synth_types,
+                            }));
+                        }
+                    }
                 };
                 
                 let declaration_node = tsp::Node {
@@ -180,47 +209,18 @@ impl Server {
                 };
 
                 // Verify that the declaration node's text matches the expected name
-                // Check if the definition is in the same module as the current one
-                if definition_module.name() == definition_module_info.name() {
-                    // Same module, use current module_info for validation
-                    let declaration_text_range = definition_module_info.lined_buffer().from_lsp_range(declaration_node.range);
-                    let declaration_text = definition_module_info.code_at(declaration_text_range);
-                    
-                    if declaration_text != name {
-                        panic!(
-                            "Declaration node text '{}' doesn't match expected name '{}' at range {:?} in module {} (definition in module {})",
-                            declaration_text,
-                            name,
-                            declaration_text_range,
-                            definition_module_info.name(),
-                            definition_module.name()
-                        );
-                    }
-                } else {
-                    // Different module - we can't easily get its module info without a handle
-                    // For now, skip the validation for cross-module definitions
-                    // TODO: Consider finding a way to get the handle for the definition module
-                    
-                    // Get synthesized types if available
-                    let mut synth_types = Vec::new();
-                    if let Some(type_info) = type_info {
-                        synth_types.push(self.convert_and_register_type(type_info));
-                    }
-                    
-                    return Ok(Some(tsp::Symbol {
-                        node: params.node,
-                        name: name.clone(),
-                        decls: vec![tsp::Declaration {
-                            handle: declaration_handle,
-                            category,
-                            flags,
-                            node: Some(declaration_node),
-                            module_name,
-                            name: name.clone(),
-                            uri: definition_uri_final,
-                        }],
-                        synthesized_types: synth_types,
-                    }));
+                let declaration_text_range = definition_module_info.lined_buffer().from_lsp_range(declaration_node.range);
+                let declaration_text = definition_module_info.code_at(declaration_text_range);
+                
+                if declaration_text != name {
+                    panic!(
+                        "Declaration node text '{}' doesn't match expected name '{}' at range {:?} in module {} (definition in module {})",
+                        declaration_text,
+                        name,
+                        declaration_text_range,
+                        definition_module_info.name(),
+                        definition_module.name()
+                    );
                 }
 
                 // Add the primary declaration
