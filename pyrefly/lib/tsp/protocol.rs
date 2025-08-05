@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use lsp_types::Url;
+use lsp_types::{Range, Url};
 
 pub enum GetTypeRequest {}
 
@@ -46,12 +46,15 @@ impl TypeCategory {
 pub struct TypeFlags(i32);
 
 impl TypeFlags {
+    #[allow(dead_code)]
     pub const NONE: TypeFlags = TypeFlags(0);
     pub const INSTANTIABLE: TypeFlags = TypeFlags(1);
     pub const INSTANCE: TypeFlags = TypeFlags(2);
     pub const CALLABLE: TypeFlags = TypeFlags(4);
     pub const LITERAL: TypeFlags = TypeFlags(8);
+    #[allow(dead_code)]
     pub const INTERFACE: TypeFlags = TypeFlags(16);
+    #[allow(dead_code)]
     pub const GENERIC: TypeFlags = TypeFlags(32);
     pub const FROM_ALIAS: TypeFlags = TypeFlags(64);
     
@@ -96,8 +99,7 @@ pub struct ModuleName {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Node {
     pub uri: Url,
-    pub start: i32,
-    pub length: i32,
+    pub range: Range,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -131,11 +133,15 @@ impl DeclarationCategory {
 pub struct DeclarationFlags(i32);
 
 impl DeclarationFlags {
+    #[allow(dead_code)]
     pub const NONE: DeclarationFlags = DeclarationFlags(0);
     pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1 << 0);   // Method defined within a class
     pub const CONSTANT: DeclarationFlags = DeclarationFlags(1 << 1);       // Variable that cannot be changed
+    #[allow(dead_code)]
     pub const FINAL: DeclarationFlags = DeclarationFlags(1 << 2);          // Final variable/class
+    #[allow(dead_code)]
     pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(1 << 3); // Class uses __slots__
+    #[allow(dead_code)]
     pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1 << 4);     // Import uses 'as' alias
     pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1 << 5);   // Import is unresolved
     
@@ -153,16 +159,19 @@ impl DeclarationFlags {
         self
     }
     
+    #[allow(dead_code)]
     pub fn with_final(mut self) -> Self {
         self.0 |= Self::FINAL.0;
         self
     }
     
+    #[allow(dead_code)]
     pub fn with_defined_by_slots(mut self) -> Self {
         self.0 |= Self::IS_DEFINED_BY_SLOTS.0;
         self
     }
     
+    #[allow(dead_code)]
     pub fn with_local_name(mut self) -> Self {
         self.0 |= Self::USES_LOCAL_NAME.0;
         self
@@ -200,7 +209,9 @@ pub struct AttributeFlags(i32);
 
 impl AttributeFlags {
     pub const NONE: AttributeFlags = AttributeFlags(0);
+    #[allow(dead_code)]
     pub const IS_ARGS_LIST: AttributeFlags = AttributeFlags(1);
+    #[allow(dead_code)]
     pub const IS_KWARGS_DICT: AttributeFlags = AttributeFlags(2);
 }
 
@@ -474,6 +485,7 @@ impl lsp_types::request::Request for GetTypeOfDeclarationRequest {
 pub struct TypeReprFlags(i32);
 
 impl TypeReprFlags {
+    #[allow(dead_code)]
     pub const NONE: TypeReprFlags = TypeReprFlags(0);
     pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1 << 0);
     pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1 << 1);
@@ -533,14 +545,19 @@ impl lsp_types::request::Request for GetDocstringRequest {
 pub struct AttributeAccessFlags(pub u32);
 
 impl AttributeAccessFlags {
+    #[allow(dead_code)]
     pub const NONE: AttributeAccessFlags = AttributeAccessFlags(0);
     // Skip instance attributes when searching for attributes of a type
+    #[allow(dead_code)]
     pub const SKIP_INSTANCE_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 0);
     // Skip members from the base class of a type when searching for members of a type
+    #[allow(dead_code)]
     pub const SKIP_TYPE_BASE_CLASS: AttributeAccessFlags = AttributeAccessFlags(1 << 1);
     // Skip attribute access overrides when searching for members of a type
+    #[allow(dead_code)]
     pub const SKIP_ATTRIBUTE_ACCESS_OVERRIDES: AttributeAccessFlags = AttributeAccessFlags(1 << 2);
     // Look for bound attributes when searching for attributes of a type. That is methods bound specifically to an instance
+    #[allow(dead_code)]
     pub const GET_BOUND_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 3);
 }
 

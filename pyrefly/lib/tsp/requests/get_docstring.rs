@@ -12,7 +12,6 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use pyrefly_python::docstring::Docstring;
 use lsp_server::ResponseError;
-use ruff_text_size::TextSize;
 
 impl Server {
     pub(crate) fn get_docstring(
@@ -60,8 +59,13 @@ impl Server {
         handle: &crate::state::handle::Handle,
         node: &tsp::Node,
     ) -> Result<Option<String>, ResponseError> {
-        // Convert position to TextSize
-        let position = TextSize::new(node.start as u32);
+        // Get module info for position conversion
+        let Some(module_info) = transaction.get_module_info(handle) else {
+            return Ok(None);
+        };
+
+        // Convert Range position to TextSize using the module's line buffer
+        let position = module_info.lined_buffer().from_lsp_position(node.range.start);
 
         // Try to find definition at the position - this is the same logic as hover
         if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {

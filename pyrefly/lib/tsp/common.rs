@@ -10,9 +10,7 @@
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 
-use crate::lsp::server::Server;
 use crate::tsp;
-use crate::state::state::Transaction;
 
 /// LSP debug logging that can be disabled in release builds
 #[cfg(debug_assertions)]
@@ -31,6 +29,7 @@ macro_rules! lsp_debug {
 pub(crate) use lsp_debug;
 
 /// Creates a snapshot outdated error
+#[allow(dead_code)]
 pub(crate) fn snapshot_outdated_error() -> ResponseError {
     ResponseError {
         code: ErrorCode::RequestFailed as i32,
@@ -40,6 +39,7 @@ pub(crate) fn snapshot_outdated_error() -> ResponseError {
 }
 
 /// Creates a common error response for internal errors
+#[allow(dead_code)]
 pub(crate) fn create_internal_error(message: &str) -> ResponseError {
     ResponseError {
         code: ErrorCode::InternalError as i32,
@@ -49,6 +49,7 @@ pub(crate) fn create_internal_error(message: &str) -> ResponseError {
 }
 
 /// Creates a common error response for language services being disabled
+#[allow(dead_code)]
 pub(crate) fn language_services_disabled_error() -> ResponseError {
     ResponseError {
         code: ErrorCode::RequestFailed as i32,

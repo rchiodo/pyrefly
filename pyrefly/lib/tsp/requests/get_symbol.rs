@@ -8,7 +8,7 @@
 //! Implementation of the getSymbol TSP request
 
 use lsp_server::{ErrorCode, ResponseError};
-use ruff_text_size::{TextRange, TextSize};
+use ruff_text_size::TextRange;
 
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
@@ -68,8 +68,8 @@ impl Server {
         // Use the appropriate transaction for the rest of the function
         let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
 
-        // Convert offset to TextSize
-        let position = TextSize::new(params.node.start as u32);
+        // Convert range start to TextSize using module_info
+        let position = module_info.lined_buffer().from_lsp_position(params.node.range.start);
 
         // First, check if we can get type information at this position
         let type_info = active_transaction.get_type_at(&handle, position);
@@ -85,7 +85,7 @@ impl Server {
                 let name = params.name.unwrap_or_else(|| {
                     // Try to extract symbol name from the source code at the position
                     let start = position;
-                    let end = TextSize::new((params.node.start + params.node.length) as u32);
+                    let end = module_info.lined_buffer().from_lsp_position(params.node.range.end);
                     module_info.code_at(TextRange::new(start, end)).to_string()
                 });
 
@@ -165,21 +165,26 @@ impl Server {
                 let definition_uri_final = definition_uri.unwrap_or_else(|| params.node.uri.clone());
 
                 // Create the declaration node
+                // Get the module info for the definition's module to convert TextRange to LSP Range
+                let definition_module_info = if definition_module.name() == module_info.name() {
+                    module_info
+                } else {
+                    // For different module, we would need to get its module info
+                    // For now, use the current module info as a fallback
+                    module_info
+                };
+                
                 let declaration_node = tsp::Node {
                     uri: definition_uri_final.clone(),
-                    start: u32::from(definition_range.start()) as i32,
-                    length: u32::from(definition_range.end() - definition_range.start()) as i32,
+                    range: definition_module_info.lined_buffer().to_lsp_range(definition_range),
                 };
 
                 // Verify that the declaration node's text matches the expected name
                 // Check if the definition is in the same module as the current one
-                if definition_module.name() == module_info.name() {
+                if definition_module.name() == definition_module_info.name() {
                     // Same module, use current module_info for validation
-                    let declaration_text_range = TextRange::new(
-                        TextSize::new(declaration_node.start as u32),
-                        TextSize::new((declaration_node.start + declaration_node.length) as u32)
-                    );
-                    let declaration_text = module_info.code_at(declaration_text_range);
+                    let declaration_text_range = definition_module_info.lined_buffer().from_lsp_range(declaration_node.range);
+                    let declaration_text = definition_module_info.code_at(declaration_text_range);
                     
                     if declaration_text != name {
                         panic!(
@@ -187,7 +192,7 @@ impl Server {
                             declaration_text,
                             name,
                             declaration_text_range,
-                            module_info.name(),
+                            definition_module_info.name(),
                             definition_module.name()
                         );
                     }
@@ -240,7 +245,7 @@ impl Server {
                 // If no definition found, try to get type information at least
                 let name = params.name.unwrap_or_else(|| {
                     let start = position;
-                    let end = TextSize::new((params.node.start + params.node.length) as u32);
+                    let end = module_info.lined_buffer().from_lsp_position(params.node.range.end);
                     module_info.code_at(TextRange::new(start, end)).to_string()
                 });
 

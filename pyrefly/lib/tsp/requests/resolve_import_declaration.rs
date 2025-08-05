@@ -165,8 +165,7 @@ impl Server {
                     flags,
                     node: Some(tsp::Node {
                         uri: module_info_to_uri(def_module).unwrap_or_else(|| params.decl.uri.clone()),
-                        start: u32::from(def_range.start()) as i32,
-                        length: u32::from(def_range.end() - def_range.start()) as i32,
+                        range: target_module_info.lined_buffer().to_lsp_range(def_range),
                     }),
                     module_name: tsp::ModuleName {
                         leading_dots: 0,

@@ -37,21 +37,21 @@ impl Server {
 
         lsp_debug!("Getting matching overloads for call node: {:?}", params.call_node);
 
-        // Convert the call node to a position and handle
+        // Get the URI and check if workspace has language services enabled
         let uri = &params.call_node.uri;
-        let position = TextSize::new(params.call_node.start as u32);
-
-        // Check if workspace has language services enabled
         let Some(handle) = self.make_handle_if_enabled(uri) else {
             lsp_debug!("Language services disabled for workspace");
             return Ok(None);
         };
 
         // Get module info to ensure the module is loaded
-        let Some(_module_info) = transaction.get_module_info(&handle) else {
+        let Some(module_info) = transaction.get_module_info(&handle) else {
             lsp_debug!("Module not loaded for handle: {:?}", handle);
             return Ok(None);
         };
+
+        // Convert the Range position to TextSize using the module's line buffer
+        let position = module_info.lined_buffer().from_lsp_position(params.call_node.range.start);
 
         // Try to find the type at the call site position
         let Some(call_site_type) = self.get_type_at_position(transaction, &handle, position) else {

@@ -12,7 +12,6 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
 use lsp_server::{ErrorCode, ResponseError};
-use ruff_text_size::TextSize;
 
 impl Server {
     pub(crate) fn get_type(
@@ -38,7 +37,7 @@ impl Server {
         };
 
         // Try to get module info, loading it if necessary
-        let (_module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
+        let (module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
             Ok((Some(info), fresh_tx)) => (info, fresh_tx),
             Ok((None, _)) => {
                 lsp_debug!("Warning: Could not load module for get_type request: {}", uri);
@@ -56,12 +55,12 @@ impl Server {
         // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
         let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
 
-        // Convert start offset to TextSize position
-        let position = TextSize::new(params.node.start as u32);
+        // Convert range start to TextSize position using module_info
+        let position = module_info.lined_buffer().from_lsp_position(params.node.range.start);
 
         // Try to get the type at the specified position
         let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
-            lsp_debug!("Warning: Could not get type at position {} in {}", params.node.start, uri);
+            lsp_debug!("Warning: Could not get type at position {:?} in {}", params.node.range.start, uri);
             return Ok(None);
         };
 

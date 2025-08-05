@@ -12,7 +12,6 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::create_default_type_for_declaration;
 use lsp_server::{ErrorCode, ResponseError};
-use ruff_text_size::TextSize;
 
 impl Server {
     pub(crate) fn get_type_of_declaration(
@@ -51,7 +50,7 @@ impl Server {
         // Note: If the module is not loaded in the transaction, we'll load it ourselves
         // If we can't get module info, the file might not be loaded in the transaction
         // This can happen when the declaration points to a definition in a file that's not currently loaded
-        let _module_info = match transaction.get_module_info(&handle) {
+        let module_info = match transaction.get_module_info(&handle) {
             Some(info) => info,
             None => {
                 // Module not loaded in transaction, try to load it
@@ -60,8 +59,13 @@ impl Server {
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
                 
-                // Convert declaration position to TextSize
-                let position = TextSize::new(node.start as u32);
+                // Get module info from the fresh transaction for position conversion
+                let Some(fresh_module_info) = fresh_transaction.get_module_info(&handle) else {
+                    return Ok(create_default_type_for_declaration(&params.decl));
+                };
+                
+                // Convert declaration position to TextSize using fresh module_info
+                let position = fresh_module_info.lined_buffer().from_lsp_position(node.range.start);
                 
                 // Try to get the type at the declaration's position using the fresh transaction
                 let Some(type_info) = fresh_transaction.get_type_at(&handle, position) else {
@@ -83,8 +87,8 @@ impl Server {
             }
         };
 
-        // Convert declaration position to TextSize
-        let position = TextSize::new(node.start as u32);
+        // Convert declaration position to TextSize using module_info
+        let position = module_info.lined_buffer().from_lsp_position(node.range.start);
 
         // Try to get the type at the declaration's position
         let Some(type_info) = transaction.get_type_at(&handle, position) else {
@@ -122,9 +126,12 @@ impl Server {
                 let resolved_uri = &resolved_node.uri;
                 
                 if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
-                    let resolved_position = TextSize::new(resolved_node.start as u32);
-                    if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
-                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    // Get module info for the resolved declaration to convert position
+                    if let Some(resolved_module_info) = transaction.get_module_info(&resolved_handle) {
+                        let resolved_position = resolved_module_info.lined_buffer().from_lsp_position(resolved_node.range.start);
+                        if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                            return Ok(Some(self.convert_and_register_type(resolved_type)));
+                        }
                     }
                 }
             }
@@ -153,9 +160,12 @@ impl Server {
                     // Make sure the resolved module is also loaded
                     fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
                     
-                    let resolved_position = TextSize::new(resolved_node.start as u32);
-                    if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
-                        return Ok(Some(self.convert_and_register_type(resolved_type)));
+                    // Get module info for the resolved declaration to convert position
+                    if let Some(resolved_module_info) = fresh_transaction.get_module_info(&resolved_handle) {
+                        let resolved_position = resolved_module_info.lined_buffer().from_lsp_position(resolved_node.range.start);
+                        if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                            return Ok(Some(self.convert_and_register_type(resolved_type)));
+                        }
                     }
                 }
             }
