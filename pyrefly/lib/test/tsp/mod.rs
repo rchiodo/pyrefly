@@ -21,4 +21,5 @@ pub mod get_function_parts;
 // pub mod get_type_of_declaration;
 // pub mod get_docstring;
 // pub mod get_diagnostics_version;
+pub mod tsp_interaction;
 pub mod util;

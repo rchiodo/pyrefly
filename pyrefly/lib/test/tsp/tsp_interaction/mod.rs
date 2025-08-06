@@ -5,17 +5,5 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#![cfg(test)]
-
-mod basic;
-mod completion;
-mod configuration;
-mod definition;
-mod diagnostic;
-mod did_change;
-mod hover;
-mod io;
-mod references;
-mod rename;
 pub mod util;
-mod workspace_symbol;
+pub mod get_type;

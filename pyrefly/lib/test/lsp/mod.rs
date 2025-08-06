@@ -14,6 +14,6 @@ mod document_symbols;
 mod hover;
 mod inlay_hint;
 mod local_find_refs;
-mod lsp_interaction;
+pub mod lsp_interaction;
 mod semantic_tokens;
 mod signature_help;
