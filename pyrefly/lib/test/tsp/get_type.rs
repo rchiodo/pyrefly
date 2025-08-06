@@ -16,7 +16,6 @@ use crate::test::util::{mk_multi_file_state_assert_no_errors};
 use crate::test::tsp::util::{build_tsp_test_server};
 use crate::tsp;
 use lsp_types::{Position, Url, Range};
-use ruff_text_size::TextSize;
 use std::collections::HashMap;
 use lsp_server::{ErrorCode, ResponseError};
 
@@ -50,8 +49,7 @@ fn test_get_type_params_construction() {
 }
 
 // Helper function that implements the core TSP get_type logic
-// This simulates what Server::get_type does without requiring a Server instance
-// Uses the real convert_to_tsp_type helper function for accurate type conversion
+// This now directly calls the standalone get_type function from the handler
 fn call_tsp_get_type_handler(
     transaction: &crate::state::state::Transaction<'_>,
     handles: &HashMap<&str, crate::state::handle::Handle>,
@@ -61,7 +59,6 @@ fn call_tsp_get_type_handler(
     
     // 1. Convert Node to URI and position (simplified - we'll map to our test files)
     let uri = &params.node.uri;
-    let position = &params.node.range.start;
     
     // 2. Get the handle for this URI (simplified mapping for test)
     let handle = if uri.path().ends_with("main.py") {
@@ -80,21 +77,19 @@ fn call_tsp_get_type_handler(
         });
     };
     
-    // 3. Convert LSP position to TextSize (this is what the real handler does)
-    let text_size = TextSize::new((position.line * 100 + position.character) as u32); // Simplified conversion
+    // 3. Get module info from the handle (this is what the real handler does)
+    let Some(module_info) = transaction.get_module_info(&handle) else {
+        return Err(ResponseError {
+            code: ErrorCode::InternalError as i32,
+            message: "Could not get module info".to_string(),
+            data: None,
+        });
+    };
     
-    // 4. Call get_type_at (this is the core functionality the TSP handler calls)
-    let type_result = transaction.get_type_at(&handle, text_size);
+    // 4. Call the standalone get_type function (same as real handler)
+    let result = crate::tsp::requests::get_type::get_type(transaction, &handle, &module_info, &params);
     
-    // 5. Convert the result to TSP Type format using the real helper function
-    match type_result {
-        Some(pyrefly_type) => {
-            // Use the same conversion logic as the real TSP handler
-            let tsp_type = crate::tsp::protocol::convert_to_tsp_type(pyrefly_type);
-            Ok(Some(tsp_type))
-        }
-        None => Ok(None),
-    }
+    Ok(result)
 }
 
 #[test]

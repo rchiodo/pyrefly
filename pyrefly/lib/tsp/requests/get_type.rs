@@ -1,5 +1,12 @@
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright /// Standalone get_type function that can be used independently of the Server
+/// This follows the same pattern as the hover feature
+pub fn get_type(
+    transaction: &Transaction<'_>, 
+    handle: &Handle,
+    module_info: &ModuleInfo,
+    params: &tsp::GetTypeParams,
+) -> Option<tsp::Type> { Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,9 +16,29 @@
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::state::handle::Handle;
+use crate::module::module_info::ModuleInfo;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
 use lsp_server::{ErrorCode, ResponseError};
+
+/// Standalone get_type function that can be used independently of the Server
+/// This follows the same pattern as the hover feature
+pub fn get_type(
+    transaction: &Transaction<'_>,
+    handle: &Handle,
+    module_info: &ModuleInfo,
+    params: &tsp::GetTypeParams,
+) -> Option<tsp::Type> {
+    // Convert range start to TextSize position using module_info
+    let position = module_info.lined_buffer().from_lsp_position(params.node.range.start);
+
+    // Try to get the type at the specified position
+    let type_info = transaction.get_type_at(handle, position)?;
+
+    // Convert pyrefly Type to TSP Type format using protocol helper
+    Some(crate::tsp::protocol::convert_to_tsp_type(type_info))
+}
 
 impl Server {
     pub(crate) fn get_type(
@@ -55,16 +82,19 @@ impl Server {
         // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
         let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
 
-        // Convert range start to TextSize position using module_info
-        let position = module_info.lined_buffer().from_lsp_position(params.node.range.start);
+        // Call the standalone get_type function
+        let tsp_type = get_type(active_transaction, &handle, &module_info, &params);
 
-        // Try to get the type at the specified position
-        let Some(type_info) = active_transaction.get_type_at(&handle, position) else {
-            lsp_debug!("Warning: Could not get type at position {:?} in {}", params.node.range.start, uri);
-            return Ok(None);
-        };
+        // Register the type in the lookup table (Server-specific functionality)
+        if let Some(ref tsp_type) = tsp_type {
+            if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
+                // Extract the pyrefly type from the TSP type for registration
+                if let Some(pyrefly_type) = active_transaction.get_type_at(&handle, module_info.lined_buffer().from_lsp_position(params.node.range.start)) {
+                    self.state.register_type_handle(handle_str.clone(), pyrefly_type);
+                }
+            }
+        }
 
-        // Convert pyrefly Type to TSP Type format
-        Ok(Some(self.convert_and_register_type(type_info)))
+        Ok(tsp_type)
     }
 }
