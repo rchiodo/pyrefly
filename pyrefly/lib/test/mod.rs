@@ -33,6 +33,7 @@ mod imports;
 mod incremental;
 mod literal;
 mod lsp;
+mod tsp;
 mod mro;
 mod named_tuple;
 mod narrow;
