@@ -104,7 +104,7 @@ impl Server {
                 Err(_) => {
                     return Err(ResponseError {
                         code: ErrorCode::InternalError as i32,
-                        message: "Failed to load target module".to_string(),
+                        message: "Failed to load target module".to_owned(),
                         data: None,
                     });
                 }
@@ -204,7 +204,7 @@ impl Server {
                             .name()
                             .as_str()
                             .split('.')
-                            .map(|s| s.to_string())
+                            .map(|s| s.to_owned())
                             .collect(),
                     },
                     name: import_name.clone(),
@@ -229,7 +229,7 @@ impl Server {
                     .name()
                     .as_str()
                     .split('.')
-                    .map(|s| s.to_string())
+                    .map(|s| s.to_owned())
                     .collect(),
             },
             name: import_name.clone(),

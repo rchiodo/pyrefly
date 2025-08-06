@@ -239,16 +239,10 @@ pub struct GetPythonSearchPathsParams {
     pub snapshot: i32, // Snapshot version
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 pub struct GetSnapshotParams {
     // No parameters needed for getting snapshot, but we need an empty struct
     // to handle both {} and null parameter cases
-}
-
-impl Default for GetSnapshotParams {
-    fn default() -> Self {
-        Self {}
-    }
 }
 
 // Custom deserializer that handles both null and empty object
@@ -371,8 +365,8 @@ fn extract_module_name(py_type: &crate::types::types::Type) -> Option<ModuleName
     use crate::types::types::Type as PyType;
 
     match py_type {
-        PyType::ClassType(ct) => Some(convert_module_name(ct.qname().module_name().clone())),
-        PyType::ClassDef(cd) => Some(convert_module_name(cd.qname().module_name().clone())),
+        PyType::ClassType(ct) => Some(convert_module_name(ct.qname().module_name())),
+        PyType::ClassDef(cd) => Some(convert_module_name(cd.qname().module_name())),
         PyType::Module(m) => Some(convert_module_name_from_string(&m.to_string())), // Fixed this line
         _ => None,
     }
@@ -397,7 +391,7 @@ pub fn convert_tsp_module_name_to_pyrefly(
 
     // Normalize __builtins__ to builtins so that the builtins module can be found
     let normalized_module_str = if module_str == "__builtins__" {
-        "builtins".to_string()
+        "builtins".to_owned()
     } else {
         module_str
     };

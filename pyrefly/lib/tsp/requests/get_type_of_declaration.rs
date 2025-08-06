@@ -31,7 +31,7 @@ impl Server {
             // If there's no node information, we can't get the type
             return Err(ResponseError {
                 code: ErrorCode::InvalidParams as i32,
-                message: "Declaration has no node information".to_string(),
+                message: "Declaration has no node information".to_owned(),
                 data: None,
             });
         };
@@ -43,7 +43,7 @@ impl Server {
         let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
+                message: "Language services disabled".to_owned(),
                 data: None,
             });
         };

@@ -33,7 +33,7 @@ impl Server {
         if params.source_uri.to_file_path().is_err() {
             return Err(ResponseError {
                 code: ErrorCode::InvalidParams as i32,
-                message: "Invalid source URI - cannot convert to file path".to_string(),
+                message: "Invalid source URI - cannot convert to file path".to_owned(),
                 data: None,
             });
         }
@@ -42,7 +42,7 @@ impl Server {
         let Some(source_handle) = self.make_handle_if_enabled(&params.source_uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled for this workspace".to_string(),
+                message: "Language services disabled for this workspace".to_owned(),
                 data: None,
             });
         };

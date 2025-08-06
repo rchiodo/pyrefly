@@ -35,7 +35,7 @@ impl Server {
         let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
+                message: "Language services disabled".to_owned(),
                 data: None,
             });
         };
@@ -53,7 +53,7 @@ impl Server {
                 ) else {
                     return Err(ResponseError {
                         code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to load module".to_string(),
+                        message: "Failed to load module".to_owned(),
                         data: None,
                     });
                 };
@@ -61,7 +61,7 @@ impl Server {
                 let Some(info) = fresh_transaction.get_module_info(&handle) else {
                     return Err(ResponseError {
                         code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to get module info after loading".to_string(),
+                        message: "Failed to get module info after loading".to_owned(),
                         data: None,
                     });
                 };
@@ -99,7 +99,7 @@ impl Server {
                 let end = module_info
                     .lined_buffer()
                     .from_lsp_position(params.node.range.end);
-                module_info.code_at(TextRange::new(start, end)).to_string()
+                module_info.code_at(TextRange::new(start, end)).to_owned()
             });
 
             // Create declarations from the definition
@@ -220,7 +220,7 @@ impl Server {
             let module_parts: Vec<String> = definition_module_name
                 .as_str()
                 .split('.')
-                .map(|s| s.to_string())
+                .map(|s| s.to_owned())
                 .collect();
             let module_name = tsp::ModuleName {
                 leading_dots: 0,
@@ -320,7 +320,7 @@ impl Server {
                 let end = module_info
                     .lined_buffer()
                     .from_lsp_position(params.node.range.end);
-                module_info.code_at(TextRange::new(start, end)).to_string()
+                module_info.code_at(TextRange::new(start, end)).to_owned()
             });
 
             let mut synth_types = Vec::new();

@@ -37,7 +37,7 @@ pub(crate) use lsp_debug;
 pub(crate) fn snapshot_outdated_error() -> ResponseError {
     ResponseError {
         code: ErrorCode::RequestFailed as i32,
-        message: "Snapshot outdated".to_string(),
+        message: "Snapshot outdated".to_owned(),
         data: None,
     }
 }
@@ -47,7 +47,7 @@ pub(crate) fn snapshot_outdated_error() -> ResponseError {
 pub(crate) fn create_internal_error(message: &str) -> ResponseError {
     ResponseError {
         code: ErrorCode::InternalError as i32,
-        message: message.to_string(),
+        message: message.to_owned(),
         data: None,
     }
 }
@@ -57,7 +57,7 @@ pub(crate) fn create_internal_error(message: &str) -> ResponseError {
 pub(crate) fn language_services_disabled_error() -> ResponseError {
     ResponseError {
         code: ErrorCode::RequestFailed as i32,
-        message: "Language services disabled".to_string(),
+        message: "Language services disabled".to_owned(),
         data: None,
     }
 }

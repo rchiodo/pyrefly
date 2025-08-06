@@ -77,7 +77,7 @@ impl Server {
 
         // Convert string attribute name to ruff_python_ast::name::Name
         use ruff_python_ast::name::Name;
-        let attr_name = Name::new(attribute_name.to_string());
+        let attr_name = Name::new(attribute_name.to_owned());
 
         // Get the module info from the class type
         let class_qname = class_type.class_object().qname();
@@ -152,7 +152,7 @@ impl Server {
         let flags = tsp::AttributeFlags::NONE;
 
         tsp::Attribute {
-            name: attribute_name.to_string(),
+            name: attribute_name.to_owned(),
             type_info: tsp_type,
             owner: None,      // TODO: Could set this to the class type if needed
             bound_type: None, // TODO: Could implement bound type if needed

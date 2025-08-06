@@ -212,7 +212,7 @@ impl ServerConnection {
             eprintln!(
                 "Notification parameters: {}",
                 serde_json::to_string_pretty(&notification.params)
-                    .unwrap_or_else(|_| "Failed to serialize params".to_string())
+                    .unwrap_or_else(|_| "Failed to serialize params".to_owned())
             );
         }
         if self.0.sender.send(msg).is_err() {
@@ -459,7 +459,7 @@ impl Server {
     pub(crate) fn snapshot_outdated_error() -> ResponseError {
         ResponseError {
             code: ErrorCode::ServerCancelled as i32,
-            message: "Snapshot is outdated".to_string(),
+            message: "Snapshot is outdated".to_owned(),
             data: None,
         }
     }

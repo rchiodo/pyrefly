@@ -62,7 +62,7 @@ impl Server {
         let Some(handle) = self.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_string(),
+                message: "Language services disabled".to_owned(),
                 data: None,
             });
         };
@@ -81,7 +81,7 @@ impl Server {
                 Err(_) => {
                     return Err(ResponseError {
                         code: ErrorCode::InternalError as i32,
-                        message: "Failed to load module".to_string(),
+                        message: "Failed to load module".to_owned(),
                         data: None,
                     });
                 }

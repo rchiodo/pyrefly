@@ -45,10 +45,10 @@ impl Server {
         // Extract function parts based on the type
         match &internal_type {
             crate::types::types::Type::Function(func_type) => {
-                self.extract_function_parts_from_function(func_type, &params.flags, transaction)
+                self.extract_function_parts_from_function(func_type, params.flags, transaction)
             }
             crate::types::types::Type::Callable(callable_type) => {
-                self.extract_function_parts_from_callable(callable_type, &params.flags, transaction)
+                self.extract_function_parts_from_callable(callable_type, params.flags, transaction)
             }
             crate::types::types::Type::Overload(_overload_type) => {
                 // For overloaded functions, we could return the signature of the first overload
@@ -69,7 +69,7 @@ impl Server {
     fn extract_function_parts_from_function(
         &self,
         func_type: &crate::types::callable::Function,
-        flags: &tsp::TypeReprFlags,
+        flags: tsp::TypeReprFlags,
         transaction: &Transaction<'_>,
     ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
         // Extract parameter information from the function's signature
@@ -80,7 +80,7 @@ impl Server {
     fn extract_function_parts_from_callable(
         &self,
         callable_type: &crate::types::callable::Callable,
-        flags: &tsp::TypeReprFlags,
+        flags: tsp::TypeReprFlags,
         transaction: &Transaction<'_>,
     ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
         // Extract parameter information from callable
@@ -95,7 +95,7 @@ impl Server {
                 }
             }
             crate::types::callable::Params::Ellipsis => {
-                params.push("...".to_string());
+                params.push("...".to_owned());
             }
             crate::types::callable::Params::ParamSpec(types, param_spec) => {
                 // Handle concatenated parameters with a ParamSpec
@@ -120,7 +120,7 @@ impl Server {
     fn format_param_for_display(
         &self,
         param: &crate::types::callable::Param,
-        flags: &tsp::TypeReprFlags,
+        flags: tsp::TypeReprFlags,
         transaction: &Transaction<'_>,
     ) -> String {
         use crate::types::callable::Param;
@@ -164,7 +164,7 @@ impl Server {
     fn format_type_for_display(
         &self,
         type_obj: &crate::types::types::Type,
-        flags: &tsp::TypeReprFlags,
+        flags: tsp::TypeReprFlags,
         _transaction: &Transaction<'_>,
     ) -> String {
         // This is a simplified implementation. You might want to use a more sophisticated
