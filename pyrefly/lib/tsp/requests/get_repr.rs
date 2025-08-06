@@ -7,11 +7,11 @@
 
 //! TSP get repr request implementation
 
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use lsp_server::ResponseError;
-
 // Import the lsp_debug macro from common
 use crate::tsp::common::lsp_debug;
 
@@ -29,7 +29,10 @@ impl Server {
         // Use the handle mapping to get the actual pyrefly type
         let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
             // If we can't find the internal type, fall back to the basic formatter
-            lsp_debug!("Warning: Could not resolve type handle for repr: {:?}", params.type_param.handle);
+            lsp_debug!(
+                "Warning: Could not resolve type handle for repr: {:?}",
+                params.type_param.handle
+            );
             let type_repr = format_type_representation(&params.type_param, params.flags);
             return Ok(type_repr);
         };
@@ -40,15 +43,14 @@ impl Server {
             match &internal_type {
                 crate::types::types::Type::ClassDef(class) => {
                     // Convert ClassDef to ClassType (instance)
-                    let empty_tparams = std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
+                    let empty_tparams =
+                        std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
                     let empty_targs = crate::types::types::TArgs::new(empty_tparams, Vec::new());
-                    let class_type = crate::types::class::ClassType::new(
-                        class.clone(),
-                        empty_targs,
-                    );
+                    let class_type =
+                        crate::types::class::ClassType::new(class.clone(), empty_targs);
                     format!("{}", crate::types::types::Type::ClassType(class_type))
                 }
-                _ => format!("{}", internal_type)
+                _ => format!("{}", internal_type),
             }
         } else {
             // Standard type representation
@@ -64,7 +66,11 @@ impl Server {
             type_repr
         };
 
-        lsp_debug!("Generated repr for type {:?}: {}", params.type_param.handle, final_repr);
+        lsp_debug!(
+            "Generated repr for type {:?}: {}",
+            params.type_param.handle,
+            final_repr
+        );
         Ok(final_repr)
     }
 }
@@ -72,9 +78,9 @@ impl Server {
 /// Format a type representation when internal type lookup fails
 fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags) -> String {
     use tsp::TypeCategory;
-    
+
     let mut result = String::new();
-    
+
     // Handle different type categories
     match type_param.category {
         TypeCategory::ANY => result.push_str("Any"),
@@ -85,12 +91,12 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
             } else {
                 result.push_str(&type_param.name);
             }
-        },
+        }
         TypeCategory::OVERLOADED => {
             result.push_str("Overload[");
             result.push_str(&type_param.name);
             result.push(']');
-        },
+        }
         TypeCategory::CLASS => {
             // For classes, show the class name
             if flags.has_convert_to_instance_type() {
@@ -102,18 +108,18 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
                 result.push_str(&type_param.name);
                 result.push(']');
             }
-        },
+        }
         TypeCategory::MODULE => {
             result.push_str("Module[");
             result.push_str(&type_param.name);
             result.push(']');
-        },
+        }
         TypeCategory::UNION => {
             // For unions, we'd need to format multiple types
             result.push_str("Union[");
             result.push_str(&type_param.name);
             result.push(']');
-        },
+        }
         TypeCategory::TYPE_VAR => {
             result.push_str(&type_param.name);
             // Add variance information if requested
@@ -121,7 +127,7 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
                 // This would require additional metadata about variance
                 // For now, just show the basic type var name
             }
-        },
+        }
         _ => {
             // Default case for unknown categories
             if type_param.name.is_empty() {
@@ -131,7 +137,7 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
             }
         }
     }
-    
+
     // Add module information if available and it's not a builtin
     if let Some(module_name) = &type_param.module_name {
         if !module_name.name_parts.is_empty() && module_name.name_parts[0] != "builtins" {

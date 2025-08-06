@@ -7,11 +7,12 @@
 
 //! TSP search for type attribute request implementation
 
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
-use lsp_server::ResponseError;
 
 impl Server {
     pub(crate) fn search_for_type_attribute(
@@ -26,23 +27,31 @@ impl Server {
 
         lsp_debug!(
             "Searching for attribute '{}' with access flags: {:?}",
-            params.attribute_name, params.access_flags
+            params.attribute_name,
+            params.access_flags
         );
 
         // Get the internal type from the start_type handle
         let internal_type = match self.lookup_type_from_tsp_type(&params.start_type) {
             Some(t) => t,
             None => {
-                lsp_debug!("Could not resolve type handle: {:?}", params.start_type.handle);
+                lsp_debug!(
+                    "Could not resolve type handle: {:?}",
+                    params.start_type.handle
+                );
                 return Ok(None);
             }
         };
 
         // Only work on class types - this method is specifically for class attribute lookup
         match &internal_type {
-            crate::types::types::Type::ClassType(class_type) => {
-                self.search_attribute_in_class_type(class_type, &params.attribute_name, transaction, &params)
-            }
+            crate::types::types::Type::ClassType(class_type) => self
+                .search_attribute_in_class_type(
+                    class_type,
+                    &params.attribute_name,
+                    transaction,
+                    &params,
+                ),
             _ => {
                 lsp_debug!(
                     "search_for_type_attribute only works on class types, got: {:?}",
@@ -72,17 +81,17 @@ impl Server {
 
         // Get the module info from the class type
         let class_qname = class_type.class_object().qname();
-        
+
         // Create a handle for the module containing the class
         let module_info = class_qname.module();
         let module_path = module_info.path().clone();
         let module_name = module_info.name();
-        let config = self.state.config_finder().python_file(module_name, &module_path);
-        let handle = crate::state::handle::Handle::new(
-            module_name,
-            module_path,
-            config.get_sys_info(),
-        );
+        let config = self
+            .state
+            .config_finder()
+            .python_file(module_name, &module_path);
+        let handle =
+            crate::state::handle::Handle::new(module_name, module_path, config.get_sys_info());
 
         // Use ad_hoc_solve to access the solver and get the attribute type
         let result = transaction.ad_hoc_solve(&handle, |solver| {
@@ -96,10 +105,10 @@ impl Server {
                     module_info.clone(),
                     crate::error::style::ErrorStyle::Never,
                 ), // Create a temporary error collector
-                None, // No context
-                "search_for_type_attribute", // Context description
+                None,                                 // No context
+                "search_for_type_attribute",          // Context description
             );
-            
+
             Some(attribute_type)
         });
 
@@ -107,18 +116,17 @@ impl Server {
             Some(Some(attribute_type)) => {
                 lsp_debug!(
                     "Found attribute '{}' in class type with type: {:?}",
-                    attribute_name, attribute_type
+                    attribute_name,
+                    attribute_type
                 );
-                
+
                 // Convert the pyrefly Type to TSP Attribute
-                let tsp_attribute = self.convert_type_to_tsp_attribute(attribute_type, attribute_name);
+                let tsp_attribute =
+                    self.convert_type_to_tsp_attribute(attribute_type, attribute_name);
                 Ok(Some(tsp_attribute))
             }
             Some(None) => {
-                lsp_debug!(
-                    "Attribute '{}' not found in class type",
-                    attribute_name
-                );
+                lsp_debug!("Attribute '{}' not found in class type", attribute_name);
                 Ok(None)
             }
             None => {
@@ -146,7 +154,7 @@ impl Server {
         tsp::Attribute {
             name: attribute_name.to_string(),
             type_info: tsp_type,
-            owner: None, // TODO: Could set this to the class type if needed
+            owner: None,      // TODO: Could set this to the class type if needed
             bound_type: None, // TODO: Could implement bound type if needed
             flags,
             decls: Vec::new(), // TODO: Could add declaration information if available

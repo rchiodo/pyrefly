@@ -1607,7 +1607,7 @@ impl State {
             state: RwLock::new(StateData::new()),
             run_count: AtomicUsize::new(0),
             committing_transaction_lock: Mutex::new(()),
-            snapshot_counter: AtomicI32::new(1), // Start at 1
+            snapshot_counter: AtomicI32::new(1),     // Start at 1
             load_version_counter: AtomicU32::new(1), // Start at 1
             type_handle_lookup: RwLock::new((0, HashMap::new())),
         }
@@ -1620,9 +1620,9 @@ impl State {
     pub fn current_snapshot(&self) -> i32 {
         self.snapshot_counter.load(Ordering::Acquire)
     }
-    
+
     pub fn increment_snapshot(&self) -> i32 {
-        let result =self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1;
+        let result = self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1;
         // Clear the lookup table when incrementing the snapshot
         let mut lookup = self.type_handle_lookup.write();
         lookup.0 = result;
@@ -1639,13 +1639,13 @@ impl State {
     pub fn register_type_handle(&self, handle: String, py_type: crate::types::types::Type) {
         let current_snapshot = self.current_snapshot();
         let mut lookup = self.type_handle_lookup.write();
-        
+
         // Clear the lookup table if snapshot has changed
         if lookup.0 != current_snapshot {
             lookup.1.clear();
             lookup.0 = current_snapshot;
         }
-        
+
         lookup.1.insert(handle, py_type);
     }
 
@@ -1653,14 +1653,14 @@ impl State {
     pub fn lookup_type_from_handle(&self, handle: &str) -> Option<crate::types::types::Type> {
         let current_snapshot = self.current_snapshot();
         let mut lookup = self.type_handle_lookup.write();
-        
+
         // Clear the lookup table if snapshot has changed
         if lookup.0 != current_snapshot {
             lookup.1.clear();
             lookup.0 = current_snapshot;
             return None;
         }
-        
+
         lookup.1.get(handle).cloned()
     }
 

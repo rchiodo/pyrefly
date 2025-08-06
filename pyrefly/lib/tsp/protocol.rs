@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
-use lsp_types::{Range, Url};
+use lsp_types::Range;
+use lsp_types::Url;
+use serde::Deserialize;
+use serde::Serialize;
 
 pub enum GetTypeRequest {}
 
@@ -57,31 +59,31 @@ impl TypeFlags {
     #[allow(dead_code)]
     pub const GENERIC: TypeFlags = TypeFlags(32);
     pub const FROM_ALIAS: TypeFlags = TypeFlags(64);
-    
+
     pub fn new() -> Self {
         TypeFlags(0)
     }
-    
+
     pub fn with_instantiable(mut self) -> Self {
         self.0 |= Self::INSTANTIABLE.0;
         self
     }
-    
+
     pub fn with_instance(mut self) -> Self {
         self.0 |= Self::INSTANCE.0;
         self
     }
-    
+
     pub fn with_callable(mut self) -> Self {
         self.0 |= Self::CALLABLE.0;
         self
     }
-    
+
     pub fn with_literal(mut self) -> Self {
         self.0 |= Self::LITERAL.0;
         self
     }
-    
+
     pub fn with_from_alias(mut self) -> Self {
         self.0 |= Self::FROM_ALIAS.0;
         self
@@ -135,48 +137,48 @@ pub struct DeclarationFlags(i32);
 impl DeclarationFlags {
     #[allow(dead_code)]
     pub const NONE: DeclarationFlags = DeclarationFlags(0);
-    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1 << 0);   // Method defined within a class
-    pub const CONSTANT: DeclarationFlags = DeclarationFlags(1 << 1);       // Variable that cannot be changed
+    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1 << 0); // Method defined within a class
+    pub const CONSTANT: DeclarationFlags = DeclarationFlags(1 << 1); // Variable that cannot be changed
     #[allow(dead_code)]
-    pub const FINAL: DeclarationFlags = DeclarationFlags(1 << 2);          // Final variable/class
+    pub const FINAL: DeclarationFlags = DeclarationFlags(1 << 2); // Final variable/class
     #[allow(dead_code)]
     pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(1 << 3); // Class uses __slots__
     #[allow(dead_code)]
-    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1 << 4);     // Import uses 'as' alias
-    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1 << 5);   // Import is unresolved
-    
+    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1 << 4); // Import uses 'as' alias
+    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1 << 5); // Import is unresolved
+
     pub fn new() -> Self {
         DeclarationFlags(0)
     }
-    
+
     pub fn with_class_member(mut self) -> Self {
         self.0 |= Self::CLASS_MEMBER.0;
         self
     }
-    
+
     pub fn with_constant(mut self) -> Self {
         self.0 |= Self::CONSTANT.0;
         self
     }
-    
+
     #[allow(dead_code)]
     pub fn with_final(mut self) -> Self {
         self.0 |= Self::FINAL.0;
         self
     }
-    
+
     #[allow(dead_code)]
     pub fn with_defined_by_slots(mut self) -> Self {
         self.0 |= Self::IS_DEFINED_BY_SLOTS.0;
         self
     }
-    
+
     #[allow(dead_code)]
     pub fn with_local_name(mut self) -> Self {
         self.0 |= Self::USES_LOCAL_NAME.0;
         self
     }
-    
+
     pub fn with_unresolved_import(mut self) -> Self {
         self.0 |= Self::UNRESOLVED_IMPORT.0;
         self
@@ -185,14 +187,14 @@ impl DeclarationFlags {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Declaration {
-    pub handle: TypeHandle, // Unique identifier for the declaration
+    pub handle: TypeHandle,            // Unique identifier for the declaration
     pub category: DeclarationCategory, // Category of the symbol
-    pub flags: DeclarationFlags, // Extra information about the declaration
-    pub node: Option<Node>, // Parse node associated with the declaration
+    pub flags: DeclarationFlags,       // Extra information about the declaration
+    pub node: Option<Node>,            // Parse node associated with the declaration
     #[serde(rename = "moduleName")]
     pub module_name: ModuleName, // Dot-separated import name for the file
-    pub name: String, // Symbol name as the user sees it
-    pub uri: Url, // File that contains the declaration
+    pub name: String,                  // Symbol name as the user sees it
+    pub uri: Url,                      // File that contains the declaration
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -217,8 +219,8 @@ impl AttributeFlags {
 
 #[derive(Serialize, Deserialize)]
 pub struct GetTypeParams {
-    pub node: Node,           // Location in the file
-    pub snapshot: i32,        // Snapshot version
+    pub node: Node,    // Location in the file
+    pub snapshot: i32, // Snapshot version
 }
 
 #[derive(Serialize, Deserialize)]
@@ -233,8 +235,8 @@ pub struct GetSymbolParams {
 #[derive(Serialize, Deserialize)]
 pub struct GetPythonSearchPathsParams {
     #[serde(rename = "fromUri")]
-    pub from_uri: Url,          // File URI to determine which config to use
-    pub snapshot: i32,        // Snapshot version
+    pub from_uri: Url, // File URI to determine which config to use
+    pub snapshot: i32, // Snapshot version
 }
 
 #[derive(Serialize)]
@@ -255,8 +257,11 @@ impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
     where
         D: serde::Deserializer<'de>,
     {
-        use serde::de::{self, MapAccess, Visitor};
         use std::fmt;
+
+        use serde::de::MapAccess;
+        use serde::de::Visitor;
+        use serde::de::{self};
 
         struct GetSnapshotParamsVisitor;
 
@@ -322,10 +327,9 @@ impl lsp_types::request::Request for GetSnapshotRequest {
     const METHOD: &'static str = "typeServer/getSnapshot";
 }
 
-
 pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> Type {
     use crate::types::types::Type as PyType;
-    
+
     Type {
         handle: TypeHandle::String(format!("{:p}", &py_type as *const _)),
         category: match &py_type {
@@ -348,9 +352,9 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> Type {
 
 fn calculate_type_flags(py_type: &crate::types::types::Type) -> TypeFlags {
     use crate::types::types::Type as PyType;
-    
+
     let mut flags = TypeFlags::new();
-    
+
     match py_type {
         PyType::ClassDef(_) => flags = flags.with_instantiable(),
         PyType::ClassType(_) => flags = flags.with_instance(),
@@ -359,13 +363,13 @@ fn calculate_type_flags(py_type: &crate::types::types::Type) -> TypeFlags {
         PyType::TypeAlias(_) => flags = flags.with_from_alias(),
         _ => {}
     }
-    
+
     flags
 }
 
 fn extract_module_name(py_type: &crate::types::types::Type) -> Option<ModuleName> {
     use crate::types::types::Type as PyType;
-    
+
     match py_type {
         PyType::ClassType(ct) => Some(convert_module_name(ct.qname().module_name().clone())),
         PyType::ClassDef(cd) => Some(convert_module_name(cd.qname().module_name().clone())),
@@ -377,21 +381,27 @@ fn extract_module_name(py_type: &crate::types::types::Type) -> Option<ModuleName
 fn convert_module_name(pyrefly_module: pyrefly_python::module_name::ModuleName) -> ModuleName {
     ModuleName {
         leading_dots: 0, // pyrefly modules don't have leading dots in this context
-        name_parts: pyrefly_module.as_str().split('.').map(|s| s.to_owned()).collect(),
+        name_parts: pyrefly_module
+            .as_str()
+            .split('.')
+            .map(|s| s.to_owned())
+            .collect(),
     }
 }
 
 // Convert TSP ModuleName back to pyrefly ModuleName
-pub fn convert_tsp_module_name_to_pyrefly(tsp_module: &ModuleName) -> pyrefly_python::module_name::ModuleName {
+pub fn convert_tsp_module_name_to_pyrefly(
+    tsp_module: &ModuleName,
+) -> pyrefly_python::module_name::ModuleName {
     let module_str = tsp_module.name_parts.join(".");
-    
+
     // Normalize __builtins__ to builtins so that the builtins module can be found
     let normalized_module_str = if module_str == "__builtins__" {
         "builtins".to_string()
     } else {
         module_str
     };
-    
+
     pyrefly_python::module_name::ModuleName::from_str(&normalized_module_str)
 }
 
@@ -405,8 +415,9 @@ fn convert_module_name_from_string(module_str: &str) -> ModuleName {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json;
+
+    use super::*;
 
     #[test]
     fn test_get_snapshot_params_deserialization() {
@@ -490,15 +501,15 @@ impl TypeReprFlags {
     pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1 << 0);
     pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1 << 1);
     pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(1 << 2);
-    
+
     pub fn has_expand_type_aliases(self) -> bool {
         self.0 & Self::EXPAND_TYPE_ALIASES.0 != 0
     }
-    
+
     pub fn has_print_type_var_variance(self) -> bool {
         self.0 & Self::PRINT_TYPE_VAR_VARIANCE.0 != 0
     }
-    
+
     pub fn has_convert_to_instance_type(self) -> bool {
         self.0 & Self::CONVERT_TO_INSTANCE_TYPE.0 != 0
     }

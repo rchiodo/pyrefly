@@ -7,11 +7,12 @@
 
 //! TSP get docstring request implementation
 
+use lsp_server::ResponseError;
+use pyrefly_python::docstring::Docstring;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use pyrefly_python::docstring::Docstring;
-use lsp_server::ResponseError;
 
 impl Server {
     pub(crate) fn get_docstring(
@@ -41,10 +42,14 @@ impl Server {
         // Get module info for position conversion
         let Some(_module_info) = transaction.get_module_info(&handle) else {
             // If module not loaded in transaction, try to load it
-            let Some(fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
+            let Some(fresh_transaction) = self.load_module_if_needed(
+                transaction,
+                &handle,
+                crate::state::require::Require::Everything,
+            ) else {
                 return Ok(None);
             };
-            
+
             return self.extract_docstring_from_transaction(&fresh_transaction, &handle, node);
         };
 
@@ -65,14 +70,20 @@ impl Server {
         };
 
         // Convert Range position to TextSize using the module's line buffer
-        let position = module_info.lined_buffer().from_lsp_position(node.range.start);
+        let position = module_info
+            .lined_buffer()
+            .from_lsp_position(node.range.start);
 
         // Try to find definition at the position - this is the same logic as hover
-        if let Some(first_definition) = transaction.find_definition(handle, position, true).into_iter().next() {
+        if let Some(first_definition) = transaction
+            .find_definition(handle, position, true)
+            .into_iter()
+            .next()
+        {
             let _definition_metadata = &first_definition.metadata;
             let _definition_range = first_definition.definition_range;
             let docstring_range = first_definition.docstring_range;
-            
+
             if let Some(docstring_range) = docstring_range {
                 // Get the module info for this handle
                 let Some(module_info) = transaction.get_load(handle) else {

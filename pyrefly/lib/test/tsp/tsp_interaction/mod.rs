@@ -5,5 +5,5 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-pub mod util;
 pub mod get_type;
+pub mod util;

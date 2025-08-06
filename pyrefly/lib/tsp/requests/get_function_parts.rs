@@ -7,11 +7,12 @@
 
 //! TSP get function parts request implementation
 
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
-use lsp_server::ResponseError;
 
 impl Server {
     pub(crate) fn get_function_parts(
@@ -24,13 +25,19 @@ impl Server {
             return Err(Self::snapshot_outdated_error());
         }
 
-        lsp_debug!("Getting function parts for type: {:?}", params.type_param.handle);
+        lsp_debug!(
+            "Getting function parts for type: {:?}",
+            params.type_param.handle
+        );
 
         // Get the internal type from the type handle
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
+                lsp_debug!(
+                    "Could not resolve type handle: {:?}",
+                    params.type_param.handle
+                );
                 return Ok(None);
             }
         };
@@ -78,7 +85,7 @@ impl Server {
     ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
         // Extract parameter information from callable
         let mut params = Vec::new();
-        
+
         // Handle different types of params
         match &callable_type.params {
             crate::types::callable::Params::List(param_list) => {
@@ -117,7 +124,7 @@ impl Server {
         transaction: &Transaction<'_>,
     ) -> String {
         use crate::types::callable::Param;
-        
+
         match param {
             Param::PosOnly(name, param_type, _required) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
@@ -166,12 +173,12 @@ impl Server {
             // Expand type aliases if requested
             // This would require more complex logic to expand aliases
         }
-        
+
         if flags.has_convert_to_instance_type() {
             // Convert class types to instance types if requested
             // This would require type conversion logic
         }
-        
+
         // For now, just use the default string representation
         type_obj.to_string()
     }

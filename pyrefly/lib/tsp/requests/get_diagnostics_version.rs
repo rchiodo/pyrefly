@@ -7,10 +7,12 @@
 
 //! TSP get diagnostics version request implementation
 
+use lsp_server::ErrorCode;
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use lsp_server::{ErrorCode, ResponseError};
 
 impl Server {
     pub(crate) fn get_diagnostics_version(

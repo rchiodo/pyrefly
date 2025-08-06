@@ -16,9 +16,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
-use lsp_server::ResponseError;
-use pyrefly_util::lock::Mutex;
-use pyrefly_util::lock::RwLock;
 
 use dupe::Dupe;
 use lsp_server::Connection;
@@ -27,6 +24,7 @@ use lsp_server::Message;
 use lsp_server::Request;
 use lsp_server::RequestId;
 use lsp_server::Response;
+use lsp_server::ResponseError;
 use lsp_types::CodeAction;
 use lsp_types::CodeActionKind;
 use lsp_types::CodeActionOptions;
@@ -148,6 +146,8 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
+use pyrefly_util::lock::Mutex;
+use pyrefly_util::lock::RwLock;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
@@ -158,22 +158,6 @@ use serde_json::Value;
 use starlark_map::small_map::SmallMap;
 
 use crate::commands::lsp::IndexingMode;
-use crate::tsp;
-use crate::tsp::GetPythonSearchPathsRequest;
-use crate::tsp::GetSnapshotRequest;
-use crate::tsp::GetSymbolRequest;
-use crate::tsp::GetTypeRequest;
-use crate::tsp::GetOverloadsRequest;
-use crate::tsp::GetMatchingOverloadsRequest;
-use crate::tsp::ResolveImportDeclarationRequest;
-use crate::tsp::GetTypeOfDeclarationRequest;
-use crate::tsp::GetReprRequest;
-use crate::tsp::GetDocstringRequest;
-use crate::tsp::SearchForTypeAttributeRequest;
-use crate::tsp::GetFunctionPartsRequest;
-use crate::tsp::GetDiagnosticsVersionRequest;
-use crate::tsp::ResolveImportRequest;
-use crate::tsp::GetTypeArgsRequest;
 use crate::config::config::ConfigFile;
 use crate::error::error::Error;
 use crate::lsp::features::hover::get_hover;
@@ -200,6 +184,22 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
+use crate::tsp;
+use crate::tsp::GetDiagnosticsVersionRequest;
+use crate::tsp::GetDocstringRequest;
+use crate::tsp::GetFunctionPartsRequest;
+use crate::tsp::GetMatchingOverloadsRequest;
+use crate::tsp::GetOverloadsRequest;
+use crate::tsp::GetPythonSearchPathsRequest;
+use crate::tsp::GetReprRequest;
+use crate::tsp::GetSnapshotRequest;
+use crate::tsp::GetSymbolRequest;
+use crate::tsp::GetTypeArgsRequest;
+use crate::tsp::GetTypeOfDeclarationRequest;
+use crate::tsp::GetTypeRequest;
+use crate::tsp::ResolveImportDeclarationRequest;
+use crate::tsp::ResolveImportRequest;
+use crate::tsp::SearchForTypeAttributeRequest;
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
@@ -209,7 +209,11 @@ impl ServerConnection {
         // Log outgoing notifications
         if let Message::Notification(ref notification) = msg {
             eprintln!("Sending notification: {}", notification.method);
-            eprintln!("Notification parameters: {}", serde_json::to_string_pretty(&notification.params).unwrap_or_else(|_| "Failed to serialize params".to_string()));
+            eprintln!(
+                "Notification parameters: {}",
+                serde_json::to_string_pretty(&notification.params)
+                    .unwrap_or_else(|_| "Failed to serialize params".to_string())
+            );
         }
         if self.0.sender.send(msg).is_err() {
             // On error, we know the channel is closed.
@@ -409,8 +413,6 @@ enum ProcessEvent {
     Continue,
     Exit,
 }
-
-
 
 const PYTHON_SECTION: &str = "python";
 
@@ -937,7 +939,12 @@ impl Server {
         // Check if this response corresponds to a tracked request and log duration
         if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
             if request_id == x.id {
-                eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
+                eprintln!(
+                    "Request {} ({}) completed in {:?}",
+                    method,
+                    request_id,
+                    start_time.elapsed()
+                );
             } else {
                 // Put it back if it doesn't match (shouldn't happen in normal flow)
                 *self.current_request.lock() = Some((request_id, method, start_time));
@@ -1226,7 +1233,7 @@ impl Server {
             crate::state::require::Require::Everything => {
                 // For Everything requirement, reload even if module exists to ensure full analysis
                 transaction.get_module_info(handle).is_some()
-            },
+            }
             _ => {
                 // For lighter requirements, don't reload if module already exists
                 transaction.get_module_info(handle).is_none()
@@ -1240,7 +1247,7 @@ impl Server {
         // Module not loaded or needs upgrade, create a fresh transaction and load it
         let mut fresh_transaction = self.state.transaction();
         fresh_transaction.run(&[(handle.clone(), required_level)]);
-        
+
         // Verify the module was loaded successfully
         if fresh_transaction.get_module_info(handle).is_some() {
             Some(fresh_transaction)
@@ -1254,8 +1261,18 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
-    ) -> Result<(Option<crate::module::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
-        self.get_module_info_with_loading_level(transaction, handle, crate::state::require::Require::Everything)
+    ) -> Result<
+        (
+            Option<crate::module::module_info::ModuleInfo>,
+            Option<Transaction<'_>>,
+        ),
+        (),
+    > {
+        self.get_module_info_with_loading_level(
+            transaction,
+            handle,
+            crate::state::require::Require::Everything,
+        )
     }
 
     /// Helper function to get module info with a specific requirement level
@@ -1264,16 +1281,22 @@ impl Server {
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
         required_level: crate::state::require::Require,
-    ) -> Result<(Option<crate::module::module_info::ModuleInfo>, Option<Transaction<'_>>), ()> {
+    ) -> Result<
+        (
+            Option<crate::module::module_info::ModuleInfo>,
+            Option<Transaction<'_>>,
+        ),
+        (),
+    > {
         // Try to get module info from the current transaction first
         if let Some(module_info) = transaction.get_module_info(handle) {
             // For lighter requirements, existing module info is usually sufficient
             match required_level {
-                crate::state::require::Require::Exports | 
-                crate::state::require::Require::Errors |
-                crate::state::require::Require::Indexing => {
+                crate::state::require::Require::Exports
+                | crate::state::require::Require::Errors
+                | crate::state::require::Require::Indexing => {
                     return Ok((Some(module_info), None));
-                },
+                }
                 crate::state::require::Require::Everything => {
                     // For Everything requirement, we may need to reload
                     // For now, we'll assume existing module info is sufficient
@@ -1284,7 +1307,9 @@ impl Server {
         }
 
         // Module not loaded or needs specific requirement level, try to load it
-        if let Some(fresh_transaction) = self.load_module_if_needed(transaction, handle, required_level) {
+        if let Some(fresh_transaction) =
+            self.load_module_if_needed(transaction, handle, required_level)
+        {
             if let Some(module_info) = fresh_transaction.get_module_info(handle) {
                 return Ok((Some(module_info), Some(fresh_transaction)));
             }
@@ -1299,14 +1324,17 @@ impl Server {
     }
 
     /// Converts a pyrefly type to TSP type and registers it in the lookup table
-    pub(crate) fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
+    pub(crate) fn convert_and_register_type(
+        &self,
+        py_type: crate::types::types::Type,
+    ) -> tsp::Type {
         let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
-        
+
         // Register the type in the lookup table
         if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
             self.state.register_type_handle(handle_str.clone(), py_type);
         }
-        
+
         tsp_type
     }
 
@@ -1319,7 +1347,10 @@ impl Server {
     }
 
     /// Looks up a pyrefly type from a TSP Type
-    pub(crate) fn lookup_type_from_tsp_type(&self, tsp_type: &tsp::Type) -> Option<crate::types::types::Type> {
+    pub(crate) fn lookup_type_from_tsp_type(
+        &self,
+        tsp_type: &tsp::Type,
+    ) -> Option<crate::types::types::Type> {
         match &tsp_type.handle {
             tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
             tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
@@ -2019,4 +2050,3 @@ where
         },
     }
 }
-

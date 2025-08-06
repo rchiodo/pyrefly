@@ -7,12 +7,15 @@
 
 //! Utility functions for TSP testing
 
-use lsp_types::{Range, Position, Url};
+use lsp_types::Position;
+use lsp_types::Range;
+use lsp_types::Url;
 use ruff_text_size::TextSize;
 
-use crate::state::state::State;
 use crate::state::handle::Handle;
-use crate::test::util::{mk_multi_file_state_assert_no_errors, extract_cursors_for_test};
+use crate::state::state::State;
+use crate::test::util::extract_cursors_for_test;
+use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp;
 
 /// Create a test server and return it along with a test handle and URI
@@ -20,10 +23,10 @@ pub fn build_tsp_test_server() -> (Handle, Url, State) {
     let files = [("test.py", "")];
     let (handles, state) = mk_multi_file_state_assert_no_errors(&files);
     let handle = handles["test.py"].clone();
-    
+
     // Create a simple test URI instead of using file path
     let uri = Url::parse("file:///test.py").expect("Failed to create test URI");
-    
+
     (handle, uri, state)
 }
 
@@ -33,13 +36,13 @@ pub fn extract_cursor_location(content: &str, uri: &Url) -> Position {
     if cursors.is_empty() {
         panic!("No cursor found in test content");
     }
-    
+
     // Convert TextSize to LSP Position
     let cursor_pos = cursors[0];
     let lines: Vec<&str> = content.lines().collect();
     let mut char_offset = 0;
     let mut line_number = 0;
-    
+
     for (line_idx, line) in lines.iter().enumerate() {
         let line_end = char_offset + line.len() + 1; // +1 for newline
         if cursor_pos.to_usize() <= char_offset + line.len() {
@@ -48,7 +51,7 @@ pub fn extract_cursor_location(content: &str, uri: &Url) -> Position {
         }
         char_offset = line_end;
     }
-    
+
     let character = cursor_pos.to_usize() - char_offset;
     Position {
         line: line_number as u32,
@@ -71,16 +74,20 @@ pub fn make_tsp_node(uri: Url, position: Position, text_length: u32) -> tsp::Nod
 }
 
 /// Helper to create a TSP Node from a cursor position and handle
-pub fn make_tsp_node_from_cursor(handle: &Handle, cursor_pos: TextSize, text_length: u32) -> tsp::Node {
+pub fn make_tsp_node_from_cursor(
+    handle: &Handle,
+    cursor_pos: TextSize,
+    text_length: u32,
+) -> tsp::Node {
     // Create a simple test URI instead of using file path
     let uri = Url::parse("file:///test.py").expect("Failed to create test URI");
-    
+
     // Create a simple position at line 0, character position based on cursor
     let position = Position {
         line: 0,
         character: cursor_pos.to_usize() as u32,
     };
-    
+
     make_tsp_node(uri, position, text_length)
 }
 
@@ -91,23 +98,33 @@ pub fn format_symbol_result(result: Option<tsp::Symbol>) -> String {
             let mut output = String::new();
             output.push_str(&format!("Symbol: {}\n", symbol.name));
             output.push_str(&format!("Declarations: {}\n", symbol.decls.len()));
-            
+
             for (i, decl) in symbol.decls.iter().enumerate() {
-                output.push_str(&format!("  Decl {}: {:?} in module {}\n", 
-                    i, decl.category, decl.module_name.name_parts.join(".")));
+                output.push_str(&format!(
+                    "  Decl {}: {:?} in module {}\n",
+                    i,
+                    decl.category,
+                    decl.module_name.name_parts.join(".")
+                ));
                 if let Some(ref node) = decl.node {
-                    output.push_str(&format!("    Range: {}:{}-{}:{}\n",
-                        node.range.start.line, node.range.start.character,
-                        node.range.end.line, node.range.end.character));
+                    output.push_str(&format!(
+                        "    Range: {}:{}-{}:{}\n",
+                        node.range.start.line,
+                        node.range.start.character,
+                        node.range.end.line,
+                        node.range.end.character
+                    ));
                 }
             }
-            
+
             output.push_str(&format!("Types: {}\n", symbol.synthesized_types.len()));
             for (i, typ) in symbol.synthesized_types.iter().enumerate() {
-                output.push_str(&format!("  Type {}: {:?} - {}\n", 
-                    i, typ.category, typ.name));
+                output.push_str(&format!(
+                    "  Type {}: {:?} - {}\n",
+                    i, typ.category, typ.name
+                ));
             }
-            
+
             output
         }
         None => "No symbol found\n".to_string(),
@@ -118,8 +135,10 @@ pub fn format_symbol_result(result: Option<tsp::Symbol>) -> String {
 pub fn format_type_result(result: Option<tsp::Type>) -> String {
     match result {
         Some(typ) => {
-            format!("Type: {:?} - {} (flags: {:?})\n", 
-                typ.category, typ.name, typ.flags)
+            format!(
+                "Type: {:?} - {} (flags: {:?})\n",
+                typ.category, typ.name, typ.flags
+            )
         }
         None => "No type found\n".to_string(),
     }
@@ -132,8 +151,10 @@ pub fn format_overloads_result(result: Vec<tsp::Type>) -> String {
     } else {
         let mut output = format!("Found {} overloads:\n", result.len());
         for (i, typ) in result.iter().enumerate() {
-            output.push_str(&format!("  Overload {}: {:?} - {}\n", 
-                i, typ.category, typ.name));
+            output.push_str(&format!(
+                "  Overload {}: {:?} - {}\n",
+                i, typ.category, typ.name
+            ));
         }
         output
     }
@@ -145,7 +166,7 @@ pub fn format_function_parts_result(result: Option<tsp::FunctionParts>) -> Strin
         Some(parts) => {
             let mut output = String::new();
             output.push_str(&format!("Function Parts:\n"));
-            
+
             if !parts.params.is_empty() {
                 output.push_str("  Parameters:\n");
                 for (i, param) in parts.params.iter().enumerate() {
@@ -153,11 +174,11 @@ pub fn format_function_parts_result(result: Option<tsp::FunctionParts>) -> Strin
                     output.push_str(&format!("    {}: {}\n", i, param));
                 }
             }
-            
+
             if !parts.return_type.is_empty() {
                 output.push_str(&format!("  Return Type: {}\n", parts.return_type));
             }
-            
+
             output
         }
         None => "No function parts found\n".to_string(),
@@ -211,7 +232,10 @@ pub fn format_import_declaration_result(result: Option<tsp::Declaration>) -> Str
 
 /// Format TSP type of declaration result
 pub fn format_type_of_declaration_result(result: tsp::Type) -> String {
-    format!("Type of Declaration: {:?} - {}", result.category, result.name)
+    format!(
+        "Type of Declaration: {:?} - {}",
+        result.category, result.name
+    )
 }
 
 /// Format TSP docstring result

@@ -1,6 +1,8 @@
+use lsp_types::Position;
+use lsp_types::Range;
+
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::tsp;
-use lsp_types::{Position, Range};
 
 #[test]
 fn test_basic_get_matching_overloads() {
@@ -10,8 +12,14 @@ fn test_basic_get_matching_overloads() {
         call_node: tsp::Node {
             uri: uri.clone(),
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 1,
+                },
             },
         },
         snapshot: 1,

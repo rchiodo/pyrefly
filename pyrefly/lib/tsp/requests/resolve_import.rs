@@ -7,14 +7,16 @@
 
 //! TSP resolve import request implementation
 
+use lsp_server::ErrorCode;
+use lsp_server::ResponseError;
+use lsp_types::Url;
+use pyrefly_util::absolutize::Absolutize;
+
+use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
-use crate::lsp::module_helpers::to_real_path;
-use lsp_server::{ErrorCode, ResponseError};
-use lsp_types::Url;
-use pyrefly_util::absolutize::Absolutize;
 
 impl Server {
     pub(crate) fn resolve_import(
@@ -46,7 +48,8 @@ impl Server {
         };
 
         // Use the transaction to resolve the import
-        let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
+        let pyrefly_module_name =
+            tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
                 // For import resolution, we don't need to load the module at all.
@@ -59,17 +62,20 @@ impl Server {
                         return Ok(None);
                     }
                 };
-                
+
                 let final_path = path.absolutize();
-                
+
                 match Url::from_file_path(final_path) {
                     Ok(url) => Ok(Some(url)),
                     Err(_) => {
-                        lsp_debug!("Could not convert path to URI for: {:?}", resolved_handle.path());
+                        lsp_debug!(
+                            "Could not convert path to URI for: {:?}",
+                            resolved_handle.path()
+                        );
                         Ok(None)
                     }
                 }
-            },
+            }
             Err(e) => {
                 // For debugging, use {:?} instead of {}
                 lsp_debug!("Import resolution failed: {:?}", e);

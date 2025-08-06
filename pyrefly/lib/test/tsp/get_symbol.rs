@@ -1,6 +1,9 @@
-use crate::test::tsp::util::{build_tsp_test_server, extract_cursor_location};
+use lsp_types::Position;
+use lsp_types::Url;
+
+use crate::test::tsp::util::build_tsp_test_server;
+use crate::test::tsp::util::extract_cursor_location;
 use crate::tsp;
-use lsp_types::{Position, Url};
 
 #[test]
 fn test_get_symbol_params_construction() {
@@ -16,7 +19,7 @@ my_function()
 "#;
 
     let position = extract_cursor_location(content, &uri);
-    
+
     let params = tsp::GetSymbolParams {
         node: tsp::Node {
             uri: uri.clone(),

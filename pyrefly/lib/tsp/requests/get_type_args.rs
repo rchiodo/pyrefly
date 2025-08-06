@@ -7,11 +7,12 @@
 
 //! TSP get type args request implementation
 
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
-use lsp_server::ResponseError;
 
 impl Server {
     pub(crate) fn get_type_args(
@@ -28,7 +29,10 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                lsp_debug!("Could not resolve type handle: {:?}", params.type_param.handle);
+                lsp_debug!(
+                    "Could not resolve type handle: {:?}",
+                    params.type_param.handle
+                );
                 return Ok(Vec::new());
             }
         };
@@ -42,8 +46,8 @@ impl Server {
                     result_types.push(self.convert_and_register_type(union_member.clone()));
                 }
                 Ok(result_types)
-            },
-            
+            }
+
             // Class types with generic arguments
             crate::types::types::Type::ClassType(class_type) => {
                 let type_args = class_type.targs();
@@ -52,9 +56,9 @@ impl Server {
                     result_types.push(self.convert_and_register_type(arg_type.clone()));
                 }
                 Ok(result_types)
-            },
+            }
 
-            // TypedDict types with generic arguments  
+            // TypedDict types with generic arguments
             crate::types::types::Type::TypedDict(typed_dict) => {
                 let type_args = typed_dict.targs();
                 let mut result_types = Vec::new();
@@ -62,7 +66,7 @@ impl Server {
                     result_types.push(self.convert_and_register_type(arg_type.clone()));
                 }
                 Ok(result_types)
-            },
+            }
 
             // Partial TypedDict types with generic arguments
             crate::types::types::Type::PartialTypedDict(typed_dict) => {
@@ -72,7 +76,7 @@ impl Server {
                     result_types.push(self.convert_and_register_type(arg_type.clone()));
                 }
                 Ok(result_types)
-            },
+            }
 
             // Tuple types
             crate::types::types::Type::Tuple(tuple_type) => {
@@ -83,11 +87,13 @@ impl Server {
                             result_types.push(self.convert_and_register_type(element_type.clone()));
                         }
                         Ok(result_types)
-                    },
+                    }
                     crate::types::tuple::Tuple::Unbounded(element_type) => {
                         // For unbounded tuples like Tuple[int, ...], return the element type
-                        Ok(vec![self.convert_and_register_type(element_type.as_ref().clone())])
-                    },
+                        Ok(vec![
+                            self.convert_and_register_type(element_type.as_ref().clone()),
+                        ])
+                    }
                     crate::types::tuple::Tuple::Unpacked(unpacked) => {
                         // For unpacked tuples like Tuple[int, str, *T, bool], return all the types
                         let mut result_types = Vec::new();
@@ -102,20 +108,23 @@ impl Server {
                             result_types.push(self.convert_and_register_type(element_type.clone()));
                         }
                         Ok(result_types)
-                    },
+                    }
                 }
-            },
+            }
 
             // Generic class definitions might have type parameters
             crate::types::types::Type::ClassDef(_class_def) => {
                 // For class definitions, we can't return type arguments since they aren't instantiated
                 // Return empty array as this represents the uninstantiated generic
                 Ok(Vec::new())
-            },
+            }
 
             // Other types don't have type arguments
             _ => {
-                lsp_debug!("get_type_args called on non-union, non-generic type: {:?}", internal_type);
+                lsp_debug!(
+                    "get_type_args called on non-union, non-generic type: {:?}",
+                    internal_type
+                );
                 Ok(Vec::new())
             }
         }

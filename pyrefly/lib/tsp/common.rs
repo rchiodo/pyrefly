@@ -65,11 +65,22 @@ pub(crate) fn language_services_disabled_error() -> ResponseError {
 /// Create a default type for a declaration when we can't determine the exact type
 pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
     let (category, flags) = match decl.category {
-        tsp::DeclarationCategory::FUNCTION => (tsp::TypeCategory::FUNCTION, tsp::TypeFlags::new().with_callable()),
-        tsp::DeclarationCategory::CLASS => (tsp::TypeCategory::CLASS, tsp::TypeFlags::new().with_instantiable()),
+        tsp::DeclarationCategory::FUNCTION => (
+            tsp::TypeCategory::FUNCTION,
+            tsp::TypeFlags::new().with_callable(),
+        ),
+        tsp::DeclarationCategory::CLASS => (
+            tsp::TypeCategory::CLASS,
+            tsp::TypeFlags::new().with_instantiable(),
+        ),
         tsp::DeclarationCategory::IMPORT => (tsp::TypeCategory::MODULE, tsp::TypeFlags::new()),
-        tsp::DeclarationCategory::TYPE_ALIAS => (tsp::TypeCategory::ANY, tsp::TypeFlags::new().with_from_alias()),
-        tsp::DeclarationCategory::TYPE_PARAM => (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new()),
+        tsp::DeclarationCategory::TYPE_ALIAS => (
+            tsp::TypeCategory::ANY,
+            tsp::TypeFlags::new().with_from_alias(),
+        ),
+        tsp::DeclarationCategory::TYPE_PARAM => {
+            (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new())
+        }
         _ => (tsp::TypeCategory::ANY, tsp::TypeFlags::new()),
     };
 
@@ -92,8 +103,10 @@ pub fn get_module_info_by_name(
     module_name: ModuleName,
 ) -> Option<ModuleInfo> {
     // Try to get a handle for the target module using import_handle
-    let target_handle = transaction.import_handle(source_handle, module_name, None).ok()?;
-    
+    let target_handle = transaction
+        .import_handle(source_handle, module_name, None)
+        .ok()?;
+
     // Get the module info for the target handle
     transaction.get_module_info(&target_handle)
 }

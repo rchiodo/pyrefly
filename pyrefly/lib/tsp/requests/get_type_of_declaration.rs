@@ -7,11 +7,13 @@
 
 //! TSP get type of declaration request implementation
 
+use lsp_server::ErrorCode;
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::create_default_type_for_declaration;
-use lsp_server::{ErrorCode, ResponseError};
 
 impl Server {
     pub(crate) fn get_type_of_declaration(
@@ -54,53 +56,68 @@ impl Server {
             Some(info) => info,
             None => {
                 // Module not loaded in transaction, try to load it
-                let Some(mut fresh_transaction) = self.load_module_if_needed(transaction, &handle, crate::state::require::Require::Everything) else {
+                let Some(mut fresh_transaction) = self.load_module_if_needed(
+                    transaction,
+                    &handle,
+                    crate::state::require::Require::Everything,
+                ) else {
                     // If we still can't load the module, fall back to default type
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
-                
+
                 // Get module info from the fresh transaction for position conversion
                 let Some(fresh_module_info) = fresh_transaction.get_module_info(&handle) else {
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
-                
+
                 // Convert declaration position to TextSize using fresh module_info
-                let position = fresh_module_info.lined_buffer().from_lsp_position(node.range.start);
-                
+                let position = fresh_module_info
+                    .lined_buffer()
+                    .from_lsp_position(node.range.start);
+
                 // Try to get the type at the declaration's position using the fresh transaction
                 let Some(type_info) = fresh_transaction.get_type_at(&handle, position) else {
                     // If we can't get type info from the position, try alternative approaches
-                    
+
                     // For imports, we might need to resolve the imported symbol first
                     if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                        if let Ok(Some(import_type)) = self.get_type_for_import_declaration_with_fresh_transaction(&mut fresh_transaction, &params) {
+                        if let Ok(Some(import_type)) = self
+                            .get_type_for_import_declaration_with_fresh_transaction(
+                                &mut fresh_transaction,
+                                &params,
+                            )
+                        {
                             return Ok(import_type);
                         }
                     }
-                    
+
                     // If still no type found, create a generic type based on the declaration category
                     return Ok(create_default_type_for_declaration(&params.decl));
                 };
-                
+
                 // Convert pyrefly Type to TSP Type format using the fresh transaction result
                 return Ok(self.convert_and_register_type(type_info));
             }
         };
 
         // Convert declaration position to TextSize using module_info
-        let position = module_info.lined_buffer().from_lsp_position(node.range.start);
+        let position = module_info
+            .lined_buffer()
+            .from_lsp_position(node.range.start);
 
         // Try to get the type at the declaration's position
         let Some(type_info) = transaction.get_type_at(&handle, position) else {
             // If we can't get type info from the position, try alternative approaches
-            
+
             // For imports, we might need to resolve the imported symbol first
             if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                if let Ok(Some(import_type)) = self.get_type_for_import_declaration(transaction, &params) {
+                if let Ok(Some(import_type)) =
+                    self.get_type_for_import_declaration(transaction, &params)
+                {
                     return Ok(import_type);
                 }
             }
-            
+
             // If still no type found, create a generic type based on the declaration category
             return Ok(create_default_type_for_declaration(&params.decl));
         };
@@ -120,23 +137,31 @@ impl Server {
             options: tsp::ResolveImportOptions::default(),
             snapshot: params.snapshot,
         };
-        
-        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(transaction, resolve_params) {
+
+        if let Ok(Some(resolved_decl)) =
+            self.resolve_import_declaration(transaction, resolve_params)
+        {
             if let Some(resolved_node) = &resolved_decl.node {
                 let resolved_uri = &resolved_node.uri;
-                
+
                 if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
                     // Get module info for the resolved declaration to convert position
-                    if let Some(resolved_module_info) = transaction.get_module_info(&resolved_handle) {
-                        let resolved_position = resolved_module_info.lined_buffer().from_lsp_position(resolved_node.range.start);
-                        if let Some(resolved_type) = transaction.get_type_at(&resolved_handle, resolved_position) {
+                    if let Some(resolved_module_info) =
+                        transaction.get_module_info(&resolved_handle)
+                    {
+                        let resolved_position = resolved_module_info
+                            .lined_buffer()
+                            .from_lsp_position(resolved_node.range.start);
+                        if let Some(resolved_type) =
+                            transaction.get_type_at(&resolved_handle, resolved_position)
+                        {
                             return Ok(Some(self.convert_and_register_type(resolved_type)));
                         }
                     }
                 }
             }
         }
-        
+
         Ok(None)
     }
 
@@ -151,26 +176,37 @@ impl Server {
             options: tsp::ResolveImportOptions::default(),
             snapshot: params.snapshot,
         };
-        
-        if let Ok(Some(resolved_decl)) = self.resolve_import_declaration(fresh_transaction, resolve_params) {
+
+        if let Ok(Some(resolved_decl)) =
+            self.resolve_import_declaration(fresh_transaction, resolve_params)
+        {
             if let Some(resolved_node) = &resolved_decl.node {
                 let resolved_uri = &resolved_node.uri;
-                
+
                 if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
                     // Make sure the resolved module is also loaded
-                    fresh_transaction.run(&[(resolved_handle.clone(), crate::state::require::Require::Everything)]);
-                    
+                    fresh_transaction.run(&[(
+                        resolved_handle.clone(),
+                        crate::state::require::Require::Everything,
+                    )]);
+
                     // Get module info for the resolved declaration to convert position
-                    if let Some(resolved_module_info) = fresh_transaction.get_module_info(&resolved_handle) {
-                        let resolved_position = resolved_module_info.lined_buffer().from_lsp_position(resolved_node.range.start);
-                        if let Some(resolved_type) = fresh_transaction.get_type_at(&resolved_handle, resolved_position) {
+                    if let Some(resolved_module_info) =
+                        fresh_transaction.get_module_info(&resolved_handle)
+                    {
+                        let resolved_position = resolved_module_info
+                            .lined_buffer()
+                            .from_lsp_position(resolved_node.range.start);
+                        if let Some(resolved_type) =
+                            fresh_transaction.get_type_at(&resolved_handle, resolved_position)
+                        {
                             return Ok(Some(self.convert_and_register_type(resolved_type)));
                         }
                     }
                 }
             }
         }
-        
+
         Ok(None)
     }
 }

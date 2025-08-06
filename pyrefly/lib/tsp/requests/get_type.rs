@@ -2,7 +2,7 @@
  * Copyright /// Standalone get_type function that can be used independently of the Server
 /// This follows the same pattern as the hover feature
 pub fn get_type(
-    transaction: &Transaction<'_>, 
+    transaction: &Transaction<'_>,
     handle: &Handle,
     module_info: &ModuleInfo,
     params: &tsp::GetTypeParams,
@@ -14,13 +14,15 @@ pub fn get_type(
 
 //! TSP get type request implementation
 
+use lsp_server::ErrorCode;
+use lsp_server::ResponseError;
+
 use crate::lsp::server::Server;
-use crate::state::state::Transaction;
-use crate::state::handle::Handle;
 use crate::module::module_info::ModuleInfo;
+use crate::state::handle::Handle;
+use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
-use lsp_server::{ErrorCode, ResponseError};
 
 /// Standalone get_type function that can be used independently of the Server
 /// This follows the same pattern as the hover feature
@@ -31,7 +33,9 @@ pub fn get_type(
     params: &tsp::GetTypeParams,
 ) -> Option<tsp::Type> {
     // Convert range start to TextSize position using module_info
-    let position = module_info.lined_buffer().from_lsp_position(params.node.range.start);
+    let position = module_info
+        .lined_buffer()
+        .from_lsp_position(params.node.range.start);
 
     // Try to get the type at the specified position
     let type_info = transaction.get_type_at(handle, position)?;
@@ -64,20 +68,24 @@ impl Server {
         };
 
         // Try to get module info, loading it if necessary
-        let (module_info, fresh_transaction) = match self.get_module_info_with_loading(transaction, &handle) {
-            Ok((Some(info), fresh_tx)) => (info, fresh_tx),
-            Ok((None, _)) => {
-                lsp_debug!("Warning: Could not load module for get_type request: {}", uri);
-                return Ok(None);
-            },
-            Err(_) => {
-                return Err(ResponseError {
-                    code: ErrorCode::InternalError as i32,
-                    message: "Failed to load module".to_string(),
-                    data: None,
-                });
-            }
-        };
+        let (module_info, fresh_transaction) =
+            match self.get_module_info_with_loading(transaction, &handle) {
+                Ok((Some(info), fresh_tx)) => (info, fresh_tx),
+                Ok((None, _)) => {
+                    lsp_debug!(
+                        "Warning: Could not load module for get_type request: {}",
+                        uri
+                    );
+                    return Ok(None);
+                }
+                Err(_) => {
+                    return Err(ResponseError {
+                        code: ErrorCode::InternalError as i32,
+                        message: "Failed to load module".to_string(),
+                        data: None,
+                    });
+                }
+            };
 
         // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
         let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
@@ -89,8 +97,14 @@ impl Server {
         if let Some(ref tsp_type) = tsp_type {
             if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
                 // Extract the pyrefly type from the TSP type for registration
-                if let Some(pyrefly_type) = active_transaction.get_type_at(&handle, module_info.lined_buffer().from_lsp_position(params.node.range.start)) {
-                    self.state.register_type_handle(handle_str.clone(), pyrefly_type);
+                if let Some(pyrefly_type) = active_transaction.get_type_at(
+                    &handle,
+                    module_info
+                        .lined_buffer()
+                        .from_lsp_position(params.node.range.start),
+                ) {
+                    self.state
+                        .register_type_handle(handle_str.clone(), pyrefly_type);
                 }
             }
         }

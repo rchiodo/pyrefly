@@ -14,7 +14,11 @@ use crate::state::state::Transaction;
 use crate::tsp;
 
 impl Server {
-    pub(crate) fn get_python_search_paths(&self, _transaction: &Transaction<'_>, params: tsp::GetPythonSearchPathsParams) -> Vec<Url> {
+    pub(crate) fn get_python_search_paths(
+        &self,
+        _transaction: &Transaction<'_>,
+        params: tsp::GetPythonSearchPathsParams,
+    ) -> Vec<Url> {
         // Get the URI directly from params
         let uri = &params.from_uri;
 
@@ -44,16 +48,16 @@ impl Server {
             } else {
                 pyrefly_python::module_path::ModulePath::filesystem(path.clone())
             };
-            
+
             // python_file always returns a config, but check if it's synthetic
             let config = self.state.config_finder().python_file(
                 pyrefly_python::module_name::ModuleName::unknown(),
                 &module_path,
             );
-            
+
             // If it's a real config file (not synthetic), use it
             match &config.source {
-                crate::config::config::ConfigSource::File(_) 
+                crate::config::config::ConfigSource::File(_)
                 | crate::config::config::ConfigSource::Marker(_) => Some(config),
                 crate::config::config::ConfigSource::Synthetic => None,
             }
@@ -62,7 +66,7 @@ impl Server {
         if let Some(config) = config_opt {
             // We found a real config file, use its search paths
             let mut search_paths = Vec::new();
-            
+
             // Add search paths from config
             for path in config.search_path() {
                 if let Ok(uri) = Url::from_file_path(path) {
@@ -95,7 +99,7 @@ impl Server {
                 // Add Python environment site package paths if available
                 if let Some(python_info) = &workspace.python_info {
                     let env = python_info.env();
-                    
+
                     // Add all site package paths from the Python environment
                     for path in env.all_site_package_paths() {
                         if let Ok(uri) = Url::from_file_path(path) {

@@ -1,6 +1,9 @@
-use crate::test::tsp::util::{build_tsp_test_server, extract_cursor_location};
+use lsp_types::Position;
+use lsp_types::Url;
+
+use crate::test::tsp::util::build_tsp_test_server;
+use crate::test::tsp::util::extract_cursor_location;
 use crate::tsp;
-use lsp_types::{Position, Url};
 
 #[test]
 fn test_basic_get_repr() {
@@ -13,7 +16,7 @@ print(x)
 "#;
 
     let position = extract_cursor_location(content, &uri);
-    
+
     let params = tsp::GetReprParams {
         type_param: tsp::Type {
             handle: tsp::TypeHandle::String("test".to_string()),
