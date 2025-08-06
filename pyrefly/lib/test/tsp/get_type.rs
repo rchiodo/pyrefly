@@ -51,6 +51,7 @@ fn test_get_type_params_construction() {
 
 // Helper function that implements the core TSP get_type logic
 // This simulates what Server::get_type does without requiring a Server instance
+// Uses the real convert_to_tsp_type helper function for accurate type conversion
 fn call_tsp_get_type_handler(
     transaction: &crate::state::state::Transaction<'_>,
     handles: &HashMap<&str, crate::state::handle::Handle>,
@@ -85,19 +86,11 @@ fn call_tsp_get_type_handler(
     // 4. Call get_type_at (this is the core functionality the TSP handler calls)
     let type_result = transaction.get_type_at(&handle, text_size);
     
-    // 5. Convert the result to TSP Type format (simplified)
+    // 5. Convert the result to TSP Type format using the real helper function
     match type_result {
         Some(pyrefly_type) => {
-            // Convert pyrefly Type to TSP Type (simplified implementation)
-            let tsp_type = tsp::Type {
-                handle: tsp::TypeHandle::String("test_handle".to_string()),
-                category: tsp::TypeCategory::ANY, // Simplified
-                flags: tsp::TypeFlags::new(),
-                module_name: None,
-                name: format!("{:?}", pyrefly_type), // Use debug format as name
-                category_flags: 0,
-                decl: None,
-            };
+            // Use the same conversion logic as the real TSP handler
+            let tsp_type = crate::tsp::protocol::convert_to_tsp_type(pyrefly_type);
             Ok(Some(tsp_type))
         }
         None => Ok(None),
