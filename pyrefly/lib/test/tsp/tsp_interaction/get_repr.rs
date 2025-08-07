@@ -104,7 +104,7 @@ z = [1, 2, 3]
             // Repr response - should return string representation of the type
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())),
+                result: Some(serde_json::Value::String("Literal[42]".to_owned())),
                 error: None,
             }),
         ],
@@ -192,7 +192,7 @@ fn test_tsp_get_repr_interaction_with_flags() {
             // Repr response with flags applied
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())),
+                result: Some(serde_json::Value::String("(param: int) -> str".to_owned())),
                 error: None,
             }),
         ],

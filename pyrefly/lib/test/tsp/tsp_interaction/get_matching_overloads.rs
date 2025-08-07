@@ -24,8 +24,10 @@ use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
 use crate::test::lsp::lsp_interaction::util::run_test_lsp;
 
 #[test]
-fn test_tsp_get_matching_overloads_interaction_basic() {
-    // Test matching overloads for a function call with specific argument types
+fn test_tsp_get_matching_overloads_interaction_basic_ignored() {
+    // TODO: getMatchingOverloads currently returns null instead of filtering overloads
+    // by argument types. This test documents the current limitation.
+    // Expected behavior: Should return only the overload that matches convert(42) -> int -> str
     let temp_dir = TempDir::new().unwrap();
     let test_file_path = temp_dir.path().join("matching_overloads_test.py");
 
@@ -50,7 +52,7 @@ def convert(value: Union[int, str, float]) -> Union[str, int]:
         return str(value)
 
 def test_conversions():
-    result1 = convert(42)        # Should match int -> str overload
+    result1 = convert(42)        # overload matching is unsupported - should match int -> str overload
     result2 = convert("123")     # Should match str -> int overload
     result3 = convert(3.14)      # Should match float -> str overload
 "#;
@@ -91,7 +93,8 @@ def test_conversions():
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Matching overloads response - when type analysis fails, returns null
+            // TODO: Currently returns null instead of filtering overloads by argument types
+            // Expected: Should return array with single overload matching int -> str
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!(null)),
@@ -106,8 +109,10 @@ def test_conversions():
 }
 
 #[test]
-fn test_tsp_get_matching_overloads_interaction_method() {
-    // Test matching overloads for method calls with multiple arguments
+fn test_tsp_get_matching_overloads_interaction_method_ignored() {
+    // TODO: getMatchingOverloads currently returns null for method calls with overloads
+    // This test documents the current limitation for method overload matching.
+    // Expected behavior: Should return only the overload matching compute(10, 20) -> int, int -> int
     let temp_dir = TempDir::new().unwrap();
     let test_file_path = temp_dir.path().join("method_matching_overloads_test.py");
 
@@ -134,7 +139,7 @@ class Calculator:
 
 def test_method_calls():
     calc = Calculator()
-    result1 = calc.compute(10, 20)        # Should match int, int -> int
+    result1 = calc.compute(10, 20)        # overload matching is unsupported - should match int, int -> int
     result2 = calc.compute(1.5, 2.5)      # Should match float, float -> float
     result3 = calc.compute("a", "b")      # Should match str, str -> str
 "#;
@@ -175,7 +180,8 @@ def test_method_calls():
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Matching overloads response for integer arguments - when type analysis fails, returns null
+            // TODO: Currently returns null instead of filtering overloads by argument types
+            // Expected: Should return array with single overload matching int, int -> int
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!(null)),

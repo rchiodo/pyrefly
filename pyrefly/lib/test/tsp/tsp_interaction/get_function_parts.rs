@@ -212,8 +212,8 @@ def process_data(
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": ["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"],  // Accept any 4 parameters for complex function
-                    "returnType": "$$MATCH_EVERYTHING$$"  // Accept any return type structure
+                    "params": ["data: list[int]", "multiplier: float", "filter_positive: bool", "callback: Unknown | None"],  // Expected 4 parameters for complex function
+                    "returnType": "list[float]"  // Expected return type
                 })),
                 error: None,
             }),
@@ -303,8 +303,8 @@ add_one = lambda n: n + 1
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": ["$$MATCH_EVERYTHING$$"],  // Accept any lambda parameter info array
-                    "returnType": "$$MATCH_EVERYTHING$$"  // Accept any inferred return type
+                    "params": ["x: Unknown"],  // Expected lambda parameter info
+                    "returnType": "Unknown"  // Expected inferred return type
                 })),
                 error: None,
             }),

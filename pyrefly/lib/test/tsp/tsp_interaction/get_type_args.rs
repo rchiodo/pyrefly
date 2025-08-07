@@ -121,7 +121,15 @@ def process_names(data: List[str]) -> str:
             // Type args response - should contain Type object for int
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$"])), // Array with wildcard for any type argument
+                result: Some(serde_json::json!([{
+                    "category": "$$MATCH_EVERYTHING$$",
+                    "categoryFlags": "$$MATCH_EVERYTHING$$",
+                    "decl": "$$MATCH_EVERYTHING$$",
+                    "flags": "$$MATCH_EVERYTHING$$",
+                    "handle": "$$MATCH_EVERYTHING$$",
+                    "moduleName": "$$MATCH_EVERYTHING$$",
+                    "name": "int"
+                }])),
                 error: None,
             }),
         ],
@@ -218,8 +226,24 @@ def calculate_average(scores: Dict[str, float]) -> float:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$", // Key type: str
-                    "$$MATCH_EVERYTHING$$"  // Value type: int
+                    {
+                        "category": "$$MATCH_EVERYTHING$$",
+                        "categoryFlags": "$$MATCH_EVERYTHING$$",
+                        "decl": "$$MATCH_EVERYTHING$$",
+                        "flags": "$$MATCH_EVERYTHING$$",
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "moduleName": "$$MATCH_EVERYTHING$$",
+                        "name": "str"
+                    },
+                    {
+                        "category": "$$MATCH_EVERYTHING$$",
+                        "categoryFlags": "$$MATCH_EVERYTHING$$",
+                        "decl": "$$MATCH_EVERYTHING$$",
+                        "flags": "$$MATCH_EVERYTHING$$",
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "moduleName": "$$MATCH_EVERYTHING$$",
+                        "name": "int"
+                    }
                 ])),
                 error: None,
             }),
@@ -319,8 +343,24 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$", // The wrapped type: int
-                    "$$MATCH_EVERYTHING$$"  // None type
+                    {
+                        "category": "$$MATCH_EVERYTHING$$",
+                        "categoryFlags": "$$MATCH_EVERYTHING$$",
+                        "decl": "$$MATCH_EVERYTHING$$",
+                        "flags": "$$MATCH_EVERYTHING$$",
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "moduleName": "$$MATCH_EVERYTHING$$",
+                        "name": "int"
+                    },
+                    {
+                        "category": "$$MATCH_EVERYTHING$$",
+                        "categoryFlags": "$$MATCH_EVERYTHING$$",
+                        "decl": "$$MATCH_EVERYTHING$$",
+                        "flags": "$$MATCH_EVERYTHING$$",
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "moduleName": "$$MATCH_EVERYTHING$$",
+                        "name": "None"
+                    }
                 ])),
                 error: None,
             }),

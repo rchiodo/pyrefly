@@ -70,7 +70,7 @@ x = os.path.join('a', 'b')
             // Import resolution response for os module
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::json!("$$MATCH_EVERYTHING$$")),
+                result: Some(serde_json::json!("file://$$MATCH_EVERYTHING$$")), // Should end with "pyrefly_bundled_typeshed/os/__init__.pyi"
                 error: None,
             }),
         ],
@@ -128,7 +128,7 @@ x: List[str] = []
             // Import resolution response for typing module
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::json!("$$MATCH_EVERYTHING$$")),
+                result: Some(serde_json::json!("file://$$MATCH_EVERYTHING$$")), // Should end with "pyrefly_bundled_typeshed/typing.pyi"
                 error: None,
             }),
         ],
@@ -205,7 +205,7 @@ result = utility_function()
             // Import resolution response for relative import
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::json!("$$MATCH_EVERYTHING$$")),
+                result: Some(serde_json::json!("file://$$MATCH_EVERYTHING$$")), // Should end with "mypackage/utils.py"
                 error: None,
             }),
         ],

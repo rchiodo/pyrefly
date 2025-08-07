@@ -96,7 +96,7 @@ fn test_tsp_get_docstring_interaction_function() {
             // Docstring response - should return the complete docstring
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())), // Accept any docstring content
+                result: Some(serde_json::Value::String("Calculate the area of a circle.\n\nArgs:\n    radius: The radius of the circle in units.\n    \nReturns:\n    The area of the circle in square units.\n    \nRaises:\n    ValueError: If radius is negative.\n".to_owned())),
                 error: None,
             }),
         ],
@@ -188,7 +188,7 @@ fn test_tsp_get_docstring_interaction_class() {
             // Class docstring response
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())),
+                result: Some(serde_json::Value::String("A class for processing and analyzing data.\n\nThis class provides methods for loading, cleaning, and analyzing\nvarious types of data structures.\n\nAttributes:\n    data: The raw data to be processed.\n    cleaned_data: The processed and cleaned data.\n    \nExample:\n    processor = DataProcessor()\n    processor.load_data(my_data)\n    results = processor.analyze()\n".to_owned())),
                 error: None,
             }),
         ],
@@ -273,7 +273,7 @@ fn test_tsp_get_docstring_interaction_method() {
             // Method docstring response
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())),
+                result: Some(serde_json::Value::String("Add two integers together.\n\nArgs:\n    x: First integer to add.\n    y: Second integer to add.\n    \nReturns:\n    The sum of x and y.\n".to_owned())),
                 error: None,
             }),
         ],
