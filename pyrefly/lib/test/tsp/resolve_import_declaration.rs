@@ -28,8 +28,14 @@ fn test_resolve_import_declaration_params_construction() {
         node: Some(tsp::Node {
             uri: uri.clone(),
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 0, character: 0 },
-                end: lsp_types::Position { line: 0, character: 10 },
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 10,
+                },
             },
         }),
         module_name: tsp::ModuleName {
@@ -68,7 +74,7 @@ fn test_resolve_import_declaration_default_options() {
 
     // Test default options construction
     let default_options = tsp::ResolveImportOptions::default();
-    
+
     assert_eq!(default_options.resolve_local_names, Some(false));
     assert_eq!(default_options.allow_externally_hidden_access, Some(false));
     assert_eq!(default_options.skip_file_needed_check, Some(false));
@@ -117,8 +123,14 @@ fn test_resolve_import_declaration_different_categories() {
             node: Some(tsp::Node {
                 uri: uri.clone(),
                 range: lsp_types::Range {
-                    start: lsp_types::Position { line: 0, character: 0 },
-                    end: lsp_types::Position { line: 0, character: name.len() as u32 },
+                    start: lsp_types::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: lsp_types::Position {
+                        line: 0,
+                        character: name.len() as u32,
+                    },
                 },
             }),
             module_name: tsp::ModuleName {
@@ -147,30 +159,45 @@ fn test_resolve_import_declaration_module_name_variants() {
     // Test different module name patterns
     let module_patterns = vec![
         // Simple module
-        (tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["os".to_string()],
-        }, "os module"),
+        (
+            tsp::ModuleName {
+                leading_dots: 0,
+                name_parts: vec!["os".to_string()],
+            },
+            "os module",
+        ),
         // Nested module
-        (tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["os".to_string(), "path".to_string()],
-        }, "os.path module"),
+        (
+            tsp::ModuleName {
+                leading_dots: 0,
+                name_parts: vec!["os".to_string(), "path".to_string()],
+            },
+            "os.path module",
+        ),
         // Relative import with single dot
-        (tsp::ModuleName {
-            leading_dots: 1,
-            name_parts: vec!["utils".to_string()],
-        }, "relative utils"),
+        (
+            tsp::ModuleName {
+                leading_dots: 1,
+                name_parts: vec!["utils".to_string()],
+            },
+            "relative utils",
+        ),
         // Relative import with multiple dots
-        (tsp::ModuleName {
-            leading_dots: 2,
-            name_parts: vec!["shared".to_string(), "helpers".to_string()],
-        }, "deeply relative"),
+        (
+            tsp::ModuleName {
+                leading_dots: 2,
+                name_parts: vec!["shared".to_string(), "helpers".to_string()],
+            },
+            "deeply relative",
+        ),
         // Current package import
-        (tsp::ModuleName {
-            leading_dots: 1,
-            name_parts: vec![],
-        }, "current package"),
+        (
+            tsp::ModuleName {
+                leading_dots: 1,
+                name_parts: vec![],
+            },
+            "current package",
+        ),
     ];
 
     for (module_name, description) in module_patterns {
@@ -190,7 +217,10 @@ fn test_resolve_import_declaration_module_name_variants() {
             snapshot: 1,
         };
 
-        assert_eq!(params.decl.module_name.leading_dots, module_name.leading_dots);
+        assert_eq!(
+            params.decl.module_name.leading_dots,
+            module_name.leading_dots
+        );
         assert_eq!(params.decl.module_name.name_parts, module_name.name_parts);
     }
 }
@@ -203,8 +233,16 @@ fn test_resolve_import_declaration_flags_handling() {
     let flag_variants = vec![
         (tsp::DeclarationFlags::new(), "basic"),
         (tsp::DeclarationFlags::new().with_constant(), "constant"),
-        (tsp::DeclarationFlags::new().with_unresolved_import(), "unresolved"),
-        (tsp::DeclarationFlags::new().with_constant().with_unresolved_import(), "constant_unresolved"),
+        (
+            tsp::DeclarationFlags::new().with_unresolved_import(),
+            "unresolved",
+        ),
+        (
+            tsp::DeclarationFlags::new()
+                .with_constant()
+                .with_unresolved_import(),
+            "constant_unresolved",
+        ),
     ];
 
     for (flags, description) in flag_variants {
@@ -227,7 +265,7 @@ fn test_resolve_import_declaration_flags_handling() {
             snapshot: 1,
         };
 
-        // Basic validation that the flags are preserved 
+        // Basic validation that the flags are preserved
         // (flags comparison requires specific trait impls)
         assert_eq!(params.decl.name, "symbol");
         // TypeHandle comparison also requires specific trait impls, so we verify other properties
@@ -254,8 +292,14 @@ fn test_resolve_import_declaration_uri_handling() {
             node: Some(tsp::Node {
                 uri: test_uri.clone(),
                 range: lsp_types::Range {
-                    start: lsp_types::Position { line: 0, character: 0 },
-                    end: lsp_types::Position { line: 0, character: 10 },
+                    start: lsp_types::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: lsp_types::Position {
+                        line: 0,
+                        character: 10,
+                    },
                 },
             }),
             module_name: tsp::ModuleName {
@@ -289,8 +333,14 @@ fn test_resolve_import_declaration_node_handling() {
         node: Some(tsp::Node {
             uri: uri.clone(),
             range: lsp_types::Range {
-                start: lsp_types::Position { line: 5, character: 10 },
-                end: lsp_types::Position { line: 5, character: 20 },
+                start: lsp_types::Position {
+                    line: 5,
+                    character: 10,
+                },
+                end: lsp_types::Position {
+                    line: 5,
+                    character: 20,
+                },
             },
         }),
         module_name: tsp::ModuleName {

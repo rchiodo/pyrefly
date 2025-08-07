@@ -1,47 +1,47 @@
 /*
- * Integration tests for resolve_import_declaration TSP interaction
- *
- * These tests verify the complete resolve_import_declaration flow by:
- * 1. Testing resolution of import declarations to actual symbol definitions
- * 2. Validating handling of different import types (absolute, relative, star imports)
- * 3. Testing cross-module symbol resolution
- * 4. Validating error handling for unresolva        expected_messages_from_language_server: vec![
-            // Snapshot response
-            Message::Response(Response {
-                id: RequestId::from(2),
-                result: Some(serde_json::json!(2)),
-                error: None,
-            }),
-            // Resolve import declaration response - currently returns original import with unresolved flag
-            // TODO: Expected behavior should be null for truly unresolvable imports
-            Message::Response(Response {
-                id: RequestId::from(3),
-                result: Some(serde_json::json!({
-                    "handle": "test_unresolved_import",
-                    "category": 4,  // IMPORT
-                    "flags": 2,    // UNRESOLVED_IMPORT flag set
-                    "node": {
-                        "uri": main_uri.to_string(),
-                        "range": {
-                            "start": { "line": 0, "character": 34 },
-                            "end": { "line": 0, "character": 48 }
-                        }
-                    },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["nonexistent_module"]
-                    },
-                    "name": "missing_symbol",
-                    "uri": main_uri.to_string()
-                })),
-                error: None,
-            }),
-        ],* 5. Testing various declaration categories and their resolution behavior
- *
- * The resolve_import_declaration request takes a Declaration and ResolveImportOptions,
- * resolves import declarations to their actual definitions in target modules,
- * and returns the resolved Declaration or None if resolution fails.
- */
+* Integration tests for resolve_import_declaration TSP interaction
+*
+* These tests verify the complete resolve_import_declaration flow by:
+* 1. Testing resolution of import declarations to actual symbol definitions
+* 2. Validating handling of different import types (absolute, relative, star imports)
+* 3. Testing cross-module symbol resolution
+* 4. Validating error handling for unresolva        expected_messages_from_language_server: vec![
+           // Snapshot response
+           Message::Response(Response {
+               id: RequestId::from(2),
+               result: Some(serde_json::json!(2)),
+               error: None,
+           }),
+           // Resolve import declaration response - currently returns original import with unresolved flag
+           // TODO: Expected behavior should be null for truly unresolvable imports
+           Message::Response(Response {
+               id: RequestId::from(3),
+               result: Some(serde_json::json!({
+                   "handle": "test_unresolved_import",
+                   "category": 4,  // IMPORT
+                   "flags": 2,    // UNRESOLVED_IMPORT flag set
+                   "node": {
+                       "uri": main_uri.to_string(),
+                       "range": {
+                           "start": { "line": 0, "character": 34 },
+                           "end": { "line": 0, "character": 48 }
+                       }
+                   },
+                   "moduleName": {
+                       "leadingDots": 0,
+                       "nameParts": ["nonexistent_module"]
+                   },
+                   "name": "missing_symbol",
+                   "uri": main_uri.to_string()
+               })),
+               error: None,
+           }),
+       ],* 5. Testing various declaration categories and their resolution behavior
+*
+* The resolve_import_declaration request takes a Declaration and ResolveImportOptions,
+* resolves import declarations to their actual definitions in target modules,
+* and returns the resolved Declaration or None if resolution fails.
+*/
 
 use lsp_server::Message;
 use lsp_server::Request;
@@ -58,7 +58,7 @@ use crate::test::lsp::lsp_interaction::util::run_test_lsp;
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_basic() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create main.py file
     let main_file_path = temp_dir.path().join("main.py");
     let main_content = r#"from utils import helper_function
@@ -71,7 +71,7 @@ os.getcwd()
 "#;
     std::fs::write(&main_file_path, main_content).unwrap();
     let main_uri = Url::from_file_path(&main_file_path).unwrap();
-    
+
     // Create utils.py file
     let utils_file_path = temp_dir.path().join("utils.py");
     let utils_content = r#"def helper_function():
@@ -170,7 +170,7 @@ CONSTANT = 42
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_class() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create main.py file
     let main_file_path = temp_dir.path().join("main.py");
     let main_content = r#"from models import User, Product
@@ -181,7 +181,7 @@ product = Product()
 "#;
     std::fs::write(&main_file_path, main_content).unwrap();
     let main_uri = Url::from_file_path(&main_file_path).unwrap();
-    
+
     // Create models.py file
     let models_file_path = temp_dir.path().join("models.py");
     let models_content = r#"class User:
@@ -283,7 +283,7 @@ class Category:
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_non_import() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create main.py file with local function
     let main_file_path = temp_dir.path().join("main.py");
     let main_content = r#"def my_function():
@@ -380,7 +380,7 @@ CONSTANT = 42
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_unresolved() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create main.py file with import that can't be resolved
     let main_file_path = temp_dir.path().join("main.py");
     let main_content = r#"from nonexistent_module import missing_symbol
@@ -476,7 +476,7 @@ missing_symbol()
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_variable() {
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create main.py file
     let main_file_path = temp_dir.path().join("main.py");
     let main_content = r#"from config import DEBUG, VERSION
@@ -488,7 +488,7 @@ if DEBUG:
 "#;
     std::fs::write(&main_file_path, main_content).unwrap();
     let main_uri = Url::from_file_path(&main_file_path).unwrap();
-    
+
     // Create config.py file
     let config_file_path = temp_dir.path().join("config.py");
     let config_content = r#"DEBUG = True
