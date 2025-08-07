@@ -15,7 +15,9 @@
  * and edge cases without requiring full TSP message protocol flows.
  */
 
-use lsp_types::{Position, Range, Url};
+use lsp_types::Position;
+use lsp_types::Range;
+use lsp_types::Url;
 use serde_json;
 
 use crate::tsp;
@@ -131,8 +133,14 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Verify different categories
     assert_eq!(params_class.start_type.category, tsp::TypeCategory::CLASS);
-    assert_eq!(params_function.start_type.category, tsp::TypeCategory::FUNCTION);
-    assert_eq!(params_overloaded.start_type.category, tsp::TypeCategory::OVERLOADED);
+    assert_eq!(
+        params_function.start_type.category,
+        tsp::TypeCategory::FUNCTION
+    );
+    assert_eq!(
+        params_overloaded.start_type.category,
+        tsp::TypeCategory::OVERLOADED
+    );
 }
 
 #[test]
@@ -255,8 +263,8 @@ fn test_search_for_type_attribute_access_flags() {
 
     // Test with multiple flags combined
     let combined_flags = tsp::AttributeAccessFlags(
-        tsp::AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES.0 
-        | tsp::AttributeAccessFlags::SKIP_TYPE_BASE_CLASS.0
+        tsp::AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES.0
+            | tsp::AttributeAccessFlags::SKIP_TYPE_BASE_CLASS.0,
     );
     let params_combined = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
@@ -294,8 +302,14 @@ fn test_search_for_type_attribute_optional_parameters() {
     let expression_node = tsp::Node {
         uri: test_uri.clone(),
         range: Range {
-            start: Position { line: 10, character: 5 },
-            end: Position { line: 10, character: 15 },
+            start: Position {
+                line: 10,
+                character: 5,
+            },
+            end: Position {
+                line: 10,
+                character: 15,
+            },
         },
     };
 
@@ -344,10 +358,10 @@ fn test_search_for_type_attribute_optional_parameters() {
     // Verify optional parameters
     assert!(params_with_node.expression_node.is_some());
     assert!(params_with_node.instance_type.is_none());
-    
+
     assert!(params_with_instance.expression_node.is_none());
     assert!(params_with_instance.instance_type.is_some());
-    
+
     assert!(params_with_both.expression_node.is_some());
     assert!(params_with_both.instance_type.is_some());
 
@@ -617,8 +631,14 @@ fn test_search_for_type_attribute_serialization_deserialization() {
         expression_node: Some(tsp::Node {
             uri: test_uri.clone(),
             range: Range {
-                start: Position { line: 5, character: 10 },
-                end: Position { line: 5, character: 25 },
+                start: Position {
+                    line: 5,
+                    character: 10,
+                },
+                end: Position {
+                    line: 5,
+                    character: 25,
+                },
             },
         }),
         instance_type: Some(tsp::Type {
@@ -638,20 +658,38 @@ fn test_search_for_type_attribute_serialization_deserialization() {
 
     // Serialize to JSON
     let json_str = serde_json::to_string(&original_params).expect("Failed to serialize");
-    
+
     // Deserialize back from JSON
-    let deserialized_params: tsp::SearchForTypeAttributeParams = 
+    let deserialized_params: tsp::SearchForTypeAttributeParams =
         serde_json::from_str(&json_str).expect("Failed to deserialize");
 
     // Verify round-trip serialization
     assert_eq!(deserialized_params.snapshot, original_params.snapshot);
-    assert_eq!(deserialized_params.attribute_name, original_params.attribute_name);
-    assert_eq!(deserialized_params.start_type.name, original_params.start_type.name);
-    assert_eq!(deserialized_params.start_type.category, original_params.start_type.category);
-    assert_eq!(deserialized_params.start_type.category_flags, original_params.start_type.category_flags);
-    assert_eq!(deserialized_params.access_flags.0, original_params.access_flags.0);
+    assert_eq!(
+        deserialized_params.attribute_name,
+        original_params.attribute_name
+    );
+    assert_eq!(
+        deserialized_params.start_type.name,
+        original_params.start_type.name
+    );
+    assert_eq!(
+        deserialized_params.start_type.category,
+        original_params.start_type.category
+    );
+    assert_eq!(
+        deserialized_params.start_type.category_flags,
+        original_params.start_type.category_flags
+    );
+    assert_eq!(
+        deserialized_params.access_flags.0,
+        original_params.access_flags.0
+    );
 
-    match (&deserialized_params.start_type.handle, &original_params.start_type.handle) {
+    match (
+        &deserialized_params.start_type.handle,
+        &original_params.start_type.handle,
+    ) {
         (tsp::TypeHandle::String(d), tsp::TypeHandle::String(o)) => assert_eq!(d, o),
         _ => panic!("Handle type mismatch"),
     }
@@ -674,4 +712,3 @@ fn test_search_for_type_attribute_serialization_deserialization() {
     let orig_instance = original_params.instance_type.as_ref().unwrap();
     assert_eq!(deser_instance.name, orig_instance.name);
 }
-
