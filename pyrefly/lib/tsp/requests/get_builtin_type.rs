@@ -7,21 +7,108 @@
 
 //! Implementation of the getBuiltinType TSP request
 
+use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use pyrefly_python::module_name::ModuleName;
+use ruff_python_ast::name::Name;
 
 use crate::lsp::server::Server;
+use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
+use pyrefly_types::types::Type;
+use crate::types::class::ClassType;
+use pyrefly_types::types::TArgs;
 
 impl Server {
     pub(crate) fn get_builtin_type(
         &self,
-        _transaction: &Transaction<'_>,
-        _params: tsp::GetBuiltinTypeParams,
+        transaction: &Transaction<'_>,
+        params: tsp::GetBuiltinTypeParams,
     ) -> Result<Option<tsp::Type>, ResponseError> {
-        // TODO: Implement getBuiltinType
-        // This should return the type of builtin types like int, str, list, etc.
-        // For now, return None
-        Ok(None)
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        // Convert Node to URI to get the handle for the scoping node
+        let uri = &params.scoping_node.uri;
+
+        // Check if workspace has language services enabled
+        let Some(scoping_handle) = self.make_handle_if_enabled(uri) else {
+            return Err(ResponseError {
+                code: ErrorCode::RequestFailed as i32,
+                message: "Language services disabled".to_owned(),
+                data: None,
+            });
+        };
+
+        // Create a handle for the builtins module using the same path and sys_info as the scoping node
+        let builtins_handle = Handle::new(
+            ModuleName::builtins(),
+            scoping_handle.path().clone(),
+            scoping_handle.sys_info().clone(),
+        );
+
+        // Get the stdlib for the scoping handle
+        let stdlib = transaction.get_stdlib(&scoping_handle);
+
+        // Try to get the builtin type from the stdlib using known builtin type names
+        let builtin_type = match params.name.as_str() {
+            "int" => Some(stdlib.int().clone().to_type()),
+            "str" => Some(stdlib.str().clone().to_type()),
+            "float" => Some(stdlib.float().clone().to_type()),
+            "bool" => Some(stdlib.bool().clone().to_type()),
+            "bytes" => Some(stdlib.bytes().clone().to_type()),
+            "complex" => Some(stdlib.complex().clone().to_type()),
+            "object" => Some(stdlib.object().clone().to_type()),
+            "type" => Some(stdlib.builtins_type().clone().to_type()),
+            "list" => Some(stdlib.list(Type::any_implicit()).to_type()),
+            "dict" => Some(stdlib.dict(Type::any_implicit(), Type::any_implicit()).to_type()),
+            "set" => Some(stdlib.set(Type::any_implicit()).to_type()),
+            "tuple" => Some(stdlib.tuple(Type::any_implicit()).to_type()),
+            "slice" => {
+                let slice = stdlib.slice_class_object();
+                Some(ClassType::new(slice, TArgs::default()).to_type())
+            }
+            "BaseException" => Some(stdlib.base_exception().clone().to_type()),
+            "NoneType" => Some(stdlib.none_type().clone().to_type()),
+            "EllipsisType" => stdlib.ellipsis_type().map(|t| t.clone().to_type()),
+            "function" => Some(stdlib.function_type().clone().to_type()),
+            "property" => Some(stdlib.property().clone().to_type()),
+            // Add more builtin types as needed
+            _ => {
+                // For types not directly available from stdlib, try to look them up in builtins exports
+                let exports = transaction.get_exports(&builtins_handle);
+                if let Some(export_location) = exports.get(&Name::new(params.name.as_str())) {
+                    match export_location {
+                        crate::export::exports::ExportLocation::ThisModule(export) => {
+                            // Get the type at the export location in the builtins module
+                            transaction.get_type_at(&builtins_handle, export.location.start())
+                        }
+                        crate::export::exports::ExportLocation::OtherModule(_) => {
+                            // Builtin type is imported from another module - this shouldn't happen for true builtins
+                            None
+                        }
+                    }
+                } else {
+                    None
+                }
+            }
+        };
+
+        // Convert pyrefly Type to TSP Type format if we found the type
+        if let Some(pyrefly_type) = builtin_type {
+            let tsp_type = crate::tsp::protocol::convert_to_tsp_type(pyrefly_type.clone());
+            
+            // Register the type in the lookup table for handle tracking
+            if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
+                self.state.register_type_handle(handle_str.clone(), pyrefly_type);
+            }
+            
+            Ok(Some(tsp_type))
+        } else {
+            Ok(None)
+        }
     }
 }
