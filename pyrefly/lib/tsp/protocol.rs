@@ -3,6 +3,9 @@ use lsp_types::Url;
 use serde::Deserialize;
 use serde::Serialize;
 
+// TSP Protocol Version
+pub const TSP_PROTOCOL_VERSION: &str = "0.1.0";
+
 pub enum GetTypeRequest {}
 
 pub enum GetSymbolRequest {}
@@ -10,6 +13,8 @@ pub enum GetSymbolRequest {}
 pub enum GetPythonSearchPathsRequest {}
 
 pub enum GetSnapshotRequest {}
+
+pub enum GetSupportedProtocolVersionRequest {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Type {
@@ -245,6 +250,12 @@ pub struct GetSnapshotParams {
     // to handle both {} and null parameter cases
 }
 
+#[derive(Serialize, Default)]
+pub struct GetSupportedProtocolVersionParams {
+    // No parameters needed for getting protocol version, but we need an empty struct
+    // to handle both {} and null parameter cases
+}
+
 // Custom deserializer that handles both null and empty object
 impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -297,6 +308,58 @@ impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
     }
 }
 
+// Custom deserializer that handles both null and empty object for GetSupportedProtocolVersionParams
+impl<'de> serde::Deserialize<'de> for GetSupportedProtocolVersionParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use std::fmt;
+
+        use serde::de::MapAccess;
+        use serde::de::Visitor;
+        use serde::de::{self};
+
+        struct GetSupportedProtocolVersionParamsVisitor;
+
+        impl<'de> Visitor<'de> for GetSupportedProtocolVersionParamsVisitor {
+            type Value = GetSupportedProtocolVersionParams;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("null or an empty object")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(GetSupportedProtocolVersionParams {})
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(GetSupportedProtocolVersionParams {})
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                // Read any fields in the map but ignore them since we don't need any params
+                while let Some((key, _value)) = map.next_entry::<String, serde_json::Value>()? {
+                    // Ignore unknown fields for flexibility
+                    let _ = key;
+                }
+                Ok(GetSupportedProtocolVersionParams {})
+            }
+        }
+
+        deserializer.deserialize_any(GetSupportedProtocolVersionParamsVisitor)
+    }
+}
+
 impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
     type Result = Option<Type>;
@@ -319,6 +382,12 @@ impl lsp_types::request::Request for GetSnapshotRequest {
     type Params = GetSnapshotParams;
     type Result = i32;
     const METHOD: &'static str = "typeServer/getSnapshot";
+}
+
+impl lsp_types::request::Request for GetSupportedProtocolVersionRequest {
+    type Params = GetSupportedProtocolVersionParams;
+    type Result = String;
+    const METHOD: &'static str = "typeServer/getSupportedProtocolVersion";
 }
 
 pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> Type {
@@ -428,6 +497,27 @@ mod tests {
         // Test object with unknown fields (should be ignored)
         let obj_with_fields = serde_json::json!({"unknown_field": "value"});
         let result: Result<GetSnapshotParams, _> = serde_json::from_value(obj_with_fields);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_supported_protocol_version_params_deserialization() {
+        // Test null case
+        let null_json = serde_json::Value::Null;
+        let result: Result<GetSupportedProtocolVersionParams, _> =
+            serde_json::from_value(null_json);
+        assert!(result.is_ok());
+
+        // Test empty object case
+        let empty_obj_json = serde_json::json!({});
+        let result: Result<GetSupportedProtocolVersionParams, _> =
+            serde_json::from_value(empty_obj_json);
+        assert!(result.is_ok());
+
+        // Test object with unknown fields (should be ignored)
+        let obj_with_fields = serde_json::json!({"unknown_field": "value"});
+        let result: Result<GetSupportedProtocolVersionParams, _> =
+            serde_json::from_value(obj_with_fields);
         assert!(result.is_ok());
     }
 }

@@ -193,6 +193,7 @@ use crate::tsp::GetOverloadsRequest;
 use crate::tsp::GetPythonSearchPathsRequest;
 use crate::tsp::GetReprRequest;
 use crate::tsp::GetSnapshotRequest;
+use crate::tsp::GetSupportedProtocolVersionRequest;
 use crate::tsp::GetSymbolRequest;
 use crate::tsp::GetTypeArgsRequest;
 use crate::tsp::GetTypeOfDeclarationRequest;
@@ -787,6 +788,11 @@ impl Server {
                     ide_transaction_manager.save(transaction);
                 } else if let Some(_params) = as_request::<GetSnapshotRequest>(&x) {
                     self.send_response(new_response(x.id, Ok(self.current_snapshot())));
+                } else if let Some(params) = as_request::<GetSupportedProtocolVersionRequest>(&x) {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response(x.id, Ok(self.get_supported_protocol_version(&transaction, params.unwrap_or_default()))));
+                    ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_request::<GetTypeRequest>(&x)
                     && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeRequest>(params, &x.id)
                 {

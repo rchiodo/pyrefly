@@ -14,6 +14,7 @@ pub mod get_matching_overloads;
 pub mod get_overloads;
 pub mod get_python_search_paths;
 pub mod get_repr;
+pub mod get_supported_protocol_version;
 pub mod get_symbol;
 pub mod get_type;
 pub mod get_type_args;

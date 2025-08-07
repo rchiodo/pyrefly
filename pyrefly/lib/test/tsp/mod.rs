@@ -13,7 +13,7 @@ pub mod get_overloads;
 pub mod get_repr;
 pub mod get_symbol;
 pub mod get_type;
-pub mod search_for_type_attribute;
 pub mod resolve_import_declaration;
+pub mod search_for_type_attribute;
 pub mod tsp_interaction;
 pub mod util;
