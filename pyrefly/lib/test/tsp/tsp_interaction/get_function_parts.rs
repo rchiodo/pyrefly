@@ -212,7 +212,7 @@ def process_data(
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": "$$MATCH_EVERYTHING$$",  // Accept any parameter structure for complex function
+                    "params": ["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"],  // Accept any 4 parameters for complex function
                     "returnType": "$$MATCH_EVERYTHING$$"  // Accept any return type structure
                 })),
                 error: None,

@@ -255,17 +255,8 @@ fn match_json_with_capture(
     actual: &str,
     captured_variables: &mut HashMap<String, serde_json::Value>,
 ) -> Result<(), String> {
-    // Handle $$MATCH_EVERYTHING$$ wildcard (existing behavior)
-    if let Some(index) = expected.find("$$MATCH_EVERYTHING$$") {
-        let expected_prefix = &expected[..index];
-        let actual_prefix = &actual[..expected_prefix.len().min(actual.len())];
-
-        if expected_prefix != actual_prefix {
-            return Err(format!(
-                "Prefix mismatch before $$MATCH_EVERYTHING$$:\nExpected: {}\nActual: {}",
-                expected_prefix, actual_prefix
-            ));
-        }
+    // Handle $$MATCH_EVERYTHING$$ wildcard only for simple cases where entire content is wildcard
+    if expected.trim() == "\"$$MATCH_EVERYTHING$$\"" {
         return Ok(());
     }
 
@@ -346,6 +337,13 @@ fn match_json_values(
                 for (i, (expected_item, actual_item)) in
                     expected_arr.iter().zip(actual_arr.iter()).enumerate()
                 {
+                    // Special case: if expected item is $$MATCH_EVERYTHING$$ string, allow any actual item
+                    if let serde_json::Value::String(s) = expected_item {
+                        if s == "$$MATCH_EVERYTHING$$" {
+                            continue; // Skip validation for this array element
+                        }
+                    }
+
                     match_json_values(expected_item, actual_item, captured_variables)
                         .map_err(|e| format!("Array index {}: {}", i, e))?;
                 }

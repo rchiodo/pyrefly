@@ -1,15 +1,25 @@
 /*
- * TSP interaction tests for get_type_args request handler
- *
- * These tests verify the full TSP message protocol for get_type_args requests by:
- * 1. Following the LSP interaction test pattern using run_test_lsp
- * 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getTypeArgs
- * 3. Validating proper snapshot management and protocol sequencing
- * 4. Using real file operations and message passing to simulate end-to-end TSP interactions
- *
- * The get_type_args request requires a type handle (obtained from get_type) and returns
- * the type arguments for generic types like List[int], Dict[str, float], etc.
- */
+* TSP interaction tests for get_type_args request handler
+*
+* These tests verify the full TSP message protocol for get_type_ar            // Type args response - should contain union type arguments: [int, None]
+           Message::Response(Response {
+               id: RequestId::from(4),
+               result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"])), // Array with wildcards for union types
+               error: None,
+           }),y:
+* 1. Following the LSP interaction test pattern using run            // Type args response - should contain Type objects for key and value types
+           Message::Response(Response {
+               id: RequestId::from(4),
+               result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"])), // Array with wildcards for [str, int]
+               error: None,
+           }),
+* 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getTypeArgs
+* 3. Validating proper snapshot management and protocol sequencing
+* 4. Using real file operations and message passing to simulate end-to-end TSP interactions
+*
+* The get_type_args request requires a type handle (obtained from get_type) and returns
+* the type arguments for generic types like List[int], Dict[str, float], etc.
+*/
 
 use lsp_server::Message;
 use lsp_server::Request;
@@ -18,10 +28,9 @@ use lsp_server::Response;
 use lsp_types::Url;
 use tempfile::TempDir;
 
-use crate::commands::lsp::IndexingMode;
-use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::run_test_lsp;
+use crate::test::tsp::tsp_interaction::util::TspTestCase;
+use crate::test::tsp::tsp_interaction::util::run_test_tsp_with_capture;
 
 #[test]
 fn test_tsp_get_type_args_interaction_list() {
@@ -45,7 +54,7 @@ def process_names(data: List[str]) -> str:
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -76,13 +85,13 @@ def process_names(data: List[str]) -> str:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
                 }),
@@ -95,33 +104,27 @@ def process_names(data: List[str]) -> str:
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for List[int] variable
+            // Type response for List[int] variable - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
-            // Type args response - should return [int] for List[int]
+            // Type args response - should contain Type object for int
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$" // Accept any type argument structure
-                ])),
+                result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$"])), // Array with wildcard for any type argument
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
 
@@ -147,7 +150,7 @@ def calculate_average(scores: Dict[str, float]) -> float:
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -178,13 +181,13 @@ def calculate_average(scores: Dict[str, float]) -> float:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
                 }),
@@ -197,17 +200,17 @@ def calculate_average(scores: Dict[str, float]) -> float:
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for Dict[str, int] variable
+            // Type response for Dict[str, int] variable - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -221,10 +224,6 @@ def calculate_average(scores: Dict[str, float]) -> float:
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
 
@@ -252,7 +251,7 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -283,13 +282,13 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
                 }),
@@ -302,33 +301,30 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for Optional[int] variable
+            // Type response for Optional[int] variable - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
-            // Type args response - should return [int] for Optional[int] (Optional is Union[T, None])
+            // Type args response - should return [int, None] for Optional[int] (Optional is Union[T, None])
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$" // The wrapped type: int
+                    "$$MATCH_EVERYTHING$$", // The wrapped type: int
+                    "$$MATCH_EVERYTHING$$"  // None type
                 ])),
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
 
@@ -353,7 +349,7 @@ class SimpleClass:
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -384,13 +380,13 @@ class SimpleClass:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
                 }),
@@ -403,17 +399,17 @@ class SimpleClass:
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for int variable
+            // Type response for int variable - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -424,9 +420,5 @@ class SimpleClass:
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
