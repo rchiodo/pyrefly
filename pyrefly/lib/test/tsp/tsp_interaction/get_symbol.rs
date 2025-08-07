@@ -85,7 +85,7 @@ x = 10
                 result: Some(serde_json::json!({
                     "decls": [{
                         "category": 5,
-                        "flags": 0, 
+                        "flags": 0,
                         "handle": "$$MATCH_EVERYTHING$$",
                         "moduleName": {
                             "leadingDots": 0,
@@ -101,14 +101,14 @@ x = 10
                         },
                         "uri": "$$MATCH_EVERYTHING$$"
                     }],
-                    "name": "my_function",   
+                    "name": "my_function",
                     "node": {
                         "range": {
                             "end": {"character": 15, "line": 1},
                             "start": {"character": 4, "line": 1}
                         },
                         "uri": "$$MATCH_EVERYTHING$$"
-                    },   
+                    },
                     "synthesizedTypes": [{
                         "category": 1,
                         "categoryFlags": 0,
@@ -182,7 +182,7 @@ fn test_tsp_get_symbol_interaction_with_name() {
                 result: Some(serde_json::json!({
                     "decls": [{
                         "category": 1,
-                        "flags": 1, 
+                        "flags": 1,
                         "handle": "$$MATCH_EVERYTHING$$",
                         "moduleName": {
                             "leadingDots": 0,
@@ -198,14 +198,14 @@ fn test_tsp_get_symbol_interaction_with_name() {
                         },
                         "uri": "$$MATCH_EVERYTHING$$"
                     }],
-                    "name": "variable_name",   
+                    "name": "variable_name",
                     "node": {
                         "range": {
                             "end": {"character": 13, "line": 0},
                             "start": {"character": 0, "line": 0}
                         },
                         "uri": "$$MATCH_EVERYTHING$$"
-                    },   
+                    },
                     "synthesizedTypes": [{
                         "category": 0,
                         "categoryFlags": 0,

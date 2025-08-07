@@ -79,7 +79,7 @@ if __name__ == "__main__":
             // Python search paths response - should return array of path strings
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::json!([])),  // Accept empty array for test environment
+                result: Some(serde_json::json!([])), // Accept empty array for test environment
                 error: None,
             }),
         ],
@@ -134,7 +134,7 @@ pass
             // Python search paths response - should still return default paths
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::json!([])),  // Empty array is acceptable for minimal setup
+                result: Some(serde_json::json!([])), // Empty array is acceptable for minimal setup
                 error: None,
             }),
         ],

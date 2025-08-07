@@ -113,7 +113,7 @@ def process_names(data: List[str]) -> str:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$"  // Accept any type argument structure
+                    "$$MATCH_EVERYTHING$$" // Accept any type argument structure
                 ])),
                 error: None,
             }),
@@ -215,8 +215,8 @@ def calculate_average(scores: Dict[str, float]) -> float:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$",  // Key type: str
-                    "$$MATCH_EVERYTHING$$"   // Value type: int
+                    "$$MATCH_EVERYTHING$$", // Key type: str
+                    "$$MATCH_EVERYTHING$$"  // Value type: int
                 ])),
                 error: None,
             }),
@@ -320,7 +320,7 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$"  // The wrapped type: int
+                    "$$MATCH_EVERYTHING$$" // The wrapped type: int
                 ])),
                 error: None,
             }),
@@ -420,7 +420,7 @@ class SimpleClass:
             // Type args response - should return empty array or null for non-generic type
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::json!([])),  // No type arguments for int
+                result: Some(serde_json::json!([])), // No type arguments for int
                 error: None,
             }),
         ],

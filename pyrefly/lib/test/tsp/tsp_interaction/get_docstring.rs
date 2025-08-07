@@ -96,7 +96,7 @@ fn test_tsp_get_docstring_interaction_function() {
             // Docstring response - should return the complete docstring
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())),  // Accept any docstring content
+                result: Some(serde_json::Value::String("$$MATCH_EVERYTHING$$".to_owned())), // Accept any docstring content
                 error: None,
             }),
         ],
@@ -348,7 +348,7 @@ class SimpleClass:
             // Docstring response - should return null or empty for no docstring
             Message::Response(Response {
                 id: RequestId::from(3),
-                result: Some(serde_json::Value::Null),  // Or could be empty string
+                result: Some(serde_json::Value::Null), // Or could be empty string
                 error: None,
             }),
         ],

@@ -18,10 +18,9 @@ use lsp_server::Response;
 use lsp_types::Url;
 use tempfile::TempDir;
 
-use crate::commands::lsp::IndexingMode;
-use crate::test::lsp::lsp_interaction::util::TestCase;
-use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::run_test_lsp;
+use crate::test::tsp::tsp_interaction::util::TspTestCase;
+use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
+use crate::test::tsp::tsp_interaction::util::run_test_tsp_with_capture;
 
 #[test]
 fn test_tsp_get_function_parts_interaction_basic() {
@@ -39,7 +38,7 @@ def greet(name: str) -> str:
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -64,20 +63,21 @@ def greet(name: str) -> str:
                     "snapshot": 2
                 }),
             }),
-            // Get function parts for the 'add' function
+            // Get function parts for the 'add' function using captured type handle
             Message::from(Request {
                 id: RequestId::from(4),
                 method: "typeServer/getFunctionParts".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
+                    "flags": 0,
                     "snapshot": 2
                 }),
             }),
@@ -89,17 +89,17 @@ def greet(name: str) -> str:
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for function 'add'
+            // Type response for function 'add' - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -107,16 +107,12 @@ def greet(name: str) -> str:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": "$$MATCH_EVERYTHING$$",  // Accept any parameter structure
-                    "returnType": "$$MATCH_EVERYTHING$$"  // Accept any return type structure
+                    "params": ["x: int", "y: int"],  // Array of parameter strings
+                    "returnType": "int"  // Return type string
                 })),
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
 
@@ -147,7 +143,7 @@ def process_data(
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -172,20 +168,21 @@ def process_data(
                     "snapshot": 2
                 }),
             }),
-            // Get function parts for the complex function
+            // Get function parts for the complex function using captured type handle
             Message::from(Request {
                 id: RequestId::from(4),
                 method: "typeServer/getFunctionParts".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
+                    "flags": 0,
                     "snapshot": 2
                 }),
             }),
@@ -197,17 +194,17 @@ def process_data(
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for complex function
+            // Type response for complex function - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -215,16 +212,12 @@ def process_data(
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": "$$MATCH_EVERYTHING$$",  // Should include all parameter information
-                    "returnType": "$$MATCH_EVERYTHING$$"  // Should be List[float] type
+                    "params": "$$MATCH_EVERYTHING$$",  // Accept any parameter structure for complex function
+                    "returnType": "$$MATCH_EVERYTHING$$"  // Accept any return type structure
                 })),
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
 
@@ -241,7 +234,7 @@ add_one = lambda n: n + 1
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -251,7 +244,7 @@ add_one = lambda n: n + 1
                 method: "typeServer/getSnapshot".to_owned(),
                 params: serde_json::json!({}),
             }),
-            // Get type of lambda function 'square'
+            // Get type of variable 'square' that holds the lambda function
             Message::from(Request {
                 id: RequestId::from(3),
                 method: "typeServer/getType".to_owned(),
@@ -259,27 +252,28 @@ add_one = lambda n: n + 1
                     "node": {
                         "uri": file_uri.to_string(),
                         "range": {
-                            "start": { "line": 0, "character": 9 },
-                            "end": { "line": 0, "character": 25 }
+                            "start": { "line": 0, "character": 0 },
+                            "end": { "line": 0, "character": 6 }
                         }
                     },
                     "snapshot": 2
                 }),
             }),
-            // Get function parts for the lambda
+            // Get function parts for the lambda using captured type handle
             Message::from(Request {
                 id: RequestId::from(4),
                 method: "typeServer/getFunctionParts".to_owned(),
                 params: serde_json::json!({
                     "type": {
-                        "category": 0,
-                        "categoryFlags": 0,
-                        "decl": null,
-                        "flags": 8,
-                        "handle": "$$TYPE_HANDLE_FROM_STEP_3$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
                     },
+                    "flags": 0,
                     "snapshot": 2
                 }),
             }),
@@ -291,17 +285,17 @@ add_one = lambda n: n + 1
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for lambda function
+            // Type response for lambda function - capture all fields
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 0,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 8,
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -309,15 +303,11 @@ add_one = lambda n: n + 1
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "params": "$$MATCH_EVERYTHING$$",  // Should include lambda parameter info
-                    "returnType": "$$MATCH_EVERYTHING$$"  // Should infer return type
+                    "params": ["$$MATCH_EVERYTHING$$"],  // Accept any lambda parameter info array
+                    "returnType": "$$MATCH_EVERYTHING$$"  // Accept any inferred return type
                 })),
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }

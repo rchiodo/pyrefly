@@ -143,21 +143,25 @@ x: List[str] = []
 fn test_tsp_resolve_import_interaction_relative() {
     // Test import resolution for relative imports
     let temp_dir = TempDir::new().unwrap();
-    
+
     // Create a package structure
     let package_dir = temp_dir.path().join("mypackage");
     std::fs::create_dir_all(&package_dir).unwrap();
-    
+
     // Create __init__.py
     let init_file = package_dir.join("__init__.py");
     std::fs::write(&init_file, "# Package init").unwrap();
-    
+
     // Create utils.py module
     let utils_file = package_dir.join("utils.py");
-    std::fs::write(&utils_file, r#"def utility_function():
+    std::fs::write(
+        &utils_file,
+        r#"def utility_function():
     return "utility"
-"#).unwrap();
-    
+"#,
+    )
+    .unwrap();
+
     // Create main test file with relative imports
     let test_file_path = package_dir.join("main.py");
     let test_content = r#"from .utils import utility_function

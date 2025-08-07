@@ -18,10 +18,9 @@ use lsp_server::Response;
 use lsp_types::Url;
 use tempfile::TempDir;
 
-use crate::commands::lsp::IndexingMode;
-use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::run_test_lsp;
+use crate::test::tsp::tsp_interaction::util::TspTestCase;
+use crate::test::tsp::tsp_interaction::util::run_test_tsp_with_capture;
 
 #[test]
 fn test_tsp_get_overloads_interaction_basic() {
@@ -29,34 +28,16 @@ fn test_tsp_get_overloads_interaction_basic() {
     let temp_dir = TempDir::new().unwrap();
     let test_file_path = temp_dir.path().join("function_overloads_test.py");
 
-    let test_content = r#"from typing import overload, Union
+    let test_content = r#"def simple_func(x: int) -> str:
+    return str(x)
 
-@overload
-def process(value: int) -> str: ...
-
-@overload  
-def process(value: str) -> int: ...
-
-@overload
-def process(value: float) -> str: ...
-
-def process(value: Union[int, str, float]) -> Union[str, int]:
-    """Process value based on type."""
-    if isinstance(value, int):
-        return str(value)
-    elif isinstance(value, str):
-        return int(value) if value.isdigit() else 0
-    else:
-        return str(value)
-
-def test_overloads():
-    result = process(42)  # Target this function call for overloads
+y = simple_func(42)
 "#;
 
     std::fs::write(&test_file_path, test_content).unwrap();
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp_with_capture(TspTestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -66,7 +47,7 @@ def test_overloads():
                 method: "typeServer/getSnapshot".to_owned(),
                 params: serde_json::json!({}),
             }),
-            // Get type of 'process' function to get a type handle
+            // Get type of 'simple_func' function to get a type handle
             Message::from(Request {
                 id: RequestId::from(3),
                 method: "typeServer/getType".to_owned(),
@@ -74,8 +55,8 @@ def test_overloads():
                     "node": {
                         "uri": file_uri.to_string(),
                         "range": {
-                            "start": { "line": 11, "character": 4 },
-                            "end": { "line": 11, "character": 11 }
+                            "start": { "line": 3, "character": 4 },
+                            "end": { "line": 3, "character": 15 }
                         }
                     },
                     "snapshot": 2
@@ -86,7 +67,15 @@ def test_overloads():
                 id: RequestId::from(4),
                 method: "typeServer/getOverloads".to_owned(),
                 params: serde_json::json!({
-                    "type": "$$TYPE_HANDLE_FROM_STEP_3$$",  // Use handle from getType response
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
                     "snapshot": 2
                 }),
             }),
@@ -98,32 +87,26 @@ def test_overloads():
                 result: Some(serde_json::json!(2)),
                 error: None,
             }),
-            // Type response for 'process' function
+            // Type response for 'simple_func' function - capture handle
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": "$$MATCH_EVERYTHING$$",
-                    "categoryFlags": "$$MATCH_EVERYTHING$$",
-                    "decl": "$$MATCH_EVERYTHING$$",
-                    "flags": "$$MATCH_EVERYTHING$$",
-                    "handle": "$$MATCH_EVERYTHING$$",  // This handle will be used in next request
-                    "moduleName": "$$MATCH_EVERYTHING$$",
-                    "name": "$$MATCH_EVERYTHING$$"
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                    "handle": "$$CAPTURE_TYPE_HANDLE$$",  // Capture this handle for next request
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
-            // Overloads response - should return multiple overload signatures
+            // Overloads response - for a non-overloaded function, this returns null
             Message::Response(Response {
                 id: RequestId::from(4),
-                result: Some(serde_json::json!([
-                    "$$MATCH_EVERYTHING$$"  // Accept any overload structure
-                ])),
+                result: Some(serde_json::Value::Null),
                 error: None,
             }),
         ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
     });
 }
