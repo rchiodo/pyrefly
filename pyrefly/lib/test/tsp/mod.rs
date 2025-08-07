@@ -12,6 +12,7 @@ pub mod get_matching_overloads;
 pub mod get_overloads;
 pub mod get_repr;
 pub mod get_symbol;
+pub mod get_symbols_for_file;
 pub mod get_type;
 pub mod resolve_import_declaration;
 pub mod search_for_type_attribute;

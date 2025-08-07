@@ -13,6 +13,7 @@ pub mod get_python_search_paths;
 pub mod get_repr;
 pub mod get_supported_protocol_version;
 pub mod get_symbol;
+pub mod get_symbols_for_file;
 pub mod get_type;
 pub mod get_type_args;
 pub mod get_type_of_declaration;
