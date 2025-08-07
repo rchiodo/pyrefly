@@ -83,7 +83,7 @@ class HelperClass:
 CONSTANT = 42
 "#;
     std::fs::write(&utils_file_path, utils_content).unwrap();
-    let utils_uri = Url::from_file_path(&utils_file_path).unwrap();
+    let _utils_uri = Url::from_file_path(&utils_file_path).unwrap();
 
     run_test_lsp(TestCase {
         messages_from_language_client: vec![
@@ -196,7 +196,7 @@ class Category:
     pass
 "#;
     std::fs::write(&models_file_path, models_content).unwrap();
-    let models_uri = Url::from_file_path(&models_file_path).unwrap();
+    let _models_uri = Url::from_file_path(&models_file_path).unwrap();
 
     run_test_lsp(TestCase {
         messages_from_language_client: vec![
@@ -496,7 +496,7 @@ VERSION = "1.0.0"
 FEATURE_FLAGS = {"new_ui": False}
 "#;
     std::fs::write(&config_file_path, config_content).unwrap();
-    let config_uri = Url::from_file_path(&config_file_path).unwrap();
+    let _config_uri = Url::from_file_path(&config_file_path).unwrap();
 
     run_test_lsp(TestCase {
         messages_from_language_client: vec![

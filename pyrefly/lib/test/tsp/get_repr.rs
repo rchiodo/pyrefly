@@ -4,7 +4,7 @@ use crate::tsp;
 
 #[test]
 fn test_basic_get_repr() {
-    let (handle, uri, state) = build_tsp_test_server();
+    let (_handle, uri, _state) = build_tsp_test_server();
 
     let content = r#"
 x = "hello world"
@@ -12,7 +12,7 @@ x = "hello world"
 print(x)
 "#;
 
-    let position = extract_cursor_location(content, &uri);
+    let _position = extract_cursor_location(content, &uri);
 
     let params = tsp::GetReprParams {
         type_param: tsp::Type {

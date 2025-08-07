@@ -31,7 +31,7 @@ pub fn build_tsp_test_server() -> (Handle, Url, State) {
 }
 
 /// Extract cursor location from test content
-pub fn extract_cursor_location(content: &str, uri: &Url) -> Position {
+pub fn extract_cursor_location(content: &str, _uri: &Url) -> Position {
     let cursors = extract_cursors_for_test(content);
     if cursors.is_empty() {
         panic!("No cursor found in test content");
@@ -75,7 +75,7 @@ pub fn make_tsp_node(uri: Url, position: Position, text_length: u32) -> tsp::Nod
 
 /// Helper to create a TSP Node from a cursor position and handle
 pub fn make_tsp_node_from_cursor(
-    handle: &Handle,
+    _handle: &Handle,
     cursor_pos: TextSize,
     text_length: u32,
 ) -> tsp::Node {

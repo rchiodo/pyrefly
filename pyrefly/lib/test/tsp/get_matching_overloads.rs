@@ -6,7 +6,7 @@ use crate::tsp;
 
 #[test]
 fn test_basic_get_matching_overloads() {
-    let (handle, uri, state) = build_tsp_test_server();
+    let (_handle, uri, _state) = build_tsp_test_server();
 
     let params = tsp::GetMatchingOverloadsParams {
         call_node: tsp::Node {

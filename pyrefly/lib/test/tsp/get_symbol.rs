@@ -4,8 +4,8 @@ use crate::tsp;
 
 #[test]
 fn test_get_symbol_params_construction() {
-    let (handle, uri, state) = build_tsp_test_server();
-    let transaction = state.transaction();
+    let (_handle, uri, state) = build_tsp_test_server();
+    let _transaction = state.transaction();
 
     let content = r#"
 def my_function():

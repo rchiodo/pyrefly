@@ -33,7 +33,7 @@ fn test_simple_get_type_verification() {
 #[test]
 fn test_get_type_params_construction() {
     // Test TSP GetType parameter construction like other TSP tests
-    let (handle, uri, state) = build_tsp_test_server();
+    let (_handle, uri, state) = build_tsp_test_server();
     let _transaction = state.transaction();
 
     let position = Position {
@@ -146,16 +146,16 @@ z = [1, 2, 3]
     match tsp_result {
         Ok(Some(type_info)) => {
             println!("TSP GetType succeeded: {type_info:?}");
-            assert!(true, "TSP handler executed successfully");
+            // TSP handler executed successfully
         }
         Ok(None) => {
             println!("TSP GetType returned None (valid result)");
-            assert!(true, "TSP handler executed successfully");
+            // TSP handler executed successfully
         }
         Err(error) => {
             println!("TSP GetType returned error: {error:?}");
             // Even an error can be valid for integration testing
-            assert!(true, "TSP handler executed (with error result)");
+            // TSP handler executed (with error result)
         }
     }
 }
@@ -231,7 +231,7 @@ dict_var = {"key": "value"}
         match tsp_result {
             Ok(_) | Err(_) => {
                 // Both success and error are valid - the handler logic was executed
-                assert!(true, "TSP handler logic executed for {var_name}");
+                // TSP handler logic executed for {var_name}
             }
         }
     }
