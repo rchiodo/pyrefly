@@ -7,7 +7,8 @@
 
 //! Implementation of the getSymbolsForFile TSP request
 
-use lsp_server::{ErrorCode, ResponseError};
+use lsp_server::ErrorCode;
+use lsp_server::ResponseError;
 use pyrefly_python::module::Module;
 
 use crate::lsp::server::Server;
@@ -20,12 +21,13 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolsForFileParams,
     ) -> Result<Option<tsp::FileSymbolInfo>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Common validation logic
+        self.validate_snapshot(params.snapshot)?;
 
         let uri = &params.uri;
+
+        // Common language services validation
+        self.validate_language_services(uri)?;
 
         // Check if workspace has language services enabled
         let Some(handle) = self.make_handle_if_enabled(uri) else {
@@ -70,7 +72,7 @@ impl Server {
 
         // Get all symbols from the file using the existing symbols() method
         let document_symbols = active_transaction.symbols(&handle).unwrap_or_default();
-        
+
         // Convert from LSP DocumentSymbol to TSP Symbol
         let mut tsp_symbols = Vec::new();
         Self::convert_document_symbols_to_tsp(
@@ -102,7 +104,13 @@ impl Server {
 
             // Recursively convert children if they exist
             if let Some(ref children) = doc_symbol.children {
-                Self::convert_document_symbols_to_tsp(children, tsp_symbols, uri, module_info, module_name_str);
+                Self::convert_document_symbols_to_tsp(
+                    children,
+                    tsp_symbols,
+                    uri,
+                    module_info,
+                    module_name_str,
+                );
             }
         }
     }
@@ -119,7 +127,7 @@ impl Server {
             range: doc_symbol.selection_range,
         };
 
-        // Convert LSP SymbolKind to TSP DeclarationCategory
+        // Convert LSP SymbolKind to TSP DeclarationCategory using common function
         let (category, flags) = Self::lsp_symbol_kind_to_tsp_category(doc_symbol.kind);
 
         // Create a unique handle for this declaration
@@ -130,15 +138,8 @@ impl Server {
             doc_symbol.selection_range.start.character
         ));
 
-        // Parse module name into ModuleName struct
-        let module_parts: Vec<String> = module_name_str
-            .split('.')
-            .map(|s| s.to_owned())
-            .collect();
-        let module_name = tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: module_parts,
-        };
+        // Parse module name into ModuleName struct using common function
+        let module_name = Self::create_tsp_module_name(module_name_str);
 
         // Create a declaration for this symbol
         let declaration = tsp::Declaration {
@@ -156,46 +157,6 @@ impl Server {
             name: doc_symbol.name.clone(),
             decls: vec![declaration],
             synthesized_types: Vec::new(), // TODO: Could be enhanced to include type information
-        }
-    }
-
-    /// Convert LSP SymbolKind to TSP DeclarationCategory and flags
-    fn lsp_symbol_kind_to_tsp_category(
-        kind: lsp_types::SymbolKind,
-    ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
-        match kind {
-            lsp_types::SymbolKind::FUNCTION | lsp_types::SymbolKind::METHOD => {
-                (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::CLASS => {
-                (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::VARIABLE | lsp_types::SymbolKind::FIELD => {
-                (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::CONSTANT => {
-                (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant())
-            }
-            lsp_types::SymbolKind::MODULE | lsp_types::SymbolKind::NAMESPACE => {
-                (tsp::DeclarationCategory::IMPORT, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::CONSTRUCTOR => {
-                (tsp::DeclarationCategory::FUNCTION, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::PROPERTY => {
-                (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_class_member())
-            }
-            lsp_types::SymbolKind::ENUM | lsp_types::SymbolKind::ENUM_MEMBER => {
-                (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new().with_constant())
-            }
-            lsp_types::SymbolKind::INTERFACE => {
-                (tsp::DeclarationCategory::CLASS, tsp::DeclarationFlags::new())
-            }
-            lsp_types::SymbolKind::TYPE_PARAMETER => {
-                (tsp::DeclarationCategory::TYPE_PARAM, tsp::DeclarationFlags::new())
-            }
-            // Default to variable for other kinds
-            _ => (tsp::DeclarationCategory::VARIABLE, tsp::DeclarationFlags::new()),
         }
     }
 }

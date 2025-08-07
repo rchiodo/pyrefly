@@ -23,13 +23,14 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolParams,
     ) -> Result<Option<tsp::Symbol>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Common validation logic
+        self.validate_snapshot(params.snapshot)?;
 
         // Convert Node to URI and position
         let uri = &params.node.uri;
+
+        // Common language services validation
+        self.validate_language_services(uri)?;
 
         // Check if workspace has language services enabled
         let Some(handle) = self.make_handle_if_enabled(uri) else {
@@ -115,40 +116,7 @@ impl Server {
             // Determine the category and flags based on definition metadata
             let (category, flags) = match &definition_metadata {
                 crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-                    match symbol_kind {
-                        pyrefly_python::symbol_kind::SymbolKind::Function => (
-                            tsp::DeclarationCategory::FUNCTION,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::Class => (
-                            tsp::DeclarationCategory::CLASS,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::Variable => (
-                            tsp::DeclarationCategory::VARIABLE,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::Constant => (
-                            tsp::DeclarationCategory::VARIABLE,
-                            tsp::DeclarationFlags::new().with_constant(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::Parameter => (
-                            tsp::DeclarationCategory::PARAM,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (
-                            tsp::DeclarationCategory::TYPE_PARAM,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (
-                            tsp::DeclarationCategory::TYPE_ALIAS,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                        _ => (
-                            tsp::DeclarationCategory::VARIABLE,
-                            tsp::DeclarationFlags::new(),
-                        ),
-                    }
+                    Self::symbol_kind_to_tsp_category(symbol_kind)
                 }
                 crate::state::lsp::DefinitionMetadata::Module => {
                     // For module imports, check if type info is available to determine if resolved
@@ -169,46 +137,7 @@ impl Server {
                 crate::state::lsp::DefinitionMetadata::VariableOrAttribute(
                     _,
                     Some(symbol_kind),
-                ) => match symbol_kind {
-                    pyrefly_python::symbol_kind::SymbolKind::Function => (
-                        tsp::DeclarationCategory::FUNCTION,
-                        tsp::DeclarationFlags::new().with_class_member(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::Class => (
-                        tsp::DeclarationCategory::CLASS,
-                        tsp::DeclarationFlags::new(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::Variable => (
-                        tsp::DeclarationCategory::VARIABLE,
-                        tsp::DeclarationFlags::new().with_class_member(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::Constant => (
-                        tsp::DeclarationCategory::VARIABLE,
-                        tsp::DeclarationFlags::new()
-                            .with_class_member()
-                            .with_constant(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::Attribute => (
-                        tsp::DeclarationCategory::VARIABLE,
-                        tsp::DeclarationFlags::new().with_class_member(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::Parameter => (
-                        tsp::DeclarationCategory::PARAM,
-                        tsp::DeclarationFlags::new(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (
-                        tsp::DeclarationCategory::TYPE_PARAM,
-                        tsp::DeclarationFlags::new(),
-                    ),
-                    pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (
-                        tsp::DeclarationCategory::TYPE_ALIAS,
-                        tsp::DeclarationFlags::new(),
-                    ),
-                    _ => (
-                        tsp::DeclarationCategory::VARIABLE,
-                        tsp::DeclarationFlags::new().with_class_member(),
-                    ),
-                },
+                ) => Self::symbol_kind_to_tsp_category_with_class_member(symbol_kind),
                 _ => (
                     tsp::DeclarationCategory::VARIABLE,
                     tsp::DeclarationFlags::new(),
@@ -217,32 +146,10 @@ impl Server {
 
             // Extract module name from the definition's module (where the symbol is actually defined)
             let definition_module_name = definition_module.name();
-            let module_parts: Vec<String> = definition_module_name
-                .as_str()
-                .split('.')
-                .map(|s| s.to_owned())
-                .collect();
-            let module_name = tsp::ModuleName {
-                leading_dots: 0,
-                name_parts: module_parts.clone(),
-            };
+            let module_name = Self::create_tsp_module_name(definition_module_name.as_str());
 
             // Check if this is from builtins and update category/flags accordingly
-            let (category, flags) = if module_parts
-                .first()
-                .is_some_and(|first| first == "builtins")
-            {
-                match category {
-                    tsp::DeclarationCategory::FUNCTION
-                    | tsp::DeclarationCategory::CLASS
-                    | tsp::DeclarationCategory::VARIABLE => {
-                        (tsp::DeclarationCategory::INTRINSIC, flags)
-                    }
-                    _ => (category, flags),
-                }
-            } else {
-                (category, flags)
-            };
+            let (category, flags) = Self::apply_builtins_category(category, flags, &module_name);
 
             // Create node pointing to the actual definition location using the same logic as goto_definition
             let definition_uri = module_info_to_uri(definition_module);

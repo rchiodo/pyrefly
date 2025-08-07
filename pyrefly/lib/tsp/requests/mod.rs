@@ -8,6 +8,7 @@
 //! TSP request implementations
 
 pub mod combine_types;
+pub mod common;
 pub mod create_instance_type;
 pub mod get_builtin_type;
 pub mod get_diagnostics;

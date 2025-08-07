@@ -35,11 +35,11 @@ fn test_get_symbols_for_file_serialization_deserialization() {
 
     // Test serialization
     let serialized = serde_json::to_string(&params).expect("Should serialize");
-    
+
     // Test deserialization
-    let deserialized: tsp::GetSymbolsForFileParams = serde_json::from_str(&serialized)
-        .expect("Should deserialize");
-    
+    let deserialized: tsp::GetSymbolsForFileParams =
+        serde_json::from_str(&serialized).expect("Should deserialize");
+
     assert_eq!(deserialized.uri, params.uri);
     assert_eq!(deserialized.snapshot, params.snapshot);
 }
@@ -48,20 +48,24 @@ fn test_get_symbols_for_file_serialization_deserialization() {
 fn test_file_symbol_info_construction() {
     let (_handle, uri, _state) = build_tsp_test_server();
 
-    let symbols = vec![
-        tsp::Symbol {
-            node: tsp::Node {
-                uri: uri.clone(),
-                range: lsp_types::Range {
-                    start: lsp_types::Position { line: 0, character: 0 },
-                    end: lsp_types::Position { line: 0, character: 5 },
+    let symbols = vec![tsp::Symbol {
+        node: tsp::Node {
+            uri: uri.clone(),
+            range: lsp_types::Range {
+                start: lsp_types::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: lsp_types::Position {
+                    line: 0,
+                    character: 5,
                 },
             },
-            name: "test_symbol".to_string(),
-            decls: vec![],
-            synthesized_types: vec![],
-        }
-    ];
+        },
+        name: "test_symbol".to_string(),
+        decls: vec![],
+        synthesized_types: vec![],
+    }];
 
     let file_symbol_info = tsp::FileSymbolInfo {
         uri: uri.clone(),
