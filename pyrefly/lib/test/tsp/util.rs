@@ -127,7 +127,7 @@ pub fn format_symbol_result(result: Option<tsp::Symbol>) -> String {
 
             output
         }
-        None => "No symbol found\n".to_string(),
+        None => "No symbol found\n".to_owned(),
     }
 }
 
@@ -140,14 +140,14 @@ pub fn format_type_result(result: Option<tsp::Type>) -> String {
                 typ.category, typ.name, typ.flags
             )
         }
-        None => "No type found\n".to_string(),
+        None => "No type found\n".to_owned(),
     }
 }
 
 /// Helper to format overloads result
 pub fn format_overloads_result(result: Vec<tsp::Type>) -> String {
     if result.is_empty() {
-        "No overloads found\n".to_string()
+        "No overloads found\n".to_owned()
     } else {
         let mut output = format!("Found {} overloads:\n", result.len());
         for (i, typ) in result.iter().enumerate() {
@@ -165,13 +165,13 @@ pub fn format_function_parts_result(result: Option<tsp::FunctionParts>) -> Strin
     match result {
         Some(parts) => {
             let mut output = String::new();
-            output.push_str(&format!("Function Parts:\n"));
+            output.push_str("Function Parts:\n");
 
             if !parts.params.is_empty() {
                 output.push_str("  Parameters:\n");
                 for (i, param) in parts.params.iter().enumerate() {
                     // Assume params are just strings for now - adjust based on actual TSP structure
-                    output.push_str(&format!("    {}: {}\n", i, param));
+                    output.push_str(&format!("    {i}: {param}\n"));
                 }
             }
 
@@ -181,7 +181,7 @@ pub fn format_function_parts_result(result: Option<tsp::FunctionParts>) -> Strin
 
             output
         }
-        None => "No function parts found\n".to_string(),
+        None => "No function parts found\n".to_owned(),
     }
 }
 
@@ -196,11 +196,11 @@ where
             let panic_msg = if let Some(msg) = panic_info.downcast_ref::<String>() {
                 msg.clone()
             } else if let Some(&msg) = panic_info.downcast_ref::<&str>() {
-                msg.to_string()
+                msg.to_owned()
             } else {
-                "Unknown panic occurred".to_string()
+                "Unknown panic occurred".to_owned()
             };
-            Err(format!("Test panicked: {}", panic_msg))
+            Err(format!("Test panicked: {panic_msg}"))
         }
     }
 }
@@ -208,15 +208,15 @@ where
 /// Format TSP search for type attribute result
 pub fn format_search_for_type_attribute_result(result: Option<tsp::Type>) -> String {
     match result {
-        Some(res) => format!("Search results: {:?}", res),
-        None => "No search results found".to_string(),
+        Some(res) => format!("Search results: {res:?}"),
+        None => "No search results found".to_owned(),
     }
 }
 
 /// Format TSP Python search paths result
 pub fn format_search_paths_result(result: Vec<Url>) -> String {
     if result.is_empty() {
-        "No search paths found".to_string()
+        "No search paths found".to_owned()
     } else {
         format!("Search Paths: {} paths found", result.len())
     }
@@ -225,8 +225,8 @@ pub fn format_search_paths_result(result: Vec<Url>) -> String {
 /// Format TSP import declaration result
 pub fn format_import_declaration_result(result: Option<tsp::Declaration>) -> String {
     match result {
-        Some(res) => format!("Import Resolution: {:?}", res),
-        None => "No resolution found".to_string(),
+        Some(res) => format!("Import Resolution: {res:?}"),
+        None => "No resolution found".to_owned(),
     }
 }
 
@@ -241,12 +241,12 @@ pub fn format_type_of_declaration_result(result: tsp::Type) -> String {
 /// Format TSP docstring result
 pub fn format_docstring_result(result: Option<String>) -> String {
     match result {
-        Some(res) => format!("Docstring: {}", res),
-        None => "No docstring found".to_string(),
+        Some(res) => format!("Docstring: {res}"),
+        None => "No docstring found".to_owned(),
     }
 }
 
 /// Format TSP diagnostics version result
 pub fn format_diagnostics_version_result(result: u32) -> String {
-    format!("Diagnostics Version: {}", result)
+    format!("Diagnostics Version: {result}")
 }

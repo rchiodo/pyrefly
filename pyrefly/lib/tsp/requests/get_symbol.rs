@@ -230,7 +230,7 @@ impl Server {
             // Check if this is from builtins and update category/flags accordingly
             let (category, flags) = if module_parts
                 .first()
-                .map_or(false, |first| first == "builtins")
+                .is_some_and(|first| first == "builtins")
             {
                 match category {
                     tsp::DeclarationCategory::FUNCTION

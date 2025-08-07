@@ -1,6 +1,3 @@
-use lsp_types::Position;
-use lsp_types::Url;
-
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::tsp::util::extract_cursor_location;
 use crate::tsp;
@@ -35,6 +32,6 @@ my_function()
 
     // Just test that we can construct the parameters correctly
     assert_eq!(params.snapshot, 1);
-    assert_eq!(params.skip_unreachable_code, false);
+    assert!(!params.skip_unreachable_code);
     assert!(params.name.is_none());
 }

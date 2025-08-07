@@ -94,18 +94,18 @@ impl Server {
         let tsp_type = get_type(active_transaction, &handle, &module_info, &params);
 
         // Register the type in the lookup table (Server-specific functionality)
-        if let Some(ref tsp_type) = tsp_type {
-            if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-                // Extract the pyrefly type from the TSP type for registration
-                if let Some(pyrefly_type) = active_transaction.get_type_at(
-                    &handle,
-                    module_info
-                        .lined_buffer()
-                        .from_lsp_position(params.node.range.start),
-                ) {
-                    self.state
-                        .register_type_handle(handle_str.clone(), pyrefly_type);
-                }
+        if let Some(ref tsp_type) = tsp_type
+            && let tsp::TypeHandle::String(handle_str) = &tsp_type.handle
+        {
+            // Extract the pyrefly type from the TSP type for registration
+            if let Some(pyrefly_type) = active_transaction.get_type_at(
+                &handle,
+                module_info
+                    .lined_buffer()
+                    .from_lsp_position(params.node.range.start),
+            ) {
+                self.state
+                    .register_type_handle(handle_str.clone(), pyrefly_type);
             }
         }
 

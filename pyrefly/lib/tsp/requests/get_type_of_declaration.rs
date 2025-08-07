@@ -80,15 +80,14 @@ impl Server {
                     // If we can't get type info from the position, try alternative approaches
 
                     // For imports, we might need to resolve the imported symbol first
-                    if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                        if let Ok(Some(import_type)) = self
+                    if params.decl.category == tsp::DeclarationCategory::IMPORT
+                        && let Ok(Some(import_type)) = self
                             .get_type_for_import_declaration_with_fresh_transaction(
                                 &mut fresh_transaction,
                                 &params,
                             )
-                        {
-                            return Ok(import_type);
-                        }
+                    {
+                        return Ok(import_type);
                     }
 
                     // If still no type found, create a generic type based on the declaration category
@@ -110,12 +109,11 @@ impl Server {
             // If we can't get type info from the position, try alternative approaches
 
             // For imports, we might need to resolve the imported symbol first
-            if params.decl.category == tsp::DeclarationCategory::IMPORT {
-                if let Ok(Some(import_type)) =
+            if params.decl.category == tsp::DeclarationCategory::IMPORT
+                && let Ok(Some(import_type)) =
                     self.get_type_for_import_declaration(transaction, &params)
-                {
-                    return Ok(import_type);
-                }
+            {
+                return Ok(import_type);
             }
 
             // If still no type found, create a generic type based on the declaration category
@@ -140,23 +138,20 @@ impl Server {
 
         if let Ok(Some(resolved_decl)) =
             self.resolve_import_declaration(transaction, resolve_params)
+            && let Some(resolved_node) = &resolved_decl.node
         {
-            if let Some(resolved_node) = &resolved_decl.node {
-                let resolved_uri = &resolved_node.uri;
+            let resolved_uri = &resolved_node.uri;
 
-                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
-                    // Get module info for the resolved declaration to convert position
-                    if let Some(resolved_module_info) =
-                        transaction.get_module_info(&resolved_handle)
+            if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                // Get module info for the resolved declaration to convert position
+                if let Some(resolved_module_info) = transaction.get_module_info(&resolved_handle) {
+                    let resolved_position = resolved_module_info
+                        .lined_buffer()
+                        .from_lsp_position(resolved_node.range.start);
+                    if let Some(resolved_type) =
+                        transaction.get_type_at(&resolved_handle, resolved_position)
                     {
-                        let resolved_position = resolved_module_info
-                            .lined_buffer()
-                            .from_lsp_position(resolved_node.range.start);
-                        if let Some(resolved_type) =
-                            transaction.get_type_at(&resolved_handle, resolved_position)
-                        {
-                            return Ok(Some(self.convert_and_register_type(resolved_type)));
-                        }
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
                     }
                 }
             }
@@ -179,29 +174,28 @@ impl Server {
 
         if let Ok(Some(resolved_decl)) =
             self.resolve_import_declaration(fresh_transaction, resolve_params)
+            && let Some(resolved_node) = &resolved_decl.node
         {
-            if let Some(resolved_node) = &resolved_decl.node {
-                let resolved_uri = &resolved_node.uri;
+            let resolved_uri = &resolved_node.uri;
 
-                if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
-                    // Make sure the resolved module is also loaded
-                    fresh_transaction.run(&[(
-                        resolved_handle.clone(),
-                        crate::state::require::Require::Everything,
-                    )]);
+            if let Some(resolved_handle) = self.make_handle_if_enabled(resolved_uri) {
+                // Make sure the resolved module is also loaded
+                fresh_transaction.run(&[(
+                    resolved_handle.clone(),
+                    crate::state::require::Require::Everything,
+                )]);
 
-                    // Get module info for the resolved declaration to convert position
-                    if let Some(resolved_module_info) =
-                        fresh_transaction.get_module_info(&resolved_handle)
+                // Get module info for the resolved declaration to convert position
+                if let Some(resolved_module_info) =
+                    fresh_transaction.get_module_info(&resolved_handle)
+                {
+                    let resolved_position = resolved_module_info
+                        .lined_buffer()
+                        .from_lsp_position(resolved_node.range.start);
+                    if let Some(resolved_type) =
+                        fresh_transaction.get_type_at(&resolved_handle, resolved_position)
                     {
-                        let resolved_position = resolved_module_info
-                            .lined_buffer()
-                            .from_lsp_position(resolved_node.range.start);
-                        if let Some(resolved_type) =
-                            fresh_transaction.get_type_at(&resolved_handle, resolved_position)
-                        {
-                            return Ok(Some(self.convert_and_register_type(resolved_type)));
-                        }
+                        return Ok(Some(self.convert_and_register_type(resolved_type)));
                     }
                 }
             }

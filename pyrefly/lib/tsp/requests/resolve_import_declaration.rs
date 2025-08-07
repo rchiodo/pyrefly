@@ -127,10 +127,10 @@ impl Server {
 
         // Look for function, class, or variable definitions of the imported name
         let patterns = [
-            format!("def {}(", import_name),   // Function definition
-            format!("class {}(", import_name), // Class definition
-            format!("class {}:", import_name), // Class definition without inheritance
-            format!("{} =", import_name),      // Variable assignment
+            format!("def {import_name}("),   // Function definition
+            format!("class {import_name}("), // Class definition
+            format!("class {import_name}:"), // Class definition without inheritance
+            format!("{import_name} ="),      // Variable assignment
         ];
 
         let mut found_position = None;

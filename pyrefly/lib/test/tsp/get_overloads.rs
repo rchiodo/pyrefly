@@ -21,14 +21,14 @@ use crate::tsp;
 fn test_get_overloads_params_construction() {
     // Test basic parameter construction
     let type_param = tsp::Type {
-        handle: tsp::TypeHandle::String("test_overloaded_function".to_string()),
+        handle: tsp::TypeHandle::String("test_overloaded_function".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["mymodule".to_string()],
+            name_parts: vec!["mymodule".to_owned()],
         }),
-        name: "overloaded_func".to_string(),
+        name: "overloaded_func".to_owned(),
         category_flags: 0,
         decl: Some(serde_json::json!({
             "kind": "function",
@@ -55,14 +55,14 @@ fn test_get_overloads_params_construction() {
 fn test_get_overloads_different_type_categories() {
     // Test with OVERLOADED category (expected case)
     let overloaded_type = tsp::Type {
-        handle: tsp::TypeHandle::String("overloaded_handle".to_string()),
+        handle: tsp::TypeHandle::String("overloaded_handle".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "overloaded_function".to_string(),
+        name: "overloaded_function".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -74,14 +74,14 @@ fn test_get_overloads_different_type_categories() {
 
     // Test with FUNCTION category (should not have overloads)
     let function_type = tsp::Type {
-        handle: tsp::TypeHandle::String("function_handle".to_string()),
+        handle: tsp::TypeHandle::String("function_handle".to_owned()),
         category: tsp::TypeCategory::FUNCTION,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "simple_function".to_string(),
+        name: "simple_function".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -93,11 +93,11 @@ fn test_get_overloads_different_type_categories() {
 
     // Test with ANY category (should not have overloads)
     let any_type = tsp::Type {
-        handle: tsp::TypeHandle::String("any_handle".to_string()),
+        handle: tsp::TypeHandle::String("any_handle".to_owned()),
         category: tsp::TypeCategory::ANY,
         flags: tsp::TypeFlags::new(),
         module_name: None,
-        name: "any_type".to_string(),
+        name: "any_type".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -123,14 +123,14 @@ fn test_get_overloads_different_type_categories() {
 fn test_get_overloads_type_handle_variants() {
     // Test with String handle
     let string_handle_type = tsp::Type {
-        handle: tsp::TypeHandle::String("string_handle_123".to_string()),
+        handle: tsp::TypeHandle::String("string_handle_123".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["module".to_string()],
+            name_parts: vec!["module".to_owned()],
         }),
-        name: "string_handle_func".to_string(),
+        name: "string_handle_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -147,9 +147,9 @@ fn test_get_overloads_type_handle_variants() {
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["module".to_string()],
+            name_parts: vec!["module".to_owned()],
         }),
-        name: "integer_handle_func".to_string(),
+        name: "integer_handle_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -176,58 +176,58 @@ fn test_get_overloads_module_name_variants() {
     // Test with simple module name
     let simple_module = tsp::ModuleName {
         leading_dots: 0,
-        name_parts: vec!["simple".to_string()],
+        name_parts: vec!["simple".to_owned()],
     };
 
     // Test with nested module name
     let nested_module = tsp::ModuleName {
         leading_dots: 0,
-        name_parts: vec!["package".to_string(), "submodule".to_string()],
+        name_parts: vec!["package".to_owned(), "submodule".to_owned()],
     };
 
     // Test with relative import (leading dots)
     let relative_module = tsp::ModuleName {
         leading_dots: 2,
-        name_parts: vec!["relative".to_string()],
+        name_parts: vec!["relative".to_owned()],
     };
 
     // Test with no module name (None)
     let type_no_module = tsp::Type {
-        handle: tsp::TypeHandle::String("no_module".to_string()),
+        handle: tsp::TypeHandle::String("no_module".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: None,
-        name: "builtin_function".to_string(),
+        name: "builtin_function".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_simple = tsp::Type {
-        handle: tsp::TypeHandle::String("simple".to_string()),
+        handle: tsp::TypeHandle::String("simple".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(simple_module.clone()),
-        name: "simple_func".to_string(),
+        name: "simple_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_nested = tsp::Type {
-        handle: tsp::TypeHandle::String("nested".to_string()),
+        handle: tsp::TypeHandle::String("nested".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(nested_module.clone()),
-        name: "nested_func".to_string(),
+        name: "nested_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_relative = tsp::Type {
-        handle: tsp::TypeHandle::String("relative".to_string()),
+        handle: tsp::TypeHandle::String("relative".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(relative_module.clone()),
-        name: "relative_func".to_string(),
+        name: "relative_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -273,28 +273,28 @@ fn test_get_overloads_module_name_variants() {
 fn test_get_overloads_flags_handling() {
     // Test with no flags
     let no_flags_type = tsp::Type {
-        handle: tsp::TypeHandle::String("no_flags".to_string()),
+        handle: tsp::TypeHandle::String("no_flags".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "no_flags_func".to_string(),
+        name: "no_flags_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     // Test with some flags set
     let with_flags_type = tsp::Type {
-        handle: tsp::TypeHandle::String("with_flags".to_string()),
+        handle: tsp::TypeHandle::String("with_flags".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new().with_callable(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "callable_func".to_string(),
+        name: "callable_func".to_owned(),
         category_flags: 1, // Some category flags
         decl: None,
     };
@@ -321,28 +321,28 @@ fn test_get_overloads_flags_handling() {
 fn test_get_overloads_declaration_handling() {
     // Test with null declaration
     let null_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("null_decl".to_string()),
+        handle: tsp::TypeHandle::String("null_decl".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "null_decl_func".to_string(),
+        name: "null_decl_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     // Test with simple declaration
     let simple_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("simple_decl".to_string()),
+        handle: tsp::TypeHandle::String("simple_decl".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "simple_decl_func".to_string(),
+        name: "simple_decl_func".to_owned(),
         category_flags: 0,
         decl: Some(serde_json::json!({
             "kind": "function",
@@ -353,14 +353,14 @@ fn test_get_overloads_declaration_handling() {
 
     // Test with complex declaration
     let complex_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("complex_decl".to_string()),
+        handle: tsp::TypeHandle::String("complex_decl".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["complex".to_string(), "module".to_string()],
+            name_parts: vec!["complex".to_owned(), "module".to_owned()],
         }),
-        name: "complex_func".to_string(),
+        name: "complex_func".to_owned(),
         category_flags: 0,
         decl: Some(serde_json::json!({
             "kind": "overloaded_function",
@@ -408,14 +408,14 @@ fn test_get_overloads_declaration_handling() {
 fn test_get_overloads_snapshot_validation() {
     // Test with different snapshot values
     let type_param = tsp::Type {
-        handle: tsp::TypeHandle::String("snapshot_test".to_string()),
+        handle: tsp::TypeHandle::String("snapshot_test".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "snapshot_func".to_string(),
+        name: "snapshot_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -449,14 +449,14 @@ fn test_get_overloads_serialization_deserialization() {
     // Test that parameters can be properly serialized and deserialized
     let original_params = tsp::GetOverloadsParams {
         type_param: tsp::Type {
-            handle: tsp::TypeHandle::String("serialization_test".to_string()),
+            handle: tsp::TypeHandle::String("serialization_test".to_owned()),
             category: tsp::TypeCategory::OVERLOADED,
             flags: tsp::TypeFlags::new().with_callable(),
             module_name: Some(tsp::ModuleName {
                 leading_dots: 1,
-                name_parts: vec!["serialization".to_string(), "test".to_string()],
+                name_parts: vec!["serialization".to_owned(), "test".to_owned()],
             }),
-            name: "serializable_func".to_string(),
+            name: "serializable_func".to_owned(),
             category_flags: 2,
             decl: Some(serde_json::json!({
                 "kind": "overloaded_function",

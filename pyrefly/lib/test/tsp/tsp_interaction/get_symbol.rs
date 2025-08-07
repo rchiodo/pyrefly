@@ -21,7 +21,6 @@ use tempfile::TempDir;
 use crate::commands::lsp::IndexingMode;
 use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::get_test_files_root;
 use crate::test::lsp::lsp_interaction::util::run_test_lsp;
 
 #[test]

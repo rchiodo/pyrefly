@@ -77,7 +77,7 @@ impl Server {
 
         // Convert string attribute name to ruff_python_ast::name::Name
         use ruff_python_ast::name::Name;
-        let attr_name = Name::new(attribute_name.to_owned());
+        let attr_name = Name::new(attribute_name);
 
         // Get the module info from the class type
         let class_qname = class_type.class_object().qname();

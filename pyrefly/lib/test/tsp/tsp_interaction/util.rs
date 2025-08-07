@@ -25,7 +25,6 @@ use lsp_types::Url;
 use lsp_types::notification::DidOpenTextDocument;
 use lsp_types::notification::Exit;
 use lsp_types::notification::Notification as _;
-use pretty_assertions::assert_eq;
 use regex::Regex;
 use tempfile::TempDir;
 
@@ -110,7 +109,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                 let send = || {
                     eprintln!("client--->server {}", serde_json::to_string(&substituted_msg).unwrap());
                     if let Err(err) = language_server_sender.send_timeout(substituted_msg.clone(), timeout) {
-                        panic!("Failed to send message to language server: {:?}", err);
+                        panic!("Failed to send message to language server: {err:?}");
                     }
                 };
 
@@ -123,7 +122,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                             // Continue to next message
                         } else {
                             stop_language_server();
-                            panic!("Did not receive response for request {:?}", id);
+                            panic!("Did not receive response for request {id:?}");
                         }
                     }
                     Message::Notification(_) => send(),
@@ -134,8 +133,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                         } else {
                             stop_language_server();
                             panic!(
-                                "language client received request {}, expecting to send response for {}",
-                                request_id, response_id
+                                "language client received request {request_id}, expecting to send response for {response_id}"
                             );
                         }
                     }
@@ -168,7 +166,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                                 if let Err(err) =
                                     match_with_capture(&expected, &msg, &mut captured_vars)
                                 {
-                                    panic!("Response mismatch: {}", err);
+                                    panic!("Response mismatch: {err}");
                                 }
                                 drop(captured_vars); // Release the lock
 
@@ -184,7 +182,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                                 if let Err(err) =
                                     match_with_capture(&expected, &msg, &mut captured_vars)
                                 {
-                                    panic!("Request mismatch: {}", err);
+                                    panic!("Request mismatch: {err}");
                                 }
                                 drop(captured_vars); // Release the lock
 
@@ -193,10 +191,10 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                         }
                     }
                     Err(RecvTimeoutError::Timeout) => {
-                        panic!("Timeout waiting for response. Expected {:?}.", responses);
+                        panic!("Timeout waiting for response. Expected {responses:?}.");
                     }
                     Err(RecvTimeoutError::Disconnected) => {
-                        panic!("Channel disconnected. Expected {:?}.", responses);
+                        panic!("Channel disconnected. Expected {responses:?}.");
                     }
                 }
             }
@@ -242,9 +240,9 @@ fn match_with_capture(
     captured_variables: &mut HashMap<String, serde_json::Value>,
 ) -> Result<(), String> {
     let expected_str = serde_json::to_string(expected)
-        .map_err(|e| format!("Failed to serialize expected: {}", e))?;
+        .map_err(|e| format!("Failed to serialize expected: {e}"))?;
     let actual_str =
-        serde_json::to_string(actual).map_err(|e| format!("Failed to serialize actual: {}", e))?;
+        serde_json::to_string(actual).map_err(|e| format!("Failed to serialize actual: {e}"))?;
 
     match_json_with_capture(&expected_str, &actual_str, captured_variables)
 }
@@ -262,9 +260,9 @@ fn match_json_with_capture(
 
     // Parse both as JSON for structured comparison
     let expected_json: serde_json::Value =
-        serde_json::from_str(expected).map_err(|e| format!("Invalid expected JSON: {}", e))?;
+        serde_json::from_str(expected).map_err(|e| format!("Invalid expected JSON: {e}"))?;
     let actual_json: serde_json::Value =
-        serde_json::from_str(actual).map_err(|e| format!("Invalid actual JSON: {}", e))?;
+        serde_json::from_str(actual).map_err(|e| format!("Invalid actual JSON: {e}"))?;
 
     match_json_values(&expected_json, &actual_json, captured_variables)
 }
@@ -282,7 +280,7 @@ fn match_json_values(
             if let Some(caps) = capture_regex.captures(expected_str) {
                 let var_name = caps[1].to_string();
                 captured_variables.insert(var_name.clone(), actual.clone());
-                eprintln!("Captured variable {}: {}", var_name, actual);
+                eprintln!("Captured variable {var_name}: {actual}");
                 return Ok(());
             }
 
@@ -298,14 +296,12 @@ fn match_json_values(
                         Ok(())
                     } else {
                         Err(format!(
-                            "String mismatch: expected '{}', got '{}'",
-                            expected_str, actual_str
+                            "String mismatch: expected '{expected_str}', got '{actual_str}'"
                         ))
                     }
                 }
                 _ => Err(format!(
-                    "Type mismatch: expected string '{}', got {:?}",
-                    expected_str, actual
+                    "Type mismatch: expected string '{expected_str}', got {actual:?}"
                 )),
             }
         }
@@ -317,13 +313,13 @@ fn match_json_values(
                             match_json_values(expected_value, actual_value, captured_variables)?;
                         }
                         None => {
-                            return Err(format!("Missing key '{}' in actual object", key));
+                            return Err(format!("Missing key '{key}' in actual object"));
                         }
                     }
                 }
                 Ok(())
             }
-            _ => Err(format!("Type mismatch: expected object, got {:?}", actual)),
+            _ => Err(format!("Type mismatch: expected object, got {actual:?}")),
         },
         serde_json::Value::Array(expected_arr) => match actual {
             serde_json::Value::Array(actual_arr) => {
@@ -338,18 +334,18 @@ fn match_json_values(
                     expected_arr.iter().zip(actual_arr.iter()).enumerate()
                 {
                     // Special case: if expected item is $$MATCH_EVERYTHING$$ string, allow any actual item
-                    if let serde_json::Value::String(s) = expected_item {
-                        if s == "$$MATCH_EVERYTHING$$" {
-                            continue; // Skip validation for this array element
-                        }
+                    if let serde_json::Value::String(s) = expected_item
+                        && s == "$$MATCH_EVERYTHING$$"
+                    {
+                        continue; // Skip validation for this array element
                     }
 
                     match_json_values(expected_item, actual_item, captured_variables)
-                        .map_err(|e| format!("Array index {}: {}", i, e))?;
+                        .map_err(|e| format!("Array index {i}: {e}"))?;
                 }
                 Ok(())
             }
-            _ => Err(format!("Type mismatch: expected array, got {:?}", actual)),
+            _ => Err(format!("Type mismatch: expected array, got {actual:?}")),
         },
         _ => {
             // For numbers, booleans, null - direct comparison
@@ -357,8 +353,7 @@ fn match_json_values(
                 Ok(())
             } else {
                 Err(format!(
-                    "Value mismatch: expected {:?}, got {:?}",
-                    expected, actual
+                    "Value mismatch: expected {expected:?}, got {actual:?}"
                 ))
             }
         }

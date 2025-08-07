@@ -22,7 +22,7 @@ fn test_resolve_import_declaration_params_construction() {
 
     // Test basic parameter construction
     let declaration = tsp::Declaration {
-        handle: tsp::TypeHandle::String("test_handle".to_string()),
+        handle: tsp::TypeHandle::String("test_handle".to_owned()),
         category: tsp::DeclarationCategory::IMPORT,
         flags: tsp::DeclarationFlags::new(),
         node: Some(tsp::Node {
@@ -40,9 +40,9 @@ fn test_resolve_import_declaration_params_construction() {
         }),
         module_name: tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test_module".to_string()],
+            name_parts: vec!["test_module".to_owned()],
         },
-        name: "imported_symbol".to_string(),
+        name: "imported_symbol".to_owned(),
         uri: uri.clone(),
     };
 
@@ -80,15 +80,15 @@ fn test_resolve_import_declaration_default_options() {
     assert_eq!(default_options.skip_file_needed_check, Some(false));
 
     let declaration = tsp::Declaration {
-        handle: tsp::TypeHandle::String("test_handle".to_string()),
+        handle: tsp::TypeHandle::String("test_handle".to_owned()),
         category: tsp::DeclarationCategory::FUNCTION,
         flags: tsp::DeclarationFlags::new(),
         node: None,
         module_name: tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test_module".to_string()],
+            name_parts: vec!["test_module".to_owned()],
         },
-        name: "my_function".to_string(),
+        name: "my_function".to_owned(),
         uri,
     };
 
@@ -117,7 +117,7 @@ fn test_resolve_import_declaration_different_categories() {
 
     for (category, name) in categories {
         let declaration = tsp::Declaration {
-            handle: tsp::TypeHandle::String(format!("handle_{}", name)),
+            handle: tsp::TypeHandle::String(format!("handle_{name}")),
             category,
             flags: tsp::DeclarationFlags::new(),
             node: Some(tsp::Node {
@@ -135,9 +135,9 @@ fn test_resolve_import_declaration_different_categories() {
             }),
             module_name: tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["test_module".to_string()],
+                name_parts: vec!["test_module".to_owned()],
             },
-            name: name.to_string(),
+            name: name.to_owned(),
             uri: uri.clone(),
         };
 
@@ -162,7 +162,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         (
             tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["os".to_string()],
+                name_parts: vec!["os".to_owned()],
             },
             "os module",
         ),
@@ -170,7 +170,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         (
             tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["os".to_string(), "path".to_string()],
+                name_parts: vec!["os".to_owned(), "path".to_owned()],
             },
             "os.path module",
         ),
@@ -178,7 +178,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         (
             tsp::ModuleName {
                 leading_dots: 1,
-                name_parts: vec!["utils".to_string()],
+                name_parts: vec!["utils".to_owned()],
             },
             "relative utils",
         ),
@@ -186,7 +186,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         (
             tsp::ModuleName {
                 leading_dots: 2,
-                name_parts: vec!["shared".to_string(), "helpers".to_string()],
+                name_parts: vec!["shared".to_owned(), "helpers".to_owned()],
             },
             "deeply relative",
         ),
@@ -207,7 +207,7 @@ fn test_resolve_import_declaration_module_name_variants() {
             flags: tsp::DeclarationFlags::new(),
             node: None,
             module_name: module_name.clone(),
-            name: "imported_item".to_string(),
+            name: "imported_item".to_owned(),
             uri: uri.clone(),
         };
 
@@ -247,15 +247,15 @@ fn test_resolve_import_declaration_flags_handling() {
 
     for (flags, description) in flag_variants {
         let declaration = tsp::Declaration {
-            handle: tsp::TypeHandle::String(format!("handle_{}", description)),
+            handle: tsp::TypeHandle::String(format!("handle_{description}")),
             category: tsp::DeclarationCategory::IMPORT,
-            flags: flags.clone(),
+            flags,
             node: None,
             module_name: tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["test".to_string()],
+                name_parts: vec!["test".to_owned()],
             },
-            name: "symbol".to_string(),
+            name: "symbol".to_owned(),
             uri: uri.clone(),
         };
 
@@ -286,7 +286,7 @@ fn test_resolve_import_declaration_uri_handling() {
 
     for test_uri in uri_variants {
         let declaration = tsp::Declaration {
-            handle: tsp::TypeHandle::String("test_handle".to_string()),
+            handle: tsp::TypeHandle::String("test_handle".to_owned()),
             category: tsp::DeclarationCategory::IMPORT,
             flags: tsp::DeclarationFlags::new(),
             node: Some(tsp::Node {
@@ -304,9 +304,9 @@ fn test_resolve_import_declaration_uri_handling() {
             }),
             module_name: tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["test".to_string()],
+                name_parts: vec!["test".to_owned()],
             },
-            name: "symbol".to_string(),
+            name: "symbol".to_owned(),
             uri: test_uri.clone(),
         };
 
@@ -327,7 +327,7 @@ fn test_resolve_import_declaration_node_handling() {
 
     // Test with node present
     let with_node = tsp::Declaration {
-        handle: tsp::TypeHandle::String("with_node".to_string()),
+        handle: tsp::TypeHandle::String("with_node".to_owned()),
         category: tsp::DeclarationCategory::IMPORT,
         flags: tsp::DeclarationFlags::new(),
         node: Some(tsp::Node {
@@ -345,23 +345,23 @@ fn test_resolve_import_declaration_node_handling() {
         }),
         module_name: tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         },
-        name: "symbol".to_string(),
+        name: "symbol".to_owned(),
         uri: uri.clone(),
     };
 
     // Test with node absent
     let without_node = tsp::Declaration {
-        handle: tsp::TypeHandle::String("without_node".to_string()),
+        handle: tsp::TypeHandle::String("without_node".to_owned()),
         category: tsp::DeclarationCategory::IMPORT,
         flags: tsp::DeclarationFlags::new(),
         node: None,
         module_name: tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         },
-        name: "symbol".to_string(),
+        name: "symbol".to_owned(),
         uri: uri.clone(),
     };
 

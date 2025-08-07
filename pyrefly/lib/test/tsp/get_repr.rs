@@ -1,6 +1,3 @@
-use lsp_types::Position;
-use lsp_types::Url;
-
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::tsp::util::extract_cursor_location;
 use crate::tsp;
@@ -19,11 +16,11 @@ print(x)
 
     let params = tsp::GetReprParams {
         type_param: tsp::Type {
-            handle: tsp::TypeHandle::String("test".to_string()),
+            handle: tsp::TypeHandle::String("test".to_owned()),
             category: tsp::TypeCategory::ANY,
             flags: tsp::TypeFlags::new(),
             module_name: None,
-            name: "str".to_string(),
+            name: "str".to_owned(),
             category_flags: 0,
             decl: None,
         },

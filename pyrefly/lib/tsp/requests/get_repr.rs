@@ -50,11 +50,11 @@ impl Server {
                         crate::types::class::ClassType::new(class.clone(), empty_targs);
                     format!("{}", crate::types::types::Type::ClassType(class_type))
                 }
-                _ => format!("{}", internal_type),
+                _ => format!("{internal_type}"),
             }
         } else {
             // Standard type representation
-            format!("{}", internal_type)
+            format!("{internal_type}")
         };
 
         // Apply additional formatting based on flags
@@ -139,11 +139,12 @@ fn format_type_representation(type_param: &tsp::Type, flags: tsp::TypeReprFlags)
     }
 
     // Add module information if available and it's not a builtin
-    if let Some(module_name) = &type_param.module_name {
-        if !module_name.name_parts.is_empty() && module_name.name_parts[0] != "builtins" {
-            let module_path = module_name.name_parts.join(".");
-            result = format!("{}.{}", module_path, result);
-        }
+    if let Some(module_name) = &type_param.module_name
+        && !module_name.name_parts.is_empty()
+        && module_name.name_parts[0] != "builtins"
+    {
+        let module_path = module_name.name_parts.join(".");
+        result = format!("{module_path}.{result}");
     }
 
     result

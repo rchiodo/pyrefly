@@ -26,14 +26,14 @@ use crate::tsp;
 fn test_search_for_type_attribute_params_construction() {
     // Test basic parameter construction
     let start_type = tsp::Type {
-        handle: tsp::TypeHandle::String("test_class_type".to_string()),
+        handle: tsp::TypeHandle::String("test_class_type".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["mymodule".to_string()],
+            name_parts: vec!["mymodule".to_owned()],
         }),
-        name: "MyClass".to_string(),
+        name: "MyClass".to_owned(),
         category_flags: 0,
         decl: Some(serde_json::json!({
             "kind": "class",
@@ -43,7 +43,7 @@ fn test_search_for_type_attribute_params_construction() {
 
     let params = tsp::SearchForTypeAttributeParams {
         start_type: start_type.clone(),
-        attribute_name: "my_method".to_string(),
+        attribute_name: "my_method".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -67,21 +67,21 @@ fn test_search_for_type_attribute_params_construction() {
 fn test_search_for_type_attribute_different_start_types() {
     // Test with CLASS category (expected case)
     let class_type = tsp::Type {
-        handle: tsp::TypeHandle::String("class_handle".to_string()),
+        handle: tsp::TypeHandle::String("class_handle".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["models".to_string()],
+            name_parts: vec!["models".to_owned()],
         }),
-        name: "User".to_string(),
+        name: "User".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_class = tsp::SearchForTypeAttributeParams {
         start_type: class_type,
-        attribute_name: "name".to_string(),
+        attribute_name: "name".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -90,21 +90,21 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Test with FUNCTION category (should not have attributes typically)
     let function_type = tsp::Type {
-        handle: tsp::TypeHandle::String("function_handle".to_string()),
+        handle: tsp::TypeHandle::String("function_handle".to_owned()),
         category: tsp::TypeCategory::FUNCTION,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["utils".to_string()],
+            name_parts: vec!["utils".to_owned()],
         }),
-        name: "helper_function".to_string(),
+        name: "helper_function".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_function = tsp::SearchForTypeAttributeParams {
         start_type: function_type,
-        attribute_name: "__name__".to_string(),
+        attribute_name: "__name__".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -113,18 +113,18 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Test with OVERLOADED category
     let overloaded_type = tsp::Type {
-        handle: tsp::TypeHandle::String("overloaded_handle".to_string()),
+        handle: tsp::TypeHandle::String("overloaded_handle".to_owned()),
         category: tsp::TypeCategory::OVERLOADED,
         flags: tsp::TypeFlags::new(),
         module_name: None,
-        name: "overloaded_func".to_string(),
+        name: "overloaded_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_overloaded = tsp::SearchForTypeAttributeParams {
         start_type: overloaded_type,
-        attribute_name: "__call__".to_string(),
+        attribute_name: "__call__".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -146,14 +146,14 @@ fn test_search_for_type_attribute_different_start_types() {
 #[test]
 fn test_search_for_type_attribute_attribute_name_variants() {
     let base_type = tsp::Type {
-        handle: tsp::TypeHandle::String("test_type".to_string()),
+        handle: tsp::TypeHandle::String("test_type".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "TestClass".to_string(),
+        name: "TestClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -161,7 +161,7 @@ fn test_search_for_type_attribute_attribute_name_variants() {
     // Test with regular method name
     let params_method = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "regular_method".to_string(),
+        attribute_name: "regular_method".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -171,7 +171,7 @@ fn test_search_for_type_attribute_attribute_name_variants() {
     // Test with dunder method
     let params_dunder = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "__init__".to_string(),
+        attribute_name: "__init__".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -181,7 +181,7 @@ fn test_search_for_type_attribute_attribute_name_variants() {
     // Test with property
     let params_property = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "my_property".to_string(),
+        attribute_name: "my_property".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -191,7 +191,7 @@ fn test_search_for_type_attribute_attribute_name_variants() {
     // Test with private attribute
     let params_private = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "_private_attr".to_string(),
+        attribute_name: "_private_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -201,7 +201,7 @@ fn test_search_for_type_attribute_attribute_name_variants() {
     // Test with mangled attribute
     let params_mangled = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "__very_private".to_string(),
+        attribute_name: "__very_private".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -219,14 +219,14 @@ fn test_search_for_type_attribute_attribute_name_variants() {
 #[test]
 fn test_search_for_type_attribute_access_flags() {
     let base_type = tsp::Type {
-        handle: tsp::TypeHandle::String("test_type".to_string()),
+        handle: tsp::TypeHandle::String("test_type".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "TestClass".to_string(),
+        name: "TestClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -234,7 +234,7 @@ fn test_search_for_type_attribute_access_flags() {
     // Test with NONE flags
     let params_none = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -244,7 +244,7 @@ fn test_search_for_type_attribute_access_flags() {
     // Test with SKIP_INSTANCE_ATTRIBUTES flag
     let params_skip_instance = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES,
         expression_node: None,
         instance_type: None,
@@ -254,7 +254,7 @@ fn test_search_for_type_attribute_access_flags() {
     // Test with SKIP_TYPE_BASE_CLASS flag
     let params_skip_base = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::SKIP_TYPE_BASE_CLASS,
         expression_node: None,
         instance_type: None,
@@ -268,7 +268,7 @@ fn test_search_for_type_attribute_access_flags() {
     );
     let params_combined = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: combined_flags,
         expression_node: None,
         instance_type: None,
@@ -285,14 +285,14 @@ fn test_search_for_type_attribute_access_flags() {
 #[test]
 fn test_search_for_type_attribute_optional_parameters() {
     let base_type = tsp::Type {
-        handle: tsp::TypeHandle::String("test_type".to_string()),
+        handle: tsp::TypeHandle::String("test_type".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "TestClass".to_string(),
+        name: "TestClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -315,7 +315,7 @@ fn test_search_for_type_attribute_optional_parameters() {
 
     let params_with_node = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: Some(expression_node.clone()),
         instance_type: None,
@@ -329,16 +329,16 @@ fn test_search_for_type_attribute_optional_parameters() {
         flags: tsp::TypeFlags::new().with_instance(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "TestClassInstance".to_string(),
+        name: "TestClassInstance".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_with_instance = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: Some(instance_type.clone()),
@@ -348,7 +348,7 @@ fn test_search_for_type_attribute_optional_parameters() {
     // Test with both optional parameters
     let params_with_both = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: Some(expression_node.clone()),
         instance_type: Some(instance_type.clone()),
@@ -384,21 +384,21 @@ fn test_search_for_type_attribute_optional_parameters() {
 fn test_search_for_type_attribute_type_handle_variants() {
     // Test with String handle
     let string_handle_type = tsp::Type {
-        handle: tsp::TypeHandle::String("string_handle_class".to_string()),
+        handle: tsp::TypeHandle::String("string_handle_class".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["models".to_string()],
+            name_parts: vec!["models".to_owned()],
         }),
-        name: "StringHandleClass".to_string(),
+        name: "StringHandleClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_string = tsp::SearchForTypeAttributeParams {
         start_type: string_handle_type,
-        attribute_name: "string_attr".to_string(),
+        attribute_name: "string_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -412,16 +412,16 @@ fn test_search_for_type_attribute_type_handle_variants() {
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["models".to_string()],
+            name_parts: vec!["models".to_owned()],
         }),
-        name: "IntegerHandleClass".to_string(),
+        name: "IntegerHandleClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let params_integer = tsp::SearchForTypeAttributeParams {
         start_type: integer_handle_type,
-        attribute_name: "integer_attr".to_string(),
+        attribute_name: "integer_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -445,58 +445,58 @@ fn test_search_for_type_attribute_module_name_variants() {
     // Test with simple module name
     let simple_module = tsp::ModuleName {
         leading_dots: 0,
-        name_parts: vec!["simple".to_string()],
+        name_parts: vec!["simple".to_owned()],
     };
 
     // Test with nested module name
     let nested_module = tsp::ModuleName {
         leading_dots: 0,
-        name_parts: vec!["package".to_string(), "submodule".to_string()],
+        name_parts: vec!["package".to_owned(), "submodule".to_owned()],
     };
 
     // Test with relative import (leading dots)
     let relative_module = tsp::ModuleName {
         leading_dots: 2,
-        name_parts: vec!["relative".to_string()],
+        name_parts: vec!["relative".to_owned()],
     };
 
     // Test with no module name (None)
     let type_no_module = tsp::Type {
-        handle: tsp::TypeHandle::String("no_module".to_string()),
+        handle: tsp::TypeHandle::String("no_module".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: None,
-        name: "BuiltinClass".to_string(),
+        name: "BuiltinClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_simple = tsp::Type {
-        handle: tsp::TypeHandle::String("simple".to_string()),
+        handle: tsp::TypeHandle::String("simple".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(simple_module.clone()),
-        name: "SimpleClass".to_string(),
+        name: "SimpleClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_nested = tsp::Type {
-        handle: tsp::TypeHandle::String("nested".to_string()),
+        handle: tsp::TypeHandle::String("nested".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(nested_module.clone()),
-        name: "NestedClass".to_string(),
+        name: "NestedClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_relative = tsp::Type {
-        handle: tsp::TypeHandle::String("relative".to_string()),
+        handle: tsp::TypeHandle::String("relative".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(relative_module.clone()),
-        name: "RelativeClass".to_string(),
+        name: "RelativeClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -504,7 +504,7 @@ fn test_search_for_type_attribute_module_name_variants() {
     // Create params
     let params_no_module = tsp::SearchForTypeAttributeParams {
         start_type: type_no_module,
-        attribute_name: "builtin_attr".to_string(),
+        attribute_name: "builtin_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -513,7 +513,7 @@ fn test_search_for_type_attribute_module_name_variants() {
 
     let params_simple = tsp::SearchForTypeAttributeParams {
         start_type: type_simple,
-        attribute_name: "simple_attr".to_string(),
+        attribute_name: "simple_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -522,7 +522,7 @@ fn test_search_for_type_attribute_module_name_variants() {
 
     let params_nested = tsp::SearchForTypeAttributeParams {
         start_type: type_nested,
-        attribute_name: "nested_attr".to_string(),
+        attribute_name: "nested_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -531,7 +531,7 @@ fn test_search_for_type_attribute_module_name_variants() {
 
     let params_relative = tsp::SearchForTypeAttributeParams {
         start_type: type_relative,
-        attribute_name: "relative_attr".to_string(),
+        attribute_name: "relative_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -557,14 +557,14 @@ fn test_search_for_type_attribute_module_name_variants() {
 #[test]
 fn test_search_for_type_attribute_snapshot_validation() {
     let base_type = tsp::Type {
-        handle: tsp::TypeHandle::String("snapshot_test".to_string()),
+        handle: tsp::TypeHandle::String("snapshot_test".to_owned()),
         category: tsp::TypeCategory::CLASS,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test".to_string()],
+            name_parts: vec!["test".to_owned()],
         }),
-        name: "SnapshotClass".to_string(),
+        name: "SnapshotClass".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -572,7 +572,7 @@ fn test_search_for_type_attribute_snapshot_validation() {
     // Test with zero snapshot
     let params_zero = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -582,7 +582,7 @@ fn test_search_for_type_attribute_snapshot_validation() {
     // Test with positive snapshot
     let params_positive = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -592,7 +592,7 @@ fn test_search_for_type_attribute_snapshot_validation() {
     // Test with negative snapshot (should be valid in parameter construction)
     let params_negative = tsp::SearchForTypeAttributeParams {
         start_type: base_type.clone(),
-        attribute_name: "test_attr".to_string(),
+        attribute_name: "test_attr".to_owned(),
         access_flags: tsp::AttributeAccessFlags::NONE,
         expression_node: None,
         instance_type: None,
@@ -611,14 +611,14 @@ fn test_search_for_type_attribute_serialization_deserialization() {
     let test_uri = Url::parse("file:///test_serialization.py").unwrap();
     let original_params = tsp::SearchForTypeAttributeParams {
         start_type: tsp::Type {
-            handle: tsp::TypeHandle::String("serialization_test".to_string()),
+            handle: tsp::TypeHandle::String("serialization_test".to_owned()),
             category: tsp::TypeCategory::CLASS,
             flags: tsp::TypeFlags::new().with_instantiable(),
             module_name: Some(tsp::ModuleName {
                 leading_dots: 1,
-                name_parts: vec!["serialization".to_string(), "test".to_string()],
+                name_parts: vec!["serialization".to_owned(), "test".to_owned()],
             }),
-            name: "SerializableClass".to_string(),
+            name: "SerializableClass".to_owned(),
             category_flags: 2,
             decl: Some(serde_json::json!({
                 "kind": "class",
@@ -626,7 +626,7 @@ fn test_search_for_type_attribute_serialization_deserialization() {
                 "methods": ["__init__", "serialize", "deserialize"]
             })),
         },
-        attribute_name: "serialize_method".to_string(),
+        attribute_name: "serialize_method".to_owned(),
         access_flags: tsp::AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES,
         expression_node: Some(tsp::Node {
             uri: test_uri.clone(),
@@ -647,9 +647,9 @@ fn test_search_for_type_attribute_serialization_deserialization() {
             flags: tsp::TypeFlags::new().with_instance(),
             module_name: Some(tsp::ModuleName {
                 leading_dots: 0,
-                name_parts: vec!["instance".to_string()],
+                name_parts: vec!["instance".to_owned()],
             }),
-            name: "InstanceType".to_string(),
+            name: "InstanceType".to_owned(),
             category_flags: 0,
             decl: None,
         }),

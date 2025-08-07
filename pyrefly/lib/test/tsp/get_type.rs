@@ -80,7 +80,7 @@ fn call_tsp_get_type_handler(
     let Some(handle) = handle else {
         return Err(ResponseError {
             code: ErrorCode::InvalidParams as i32,
-            message: "Invalid file URI".to_string(),
+            message: "Invalid file URI".to_owned(),
             data: None,
         });
     };
@@ -89,7 +89,7 @@ fn call_tsp_get_type_handler(
     let Some(module_info) = transaction.get_module_info(&handle) else {
         return Err(ResponseError {
             code: ErrorCode::InternalError as i32,
-            message: "Could not get module info".to_string(),
+            message: "Could not get module info".to_owned(),
             data: None,
         });
     };
@@ -140,12 +140,12 @@ z = [1, 2, 3]
     // Call our TSP get_type handler implementation!
     let tsp_result = call_tsp_get_type_handler(&transaction, &handles, params);
 
-    println!("Real TSP GetType Handler Result: {:?}", tsp_result);
+    println!("Real TSP GetType Handler Result: {tsp_result:?}");
 
     // Verify we get a TSP response (success or error)
     match tsp_result {
         Ok(Some(type_info)) => {
-            println!("TSP GetType succeeded: {:?}", type_info);
+            println!("TSP GetType succeeded: {type_info:?}");
             assert!(true, "TSP handler executed successfully");
         }
         Ok(None) => {
@@ -153,7 +153,7 @@ z = [1, 2, 3]
             assert!(true, "TSP handler executed successfully");
         }
         Err(error) => {
-            println!("TSP GetType returned error: {:?}", error);
+            println!("TSP GetType returned error: {error:?}");
             // Even an error can be valid for integration testing
             assert!(true, "TSP handler executed (with error result)");
         }
@@ -225,16 +225,13 @@ dict_var = {"key": "value"}
         // Call our TSP get_type handler implementation!
         let tsp_result = call_tsp_get_type_handler(&transaction, &handles, params);
 
-        println!(
-            "Real TSP GetType Handler Result for {}: {:?}",
-            var_name, tsp_result
-        );
+        println!("Real TSP GetType Handler Result for {var_name}: {tsp_result:?}");
 
         // Verify the TSP handler logic was executed
         match tsp_result {
             Ok(_) | Err(_) => {
                 // Both success and error are valid - the handler logic was executed
-                assert!(true, "TSP handler logic executed for {}", var_name);
+                assert!(true, "TSP handler logic executed for {var_name}");
             }
         }
     }

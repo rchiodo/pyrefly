@@ -101,10 +101,10 @@ impl Server {
                 // Handle concatenated parameters with a ParamSpec
                 for (i, param_type) in types.iter().enumerate() {
                     let type_str = self.format_type_for_display(param_type, flags, transaction);
-                    params.push(format!("param{}: {}", i, type_str));
+                    params.push(format!("param{i}: {type_str}"));
                 }
                 let param_spec_str = self.format_type_for_display(param_spec, flags, transaction);
-                params.push(format!("*{}", param_spec_str));
+                params.push(format!("*{param_spec_str}"));
             }
         }
 
@@ -129,33 +129,33 @@ impl Server {
             Param::PosOnly(name, param_type, _required) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
                 if let Some(name) = name {
-                    format!("{}: {}", name, type_str)
+                    format!("{name}: {type_str}")
                 } else {
                     type_str
                 }
             }
             Param::Pos(name, param_type, _required) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
-                format!("{}: {}", name, type_str)
+                format!("{name}: {type_str}")
             }
             Param::VarArg(name, param_type) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
                 if let Some(name) = name {
-                    format!("*{}: {}", name, type_str)
+                    format!("*{name}: {type_str}")
                 } else {
-                    format!("*{}", type_str)
+                    format!("*{type_str}")
                 }
             }
             Param::KwOnly(name, param_type, _required) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
-                format!("{}: {}", name, type_str)
+                format!("{name}: {type_str}")
             }
             Param::Kwargs(name, param_type) => {
                 let type_str = self.format_type_for_display(param_type, flags, transaction);
                 if let Some(name) = name {
-                    format!("**{}: {}", name, type_str)
+                    format!("**{name}: {type_str}")
                 } else {
-                    format!("**{}", type_str)
+                    format!("**{type_str}")
                 }
             }
         }

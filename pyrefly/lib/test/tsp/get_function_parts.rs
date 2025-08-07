@@ -27,7 +27,7 @@ fn test_get_function_parts_params_construction() {
         category: TypeCategory::FUNCTION,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
-        name: "test_function".to_string(),
+        name: "test_function".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -80,17 +80,17 @@ fn test_get_function_parts_params_with_different_types() {
         category: TypeCategory::FUNCTION,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
-        name: "simple_func".to_string(),
+        name: "simple_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type2 = Type {
-        handle: TypeHandle::String("async_func_handle".to_string()),
+        handle: TypeHandle::String("async_func_handle".to_owned()),
         category: TypeCategory::FUNCTION,
         flags: TypeFlags::new().with_callable().with_instance(),
         module_name: None,
-        name: "async_func".to_string(),
+        name: "async_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -100,7 +100,7 @@ fn test_get_function_parts_params_with_different_types() {
         category: TypeCategory::OVERLOADED,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
-        name: "overloaded_func".to_string(),
+        name: "overloaded_func".to_owned(),
         category_flags: 0,
         decl: None,
     };
