@@ -185,17 +185,25 @@ use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::CombineTypesRequest;
+use crate::tsp::CreateInstanceTypeRequest;
+use crate::tsp::GetBuiltinTypeRequest;
+use crate::tsp::GetDiagnosticsRequest;
 use crate::tsp::GetDiagnosticsVersionRequest;
 use crate::tsp::GetDocstringRequest;
 use crate::tsp::GetFunctionPartsRequest;
 use crate::tsp::GetMatchingOverloadsRequest;
+use crate::tsp::GetMetaclassRequest;
 use crate::tsp::GetOverloadsRequest;
 use crate::tsp::GetPythonSearchPathsRequest;
 use crate::tsp::GetReprRequest;
 use crate::tsp::GetSnapshotRequest;
 use crate::tsp::GetSupportedProtocolVersionRequest;
 use crate::tsp::GetSymbolRequest;
+use crate::tsp::GetSymbolsForFileRequest;
+use crate::tsp::GetTypeAliasInfoRequest;
 use crate::tsp::GetTypeArgsRequest;
+use crate::tsp::GetTypeAttributesRequest;
 use crate::tsp::GetTypeOfDeclarationRequest;
 use crate::tsp::GetTypeRequest;
 use crate::tsp::ResolveImportDeclarationRequest;
@@ -883,6 +891,62 @@ impl Server {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetDiagnosticsRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetDiagnosticsRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_diagnostics(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetBuiltinTypeRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetBuiltinTypeRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_builtin_type(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeAttributesRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeAttributesRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_attributes(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetSymbolsForFileRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetSymbolsForFileRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_symbols_for_file(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetMetaclassRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetMetaclassRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_metaclass(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetTypeAliasInfoRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<GetTypeAliasInfoRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.get_type_alias_info(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<CombineTypesRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<CombineTypesRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.combine_types(&transaction, params)));
+                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<CreateInstanceTypeRequest>(&x)
+                    && let Some(params) = self.extract_request_params_or_send_err_response::<CreateInstanceTypeRequest>(params, &x.id)
+                {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.state);
+                    self.send_response(new_response_with_error_code(x.id, self.create_instance_type(&transaction, params)));
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");

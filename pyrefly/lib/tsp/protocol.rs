@@ -1,5 +1,6 @@
 use lsp_types::Range;
 use lsp_types::Url;
+use lsp_types::Diagnostic;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -15,6 +16,22 @@ pub enum GetPythonSearchPathsRequest {}
 pub enum GetSnapshotRequest {}
 
 pub enum GetSupportedProtocolVersionRequest {}
+
+pub enum GetDiagnosticsRequest {}
+
+pub enum GetBuiltinTypeRequest {}
+
+pub enum GetTypeAttributesRequest {}
+
+pub enum GetSymbolsForFileRequest {}
+
+pub enum GetMetaclassRequest {}
+
+pub enum GetTypeAliasInfoRequest {}
+
+pub enum CombineTypesRequest {}
+
+pub enum CreateInstanceTypeRequest {}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Type {
@@ -360,6 +377,77 @@ impl<'de> serde::Deserialize<'de> for GetSupportedProtocolVersionParams {
     }
 }
 
+// Additional parameter types for missing requests
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetDiagnosticsParams {
+    pub uri: Url,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetBuiltinTypeParams {
+    #[serde(rename = "scopingNode")]
+    pub scoping_node: Node,
+    pub name: String,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetTypeAttributesParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetSymbolsForFileParams {
+    pub uri: Url,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetMetaclassParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GetTypeAliasInfoParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CombineTypesParams {
+    pub types: Vec<Type>,
+    pub snapshot: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateInstanceTypeParams {
+    #[serde(rename = "type")]
+    pub type_param: Type,
+    pub snapshot: i32,
+}
+
+// Additional response types
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FileSymbolInfo {
+    pub uri: Url,
+    pub symbols: Vec<Symbol>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TypeAliasInfo {
+    pub name: String,
+    #[serde(rename = "typeArgs")]
+    pub type_args: Option<Vec<Type>>,
+}
+
 impl lsp_types::request::Request for GetTypeRequest {
     type Params = GetTypeParams;
     type Result = Option<Type>;
@@ -388,6 +476,54 @@ impl lsp_types::request::Request for GetSupportedProtocolVersionRequest {
     type Params = GetSupportedProtocolVersionParams;
     type Result = String;
     const METHOD: &'static str = "typeServer/getSupportedProtocolVersion";
+}
+
+impl lsp_types::request::Request for GetDiagnosticsRequest {
+    type Params = GetDiagnosticsParams;
+    type Result = Option<Vec<Diagnostic>>;
+    const METHOD: &'static str = "typeServer/getDiagnostics";
+}
+
+impl lsp_types::request::Request for GetBuiltinTypeRequest {
+    type Params = GetBuiltinTypeParams;
+    type Result = Option<Type>;
+    const METHOD: &'static str = "typeServer/getBuiltinType";
+}
+
+impl lsp_types::request::Request for GetTypeAttributesRequest {
+    type Params = GetTypeAttributesParams;
+    type Result = Option<Vec<Attribute>>;
+    const METHOD: &'static str = "typeServer/getTypeAttributes";
+}
+
+impl lsp_types::request::Request for GetSymbolsForFileRequest {
+    type Params = GetSymbolsForFileParams;
+    type Result = Option<FileSymbolInfo>;
+    const METHOD: &'static str = "typeServer/getSymbolsForFile";
+}
+
+impl lsp_types::request::Request for GetMetaclassRequest {
+    type Params = GetMetaclassParams;
+    type Result = Option<Type>;
+    const METHOD: &'static str = "typeServer/getMetaclass";
+}
+
+impl lsp_types::request::Request for GetTypeAliasInfoRequest {
+    type Params = GetTypeAliasInfoParams;
+    type Result = Option<TypeAliasInfo>;
+    const METHOD: &'static str = "typeServer/getTypeAliasInfo";
+}
+
+impl lsp_types::request::Request for CombineTypesRequest {
+    type Params = CombineTypesParams;
+    type Result = Option<Type>;
+    const METHOD: &'static str = "typeServer/combineTypes";
+}
+
+impl lsp_types::request::Request for CreateInstanceTypeRequest {
+    type Params = CreateInstanceTypeParams;
+    type Result = Option<Type>;
+    const METHOD: &'static str = "typeServer/createInstanceType";
 }
 
 pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> Type {
