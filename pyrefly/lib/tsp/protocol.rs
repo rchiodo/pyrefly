@@ -1,6 +1,6 @@
+use lsp_types::Diagnostic;
 use lsp_types::Range;
 use lsp_types::Url;
-use lsp_types::Diagnostic;
 use serde::Deserialize;
 use serde::Serialize;
 
