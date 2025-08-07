@@ -14,6 +14,7 @@ pub mod get_repr;
 pub mod get_symbol;
 pub mod get_symbols_for_file;
 pub mod get_type;
+pub mod get_type_alias_info;
 pub mod resolve_import_declaration;
 pub mod search_for_type_attribute;
 pub mod tsp_interaction;
