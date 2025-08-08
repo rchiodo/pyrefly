@@ -116,7 +116,7 @@ impl Server {
             // Determine the category and flags based on definition metadata
             let (category, flags) = match &definition_metadata {
                 crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-                    Self::symbol_kind_to_tsp_category(symbol_kind)
+                    Self::symbol_kind_to_tsp_category(*symbol_kind)
                 }
                 crate::state::lsp::DefinitionMetadata::Module => {
                     // For module imports, check if type info is available to determine if resolved
@@ -137,7 +137,7 @@ impl Server {
                 crate::state::lsp::DefinitionMetadata::VariableOrAttribute(
                     _,
                     Some(symbol_kind),
-                ) => Self::symbol_kind_to_tsp_category_with_class_member(symbol_kind),
+                ) => Self::symbol_kind_to_tsp_category_with_class_member(*symbol_kind),
                 _ => (
                     tsp::DeclarationCategory::VARIABLE,
                     tsp::DeclarationFlags::new(),

@@ -94,7 +94,7 @@ impl Server {
         document_symbols: &[lsp_types::DocumentSymbol],
         tsp_symbols: &mut Vec<tsp::Symbol>,
         uri: &lsp_types::Url,
-        module_info: &Module,
+        _module_info: &Module,
         module_name_str: &str,
     ) {
         for doc_symbol in document_symbols {
@@ -108,7 +108,7 @@ impl Server {
                     children,
                     tsp_symbols,
                     uri,
-                    module_info,
+                    _module_info,
                     module_name_str,
                 );
             }

@@ -39,7 +39,7 @@ impl Server {
 
     /// Convert from pyrefly symbol kind to TSP declaration category and flags
     pub(crate) fn symbol_kind_to_tsp_category(
-        symbol_kind: &pyrefly_python::symbol_kind::SymbolKind,
+        symbol_kind: pyrefly_python::symbol_kind::SymbolKind,
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         match symbol_kind {
             pyrefly_python::symbol_kind::SymbolKind::Function => (
@@ -83,7 +83,7 @@ impl Server {
 
     /// Convert from pyrefly symbol kind to TSP declaration category and flags with class member flag
     pub(crate) fn symbol_kind_to_tsp_category_with_class_member(
-        symbol_kind: &pyrefly_python::symbol_kind::SymbolKind,
+        symbol_kind: pyrefly_python::symbol_kind::SymbolKind,
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         let (category, mut flags) = Self::symbol_kind_to_tsp_category(symbol_kind);
 
