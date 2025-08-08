@@ -8,6 +8,7 @@
 //! Tests for TSP (Type Server Protocol) request handlers
 
 pub mod get_builtin_type;
+pub mod get_diagnostics;
 pub mod get_docstring;
 pub mod get_function_parts;
 pub mod get_matching_overloads;
