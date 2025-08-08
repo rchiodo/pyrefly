@@ -64,7 +64,7 @@ impl Server {
                         }
                     }
                 }
-                
+
                 if instance_types.len() == 1 {
                     instance_types.into_iter().next().unwrap()
                 } else {

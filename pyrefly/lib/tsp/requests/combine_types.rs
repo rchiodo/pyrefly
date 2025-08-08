@@ -47,7 +47,10 @@ impl Server {
         let mut py_types = Vec::new();
         for tsp_type in &params.types {
             let Some(py_type) = self.lookup_type_from_tsp_type(tsp_type) else {
-                lsp_debug!("Warning: Could not resolve type handle: {:?}", tsp_type.handle);
+                lsp_debug!(
+                    "Warning: Could not resolve type handle: {:?}",
+                    tsp_type.handle
+                );
                 // Skip unresolvable types rather than failing completely
                 continue;
             };
@@ -61,7 +64,9 @@ impl Server {
 
         if py_types.len() == 1 {
             // Only one valid type found
-            return Ok(Some(crate::tsp::protocol::convert_to_tsp_type(py_types.into_iter().next().unwrap())));
+            return Ok(Some(crate::tsp::protocol::convert_to_tsp_type(
+                py_types.into_iter().next().unwrap(),
+            )));
         }
 
         // Create a union of all the types using pyrefly's union simplification logic

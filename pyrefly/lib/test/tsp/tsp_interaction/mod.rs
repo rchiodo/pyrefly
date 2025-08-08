@@ -10,6 +10,7 @@ pub mod get_diagnostics;
 pub mod get_docstring;
 pub mod get_function_parts;
 pub mod get_matching_overloads;
+pub mod get_metaclass;
 pub mod get_overloads;
 pub mod get_python_search_paths;
 pub mod get_repr;
