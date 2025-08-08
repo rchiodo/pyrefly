@@ -29,6 +29,7 @@ use crate::config::config::ConfigFile;
 use crate::config::config::ConfigSource;
 use crate::config::environment::environment::PythonEnvironment;
 use crate::config::finder::ConfigFinder;
+use crate::state::lsp::InlayHintConfig;
 
 /// Information about the Python environment p
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ pub struct Workspace {
     pub(crate) search_path: Option<Vec<PathBuf>>,
     pub disable_language_services: bool,
     pub disable_type_errors: bool,
+    pub lsp_analysis_config: Option<LspAnalysisConfig>,
 }
 
 impl Workspace {
@@ -143,9 +145,37 @@ struct PyreflyClientConfig {
     extra_paths: Option<Vec<PathBuf>>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticMode {
+    #[serde(rename = "workspace")]
+    Workspace,
+    #[serde(rename = "openFilesOnly")]
+    OpenFilesOnly,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportFormat {
+    Absolute,
+    Relative,
+}
+
+/// https://code.visualstudio.com/docs/python/settings-reference#_pylance-language-server
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LspAnalysisConfig {
+    #[expect(unused)]
+    pub diagnostic_mode: Option<DiagnosticMode>,
+    #[expect(unused)]
+    pub import_format: Option<ImportFormat>,
+    pub inlay_hints: Option<InlayHintConfig>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LspConfig {
+    analysis: Option<LspAnalysisConfig>,
     python_path: Option<String>,
     pyrefly: Option<PyreflyClientConfig>,
 }
@@ -266,6 +296,7 @@ impl Workspaces {
                 self.update_disable_type_errors(modified, scope_uri, disable_type_errors);
             }
         }
+        self.update_ide_settings(modified, scope_uri, config.analysis);
     }
 
     /// Update disableLanguageServices setting for scope_uri, None if default workspace
@@ -303,6 +334,27 @@ impl Workspaces {
             None => {
                 *modified = true;
                 self.default.write().disable_type_errors = disable_type_errors
+            }
+        }
+    }
+
+    fn update_ide_settings(
+        &self,
+        modified: &mut bool,
+        scope_uri: &Option<Url>,
+        lsp_analysis_config: Option<LspAnalysisConfig>,
+    ) {
+        let mut workspaces = self.workspaces.write();
+        match scope_uri {
+            Some(scope_uri) => {
+                if let Some(workspace) = workspaces.get_mut(&scope_uri.to_file_path().unwrap()) {
+                    *modified = true;
+                    workspace.lsp_analysis_config = lsp_analysis_config;
+                }
+            }
+            None => {
+                *modified = true;
+                self.default.write().lsp_analysis_config = lsp_analysis_config;
             }
         }
     }
