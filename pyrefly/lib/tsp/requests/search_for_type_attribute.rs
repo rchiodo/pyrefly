@@ -14,8 +14,8 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::tsp_debug;
 use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 
 /// Search for an attribute in a class type using the solver
 ///
