@@ -57,6 +57,7 @@ use crate::alt::types::yields::YieldResult;
 use crate::binding::base_class::BaseClass;
 use crate::binding::bindings::Bindings;
 use crate::binding::narrow::NarrowOp;
+use crate::binding::pydantic::PydanticMetadataBinding;
 use crate::graph::index::Idx;
 use crate::module::module_info::ModuleInfo;
 use crate::types::annotation::Annotation;
@@ -108,6 +109,7 @@ assert_words!(BindingFunction, 23);
 pub enum AnyIdx {
     Key(Idx<Key>),
     KeyExpect(Idx<KeyExpect>),
+    KeyConsistentOverrideCheck(Idx<KeyConsistentOverrideCheck>),
     KeyClass(Idx<KeyClass>),
     KeyTParams(Idx<KeyTParams>),
     KeyClassBaseType(Idx<KeyClassBaseType>),
@@ -129,6 +131,7 @@ impl DisplayWith<Bindings> for AnyIdx {
         match self {
             Self::Key(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyExpect(idx) => write!(f, "{}", ctx.display(*idx)),
+            Self::KeyConsistentOverrideCheck(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClass(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyTParams(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassBaseType(idx) => write!(f, "{}", ctx.display(*idx)),
@@ -170,6 +173,13 @@ impl Keyed for KeyExpect {
     type Answer = EmptyAnswer;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyExpect(idx)
+    }
+}
+impl Keyed for KeyConsistentOverrideCheck {
+    type Value = BindingConsistentOverrideCheck;
+    type Answer = EmptyAnswer;
+    fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
+        AnyIdx::KeyConsistentOverrideCheck(idx)
     }
 }
 impl Keyed for KeyClass {
@@ -700,6 +710,22 @@ impl DisplayWith<ModuleInfo> for KeyVariance {
     }
 }
 
+// An expectation that attributes in this class need checking for inconsistent override
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KeyConsistentOverrideCheck(pub ClassDefIndex);
+
+impl Ranged for KeyConsistentOverrideCheck {
+    fn range(&self) -> TextRange {
+        TextRange::default()
+    }
+}
+
+impl DisplayWith<ModuleInfo> for KeyConsistentOverrideCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
+        write!(f, "KeyConsistentOverrideCheck(class{})", self.0)
+    }
+}
+
 /// Keys that refer to an `Annotation`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum KeyAnnotation {
@@ -1049,6 +1075,12 @@ pub enum Binding {
     /// An expression, optionally with a Key saying what the type must be.
     /// The Key must be a type of types, e.g. `Type::Type`.
     Expr(Option<Idx<KeyAnnotation>>, Expr),
+    // This binding is created specifically for stand-alone `Stmt::Expr` statements.
+    // Unlike the general `Expr` binding above, this separate binding allows us to
+    // perform additional checks that are only relevant for expressions in `Stmt::Expr`,
+    // such as verifying for unused awaitables.
+    // The boolean is whether the expression is a call to `assert_type()`
+    StmtExpr(Expr, bool),
     /// Propagate a type to a new binding. Takes an optional annotation to
     /// check against (which will override the computed type if they disagree).
     MultiTargetAssign(Option<Idx<KeyAnnotation>>, Idx<Key>, TextRange),
@@ -1190,6 +1222,7 @@ impl DisplayWith<Bindings> for Binding {
         };
         match self {
             Self::Expr(a, x) => write!(f, "Expr({}, {})", ann(a), m.display(x)),
+            Self::StmtExpr(x, _) => write!(f, "StmtExpr({})", m.display(x)),
             Self::MultiTargetAssign(a, idx, range) => {
                 write!(
                     f,
@@ -1462,6 +1495,7 @@ impl Binding {
             Binding::IterableValue(_, _, _) => Some(SymbolKind::Variable),
             Binding::UnpackedValue(_, _, _, _) => Some(SymbolKind::Variable),
             Binding::Expr(_, _)
+            | Binding::StmtExpr(_, _)
             | Binding::MultiTargetAssign(_, _, _)
             | Binding::ReturnExplicit(_)
             | Binding::ReturnImplicit(_)
@@ -1813,6 +1847,21 @@ impl DisplayWith<Bindings> for BindingVariance {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct BindingConsistentOverrideCheck {
+    pub class_key: Idx<KeyClass>,
+}
+
+impl DisplayWith<Bindings> for BindingConsistentOverrideCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
+        write!(
+            f,
+            "BindingConsistentOverrideCheck({})",
+            ctx.display(self.class_key)
+        )
+    }
+}
+
 /// Binding for the class's metadata (anything obtained directly from base classes,
 /// except for the MRO which is kept separate to avoid cycles.
 #[derive(Clone, Debug)]
@@ -1832,6 +1881,8 @@ pub struct BindingClassMetadata {
     /// for some synthesized classes, which have no actual class body and therefore usually have no
     /// base class expressions, but may have a known base class for the synthesized class.
     pub special_base: Option<Box<BaseClass>>,
+    #[allow(dead_code)]
+    pub pydantic_metadata: Option<PydanticMetadataBinding>,
 }
 
 impl DisplayWith<Bindings> for BindingClassMetadata {

@@ -8,6 +8,7 @@
 use itertools::Itertools;
 use pyrefly_python::dunder;
 use pyrefly_types::types::TArgs;
+use pyrefly_types::types::TParams;
 use pyrefly_util::display::count;
 use pyrefly_util::owner::Owner;
 use pyrefly_util::prelude::SliceExt;
@@ -27,6 +28,7 @@ use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
+use crate::alt::unwrap::HintRef;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -283,7 +285,7 @@ impl CallArgPreEval<'_> {
                 *done = true;
                 solver.expr_with_separate_check_errors(
                     x,
-                    Some((hint, tcc, call_errors)),
+                    Some((HintRef::new(hint, call_errors), tcc)),
                     arg_errors,
                 );
             }
@@ -796,7 +798,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         TypeOrExpr::Expr(x) => {
                             self.expr_with_separate_check_errors(
                                 x,
-                                hint.map(|ty| (ty, tcc, call_errors)),
+                                hint.map(|ty| (HintRef::new(ty, call_errors), tcc)),
                                 arg_errors,
                             );
                         }
@@ -911,8 +913,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     // for overload matching.
     pub fn callable_infer(
         &self,
-        mut callable: Callable,
+        callable: Callable,
         callable_name: Option<FuncId>,
+        tparams: Option<&TParams>,
         mut self_obj: Option<Type>,
         mut args: &[CallArg],
         keywords: &[CallKeyword],
@@ -920,9 +923,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        _hint: Option<&Type>,
+        hint: Option<HintRef>,
         mut ctor_targs: Option<&mut TArgs>,
     ) -> Type {
+        let (qs, mut callable) = if let Some(tparams) = tparams {
+            // If we have a hint, we want to try to instantiate against it first, so we cancontextually type
+            // arguments. If we don't match the hint, we need to throw away any instantiations we might have made.
+            // By invariant, hint will be None if we are calling a constructor.
+            if let Some(hint) = hint {
+                let (qs_, callable_) = self.instantiate_fresh_callable(tparams, callable.clone());
+                if self
+                    .solver()
+                    .is_subset_eq(&callable_.ret, hint.ty(), self.type_order())
+                {
+                    (qs_, callable_)
+                } else {
+                    self.instantiate_fresh_callable(tparams, callable)
+                }
+            } else {
+                self.instantiate_fresh_callable(tparams, callable)
+            }
+        } else {
+            (Vec::new(), callable)
+        };
         if let Some(targs) = ctor_targs.as_mut() {
             self.solver().freshen_class_targs(targs, self.uniques);
             let substitution = targs.substitution();
@@ -1040,6 +1063,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(targs) = ctor_targs {
             self.solver().generalize_class_targs(targs);
         }
+        self.solver().finish_quantified(&qs);
         self.solver().expand(callable.ret)
     }
 }

@@ -9,8 +9,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use anyhow::anyhow;
+use pyrefly_config::error_kind::Severity;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::module::GENERATED_TOKEN;
+use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::lined_buffer::LineNumber;
 use regex::Regex;
@@ -100,13 +102,21 @@ fn add_suppressions(
     (failures, successes)
 }
 
-pub fn suppress_errors(path_errors: &SmallMap<PathBuf, Vec<Error>>) {
+pub fn suppress_errors(errors: Vec<Error>) {
+    let mut path_errors: SmallMap<PathBuf, Vec<Error>> = SmallMap::new();
+    for e in errors {
+        if e.severity() >= Severity::Warn
+            && let ModulePathDetails::FileSystem(path) = e.path().details()
+        {
+            path_errors.entry(path.clone()).or_default().push(e);
+        }
+    }
     eprintln!("Inserting error suppressions...");
     if path_errors.is_empty() {
         eprintln!("No errors to suppress!");
         return;
     }
-    let (failures, successes) = add_suppressions(path_errors);
+    let (failures, successes) = add_suppressions(&path_errors);
     eprintln!(
         "Finished suppressing errors in {}/{} files",
         successes.len(),
@@ -143,21 +153,28 @@ pub fn find_unused_ignores<'a>(
 }
 
 pub fn remove_unused_ignores(path_ignores: SmallMap<&PathBuf, SmallSet<LineNumber>>) {
+    // TODO: right now we only remove pyrefly ignores, but we should have options to clean up
+    // other comment based ignores as well
     let regex = Regex::new(r"# pyrefly: ignore.*$").unwrap();
     let mut removed_ignores: SmallMap<&PathBuf, usize> = SmallMap::new();
     for (path, ignores) in path_ignores {
         let mut unused_ignore_count = 0;
-        let zero_index_ignores: SmallSet<usize> = ignores
-            .iter()
-            .map(|i| i.to_zero_indexed() as usize)
-            .collect();
+        let mut ignore_locations: SmallSet<usize> = SmallSet::new();
+        for ignore in ignores {
+            let above_line = ignore
+                .decrement()
+                .expect("Invalid error suppression location")
+                .to_zero_indexed() as usize;
+            let same_line = ignore.to_zero_indexed() as usize;
+            ignore_locations.insert(above_line);
+            ignore_locations.insert(same_line);
+        }
         if let Ok(file) = read_and_validate_file(path) {
             let mut buf = String::with_capacity(file.len());
             let lines = file.lines();
             for (idx, line) in lines.enumerate() {
-                if zero_index_ignores.contains(&idx) {
+                if ignore_locations.contains(&idx) {
                     unused_ignore_count += 1;
-                    // TODO: Expand support of what we remove and thoroughly test
                     let new_string = regex.replace_all(line, "");
                     if !new_string.trim().is_empty() {
                         buf.push_str(new_string.trim_end());
@@ -185,20 +202,32 @@ pub fn remove_unused_ignores(path_ignores: SmallMap<&PathBuf, SmallSet<LineNumbe
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
+    use std::path::PathBuf;
     use std::sync::Arc;
 
+    use dupe::Dupe;
     use pretty_assertions::assert_str_eq;
     use pyrefly_python::module_name::ModuleName;
     use pyrefly_python::module_path::ModulePath;
+    use pyrefly_python::sys_info::SysInfo;
+    use pyrefly_util::arc_id::ArcId;
+    use pyrefly_util::fs_anyhow;
     use pyrefly_util::lined_buffer::DisplayPos;
     use ruff_text_size::TextRange;
     use ruff_text_size::TextSize;
     use tempfile;
+    use tempfile::TempDir;
     use vec1::Vec1;
 
     use super::*;
+    use crate::config::config::ConfigFile;
     use crate::config::error_kind::ErrorKind;
+    use crate::config::finder::ConfigFinder;
+    use crate::error::suppress;
     use crate::module::module_info::ModuleInfo;
+    use crate::state::handle::Handle;
+    use crate::state::require::Require;
+    use crate::state::state::State;
 
     fn error(path: PathBuf, row: usize, column: usize, error_kind: ErrorKind) -> Error {
         let contents = format!("{}{}", "\n".repeat(row - 1), " ".repeat(column - 1));
@@ -233,30 +262,39 @@ mod tests {
         assert_str_eq!(want, got_file);
     }
 
-    fn assert_suppress_errors(
-        path_errors: Vec<(usize, usize, ErrorKind)>,
-        input: &str,
-        output: &str,
-    ) {
+    fn get_path(tdir: &TempDir) -> PathBuf {
+        tdir.path().join("test.py")
+    }
+
+    fn assert_suppress_errors(before: &str, after: &str) {
         let tdir = tempfile::tempdir().unwrap();
-        let path = tdir.path().join("test.py");
-        fs_anyhow::write(&path, input).unwrap();
-        let errors = {
-            let mut e = SmallMap::new();
-            e.insert(
-                path.clone(),
-                path_errors
-                    .into_iter()
-                    .map(|x| error(path.clone(), x.0, x.1, x.2))
-                    .collect(),
-            );
-            e
-        };
-        let (failures, successes) = add_suppressions(&errors);
-        assert!(failures.is_empty());
-        assert_eq!(vec![&path], successes);
-        let got_file = fs_anyhow::read_to_string(&path).unwrap();
-        assert_str_eq!(output, got_file);
+
+        let mut config = ConfigFile::default();
+        config.python_environment.set_empty_to_default();
+        let name = "test";
+        let contents = before;
+        fs_anyhow::write(&get_path(&tdir), contents).unwrap();
+        config.configure();
+
+        let config = ArcId::new(config);
+        let sys_info = SysInfo::default();
+        let state = State::new(ConfigFinder::new_constant(config));
+        let handle = Handle::new(
+            ModuleName::from_str(name),
+            ModulePath::filesystem(get_path(&tdir)),
+            sys_info.dupe(),
+        );
+        let mut transaction = state.new_transaction(Require::Exports, None);
+        transaction.set_memory(vec![(
+            get_path(&tdir),
+            Some(Arc::new((*contents).to_owned())),
+        )]);
+        transaction.run(&[handle.clone()].map(|x| (x.dupe(), Require::Everything)));
+        let loads = transaction.get_errors([handle.clone()].iter());
+        suppress::suppress_errors(loads.collect_errors().shown);
+
+        let got_file = fs_anyhow::read_to_string(&get_path(&tdir)).unwrap();
+        assert_eq!(after, got_file);
     }
 
     fn assert_no_error_suppression(
@@ -287,13 +325,8 @@ mod tests {
     #[test]
     fn test_add_suppressions() {
         assert_suppress_errors(
-            vec![
-                (1, 10, ErrorKind::BadAssignment),
-                (6, 7, ErrorKind::BadArgumentType),
-                (7, 10, ErrorKind::BadReturn),
-                (10, 3, ErrorKind::BadArgumentType),
-            ],
-            r#"x: str = 1
+            r#"
+x: str = 1
 
 
 def f(y: int) -> None:
@@ -305,15 +338,15 @@ def f(y: int) -> None:
 f(x)
 
 "#,
-            r#"# pyrefly: ignore  # bad-assignment
+            r#"
+# pyrefly: ignore  # bad-assignment
 x: str = 1
 
 
 def f(y: int) -> None:
     """Doc comment"""
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore  # unsupported-operation
     x = "one" + y
-    # pyrefly: ignore  # bad-return
     return x
 
 
@@ -323,18 +356,20 @@ f(x)
 "#,
         );
     }
+
     #[test]
     fn test_add_suppressions_existing_comment() {
         assert_suppress_errors(
-            vec![(3, 10, ErrorKind::BadAssignment)],
             r#"
-# comment
-def foo() -> None: pass
+def foo() -> int:
+    # comment
+    return ""
 "#,
             r#"
-# comment
-# pyrefly: ignore  # bad-assignment
-def foo() -> None: pass
+def foo() -> int:
+    # comment
+    # pyrefly: ignore  # bad-return
+    return ""
 "#,
         );
     }
@@ -342,18 +377,14 @@ def foo() -> None: pass
     #[test]
     fn test_add_suppressions_duplicate_errors() {
         assert_suppress_errors(
-            vec![
-                (3, 10, ErrorKind::BadAssignment),
-                (3, 10, ErrorKind::BadAssignment),
-            ],
             r#"
 # comment
-def foo() -> None: pass
+def foo() -> int: pass
 "#,
             r#"
 # comment
-# pyrefly: ignore  # bad-assignment
-def foo() -> None: pass
+# pyrefly: ignore  # bad-return
+def foo() -> int: pass
 "#,
         );
     }
@@ -361,18 +392,18 @@ def foo() -> None: pass
     #[test]
     fn test_add_suppressions_multiple_errors_one_line() {
         assert_suppress_errors(
-            vec![
-                (3, 10, ErrorKind::BadAssignment),
-                (3, 10, ErrorKind::TypeAliasError),
-            ],
             r#"
 # comment
-def foo() -> None: pass
+def foo(x: int) -> str:
+    return ""
+x: int = foo("Hello")
 "#,
             r#"
 # comment
-# pyrefly: ignore  # bad-assignment, type-alias-error
-def foo() -> None: pass
+def foo(x: int) -> str:
+    return ""
+# pyrefly: ignore  # bad-assignment, bad-argument-type
+x: int = foo("Hello")
 "#,
         );
     }
@@ -419,7 +450,7 @@ pass
 
     #[test]
     fn test_remove_suppression_above() {
-        let lines = SmallSet::from_iter([LineNumber::new(3).unwrap()]);
+        let lines = SmallSet::from_iter([LineNumber::new(4).unwrap()]);
         let input = r#"
 def f() -> int:
     # pyrefly: ignore # bad-return
@@ -435,7 +466,7 @@ def f() -> int:
 
     #[test]
     fn test_remove_suppression_above_two() {
-        let lines = SmallSet::from_iter([LineNumber::new(3).unwrap()]);
+        let lines = SmallSet::from_iter([LineNumber::new(4).unwrap()]);
         let input = r#"
 def g() -> str:
     # pyrefly: ignore # bad-return
@@ -451,7 +482,7 @@ def g() -> str:
 
     #[test]
     fn test_remove_suppression_inline() {
-        let lines = SmallSet::from_iter([LineNumber::new(3).unwrap()]);
+        let lines = SmallSet::from_iter([LineNumber::new(4).unwrap()]);
         let input = r#"
 def g() -> str:
     return "hello" # pyrefly: ignore # bad-return
@@ -465,7 +496,7 @@ def g() -> str:
 
     #[test]
     fn test_remove_suppression_multiple() {
-        let lines = SmallSet::from_iter([LineNumber::new(3).unwrap(), LineNumber::new(5).unwrap()]);
+        let lines = SmallSet::from_iter([LineNumber::new(4).unwrap(), LineNumber::new(6).unwrap()]);
         let input = r#"
 def g() -> str:
     return "hello" # pyrefly: ignore # bad-return

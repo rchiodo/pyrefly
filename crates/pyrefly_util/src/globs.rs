@@ -6,6 +6,7 @@
  */
 
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt;
 use std::fmt::Display;
 use std::hash::Hash;
@@ -15,10 +16,15 @@ use std::path::MAIN_SEPARATOR_STR;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::LazyLock;
 
 use anyhow::Context;
 use bstr::ByteSlice;
 use glob::Pattern;
+use ignore::Match;
+use ignore::gitignore::Gitignore;
+use ignore::gitignore::GitignoreBuilder;
 use itertools::Itertools;
 use serde::Deserialize;
 use serde::Serialize;
@@ -31,6 +37,25 @@ use crate::absolutize::Absolutize as _;
 use crate::fs_anyhow;
 use crate::prelude::SliceExt;
 use crate::prelude::VecExt;
+use crate::upward_search::UpwardSearch;
+
+static IGNORE_FILES_SEARCH: LazyLock<Vec<UpwardSearch<Arc<(PathBuf, PathBuf)>>>> =
+    LazyLock::new(|| {
+        [".gitignore", ".ignore", ".git/info/exclude"]
+            .iter()
+            .map(|f| {
+                UpwardSearch::new(vec![OsString::from(f)], |p| {
+                    let mut ignore_root = p.to_path_buf();
+                    ignore_root.pop();
+                    if *f == ".git/info/exclude" {
+                        ignore_root.pop();
+                        ignore_root.pop();
+                    }
+                    Arc::new((p.to_path_buf(), ignore_root))
+                })
+            })
+            .collect::<Vec<_>>()
+    });
 
 #[derive(Debug, Clone, Eq, Default)]
 
@@ -139,9 +164,9 @@ impl Glob {
     fn resolve_path(
         path: PathBuf,
         results: &mut Vec<PathBuf>,
-        filter: &Globs,
+        filter: &GlobFilter,
     ) -> anyhow::Result<()> {
-        if filter.matches(&path) {
+        if filter.is_excluded(&path) {
             return Ok(());
         }
         if path.is_dir() {
@@ -152,7 +177,11 @@ impl Glob {
         Ok(())
     }
 
-    fn resolve_dir(path: &Path, results: &mut Vec<PathBuf>, filter: &Globs) -> anyhow::Result<()> {
+    fn resolve_dir(
+        path: &Path,
+        results: &mut Vec<PathBuf>,
+        filter: &GlobFilter,
+    ) -> anyhow::Result<()> {
         for entry in fs_anyhow::read_dir(path)? {
             let entry = entry
                 .with_context(|| format!("When iterating over directory `{}`", path.display()))?;
@@ -162,7 +191,7 @@ impl Glob {
         Ok(())
     }
 
-    fn resolve_pattern(pattern: &str, filter: &Globs) -> anyhow::Result<Vec<PathBuf>> {
+    fn resolve_pattern(pattern: &str, filter: &GlobFilter) -> anyhow::Result<Vec<PathBuf>> {
         let mut result = Vec::new();
         let paths = glob::glob(pattern)?;
         for path in paths {
@@ -259,13 +288,13 @@ impl PartialEq for Glob {
 }
 
 impl Glob {
-    fn files(&self, filter: &Globs) -> anyhow::Result<Vec<PathBuf>> {
+    fn files(&self, filter: &GlobFilter) -> anyhow::Result<Vec<PathBuf>> {
         let pattern = &self.0;
-        if filter.matches(self.as_path()) {
+        if filter.is_excluded(self.as_path()) {
             return Err(anyhow::anyhow!(
-                "Pattern {} is matched by `project-excludes`.\n`project-excludes`: {}",
+                "Pattern {} is matched by `project-excludes` or ignore file.\n{}",
                 pattern.as_str(),
-                filter.0.iter().map(|p| p.to_string()).join(", "),
+                filter
             ));
         }
         let pattern_str = pattern.as_str().to_owned();
@@ -357,7 +386,7 @@ impl Display for Globs {
 const USE_EDEN: bool = cfg!(fbcode_build);
 
 impl Globs {
-    pub fn files_eden(&self, filter: &Globs) -> anyhow::Result<Vec<PathBuf>> {
+    pub fn files_eden(&self, filter: &GlobFilter) -> anyhow::Result<Vec<PathBuf>> {
         fn hg_root() -> anyhow::Result<PathBuf> {
             let output = Command::new("hg")
                 .arg("root")
@@ -396,7 +425,7 @@ impl Globs {
                         line.to_str_lossy()
                     )
                 })?;
-                Glob::resolve_path(root.join(path), &mut result, &Globs::empty())?;
+                Glob::resolve_path(root.join(path), &mut result, &GlobFilter::empty())?;
             }
             Ok(result)
         }
@@ -404,11 +433,11 @@ impl Globs {
         let root = hg_root()?;
         let globs = self.0.try_map(|g| g.as_path().strip_prefix(&root))?;
         let mut result = eden_glob(root, globs)?;
-        result.retain(|p| !filter.matches(p));
+        result.retain(|p| !filter.is_excluded(p));
         Ok(result)
     }
 
-    fn filtered_files(&self, filter: &Globs) -> anyhow::Result<Vec<PathBuf>> {
+    fn filtered_files(&self, filter: &GlobFilter) -> anyhow::Result<Vec<PathBuf>> {
         if USE_EDEN {
             match self.files_eden(filter) {
                 Ok(files) if files.is_empty() => {
@@ -430,7 +459,7 @@ impl Globs {
     }
 
     pub fn files(&self) -> anyhow::Result<Vec<PathBuf>> {
-        self.filtered_files(&Globs::empty())
+        self.filtered_files(&GlobFilter::empty())
     }
 
     pub fn covers(&self, path: &Path) -> bool {
@@ -438,15 +467,138 @@ impl Globs {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize)]
+/// A struct which allows filtering by matching a high-priority [`Globs`] of excludes
+/// and several ignore files. The first positive (ignore) or negative (allowlist)
+/// match that's found from the following order is what's used.
+/// 1. `excludes`: user-provied paths, either from a config or CLI.
+/// 2. `.gitignore`: if one exists from an upward search from `root`, the first
+///    positive or negative match (`!`) is used
+/// 3. `.ignore`: if it exists, behaves similar to `.gitignore`
+/// 4. `.git/info/excludes`: if it exists, behaves similar to `.gitignore`
+#[derive(Debug)]
+pub struct GlobFilter {
+    excludes: Globs,
+    ignores: Vec<Gitignore>,
+    ignore_paths: Vec<PathBuf>,
+    errors: Vec<anyhow::Error>,
+}
+
+impl Display for GlobFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`project-excludes`: {}, ignore files [{}]",
+            self.excludes,
+            self.ignore_paths.iter().map(|p| p.display()).join(", ")
+        )?;
+        Ok(())
+    }
+}
+
+impl PartialEq for GlobFilter {
+    fn eq(&self, other: &Self) -> bool {
+        self.excludes == other.excludes && self.ignore_paths == other.ignore_paths
+    }
+}
+
+impl Eq for GlobFilter {}
+
+impl Hash for GlobFilter {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.excludes.hash(state);
+        self.ignore_paths.hash(state);
+    }
+}
+
+impl GlobFilter {
+    /// Create a new `GlobFilter` with the given `Globs` as highest-priority excludes.
+    /// If `ignore_file_search_start` is provided, it is where the upward search for
+    /// ignore files will originate from. Typically, this should be your project root.
+    pub fn new(excludes: Globs, ignorefile_search_start: Option<&Path>) -> Self {
+        let (ignores, errors, ignore_paths) = if let Some(root) = ignorefile_search_start {
+            Self::ignore_files(root)
+        } else {
+            (vec![], vec![], vec![])
+        };
+
+        Self {
+            excludes,
+            ignores,
+            ignore_paths,
+            errors,
+        }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            excludes: Globs::empty(),
+            ignores: vec![],
+            ignore_paths: vec![],
+            errors: vec![],
+        }
+    }
+
+    pub fn ignore_files(root: &Path) -> (Vec<Gitignore>, Vec<anyhow::Error>, Vec<PathBuf>) {
+        let found_ignores = IGNORE_FILES_SEARCH
+            .iter()
+            .filter_map(|s| s.directory_absolute(root));
+        let mut errors = vec![];
+        let mut ignores = vec![];
+        let mut ignore_paths = vec![];
+        for item in found_ignores {
+            let (ignore_file, ignore_root) = &*item;
+            let mut builder = GitignoreBuilder::new(ignore_root);
+            if let Some(error) = builder.add(ignore_file) {
+                errors.push(error.into());
+            }
+            match builder.build() {
+                Ok(ignore) => ignores.push(ignore),
+                Err(error) => errors.push(error.into()),
+            }
+            ignore_paths.push(ignore_file.to_owned());
+        }
+        (ignores, errors, ignore_paths)
+    }
+
+    // Does this path match (either positively or negatively), the `excludes` or ignore
+    // files found.
+    pub fn is_excluded(&self, path: &Path) -> bool {
+        if self.excludes.matches(path) {
+            return true;
+        }
+
+        for ignore in &self.ignores {
+            match ignore.matched_path_or_any_parents(path, path.is_dir()) {
+                Match::None => (),
+                Match::Whitelist(_) => return false,
+                Match::Ignore(_) => return true,
+            }
+        }
+        false
+    }
+
+    /// Get the errors from this glob, replacing them with an empty list.
+    pub fn errors(&mut self) -> Vec<anyhow::Error> {
+        std::mem::take(&mut self.errors)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
 pub struct FilteredGlobs {
     includes: Globs,
-    excludes: Globs,
+    filter: GlobFilter,
 }
 
 impl FilteredGlobs {
-    pub fn new(includes: Globs, excludes: Globs) -> Self {
-        Self { includes, excludes }
+    /// Build a new `FilteredGlobs` from the given `includes` and `excludes`.
+    /// If an `ignorefile_search_start` is provided, it is the path from which we will
+    /// perform an upward search for applicable ignore files, which will be used when
+    /// filtering out files from our glob search.
+    pub fn new(includes: Globs, excludes: Globs, ignorefile_search_start: Option<&Path>) -> Self {
+        Self {
+            includes,
+            filter: GlobFilter::new(excludes, ignorefile_search_start),
+        }
     }
 
     /// Given a glob pattern, return the directories that can contain files that match the pattern.
@@ -455,11 +607,15 @@ impl FilteredGlobs {
     }
 
     pub fn files(&self) -> anyhow::Result<Vec<PathBuf>> {
-        self.includes.filtered_files(&self.excludes)
+        self.includes.filtered_files(&self.filter)
     }
 
     pub fn covers(&self, path: &Path) -> bool {
-        self.includes.covers(path) && !self.excludes.covers(path)
+        self.includes.covers(path) && !self.filter.is_excluded(path)
+    }
+
+    pub fn errors(&mut self) -> Vec<anyhow::Error> {
+        self.filter.errors()
     }
 }
 
@@ -802,7 +958,7 @@ mod tests {
         let glob_files_match = |pattern: &str, expected: &[&str]| -> anyhow::Result<()> {
             let glob_files = Glob::new_with_root(root, pattern.to_owned())
                 .unwrap()
-                .files(&Globs::empty())?;
+                .files(&GlobFilter::empty())?;
             let mut glob_files = glob_files
                 .iter()
                 .map(|p| p.strip_prefix(root))
@@ -968,7 +1124,7 @@ mod tests {
         let assert_empty_glob = |pattern_str: &str, description: &str| {
             let found_files = Glob::new_with_root(root, pattern_str.to_owned())
                 .unwrap()
-                .files(&Globs::empty())
+                .files(&GlobFilter::empty())
                 .unwrap_or_else(|_| Vec::new());
             assert!(
                 found_files.is_empty(),
@@ -986,7 +1142,7 @@ mod tests {
         // Verify that normal files are still found
         let normal_files = Glob::new_with_root(root, "**/*.py".to_owned())
             .unwrap()
-            .files(&Globs::empty())
+            .files(&GlobFilter::empty())
             .unwrap();
         assert!(
             !normal_files.is_empty(),
@@ -1018,13 +1174,16 @@ mod tests {
 
         let pattern = root.join("**").to_string_lossy().to_string();
 
-        let mut sorted_globs = Glob::resolve_pattern(&pattern, &Globs::empty()).unwrap();
+        let mut sorted_globs = Glob::resolve_pattern(&pattern, &GlobFilter::empty()).unwrap();
         sorted_globs.sort();
         assert_eq!(sorted_globs, vec![root.join("a/b.py"), root.join("a/c.py")]);
         assert_eq!(
             Glob::resolve_pattern(
                 &pattern,
-                &Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap()
+                &GlobFilter::new(
+                    Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap(),
+                    None
+                ),
             )
             .unwrap(),
             Vec::<PathBuf>::new()
@@ -1032,20 +1191,29 @@ mod tests {
         assert!(
             Glob::new(pattern.clone())
                 .unwrap()
-                .files(&Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap())
+                .files(&GlobFilter::new(
+                    Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap(),
+                    None
+                ))
                 .is_err()
         );
         // double check that <path>/** will also match <path>
         assert!(
             Glob::new(root.to_string_lossy().to_string())
                 .unwrap()
-                .files(&Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap())
+                .files(&GlobFilter::new(
+                    Globs::new(vec![root.join("**").to_string_lossy().to_string()]).unwrap(),
+                    None
+                ))
                 .is_err()
         );
         assert_eq!(
             Glob::resolve_pattern(
                 &pattern,
-                &Globs::new(vec![root.join("a/c.py").to_string_lossy().to_string()]).unwrap()
+                &GlobFilter::new(
+                    Globs::new(vec![root.join("a/c.py").to_string_lossy().to_string()]).unwrap(),
+                    None
+                )
             )
             .unwrap(),
             vec![root.join("a/b.py")],
@@ -1053,7 +1221,10 @@ mod tests {
         assert_eq!(
             Glob::resolve_pattern(
                 &pattern,
-                &Globs::new(vec![root.join("a").to_string_lossy().to_string()]).unwrap()
+                &GlobFilter::new(
+                    Globs::new(vec![root.join("a").to_string_lossy().to_string()]).unwrap(),
+                    None
+                )
             )
             .unwrap(),
             Vec::<PathBuf>::new()
@@ -1061,10 +1232,120 @@ mod tests {
         assert_eq!(
             Glob::resolve_pattern(
                 &pattern,
-                &Globs::new(vec![root.join("a/b*").to_string_lossy().to_string()]).unwrap()
+                &GlobFilter::new(
+                    Globs::new(vec![root.join("a/b*").to_string_lossy().to_string()]).unwrap(),
+                    None
+                ),
             )
             .unwrap(),
             vec![root.join("a/c.py")],
         );
+    }
+
+    #[test]
+    fn test_globfilter_finds_ignorefiles() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        TestPath::setup_test_directory(
+            root,
+            vec![
+                TestPath::file_with_contents(
+                    ".gitignore",
+                    "**/gitignore_exclude\n!**/gitignore_include/**",
+                ),
+                TestPath::dir(
+                    ".git",
+                    vec![TestPath::dir(
+                        "info",
+                        vec![TestPath::file_with_contents(
+                            "exclude",
+                            "**/gitexclude_exclude",
+                        )],
+                    )],
+                ),
+                TestPath::dir(
+                    "project",
+                    vec![
+                        TestPath::file("pyrefly.toml"),
+                        TestPath::file_with_contents(
+                            ".ignore",
+                            // added gitignore_include here to show that .gitignore's allowlist,
+                            // which will be found first will be preferred over anything later
+                            "**/gitignore_include/**\nignore_exclude",
+                        ),
+                    ],
+                ),
+            ],
+        );
+        let filter = GlobFilter::new(Globs::empty(), Some(&root.join("project")));
+
+        assert_eq!(
+            filter.ignore_paths,
+            vec![
+                root.join(".gitignore"),
+                root.join("project/.ignore"),
+                root.join(".git/info/exclude"),
+            ],
+        );
+        assert_eq!(filter.errors.len(), 0);
+        assert_eq!(filter.ignores.len(), 3);
+    }
+
+    #[test]
+    fn test_gitignore_globfilter() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        TestPath::setup_test_directory(
+            root,
+            vec![
+                TestPath::file_with_contents(
+                    ".gitignore",
+                    "**/*.gitignore_exclude\n!**/include/**",
+                ),
+                TestPath::dir(
+                    ".git",
+                    vec![TestPath::dir(
+                        "info",
+                        vec![TestPath::file_with_contents("exclude", "**/*.gitexclude")],
+                    )],
+                ),
+                TestPath::dir(
+                    "project",
+                    vec![
+                        TestPath::file("pyrefly.toml"),
+                        TestPath::file_with_contents(
+                            ".ignore",
+                            // added gitignore_include here to show that .gitignore's allowlist,
+                            // which will be found first will be preferred over anything later
+                            "**/include/**\n**/*.ignore_exclude",
+                        ),
+                    ],
+                ),
+            ],
+        );
+
+        let project_root = root.join("project");
+        let filter = GlobFilter::new(
+            Globs::new_with_root(&project_root, vec!["exclude_glob/**".to_owned()]).unwrap(),
+            Some(&project_root),
+        );
+
+        // do non-excluded files get excluded
+        assert!(!filter.is_excluded(&project_root.join("my_file.py")));
+
+        // test exclude globs
+        assert!(filter.is_excluded(&project_root.join("exclude_glob/my_file.py")));
+
+        // test `.gitignore`
+        assert!(filter.is_excluded(&project_root.join("my_file.gitignore_exclude")));
+        // Even though this is included in `.ignore`'s excludes, `.gitignore` takes priority,
+        // which allowlists it
+        assert!(!filter.is_excluded(&project_root.join("include/test.gitignore_exclude")));
+
+        // test `.ignore`
+        assert!(filter.is_excluded(&project_root.join("test/my_file.ignore_exclude")));
+
+        // test `.git/info/exclude`
+        assert!(filter.is_excluded(&project_root.join("my_file.gitexclude")));
     }
 }

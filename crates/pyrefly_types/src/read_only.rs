@@ -25,6 +25,8 @@ pub enum ReadOnlyReason {
     ClassObjectInitializedOnBody,
     /// Field is on a Super instance
     Super,
+    /// Field is marked as frozen via a ConfigDict
+    PydanticFrozen,
 }
 
 impl ReadOnlyReason {
@@ -42,6 +44,9 @@ impl ReadOnlyReason {
             }
             ReadOnlyReason::Super => {
                 "A field accessed through `super()` is considered read-only".to_owned()
+            }
+            ReadOnlyReason::PydanticFrozen => {
+                "This field belongs to a frozen Pydantic model,".to_owned()
             }
         }
     }

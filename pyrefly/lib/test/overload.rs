@@ -574,3 +574,21 @@ def g(x: int, y=None) -> int:
     return x
     "#,
 );
+
+testcase!(
+    test_overload_typeddict_errors,
+    r#"
+from typing import Any, TypedDict, overload, assert_type
+
+class TD(TypedDict):
+    x: int
+
+@overload
+def foo(d: TD) -> None: ...
+@overload
+def foo(d: int) -> None: ...
+def foo(d: TD | int) -> None: ...
+
+assert_type(foo({ "x": "foo" }), Any) # E: No matching overload found for function `foo`
+    "#,
+);

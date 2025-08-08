@@ -917,7 +917,7 @@ testcase!(
     test_empty_if,
     r#"
 # This parse error results in two identical Identifiers, which previously caused a panic.
-a = True if # E: Parse 
+a = True if # E: Parse
 "#,
 );
 
@@ -1061,7 +1061,7 @@ testcase!(
 from typing import Literal, assert_type, reveal_type
 
 a = assert_type(0, str) # E: assert_type(Literal[0], str) failed
-assert_type(a, Literal[0]) 
+assert_type(a, Literal[0])
 
 b = reveal_type(0) # E: revealed type: Literal[0]
 assert_type(b, Literal[0])
@@ -1336,7 +1336,7 @@ class NotBoolable:
 y = bool(NotBoolable())  # E: `NotBoolable.__bool__` has type `int`, which is not callable
 
 # if expressions
-x = 0 if NotBoolable() else 1  # E: `NotBoolable.__bool__` has type `int`, which is not callable
+x = 0 if NotBoolable() else 1  # E: `NotBoolable.__bool__` has type `int`, which is not callable  # E: Expected `__bool__` to be a callable, got int
 
 # if statements
 if NotBoolable(): ...  # E: `NotBoolable.__bool__` has type `int`, which is not callable
@@ -1498,6 +1498,22 @@ testcase!(
     r#"
 # Used to crash https://github.com/facebook/pyrefly/issues/517
 t: "õ" # E: Could not find name `õ`
+"#,
+);
+
+testcase!(
+    test_unused_coroutine,
+    r#"
+from typing import Any
+def not_async() -> Any:
+    pass
+async def foo():
+    return 1
+async def bar():
+    foo()  # E: Result of async function call is unused. Did you forget to `await`?
+    await foo()  # ok
+    x = foo()  # ok
+    not_async()  # ok
 "#,
 );
 
@@ -1670,7 +1686,7 @@ testcase!(
     test_bin_op_bool_num,
     r#"
 def f(x:float, y:bool) -> float:
-    return x * y 
+    return x * y
 "#,
 );
 
@@ -1712,7 +1728,16 @@ testcase!(
     test_overlapping_link_keys,
     r#"
 def f():
-    del yield  # E: # E: 
+    del yield  # E: # E:
     assert False, yield  # E:
+    "#,
+);
+
+testcase!(
+    test_lambda_args,
+    r#"
+from typing import reveal_type
+f1 = lambda x, *args, **kwargs: x
+reveal_type(f1) # E: revealed type: (x: Unknown, *args: Unknown, **kwargs: Unknown) -> Unknown
     "#,
 );

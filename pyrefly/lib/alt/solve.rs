@@ -53,6 +53,7 @@ use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSynthesizedFields;
+use crate::binding::binding::BindingConsistentOverrideCheck;
 use crate::binding::binding::BindingExpect;
 use crate::binding::binding::BindingFunction;
 use crate::binding::binding::BindingLegacyTypeParam;
@@ -252,6 +253,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             decorators,
             is_new_type,
             special_base,
+            pydantic_metadata,
         } = binding;
         let metadata = match &self.get_idx(*k).0 {
             None => ClassMetadata::recursive(),
@@ -262,6 +264,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 decorators,
                 *is_new_type,
                 special_base,
+                pydantic_metadata,
                 errors,
             ),
         };
@@ -1303,6 +1306,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Arc::new(EmptyAnswer)
     }
 
+    pub fn solve_consistent_override_check(
+        &self,
+        binding: &BindingConsistentOverrideCheck,
+        errors: &ErrorCollector,
+    ) -> Arc<EmptyAnswer> {
+        if let Some(cls) = &self.get_idx(binding.class_key).0 {
+            let class_bases = self.get_base_types_for_class(cls);
+            for (name, field) in self.get_class_field_map(cls).iter() {
+                self.check_consistent_override_for_field(
+                    cls,
+                    name,
+                    field.as_ref(),
+                    class_bases.as_ref(),
+                    errors,
+                );
+            }
+        }
+        Arc::new(EmptyAnswer)
+    }
+
     pub fn solve_class(
         &self,
         cls: &BindingClass,
@@ -2021,6 +2044,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.expr(e, None, errors)
                 }
             },
+            Binding::StmtExpr(e, is_assert_type) => {
+                let result = self.expr(e, None, errors);
+                if !is_assert_type
+                    && let Type::ClassType(cls) = &result
+                    && self.is_coroutine(&result)
+                    && !self.extends_any(cls.class_object())
+                {
+                    self.error(
+                        errors,
+                        e.range(),
+                        ErrorInfo::Kind(ErrorKind::UnusedCoroutine),
+                        "Result of async function call is unused. Did you forget to `await`?"
+                            .to_owned(),
+                    );
+                }
+                result
+            }
             Binding::MultiTargetAssign(ann, idx, range) => {
                 let type_info = self.get_idx(*idx);
                 let ty = type_info.ty();

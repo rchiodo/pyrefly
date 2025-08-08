@@ -25,6 +25,7 @@ use ruff_python_ast::StmtClassDef;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
 
 use crate::binding::base_class::BaseClass;
@@ -37,6 +38,7 @@ use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSynthesizedFields;
+use crate::binding::binding::BindingConsistentOverrideCheck;
 use crate::binding::binding::BindingTParams;
 use crate::binding::binding::BindingVariance;
 use crate::binding::binding::ClassBinding;
@@ -50,11 +52,13 @@ use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSynthesizedFields;
+use crate::binding::binding::KeyConsistentOverrideCheck;
 use crate::binding::binding::KeyTParams;
 use crate::binding::binding::KeyVariance;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::CurrentIdx;
 use crate::binding::bindings::LegacyTParamBuilder;
+use crate::binding::pydantic::PydanticMetadataBinding;
 use crate::binding::scope::ClassFieldInBody;
 use crate::binding::scope::ClassIndices;
 use crate::binding::scope::FlowStyle;
@@ -63,6 +67,7 @@ use crate::binding::scope::Scope;
 use crate::binding::scope::ScopeKind;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
+use crate::export::special::SpecialExport;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
 use crate::types::types::Type;
@@ -98,12 +103,42 @@ impl<'a> BindingsBuilder<'a> {
             mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
             synthesized_fields_idx: self.idx_for_promise(KeyClassSynthesizedFields(def_index)),
             variance_idx: self.idx_for_promise(KeyVariance(def_index)),
+            consistent_override_check_idx: self
+                .idx_for_promise(KeyConsistentOverrideCheck(def_index)),
         };
         // The user - used for first-usage tracking of any expressions we analyze in a class definition -
         // is the `Idx<Key>` of the class object bound to the class name.
         let class_object =
             self.declare_current_idx(Key::Definition(ShortIdentifier::new(class_name)));
         (class_object, class_indices)
+    }
+
+    // The goal of this function is to extract pydantic metadata (https://docs.pydantic.dev/latest/concepts/models/) from expressions.
+    // TODO: Consider propagating the entire expression instead of the value
+    // in case it is aliased.
+    fn extract_pydantic_metadata(
+        &self,
+        e: &Expr,
+        name: Hashed<&Name>,
+    ) -> Option<PydanticMetadataBinding> {
+        if name.as_str() == "model_config"
+            && let Some(call) = e.as_call_expr()
+            && let Some(special) = self.as_special_export(&call.func)
+            && special == SpecialExport::PydanticConfigDict
+        {
+            let mut frozen = false;
+            for kw in &call.arguments.keywords {
+                if let Some(arg_name) = &kw.arg
+                    && arg_name.id.as_str() == "frozen"
+                    && let Expr::BooleanLiteral(bl) = &kw.value
+                {
+                    frozen = bl.value;
+                    break;
+                }
+            }
+            return Some(PydanticMetadataBinding { frozen });
+        }
+        None
     }
 
     pub fn class_def(&mut self, mut x: StmtClassDef) {
@@ -119,7 +154,7 @@ impl<'a> BindingsBuilder<'a> {
         }
 
         let (mut class_object, class_indices) = self.class_object_and_indices(&x.name);
-
+        let mut pydantic_metadata = None;
         let docstring_range = Docstring::range_from_stmts(x.body.as_slice());
         let body = mem::take(&mut x.body);
         let decorators_with_ranges = self.ensure_and_bind_decorators_with_ranges(
@@ -192,17 +227,6 @@ impl<'a> BindingsBuilder<'a> {
             },
         );
         self.insert_binding_idx(
-            class_indices.metadata_idx,
-            BindingClassMetadata {
-                class_idx: class_indices.class_idx,
-                bases: bases.clone().into_boxed_slice(),
-                keywords: keywords.into_boxed_slice(),
-                decorators: decorators_with_ranges.clone().into_boxed_slice(),
-                is_new_type: false,
-                special_base: None,
-            },
-        );
-        self.insert_binding_idx(
             class_indices.mro_idx,
             BindingClassMro {
                 class_idx: class_indices.class_idx,
@@ -242,13 +266,22 @@ impl<'a> BindingsBuilder<'a> {
                         )
                     } else {
                         match info.as_initial_value() {
-                            ClassFieldInBody::InitializedByAssign(e) => (
-                                ClassFieldDefinition::AssignedInBody {
-                                    value: ExprOrBinding::Expr(e.clone()),
-                                    annotation: stat_info.annot,
-                                },
-                                true,
-                            ),
+                            ClassFieldInBody::InitializedByAssign(e) => {
+                                // TODO Zeina: This logic will need to be updated after we extract more data
+                                let curr_pydantic_metadata =
+                                    self.extract_pydantic_metadata(&e, name);
+                                if curr_pydantic_metadata.is_some() {
+                                    pydantic_metadata = curr_pydantic_metadata;
+                                }
+
+                                (
+                                    ClassFieldDefinition::AssignedInBody {
+                                        value: ExprOrBinding::Expr(e.clone()),
+                                        annotation: stat_info.annot,
+                                    },
+                                    true,
+                                )
+                            }
                             ClassFieldInBody::InitializedWithoutAssign => (
                                 ClassFieldDefinition::DefinedWithoutAssign {
                                     definition: info.key,
@@ -360,6 +393,24 @@ impl<'a> BindingsBuilder<'a> {
                 class_key: class_indices.class_idx,
             },
         );
+        self.insert_binding_idx(
+            class_indices.consistent_override_check_idx,
+            BindingConsistentOverrideCheck {
+                class_key: class_indices.class_idx,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.metadata_idx,
+            BindingClassMetadata {
+                class_idx: class_indices.class_idx,
+                bases: bases.clone().into_boxed_slice(),
+                keywords: keywords.into_boxed_slice(),
+                decorators: decorators_with_ranges.clone().into_boxed_slice(),
+                is_new_type: false,
+                special_base: None,
+                pydantic_metadata,
+            },
+        );
     }
 
     fn extract_string_literals(
@@ -459,6 +510,7 @@ impl<'a> BindingsBuilder<'a> {
                 decorators: Box::new([]),
                 is_new_type,
                 special_base,
+                pydantic_metadata: None, // This is a synthesized class, so no pydantic metadata
             },
         );
         self.insert_binding_idx(
@@ -577,6 +629,12 @@ impl<'a> BindingsBuilder<'a> {
         self.insert_binding_idx(
             class_indices.variance_idx,
             BindingVariance {
+                class_key: class_indices.class_idx,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.consistent_override_check_idx,
+            BindingConsistentOverrideCheck {
                 class_key: class_indices.class_idx,
             },
         );

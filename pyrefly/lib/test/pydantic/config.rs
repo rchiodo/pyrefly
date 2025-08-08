@@ -29,7 +29,6 @@ print(u)
 );
 
 testcase!(
-    bug = "we should raise an error that x is immutable",
     test_model_config,
     pydantic_env(),
     r#"
@@ -41,6 +40,57 @@ class Model(BaseModel):
 
 
 m = Model()
+m.x = 10 # E: Cannot set field `x`
+"#,
+);
+
+// This is a corner case, but since y is annotated, we consider it a field
+testcase!(
+    test_model_config_alias,
+    pydantic_env(),
+    r#"
+from pydantic import BaseModel, ConfigDict
+
+class Model(BaseModel):
+    y: ConfigDict = ConfigDict(frozen=True)
+    model_config = y
+    x: int = 42
+
+m = Model() # E:  Missing argument `y` in function `Model.__init__`
+m.x = 10
+
+"#,
+);
+
+testcase!(
+    bug = "We should raise an error on y because all model fields require an annotation.",
+    test_model_config_y,
+    pydantic_env(),
+    r#"
+from pydantic import BaseModel, ConfigDict
+
+class Model(BaseModel):
+    y = ConfigDict(frozen=True)
+    x: int = 42
+
+m = Model()
 m.x = 10 
+"#,
+);
+
+// Only the last config is considered
+testcase!(
+    test_model_two_config,
+    pydantic_env(),
+    r#"
+from pydantic import BaseModel, ConfigDict
+
+class Model(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=False)
+    x: int = 42
+
+m = Model()
+m.x = 10
 "#,
 );
