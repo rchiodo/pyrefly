@@ -237,6 +237,10 @@ impl AttributeFlags {
     pub const IS_ARGS_LIST: AttributeFlags = AttributeFlags(1);
     #[allow(dead_code)]
     pub const IS_KWARGS_DICT: AttributeFlags = AttributeFlags(2);
+    #[allow(dead_code)]
+    pub const PARAMETER: AttributeFlags = AttributeFlags(4);
+    #[allow(dead_code)]
+    pub const RETURN_TYPE: AttributeFlags = AttributeFlags(8);
 }
 
 #[derive(Serialize, Deserialize)]

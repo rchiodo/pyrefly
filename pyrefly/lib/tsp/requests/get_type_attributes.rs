@@ -17,6 +17,41 @@ use crate::tsp;
 use crate::tsp::common::lsp_debug;
 use crate::types::types::Type;
 
+/// Helper function to extract parameter name from a Param
+fn get_param_name(param: &crate::types::callable::Param, index: usize) -> String {
+    use crate::types::callable::Param;
+
+    match param {
+        Param::PosOnly(name, _, _) => name
+            .as_ref()
+            .map(|n| n.as_str().to_owned())
+            .unwrap_or_else(|| format!("param{}", index)),
+        Param::Pos(name, _, _) => name.as_str().to_owned(),
+        Param::VarArg(name, _) => name
+            .as_ref()
+            .map(|n| format!("*{}", n.as_str()))
+            .unwrap_or_else(|| "*args".to_owned()),
+        Param::KwOnly(name, _, _) => name.as_str().to_owned(),
+        Param::Kwargs(name, _) => name
+            .as_ref()
+            .map(|n| format!("**{}", n.as_str()))
+            .unwrap_or_else(|| "**kwargs".to_owned()),
+    }
+}
+
+/// Helper function to extract parameter type from a Param
+fn get_param_type(param: &crate::types::callable::Param) -> &Type {
+    use crate::types::callable::Param;
+
+    match param {
+        Param::PosOnly(_, param_type, _) => param_type,
+        Param::Pos(_, param_type, _) => param_type,
+        Param::VarArg(_, param_type) => param_type,
+        Param::KwOnly(_, param_type, _) => param_type,
+        Param::Kwargs(_, param_type) => param_type,
+    }
+}
+
 /// Extract all attributes from a pyrefly type
 /// This function examines a type and returns all its attributes (class members, function parameters, etc.)
 pub fn extract_type_attributes(
@@ -40,10 +75,7 @@ pub fn extract_type_attributes(
                 let class_instance_type = Type::ClassType(class_type.clone());
 
                 // Get all field names from the class
-                let field_names: Vec<_> = class_type
-                    .class_object()
-                    .fields()
-                    .collect();
+                let field_names: Vec<_> = class_type.class_object().fields().collect();
 
                 let mut class_attributes = Vec::new();
 
@@ -57,8 +89,8 @@ pub fn extract_type_attributes(
                             module_info.clone(),
                             crate::error::style::ErrorStyle::Never,
                         ), // Create a temporary error collector
-                        None,                                 // No context
-                        "get_type_attributes",                // Context description
+                        None,       // No context
+                        "get_type_attributes", // Context description
                     );
 
                     // Convert the pyrefly type to TSP type
@@ -84,13 +116,168 @@ pub fn extract_type_attributes(
         }
 
         Type::Function(function_type) => {
-            // For functions, we could return the parameters as attributes
-            // For now, we'll return empty as function parameter introspection is complex
-            // TODO: Implement function parameter extraction when public API is available
-            lsp_debug!(
-                "Function parameter extraction not yet implemented for: {:?}",
-                function_type.signature
-            );
+            // For functions, extract parameters and return type as attributes
+            // Reuse logic from get_function_parts
+            let signature = &function_type.signature;
+
+            // Extract parameters as attributes
+            match &signature.params {
+                crate::types::callable::Params::List(param_list) => {
+                    for (i, param) in param_list.items().iter().enumerate() {
+                        let param_name = get_param_name(param, i);
+                        let param_type = get_param_type(param);
+                        let tsp_type =
+                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+
+                        let attribute = tsp::Attribute {
+                            name: param_name,
+                            type_info: tsp_type,
+                            owner: None,
+                            bound_type: None,
+                            flags: tsp::AttributeFlags::PARAMETER,
+                            decls: Vec::new(),
+                        };
+                        attributes.push(attribute);
+                    }
+                }
+                crate::types::callable::Params::Ellipsis => {
+                    // Handle ellipsis parameters
+                    let attribute = tsp::Attribute {
+                        name: "...".to_owned(),
+                        type_info: crate::tsp::protocol::convert_to_tsp_type(Type::Any(
+                            crate::types::types::AnyStyle::Implicit,
+                        )),
+                        owner: None,
+                        bound_type: None,
+                        flags: tsp::AttributeFlags::PARAMETER,
+                        decls: Vec::new(),
+                    };
+                    attributes.push(attribute);
+                }
+                crate::types::callable::Params::ParamSpec(types, param_spec) => {
+                    // Handle concatenated parameters with ParamSpec
+                    for (i, param_type) in types.iter().enumerate() {
+                        let param_name = format!("param{}", i);
+                        let tsp_type =
+                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+
+                        let attribute = tsp::Attribute {
+                            name: param_name,
+                            type_info: tsp_type,
+                            owner: None,
+                            bound_type: None,
+                            flags: tsp::AttributeFlags::PARAMETER,
+                            decls: Vec::new(),
+                        };
+                        attributes.push(attribute);
+                    }
+
+                    // Add the ParamSpec itself
+                    let param_spec_tsp =
+                        crate::tsp::protocol::convert_to_tsp_type(param_spec.clone());
+                    let attribute = tsp::Attribute {
+                        name: "*param_spec".to_owned(),
+                        type_info: param_spec_tsp,
+                        owner: None,
+                        bound_type: None,
+                        flags: tsp::AttributeFlags::PARAMETER,
+                        decls: Vec::new(),
+                    };
+                    attributes.push(attribute);
+                }
+            }
+
+            // Add return type as an attribute
+            let return_tsp_type = crate::tsp::protocol::convert_to_tsp_type(signature.ret.clone());
+            let return_attribute = tsp::Attribute {
+                name: "return".to_owned(),
+                type_info: return_tsp_type,
+                owner: None,
+                bound_type: None,
+                flags: tsp::AttributeFlags::RETURN_TYPE,
+                decls: Vec::new(),
+            };
+            attributes.push(return_attribute);
+        }
+
+        Type::Callable(callable_type) => {
+            // For callable types, extract parameters and return type as attributes
+            // Similar logic to Function but working directly with Callable
+            match &callable_type.params {
+                crate::types::callable::Params::List(param_list) => {
+                    for (i, param) in param_list.items().iter().enumerate() {
+                        let param_name = get_param_name(param, i);
+                        let param_type = get_param_type(param);
+                        let tsp_type =
+                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+
+                        let attribute = tsp::Attribute {
+                            name: param_name,
+                            type_info: tsp_type,
+                            owner: None,
+                            bound_type: None,
+                            flags: tsp::AttributeFlags::PARAMETER,
+                            decls: Vec::new(),
+                        };
+                        attributes.push(attribute);
+                    }
+                }
+                crate::types::callable::Params::Ellipsis => {
+                    let attribute = tsp::Attribute {
+                        name: "...".to_owned(),
+                        type_info: crate::tsp::protocol::convert_to_tsp_type(Type::Any(
+                            crate::types::types::AnyStyle::Implicit,
+                        )),
+                        owner: None,
+                        bound_type: None,
+                        flags: tsp::AttributeFlags::PARAMETER,
+                        decls: Vec::new(),
+                    };
+                    attributes.push(attribute);
+                }
+                crate::types::callable::Params::ParamSpec(types, param_spec) => {
+                    for (i, param_type) in types.iter().enumerate() {
+                        let param_name = format!("param{}", i);
+                        let tsp_type =
+                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+
+                        let attribute = tsp::Attribute {
+                            name: param_name,
+                            type_info: tsp_type,
+                            owner: None,
+                            bound_type: None,
+                            flags: tsp::AttributeFlags::PARAMETER,
+                            decls: Vec::new(),
+                        };
+                        attributes.push(attribute);
+                    }
+
+                    let param_spec_tsp =
+                        crate::tsp::protocol::convert_to_tsp_type(param_spec.clone());
+                    let attribute = tsp::Attribute {
+                        name: "*param_spec".to_owned(),
+                        type_info: param_spec_tsp,
+                        owner: None,
+                        bound_type: None,
+                        flags: tsp::AttributeFlags::PARAMETER,
+                        decls: Vec::new(),
+                    };
+                    attributes.push(attribute);
+                }
+            }
+
+            // Add return type as an attribute
+            let return_tsp_type =
+                crate::tsp::protocol::convert_to_tsp_type(callable_type.ret.clone());
+            let return_attribute = tsp::Attribute {
+                name: "return".to_owned(),
+                type_info: return_tsp_type,
+                owner: None,
+                bound_type: None,
+                flags: tsp::AttributeFlags::RETURN_TYPE,
+                decls: Vec::new(),
+            };
+            attributes.push(return_attribute);
         }
 
         Type::Module(module_type) => {
