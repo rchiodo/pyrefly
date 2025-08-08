@@ -14,6 +14,54 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::types::types::Type as PyType;
 
+/// Standalone get_type_alias_info function that can be used independently of the Server
+/// This follows the same pattern as the get_type feature
+pub fn get_type_alias_info(py_type: &PyType) -> Option<tsp::TypeAliasInfo> {
+    // Check if this is a TypeAlias
+    match py_type {
+        PyType::TypeAlias(type_alias) => {
+            let name = type_alias.name.to_string();
+
+            // Get the aliased type and check if it has type arguments
+            let aliased_type = type_alias.as_type();
+            let type_args = extract_type_arguments(&aliased_type);
+
+            Some(tsp::TypeAliasInfo { name, type_args })
+        }
+        _ => {
+            // Not a type alias, return None
+            None
+        }
+    }
+}
+
+/// Extract type arguments from a type if it's a generic type
+pub fn extract_type_arguments(py_type: &PyType) -> Option<Vec<tsp::Type>> {
+    match py_type {
+        // If it's a ClassType with type arguments, extract them
+        PyType::ClassType(class_type) => {
+            let targs = class_type.targs();
+
+            if targs.is_empty() {
+                None
+            } else {
+                let type_args: Vec<tsp::Type> = targs
+                    .as_slice()
+                    .iter()
+                    .map(|arg| {
+                        // Convert each pyrefly type argument to TSP Type
+                        crate::tsp::protocol::convert_to_tsp_type(arg.clone())
+                    })
+                    .collect();
+
+                Some(type_args)
+            }
+        }
+        // For other generic types, we could add more cases here
+        _ => None,
+    }
+}
+
 impl Server {
     pub(crate) fn get_type_alias_info(
         &self,
@@ -29,48 +77,7 @@ impl Server {
             return Ok(None);
         };
 
-        // Check if this is a TypeAlias
-        match py_type {
-            PyType::TypeAlias(type_alias) => {
-                let name = type_alias.name.to_string();
-
-                // Get the aliased type and check if it has type arguments
-                let aliased_type = type_alias.as_type();
-                let type_args = self.extract_type_arguments(&aliased_type);
-
-                Ok(Some(tsp::TypeAliasInfo { name, type_args }))
-            }
-            _ => {
-                // Not a type alias, return None
-                Ok(None)
-            }
-        }
-    }
-
-    /// Extract type arguments from a type if it's a generic type
-    fn extract_type_arguments(&self, py_type: &PyType) -> Option<Vec<tsp::Type>> {
-        match py_type {
-            // If it's a ClassType with type arguments, extract them
-            PyType::ClassType(class_type) => {
-                let targs = class_type.targs();
-
-                if targs.is_empty() {
-                    None
-                } else {
-                    let type_args: Vec<tsp::Type> = targs
-                        .as_slice()
-                        .iter()
-                        .map(|arg| {
-                            // Convert each pyrefly type argument to TSP Type
-                            crate::tsp::protocol::convert_to_tsp_type(arg.clone())
-                        })
-                        .collect();
-
-                    Some(type_args)
-                }
-            }
-            // For other generic types, we could add more cases here
-            _ => None,
-        }
+        // Call the standalone get_type_alias_info function
+        Ok(get_type_alias_info(&py_type))
     }
 }

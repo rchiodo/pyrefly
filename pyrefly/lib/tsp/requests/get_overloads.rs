@@ -14,6 +14,50 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
 
+/// Extract overload signatures from an overloaded type
+///
+/// This is the core logic for getting overloads that can be used independently
+/// of the Server implementation for unit testing.
+pub fn extract_overloads_from_type(
+    internal_type: &crate::types::types::Type,
+) -> Option<Vec<crate::types::types::Type>> {
+    // Only process overloaded function types
+    match internal_type {
+        crate::types::types::Type::Overload(overload_type) => {
+            let mut result_types = Vec::new();
+
+            // Convert each overload signature to a Function type
+            for signature in overload_type.signatures.iter() {
+                match signature {
+                    crate::types::types::OverloadType::Callable(function) => {
+                        // OverloadType::Callable already contains a Function
+                        let function_type =
+                            crate::types::types::Type::Function(Box::new(function.clone()));
+                        result_types.push(function_type);
+                    }
+                    crate::types::types::OverloadType::Forall(forall) => {
+                        // Convert Forall<Function> to Function type
+                        let function_type =
+                            crate::types::types::Type::Function(Box::new(forall.body.clone()));
+                        result_types.push(function_type);
+                    }
+                }
+            }
+
+            Some(result_types)
+        }
+
+        // Non-overloaded types return None
+        _ => {
+            lsp_debug!(
+                "extract_overloads_from_type called on non-overloaded type: {:?}",
+                internal_type
+            );
+            None
+        }
+    }
+}
+
 impl Server {
     pub(crate) fn get_overloads(
         &self,
@@ -37,40 +81,17 @@ impl Server {
             }
         };
 
-        // Only process overloaded function types
-        match &internal_type {
-            crate::types::types::Type::Overload(overload_type) => {
-                let mut result_types = Vec::new();
+        // Extract overloads using standalone function
+        let overload_types = extract_overloads_from_type(&internal_type);
 
-                // Convert each overload signature to a TSP Type
-                for signature in overload_type.signatures.iter() {
-                    match signature {
-                        crate::types::types::OverloadType::Callable(function) => {
-                            // OverloadType::Callable already contains a Function
-                            let function_type =
-                                crate::types::types::Type::Function(Box::new(function.clone()));
-                            result_types.push(self.convert_and_register_type(function_type));
-                        }
-                        crate::types::types::OverloadType::Forall(forall) => {
-                            // Convert Forall<Function> to Function type
-                            let function_type =
-                                crate::types::types::Type::Function(Box::new(forall.body.clone()));
-                            result_types.push(self.convert_and_register_type(function_type));
-                        }
-                    }
-                }
+        // Convert internal types to TSP types
+        let result_types = overload_types.map(|types| {
+            types
+                .into_iter()
+                .map(|t| self.convert_and_register_type(t))
+                .collect()
+        });
 
-                Ok(Some(result_types))
-            }
-
-            // Non-overloaded types return None
-            _ => {
-                lsp_debug!(
-                    "get_overloads called on non-overloaded type: {:?}",
-                    internal_type
-                );
-                Ok(None)
-            }
-        }
+        Ok(result_types)
     }
 }

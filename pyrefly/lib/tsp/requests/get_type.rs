@@ -1,12 +1,5 @@
 /*
- * Copyright /// Standalone get_type function that can be used independently of the Server
-/// This follows the same pattern as the hover feature
-pub fn get_type(
-    transaction: &Transaction<'_>,
-    handle: &Handle,
-    module_info: &ModuleInfo,
-    params: &tsp::GetTypeParams,
-) -> Option<tsp::Type> { Platforms, Inc. and affiliates.
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.

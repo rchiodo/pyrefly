@@ -14,6 +14,133 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
 
+/// Extract function parts from a function type
+///
+/// This is the core logic for getting function parts that can be used independently
+/// of the Server implementation for unit testing.
+pub fn extract_function_parts_from_function(
+    func_type: &crate::types::callable::Function,
+    flags: tsp::TypeReprFlags,
+    transaction: &Transaction<'_>,
+) -> Option<tsp::FunctionParts> {
+    // Extract parameter information from the function's signature
+    let signature = &func_type.signature;
+    extract_function_parts_from_callable(signature, flags, transaction)
+}
+
+/// Extract function parts from a callable type
+///
+/// This is the core logic for getting function parts from callables that can be used
+/// independently of the Server implementation for unit testing.
+pub fn extract_function_parts_from_callable(
+    callable_type: &crate::types::callable::Callable,
+    flags: tsp::TypeReprFlags,
+    transaction: &Transaction<'_>,
+) -> Option<tsp::FunctionParts> {
+    // Extract parameter information from callable
+    let mut params = Vec::new();
+
+    // Handle different types of params
+    match &callable_type.params {
+        crate::types::callable::Params::List(param_list) => {
+            for param in param_list.items() {
+                let param_str = format_param_for_display(param, flags, transaction);
+                params.push(param_str);
+            }
+        }
+        crate::types::callable::Params::Ellipsis => {
+            params.push("...".to_owned());
+        }
+        crate::types::callable::Params::ParamSpec(types, param_spec) => {
+            // Handle concatenated parameters with a ParamSpec
+            for (i, param_type) in types.iter().enumerate() {
+                let type_str = format_type_for_display(param_type, flags, transaction);
+                params.push(format!("param{i}: {type_str}"));
+            }
+            let param_spec_str = format_type_for_display(param_spec, flags, transaction);
+            params.push(format!("*{param_spec_str}"));
+        }
+    }
+
+    // Get return type
+    let return_type_str = format_type_for_display(&callable_type.ret, flags, transaction);
+
+    Some(tsp::FunctionParts {
+        params,
+        return_type: return_type_str,
+    })
+}
+
+/// Format a parameter for display
+///
+/// This is a helper function that can be used independently for formatting parameters.
+pub fn format_param_for_display(
+    param: &crate::types::callable::Param,
+    flags: tsp::TypeReprFlags,
+    transaction: &Transaction<'_>,
+) -> String {
+    use crate::types::callable::Param;
+
+    match param {
+        Param::PosOnly(name, param_type, _required) => {
+            let type_str = format_type_for_display(param_type, flags, transaction);
+            if let Some(name) = name {
+                format!("{name}: {type_str}")
+            } else {
+                type_str
+            }
+        }
+        Param::Pos(name, param_type, _required) => {
+            let type_str = format_type_for_display(param_type, flags, transaction);
+            format!("{name}: {type_str}")
+        }
+        Param::VarArg(name, param_type) => {
+            let type_str = format_type_for_display(param_type, flags, transaction);
+            if let Some(name) = name {
+                format!("*{name}: {type_str}")
+            } else {
+                format!("*{type_str}")
+            }
+        }
+        Param::KwOnly(name, param_type, _required) => {
+            let type_str = format_type_for_display(param_type, flags, transaction);
+            format!("{name}: {type_str}")
+        }
+        Param::Kwargs(name, param_type) => {
+            let type_str = format_type_for_display(param_type, flags, transaction);
+            if let Some(name) = name {
+                format!("**{name}: {type_str}")
+            } else {
+                format!("**{type_str}")
+            }
+        }
+    }
+}
+
+/// Format a type for display
+///
+/// This is a helper function that can be used independently for formatting types.
+pub fn format_type_for_display(
+    type_obj: &crate::types::types::Type,
+    flags: tsp::TypeReprFlags,
+    _transaction: &Transaction<'_>,
+) -> String {
+    // This is a simplified implementation. You might want to use a more sophisticated
+    // type formatting system that respects the TypeReprFlags
+    if flags.has_expand_type_aliases() {
+        // Expand type aliases if requested
+        // This would require more complex logic to expand aliases
+    }
+
+    if flags.has_convert_to_instance_type() {
+        // Convert class types to instance types if requested
+        // This would require type conversion logic
+    }
+
+    // For now, just use the default string representation
+    type_obj.to_string()
+}
+
 impl Server {
     pub(crate) fn get_function_parts(
         &self,
@@ -44,12 +171,12 @@ impl Server {
 
         // Extract function parts based on the type
         match &internal_type {
-            crate::types::types::Type::Function(func_type) => {
-                self.extract_function_parts_from_function(func_type, params.flags, transaction)
-            }
-            crate::types::types::Type::Callable(callable_type) => {
-                self.extract_function_parts_from_callable(callable_type, params.flags, transaction)
-            }
+            crate::types::types::Type::Function(func_type) => Ok(
+                extract_function_parts_from_function(func_type, params.flags, transaction),
+            ),
+            crate::types::types::Type::Callable(callable_type) => Ok(
+                extract_function_parts_from_callable(callable_type, params.flags, transaction),
+            ),
             crate::types::types::Type::Overload(_overload_type) => {
                 // For overloaded functions, we could return the signature of the first overload
                 // or a combined representation. For now, let's return None as it's complex.
@@ -64,122 +191,5 @@ impl Server {
                 Ok(None)
             }
         }
-    }
-
-    fn extract_function_parts_from_function(
-        &self,
-        func_type: &crate::types::callable::Function,
-        flags: tsp::TypeReprFlags,
-        transaction: &Transaction<'_>,
-    ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
-        // Extract parameter information from the function's signature
-        let signature = &func_type.signature;
-        self.extract_function_parts_from_callable(signature, flags, transaction)
-    }
-
-    fn extract_function_parts_from_callable(
-        &self,
-        callable_type: &crate::types::callable::Callable,
-        flags: tsp::TypeReprFlags,
-        transaction: &Transaction<'_>,
-    ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
-        // Extract parameter information from callable
-        let mut params = Vec::new();
-
-        // Handle different types of params
-        match &callable_type.params {
-            crate::types::callable::Params::List(param_list) => {
-                for param in param_list.items() {
-                    let param_str = self.format_param_for_display(param, flags, transaction);
-                    params.push(param_str);
-                }
-            }
-            crate::types::callable::Params::Ellipsis => {
-                params.push("...".to_owned());
-            }
-            crate::types::callable::Params::ParamSpec(types, param_spec) => {
-                // Handle concatenated parameters with a ParamSpec
-                for (i, param_type) in types.iter().enumerate() {
-                    let type_str = self.format_type_for_display(param_type, flags, transaction);
-                    params.push(format!("param{i}: {type_str}"));
-                }
-                let param_spec_str = self.format_type_for_display(param_spec, flags, transaction);
-                params.push(format!("*{param_spec_str}"));
-            }
-        }
-
-        // Get return type
-        let return_type_str = self.format_type_for_display(&callable_type.ret, flags, transaction);
-
-        Ok(Some(tsp::FunctionParts {
-            params,
-            return_type: return_type_str,
-        }))
-    }
-
-    fn format_param_for_display(
-        &self,
-        param: &crate::types::callable::Param,
-        flags: tsp::TypeReprFlags,
-        transaction: &Transaction<'_>,
-    ) -> String {
-        use crate::types::callable::Param;
-
-        match param {
-            Param::PosOnly(name, param_type, _required) => {
-                let type_str = self.format_type_for_display(param_type, flags, transaction);
-                if let Some(name) = name {
-                    format!("{name}: {type_str}")
-                } else {
-                    type_str
-                }
-            }
-            Param::Pos(name, param_type, _required) => {
-                let type_str = self.format_type_for_display(param_type, flags, transaction);
-                format!("{name}: {type_str}")
-            }
-            Param::VarArg(name, param_type) => {
-                let type_str = self.format_type_for_display(param_type, flags, transaction);
-                if let Some(name) = name {
-                    format!("*{name}: {type_str}")
-                } else {
-                    format!("*{type_str}")
-                }
-            }
-            Param::KwOnly(name, param_type, _required) => {
-                let type_str = self.format_type_for_display(param_type, flags, transaction);
-                format!("{name}: {type_str}")
-            }
-            Param::Kwargs(name, param_type) => {
-                let type_str = self.format_type_for_display(param_type, flags, transaction);
-                if let Some(name) = name {
-                    format!("**{name}: {type_str}")
-                } else {
-                    format!("**{type_str}")
-                }
-            }
-        }
-    }
-
-    fn format_type_for_display(
-        &self,
-        type_obj: &crate::types::types::Type,
-        flags: tsp::TypeReprFlags,
-        _transaction: &Transaction<'_>,
-    ) -> String {
-        // This is a simplified implementation. You might want to use a more sophisticated
-        // type formatting system that respects the TypeReprFlags
-        if flags.has_expand_type_aliases() {
-            // Expand type aliases if requested
-            // This would require more complex logic to expand aliases
-        }
-
-        if flags.has_convert_to_instance_type() {
-            // Convert class types to instance types if requested
-            // This would require type conversion logic
-        }
-
-        // For now, just use the default string representation
-        type_obj.to_string()
     }
 }

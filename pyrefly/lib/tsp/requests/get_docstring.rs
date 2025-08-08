@@ -14,6 +14,41 @@ use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 
+/// Extract docstring from a transaction at a specific position
+///
+/// This is the core logic for getting docstrings that can be used independently
+/// of the Server implementation for unit testing.
+pub fn get_docstring_at_position(
+    transaction: &Transaction<'_>,
+    handle: &crate::state::handle::Handle,
+    node: &tsp::Node,
+) -> Option<String> {
+    // Get module info for position conversion
+    let module_info = transaction.get_module_info(handle)?;
+
+    // Convert Range position to TextSize using the module's line buffer
+    let position = module_info
+        .lined_buffer()
+        .from_lsp_position(node.range.start);
+
+    // Try to find definition at the position - this is the same logic as hover
+    let first_definition = transaction
+        .find_definition(handle, position, true)
+        .into_iter()
+        .next()?;
+
+    let _definition_metadata = &first_definition.metadata;
+    let _definition_range = first_definition.definition_range;
+    let docstring_range = first_definition.docstring_range?;
+
+    // Get the module info for this handle
+    let module_info = transaction.get_load(handle)?;
+
+    // Use the Docstring class to properly format the docstring, same as hover
+    let docstring = Docstring(docstring_range, module_info.module_info.clone());
+    Some(docstring.resolve())
+}
+
 impl Server {
     pub(crate) fn get_docstring(
         &self,
@@ -50,53 +85,10 @@ impl Server {
                 return Ok(None);
             };
 
-            return self.extract_docstring_from_transaction(&fresh_transaction, &handle, node);
+            return Ok(get_docstring_at_position(&fresh_transaction, &handle, node));
         };
 
         // Use the current transaction to find the docstring
-        self.extract_docstring_from_transaction(transaction, &handle, node)
-    }
-
-    /// Helper method to extract docstring from a transaction, reusing hover logic
-    fn extract_docstring_from_transaction(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        node: &tsp::Node,
-    ) -> Result<Option<String>, ResponseError> {
-        // Get module info for position conversion
-        let Some(module_info) = transaction.get_module_info(handle) else {
-            return Ok(None);
-        };
-
-        // Convert Range position to TextSize using the module's line buffer
-        let position = module_info
-            .lined_buffer()
-            .from_lsp_position(node.range.start);
-
-        // Try to find definition at the position - this is the same logic as hover
-        if let Some(first_definition) = transaction
-            .find_definition(handle, position, true)
-            .into_iter()
-            .next()
-        {
-            let _definition_metadata = &first_definition.metadata;
-            let _definition_range = first_definition.definition_range;
-            let docstring_range = first_definition.docstring_range;
-
-            if let Some(docstring_range) = docstring_range {
-                // Get the module info for this handle
-                let Some(module_info) = transaction.get_load(handle) else {
-                    return Ok(None);
-                };
-
-                // Use the Docstring class to properly format the docstring, same as hover
-                let docstring = Docstring(docstring_range, module_info.module_info.clone());
-                return Ok(Some(docstring.resolve()));
-            }
-        }
-
-        // No docstring found
-        Ok(None)
+        Ok(get_docstring_at_position(transaction, &handle, node))
     }
 }
