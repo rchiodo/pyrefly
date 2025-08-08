@@ -295,7 +295,7 @@ pub fn extract_type_attributes(
             for (i, signature) in overload_type.signatures.iter().enumerate() {
                 let signature_name = format!("overload_{}", i);
                 match signature {
-                    crate::types::types::OverloadType::Callable(function) => {
+                    crate::types::types::OverloadType::Function(function) => {
                         let function_type = Type::Function(Box::new(function.clone()));
                         let tsp_type = crate::tsp::protocol::convert_to_tsp_type(function_type);
 

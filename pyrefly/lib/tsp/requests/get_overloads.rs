@@ -29,8 +29,8 @@ pub fn extract_overloads_from_type(
             // Convert each overload signature to a Function type
             for signature in overload_type.signatures.iter() {
                 match signature {
-                    crate::types::types::OverloadType::Callable(function) => {
-                        // OverloadType::Callable already contains a Function
+                    crate::types::types::OverloadType::Function(function) => {
+                        // OverloadType::Function already contains a Function
                         let function_type =
                             crate::types::types::Type::Function(Box::new(function.clone()));
                         result_types.push(function_type);

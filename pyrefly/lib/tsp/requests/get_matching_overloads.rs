@@ -80,7 +80,7 @@ impl Server {
 
                 for signature in overload_type.signatures.iter() {
                     match signature {
-                        crate::types::types::OverloadType::Callable(function) => {
+                        crate::types::types::OverloadType::Function(function) => {
                             let function_type =
                                 crate::types::types::Type::Function(Box::new(function.clone()));
                             result_types.push(self.convert_and_register_type(function_type));
