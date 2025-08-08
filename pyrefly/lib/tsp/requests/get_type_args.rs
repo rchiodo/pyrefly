@@ -12,7 +12,8 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn get_type_args(
@@ -22,14 +23,14 @@ impl Server {
     ) -> Result<Vec<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
         // Get the internal type from the type handle
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                lsp_debug!(
+                tsp_debug!(
                     "Could not resolve type handle: {:?}",
                     params.type_param.handle
                 );
@@ -121,7 +122,7 @@ impl Server {
 
             // Other types don't have type arguments
             _ => {
-                lsp_debug!(
+                tsp_debug!(
                     "get_type_args called on non-union, non-generic type: {:?}",
                     internal_type
                 );

@@ -15,6 +15,7 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::common::snapshot_outdated_error;
 
 /// Create an unresolved import declaration
 ///
@@ -194,7 +195,7 @@ impl Server {
     ) -> Result<Option<tsp::Declaration>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
         // Only resolve import declarations
@@ -214,12 +215,13 @@ impl Server {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         };
 
-        let target_handle = match resolve_import_target_handle(transaction, &source_handle, module_name) {
-            Ok(handle) => handle,
-            Err(_) => {
-                return Ok(Some(create_unresolved_import_declaration(&params.decl)));
-            }
-        };
+        let target_handle =
+            match resolve_import_target_handle(transaction, &source_handle, module_name) {
+                Ok(handle) => handle,
+                Err(_) => {
+                    return Ok(Some(create_unresolved_import_declaration(&params.decl)));
+                }
+            };
 
         // Use common helper to get or load module info for the target handle
         let (target_module_info, fresh_transaction) = match self.get_or_load_module_info(

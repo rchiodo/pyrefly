@@ -15,7 +15,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
-use std::time::Instant;
 
 use dupe::Dupe;
 use lsp_server::Connection;
@@ -24,7 +23,6 @@ use lsp_server::Message;
 use lsp_server::Request;
 use lsp_server::RequestId;
 use lsp_server::Response;
-use lsp_server::ResponseError;
 use lsp_types::CodeAction;
 use lsp_types::CodeActionKind;
 use lsp_types::CodeActionOptions;
@@ -175,6 +173,7 @@ use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
 use crate::lsp::transaction_manager::TransactionManager;
+use crate::lsp::workspace::LspAnalysisConfig;
 use crate::lsp::workspace::Workspace;
 use crate::lsp::workspace::Workspaces;
 use crate::module::from_path::module_from_path;
@@ -184,7 +183,6 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
-use crate::tsp;
 use crate::tsp::CombineTypesRequest;
 use crate::tsp::CreateInstanceTypeRequest;
 use crate::tsp::GetBuiltinTypeRequest;
@@ -215,15 +213,6 @@ struct ServerConnection(Arc<Connection>);
 
 impl ServerConnection {
     fn send(&self, msg: Message) {
-        // Log outgoing notifications
-        if let Message::Notification(ref notification) = msg {
-            eprintln!("Sending notification: {}", notification.method);
-            eprintln!(
-                "Notification parameters: {}",
-                serde_json::to_string_pretty(&notification.params)
-                    .unwrap_or_else(|_| "Failed to serialize params".to_owned())
-            );
-        }
         if self.0.sender.send(msg).is_err() {
             // On error, we know the channel is closed.
             // https://docs.rs/crossbeam/latest/crossbeam/channel/struct.Sender.html#method.send
@@ -267,8 +256,6 @@ pub(crate) struct Server {
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: AtomicBool,
     version_info: Mutex<HashMap<PathBuf, i32>>,
-    /// Track current request for duration logging
-    current_request: Arc<Mutex<Option<(RequestId, String, Instant)>>>,
 }
 
 /// At the time when we are ready to handle a new LSP event, it will help if we know the a list of
@@ -466,14 +453,6 @@ pub fn lsp_loop(
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
-    /// Helper function to create a consistent "Snapshot is outdated" error response
-    pub(crate) fn snapshot_outdated_error() -> ResponseError {
-        ResponseError {
-            code: ErrorCode::ServerCancelled as i32,
-            message: "Snapshot is outdated".to_owned(),
-            data: None,
-        }
-    }
     fn extract_request_params_or_send_err_response<T>(
         &self,
         params: Result<T::Params, serde_json::Error>,
@@ -952,10 +931,6 @@ impl Server {
                     ide_transaction_manager.save(transaction);
                 } else {
                     eprintln!("Unhandled request: {x:?}");
-                    // Log duration for unhandled requests since they don't call send_response
-                    if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
-                        eprintln!("Request {} ({}) completed in {:?}", method, request_id, start_time.elapsed());
-                    }
                 }
             }
         }
@@ -1000,7 +975,6 @@ impl Server {
             outgoing_requests: Mutex::new(HashMap::new()),
             filewatcher_registered: AtomicBool::new(false),
             version_info: Mutex::new(HashMap::new()),
-            current_request: Arc::new(Mutex::new(None)),
         };
         s.setup_file_watcher_if_necessary();
         s.request_settings_for_all_workspaces();
@@ -1008,20 +982,6 @@ impl Server {
     }
 
     fn send_response(&self, x: Response) {
-        // Check if this response corresponds to a tracked request and log duration
-        if let Some((request_id, method, start_time)) = self.current_request.lock().take() {
-            if request_id == x.id {
-                eprintln!(
-                    "Request {} ({}) completed in {:?}",
-                    method,
-                    request_id,
-                    start_time.elapsed()
-                );
-            } else {
-                // Put it back if it doesn't match (shouldn't happen in normal flow)
-                *self.current_request.lock() = Some((request_id, method, start_time));
-            }
-        }
         self.connection.send(Message::Response(x))
     }
 
@@ -1290,176 +1250,6 @@ impl Server {
         Ok(())
     }
 
-    /// Load a module in a fresh transaction if it's not available in the current transaction
-    /// or if it doesn't meet the required level
-    pub(crate) fn load_module_if_needed(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        required_level: crate::state::require::Require,
-    ) -> Option<Transaction> {
-        // Check if module is already loaded in the current transaction
-        // For now, we'll be conservative and always reload if Everything is required
-        // but the module exists (since we can't easily check the current requirement level)
-        let should_reload = match required_level {
-            crate::state::require::Require::Everything => {
-                // For Everything requirement, reload even if module exists to ensure full analysis
-                transaction.get_module_info(handle).is_some()
-            }
-            _ => {
-                // For lighter requirements, don't reload if module already exists
-                transaction.get_module_info(handle).is_none()
-            }
-        };
-
-        if !should_reload && transaction.get_module_info(handle).is_some() {
-            return None; // Module already loaded and sufficient
-        }
-
-        // Module not loaded or needs upgrade, create a fresh transaction and load it
-        let mut fresh_transaction = self.state.transaction();
-        fresh_transaction.run(&[(handle.clone(), required_level)]);
-
-        // Verify the module was loaded successfully
-        if fresh_transaction.get_module_info(handle).is_some() {
-            Some(fresh_transaction)
-        } else {
-            None // Module couldn't be loaded even with fresh transaction
-        }
-    }
-
-    /// Helper function to get module info from either the current transaction or a fresh one if needed
-    pub(crate) fn get_module_info_with_loading(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-    ) -> Result<
-        (
-            Option<crate::module::module_info::ModuleInfo>,
-            Option<Transaction<'_>>,
-        ),
-        (),
-    > {
-        self.get_module_info_with_loading_level(
-            transaction,
-            handle,
-            crate::state::require::Require::Everything,
-        )
-    }
-
-    /// Helper function to get module info with a specific requirement level
-    fn get_module_info_with_loading_level(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        required_level: crate::state::require::Require,
-    ) -> Result<
-        (
-            Option<crate::module::module_info::ModuleInfo>,
-            Option<Transaction<'_>>,
-        ),
-        (),
-    > {
-        // Try to get module info from the current transaction first
-        if let Some(module_info) = transaction.get_module_info(handle) {
-            // For lighter requirements, existing module info is usually sufficient
-            match required_level {
-                crate::state::require::Require::Exports
-                | crate::state::require::Require::Errors
-                | crate::state::require::Require::Indexing => {
-                    return Ok((Some(module_info), None));
-                }
-                crate::state::require::Require::Everything => {
-                    // For Everything requirement, we may need to reload
-                    // For now, we'll assume existing module info is sufficient
-                    // unless explicitly requested to reload
-                    return Ok((Some(module_info), None));
-                }
-            }
-        }
-
-        // Module not loaded or needs specific requirement level, try to load it
-        if let Some(fresh_transaction) =
-            self.load_module_if_needed(transaction, handle, required_level)
-        {
-            if let Some(module_info) = fresh_transaction.get_module_info(handle) {
-                return Ok((Some(module_info), Some(fresh_transaction)));
-            }
-        }
-
-        // Could not load the module
-        Ok((None, None))
-    }
-
-    pub(crate) fn current_snapshot(&self) -> i32 {
-        self.state.current_snapshot()
-    }
-
-    /// Converts a pyrefly type to TSP type and registers it in the lookup table
-    pub(crate) fn convert_and_register_type(
-        &self,
-        py_type: crate::types::types::Type,
-    ) -> tsp::Type {
-        let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
-
-        // Register the type in the lookup table
-        if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-            self.state.register_type_handle(handle_str.clone(), py_type);
-        }
-
-        tsp_type
-    }
-
-    /// Looks up a pyrefly type from an integer TSP type handle
-    fn lookup_type_by_int_handle(&self, id: i32) -> Option<crate::types::types::Type> {
-        // For now, convert integer handle to string and use the existing lookup
-        // In a more sophisticated implementation, we might have separate integer and string lookups
-        let handle_str = format!("{}", id);
-        self.state.lookup_type_from_handle(&handle_str)
-    }
-
-    /// Looks up a pyrefly type from a TSP Type
-    pub(crate) fn lookup_type_from_tsp_type(
-        &self,
-        tsp_type: &tsp::Type,
-    ) -> Option<crate::types::types::Type> {
-        match &tsp_type.handle {
-            tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
-            tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
-        }
-    }
-
-    pub fn categorized_events(events: Vec<lsp_types::FileEvent>) -> CategorizedEvents {
-        let mut created = Vec::new();
-        let mut modified = Vec::new();
-        let mut removed = Vec::new();
-        let mut unknown = Vec::new();
-
-        for event in events {
-            match event.typ {
-                lsp_types::FileChangeType::CREATED => {
-                    created.push(event.uri.to_file_path().unwrap());
-                }
-                lsp_types::FileChangeType::CHANGED => {
-                    modified.push(event.uri.to_file_path().unwrap());
-                }
-                lsp_types::FileChangeType::DELETED => {
-                    removed.push(event.uri.to_file_path().unwrap());
-                }
-                _ => {
-                    unknown.push(event.uri.to_file_path().unwrap());
-                }
-            }
-        }
-
-        CategorizedEvents {
-            created,
-            modified,
-            removed,
-            unknown,
-        }
-    }
-
     fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         if !params.changes.is_empty() {
             self.invalidate(move |t| {
@@ -1545,8 +1335,12 @@ impl Server {
         }
     }
 
-    /// Create a handle. Return None if the workspace has language services disabled (and thus you shouldn't do anything).
-    pub(crate) fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
+    /// Create a handle with analysis config that decides language service behavior.
+    /// Return None if the workspace has language services disabled (and thus you shouldn't do anything).
+    fn make_handle_with_lsp_analysis_config_if_enabled(
+        &self,
+        uri: &Url,
+    ) -> Option<(Handle, Option<LspAnalysisConfig>)> {
         let path = uri.to_file_path().unwrap();
         self.workspaces.get_with(path.clone(), |workspace| {
             if workspace.disable_language_services {
@@ -1558,9 +1352,17 @@ impl Server {
                 } else {
                     ModulePath::filesystem(path)
                 };
-                Some(handle_from_module_path(&self.state, module_path))
+                Some((
+                    handle_from_module_path(&self.state, module_path),
+                    workspace.lsp_analysis_config,
+                ))
             }
         })
+    }
+
+    pub fn make_handle_if_enabled(&self, uri: &Url) -> Option<Handle> {
+        self.make_handle_with_lsp_analysis_config_if_enabled(uri)
+            .map(|(handle, _)| handle)
     }
 
     fn goto_definition(
@@ -1853,9 +1655,15 @@ impl Server {
     ) -> Option<Vec<InlayHint>> {
         let uri = &params.text_document.uri;
         let range = &params.range;
-        let handle = self.make_handle_if_enabled(uri)?;
+        let (handle, lsp_analysis_config) =
+            self.make_handle_with_lsp_analysis_config_if_enabled(uri)?;
         let info = transaction.get_module_info(&handle)?;
-        let t = transaction.inlay_hints(&handle)?;
+        let t = transaction.inlay_hints(
+            &handle,
+            lsp_analysis_config
+                .and_then(|c| c.inlay_hints)
+                .unwrap_or_default(),
+        )?;
         let res = t
             .into_iter()
             .filter_map(|x| {

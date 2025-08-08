@@ -12,7 +12,7 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 use crate::types::types::Type as PyType;
 
 impl Server {
@@ -24,11 +24,11 @@ impl Server {
         // Validate snapshot
         self.validate_snapshot(params.snapshot)?;
 
-        lsp_debug!("Creating instance type for: {:?}", params.type_param);
+        tsp_debug!("Creating instance type for: {:?}", params.type_param);
 
         // Use the handle mapping to get the actual pyrefly type
         let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
-            lsp_debug!("Warning: Could not resolve type handle for createInstanceType");
+            tsp_debug!("Warning: Could not resolve type handle for createInstanceType");
             return Ok(None);
         };
 
@@ -79,7 +79,7 @@ impl Server {
         // Convert back to TSP type format
         let result = Some(crate::tsp::protocol::convert_to_tsp_type(instance_type));
 
-        lsp_debug!("createInstanceType result: {:?}", result);
+        tsp_debug!("createInstanceType result: {:?}", result);
         Ok(result)
     }
 }

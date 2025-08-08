@@ -14,7 +14,8 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
 
 /// Search for an attribute in a class type using the solver
 ///
@@ -94,10 +95,10 @@ impl Server {
     ) -> Result<Option<tsp::Attribute>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
-        lsp_debug!(
+        tsp_debug!(
             "Searching for attribute '{}' with access flags: {:?}",
             params.attribute_name,
             params.access_flags
@@ -107,7 +108,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.start_type) {
             Some(t) => t,
             None => {
-                lsp_debug!(
+                tsp_debug!(
                     "Could not resolve type handle: {:?}",
                     params.start_type.handle
                 );
@@ -125,7 +126,7 @@ impl Server {
                     &params.attribute_name,
                     |module_info| self.create_handle_for_module(module_info),
                 ) {
-                    lsp_debug!(
+                    tsp_debug!(
                         "Found attribute '{}' in class type with type: {:?}",
                         params.attribute_name,
                         attribute_type
@@ -139,7 +140,7 @@ impl Server {
                     );
                     Ok(Some(tsp_attribute))
                 } else {
-                    lsp_debug!(
+                    tsp_debug!(
                         "Attribute '{}' not found in class type",
                         params.attribute_name
                     );
@@ -147,7 +148,7 @@ impl Server {
                 }
             }
             _ => {
-                lsp_debug!(
+                tsp_debug!(
                     "search_for_type_attribute only works on class types, got: {:?}",
                     internal_type
                 );

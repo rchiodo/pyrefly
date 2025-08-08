@@ -19,7 +19,7 @@ use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn get_diagnostics(
@@ -30,7 +30,7 @@ impl Server {
         // Validate snapshot
         self.validate_snapshot(params.snapshot)?;
 
-        lsp_debug!("Getting diagnostics for URI: {}", params.uri);
+        tsp_debug!("Getting diagnostics for URI: {}", params.uri);
 
         // Convert URI to file path
         let file_path = match params.uri.to_file_path() {
@@ -46,7 +46,7 @@ impl Server {
 
         // Check if workspace has language services enabled
         let Some(_handle) = self.make_handle_if_enabled(&params.uri) else {
-            lsp_debug!("Language services disabled for workspace");
+            tsp_debug!("Language services disabled for workspace");
             return Ok(Some(Vec::new()));
         };
 
@@ -77,7 +77,7 @@ impl Server {
             }
         }
 
-        lsp_debug!(
+        tsp_debug!(
             "Found {} diagnostics for URI: {}",
             diagnostics.len(),
             params.uri

@@ -13,7 +13,7 @@ use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 // Import the lsp_debug macro from common
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn get_repr(
@@ -27,7 +27,7 @@ impl Server {
         // Use the handle mapping to get the actual pyrefly type
         let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
             // If we can't find the internal type, fall back to the basic formatter
-            lsp_debug!(
+            tsp_debug!(
                 "Warning: Could not resolve type handle for repr: {:?}",
                 params.type_param.handle
             );
@@ -64,7 +64,7 @@ impl Server {
             type_repr
         };
 
-        lsp_debug!(
+        tsp_debug!(
             "Generated repr for type {:?}: {}",
             params.type_param.handle,
             final_repr

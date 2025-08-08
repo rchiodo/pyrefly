@@ -12,7 +12,7 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 use crate::tsp::requests::common::node_start_position;
 
 impl Server {
@@ -39,7 +39,7 @@ impl Server {
             crate::state::require::Require::Everything,
         )?;
 
-        lsp_debug!(
+        tsp_debug!(
             "Getting matching overloads for call node: {:?}",
             params.call_node
         );
@@ -51,7 +51,7 @@ impl Server {
 
         // Try to find the type at the call site position
         let Some(call_site_type) = active_tx.get_type_at(&handle, position) else {
-            lsp_debug!("Could not determine type at call site position");
+            tsp_debug!("Could not determine type at call site position");
             return Ok(None);
         };
 
@@ -83,20 +83,20 @@ impl Server {
                     }
                 }
 
-                lsp_debug!("Found {} matching overloads", result_types.len());
+                tsp_debug!("Found {} matching overloads", result_types.len());
                 Ok(Some(result_types))
             }
 
             // If it's a regular function, return it as a single-item array
             crate::types::types::Type::Function(_) => {
-                lsp_debug!("Found single function at call site");
+                tsp_debug!("Found single function at call site");
                 let tsp_type = self.convert_and_register_type(call_site_type);
                 Ok(Some(vec![tsp_type]))
             }
 
             // Other types don't have overloads
             _ => {
-                lsp_debug!(
+                tsp_debug!(
                     "Type at call site is not a function or overload: {:?}",
                     call_site_type
                 );

@@ -18,6 +18,7 @@ use crate::lsp::server::Server;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::common::snapshot_outdated_error;
 use crate::types::class::ClassType;
 
 /// Standalone get_builtin_type function that can be used independently of the Server
@@ -94,7 +95,7 @@ impl Server {
     ) -> Result<Option<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
         // Convert Node to URI to get the handle for the scoping node

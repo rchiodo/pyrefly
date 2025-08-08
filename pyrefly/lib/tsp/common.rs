@@ -14,19 +14,19 @@ use crate::tsp;
 
 /// LSP debug logging that can be disabled in release builds
 #[cfg(debug_assertions)]
-macro_rules! lsp_debug {
+macro_rules! tsp_debug {
     ($($arg:tt)*) => {
         eprintln!($($arg)*);
     };
 }
 
 #[cfg(not(debug_assertions))]
-macro_rules! lsp_debug {
+macro_rules! tsp_debug {
     ($($arg:tt)*) => {};
 }
 
 // Re-export the macro for use in TSP request modules
-pub(crate) use lsp_debug;
+pub(crate) use tsp_debug;
 
 /// Creates a snapshot outdated error
 #[allow(dead_code)]

@@ -17,12 +17,13 @@ use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::common::snapshot_outdated_error;
+/// Common validation for snapshot
 
 impl Server {
-    /// Common validation for snapshot
     pub(crate) fn validate_snapshot(&self, snapshot: i32) -> Result<(), ResponseError> {
         if snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
         Ok(())
     }
@@ -252,6 +253,145 @@ impl Server {
 
         Ok((handle, module_info, maybe_fresh_tx))
     }
+
+    /// Load a module in a fresh transaction if it's not available in the current transaction
+    /// or if it doesn't meet the required level
+    pub(crate) fn load_module_if_needed(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
+    ) -> Option<Transaction> {
+        // Check if module is already loaded in the current transaction
+        // For now, we'll be conservative and always reload if Everything is required
+        // but the module exists (since we can't easily check the current requirement level)
+        let should_reload = match required_level {
+            crate::state::require::Require::Everything => {
+                // For Everything requirement, reload even if module exists to ensure full analysis
+                transaction.get_module_info(handle).is_some()
+            }
+            _ => {
+                // For lighter requirements, don't reload if module already exists
+                transaction.get_module_info(handle).is_none()
+            }
+        };
+
+        if !should_reload && transaction.get_module_info(handle).is_some() {
+            return None; // Module already loaded and sufficient
+        }
+
+        // Module not loaded or needs upgrade, create a fresh transaction and load it
+        let mut fresh_transaction = self.state.transaction();
+        fresh_transaction.run(&[(handle.clone(), required_level)]);
+
+        // Verify the module was loaded successfully
+        if fresh_transaction.get_module_info(handle).is_some() {
+            Some(fresh_transaction)
+        } else {
+            None // Module couldn't be loaded even with fresh transaction
+        }
+    }
+
+    /// Helper function to get module info from either the current transaction or a fresh one if needed
+    pub(crate) fn get_module_info_with_loading(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+    ) -> Result<
+        (
+            Option<crate::module::module_info::ModuleInfo>,
+            Option<Transaction<'_>>,
+        ),
+        (),
+    > {
+        self.get_module_info_with_loading_level(
+            transaction,
+            handle,
+            crate::state::require::Require::Everything,
+        )
+    }
+
+    /// Helper function to get module info with a specific requirement level
+    fn get_module_info_with_loading_level(
+        &self,
+        transaction: &Transaction<'_>,
+        handle: &crate::state::handle::Handle,
+        required_level: crate::state::require::Require,
+    ) -> Result<
+        (
+            Option<crate::module::module_info::ModuleInfo>,
+            Option<Transaction<'_>>,
+        ),
+        (),
+    > {
+        // Try to get module info from the current transaction first
+        if let Some(module_info) = transaction.get_module_info(handle) {
+            // For lighter requirements, existing module info is usually sufficient
+            match required_level {
+                crate::state::require::Require::Exports
+                | crate::state::require::Require::Errors
+                | crate::state::require::Require::Indexing => {
+                    return Ok((Some(module_info), None));
+                }
+                crate::state::require::Require::Everything => {
+                    // For Everything requirement, we may need to reload
+                    // For now, we'll assume existing module info is sufficient
+                    // unless explicitly requested to reload
+                    return Ok((Some(module_info), None));
+                }
+            }
+        }
+
+        // Module not loaded or needs specific requirement level, try to load it
+        if let Some(fresh_transaction) =
+            self.load_module_if_needed(transaction, handle, required_level)
+        {
+            if let Some(module_info) = fresh_transaction.get_module_info(handle) {
+                return Ok((Some(module_info), Some(fresh_transaction)));
+            }
+        }
+
+        // Could not load the module
+        Ok((None, None))
+    }
+
+    pub(crate) fn current_snapshot(&self) -> i32 {
+        self.state.current_snapshot()
+    }
+
+    /// Converts a pyrefly type to TSP type and registers it in the lookup table
+    pub(crate) fn convert_and_register_type(
+        &self,
+        py_type: crate::types::types::Type,
+    ) -> tsp::Type {
+        let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
+
+        // Register the type in the lookup table
+        if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
+            self.state.register_type_handle(handle_str.clone(), py_type);
+        }
+
+        tsp_type
+    }
+
+    /// Looks up a pyrefly type from an integer TSP type handle
+    fn lookup_type_by_int_handle(&self, id: i32) -> Option<crate::types::types::Type> {
+        // For now, convert integer handle to string and use the existing lookup
+        // In a more sophisticated implementation, we might have separate integer and string lookups
+        let handle_str = format!("{}", id);
+        self.state.lookup_type_from_handle(&handle_str)
+    }
+
+    /// Looks up a pyrefly type from a TSP Type
+    pub(crate) fn lookup_type_from_tsp_type(
+        &self,
+        tsp_type: &tsp::Type,
+    ) -> Option<crate::types::types::Type> {
+        match &tsp_type.handle {
+            tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
+            tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
+        }
+    }
 }
 
 /// A builder to create TSP declarations consistently across handlers
@@ -314,10 +454,7 @@ impl DeclarationBuilder {
                     self.uri,
                     self.node
                         .as_ref()
-                        .map(|n| format!(
-                            "{}:{}",
-                            n.range.start.line, n.range.start.character
-                        ))
+                        .map(|n| format!("{}:{}", n.range.start.line, n.range.start.character))
                         .unwrap_or_else(|| "no_node".to_owned())
                 ))
             }),

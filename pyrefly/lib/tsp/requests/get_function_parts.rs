@@ -12,7 +12,8 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 
 /// Extract function parts from a function type
 ///
@@ -149,10 +150,10 @@ impl Server {
     ) -> Result<Option<tsp::FunctionParts>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
-        lsp_debug!(
+        tsp_debug!(
             "Getting function parts for type: {:?}",
             params.type_param.handle
         );
@@ -161,7 +162,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                lsp_debug!(
+                tsp_debug!(
                     "Could not resolve type handle: {:?}",
                     params.type_param.handle
                 );
@@ -180,11 +181,11 @@ impl Server {
             crate::types::types::Type::Overload(_overload_type) => {
                 // For overloaded functions, we could return the signature of the first overload
                 // or a combined representation. For now, let's return None as it's complex.
-                lsp_debug!("Function parts for overloaded functions not yet implemented");
+                tsp_debug!("Function parts for overloaded functions not yet implemented");
                 Ok(None)
             }
             _ => {
-                lsp_debug!(
+                tsp_debug!(
                     "get_function_parts only works on function types, got: {:?}",
                     internal_type
                 );

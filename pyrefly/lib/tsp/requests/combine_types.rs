@@ -13,7 +13,8 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 use crate::types::simplify::unions;
 
 impl Server {
@@ -24,10 +25,10 @@ impl Server {
     ) -> Result<Option<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
-        lsp_debug!("Combining {} types", params.types.len());
+        tsp_debug!("Combining {} types", params.types.len());
 
         // Validate input
         if params.types.is_empty() {
@@ -47,7 +48,7 @@ impl Server {
         let mut py_types = Vec::new();
         for tsp_type in &params.types {
             let Some(py_type) = self.lookup_type_from_tsp_type(tsp_type) else {
-                lsp_debug!(
+                tsp_debug!(
                     "Warning: Could not resolve type handle: {:?}",
                     tsp_type.handle
                 );
@@ -75,7 +76,7 @@ impl Server {
         // Convert back to TSP type format
         let result = Some(crate::tsp::protocol::convert_to_tsp_type(union_type));
 
-        lsp_debug!("combineTypes result: {:?}", result);
+        tsp_debug!("combineTypes result: {:?}", result);
         Ok(result)
     }
 }

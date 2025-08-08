@@ -14,7 +14,8 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 use crate::types::types::Type;
 
 /// Helper function to extract parameter name from a Param
@@ -283,7 +284,7 @@ pub fn extract_type_attributes(
         Type::Module(module_type) => {
             // For modules, we could potentially list exported symbols
             // For now, we'll return empty as module introspection is complex
-            lsp_debug!(
+            tsp_debug!(
                 "Module attribute extraction not yet implemented for: {:?}",
                 module_type
             );
@@ -329,7 +330,7 @@ pub fn extract_type_attributes(
 
         _ => {
             // For other types (primitives, unions, etc.), there are no attributes
-            lsp_debug!("No attributes available for type: {:?}", pyrefly_type);
+            tsp_debug!("No attributes available for type: {:?}", pyrefly_type);
         }
     }
 
@@ -344,16 +345,16 @@ impl Server {
     ) -> Result<Option<Vec<tsp::Attribute>>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
-        lsp_debug!("Getting attributes for type: {:?}", params.type_param);
+        tsp_debug!("Getting attributes for type: {:?}", params.type_param);
 
         // Convert TSP type to pyrefly type
         let pyrefly_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(pyrefly_type) => pyrefly_type,
             None => {
-                lsp_debug!("Could not convert TSP type to pyrefly type");
+                tsp_debug!("Could not convert TSP type to pyrefly type");
                 return Ok(Some(Vec::new()));
             }
         };
@@ -369,7 +370,7 @@ impl Server {
             Handle::new(module_name, module_path, config.get_sys_info())
         })?;
 
-        lsp_debug!("Found {} attributes", attributes.len());
+        tsp_debug!("Found {} attributes", attributes.len());
         Ok(Some(attributes))
     }
 }

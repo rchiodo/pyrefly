@@ -16,7 +16,7 @@ use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn resolve_import(
@@ -58,7 +58,7 @@ impl Server {
                 let path = match to_real_path(resolved_handle.path()) {
                     Some(path) => path,
                     None => {
-                        lsp_debug!("Could not get real path for: {:?}", resolved_handle.path());
+                        tsp_debug!("Could not get real path for: {:?}", resolved_handle.path());
                         return Ok(None);
                     }
                 };
@@ -68,7 +68,7 @@ impl Server {
                 match Url::from_file_path(final_path) {
                     Ok(url) => Ok(Some(url)),
                     Err(_) => {
-                        lsp_debug!(
+                        tsp_debug!(
                             "Could not convert path to URI for: {:?}",
                             resolved_handle.path()
                         );
@@ -78,7 +78,7 @@ impl Server {
             }
             Err(e) => {
                 // For debugging, use {:?} instead of {}
-                lsp_debug!("Import resolution failed: {:?}", e);
+                tsp_debug!("Import resolution failed: {:?}", e);
                 // Return None instead of an error if the import cannot be resolved
                 Ok(None)
             }

@@ -16,9 +16,9 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
-use crate::tsp::requests::common::node_start_position;
+use crate::tsp::common::tsp_debug;
 use crate::tsp::requests::common::DeclarationBuilder;
+use crate::tsp::requests::common::node_start_position;
 
 /// Extract symbol name from a node or use the provided name
 ///
@@ -222,7 +222,7 @@ pub fn extract_symbol_from_transaction(
             Some((name, Vec::new(), vec![type_info]))
         } else {
             // No definition found and no type information available
-            lsp_debug!(
+            tsp_debug!(
                 "Warning: No symbol definition or type information found at position {} in {}",
                 position.to_usize(),
                 params.node.uri

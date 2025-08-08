@@ -12,7 +12,7 @@ use lsp_server::ResponseError;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::tsp_debug;
 
 /// Extract overload signatures from an overloaded type
 ///
@@ -49,7 +49,7 @@ pub fn extract_overloads_from_type(
 
         // Non-overloaded types return None
         _ => {
-            lsp_debug!(
+            tsp_debug!(
                 "extract_overloads_from_type called on non-overloaded type: {:?}",
                 internal_type
             );
@@ -71,7 +71,7 @@ impl Server {
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
             Some(t) => t,
             None => {
-                lsp_debug!(
+                tsp_debug!(
                     "Could not resolve type handle: {:?}",
                     params.type_param.handle
                 );

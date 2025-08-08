@@ -14,7 +14,8 @@ use crate::binding::binding::KeyClassMetadata;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::common::lsp_debug;
+use crate::tsp::common::snapshot_outdated_error;
+use crate::tsp::common::tsp_debug;
 use crate::types::types::Type as PyType;
 
 impl Server {
@@ -25,14 +26,14 @@ impl Server {
     ) -> Result<Option<tsp::Type>, ResponseError> {
         // Check if the snapshot is still valid
         if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
+            return Err(snapshot_outdated_error());
         }
 
-        lsp_debug!("Getting metaclass for type: {:?}", params.type_param);
+        tsp_debug!("Getting metaclass for type: {:?}", params.type_param);
 
         // Convert TSP type to internal pyrefly type
         let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_param) else {
-            lsp_debug!("Warning: Could not resolve type handle for getMetaclass");
+            tsp_debug!("Warning: Could not resolve type handle for getMetaclass");
             return Ok(None);
         };
 
@@ -40,7 +41,7 @@ impl Server {
         let class_type = match py_type {
             PyType::ClassType(class_type) => class_type,
             _ => {
-                lsp_debug!("Type is not a class type, returning None");
+                tsp_debug!("Type is not a class type, returning None");
                 return Ok(None);
             }
         };
@@ -62,7 +63,7 @@ impl Server {
         let solutions = match transaction.get_solutions(&handle) {
             Some(solutions) => solutions,
             None => {
-                lsp_debug!("No solutions found for primary handle");
+                tsp_debug!("No solutions found for primary handle");
                 return Ok(None);
             }
         };
@@ -76,7 +77,7 @@ impl Server {
             Some(metaclass) => metaclass.clone(),
             None => {
                 // When no explicit metaclass is specified, Python uses `type` as the default metaclass
-                lsp_debug!("No explicit metaclass found, returning default 'type' metaclass");
+                tsp_debug!("No explicit metaclass found, returning default 'type' metaclass");
 
                 // Use the built-in 'type' class as the default metaclass
                 let stdlib = transaction.get_stdlib(&handle);
@@ -89,7 +90,7 @@ impl Server {
         let metaclass_type = PyType::ClassType(metaclass);
         let result = Some(crate::tsp::protocol::convert_to_tsp_type(metaclass_type));
 
-        lsp_debug!("getMetaclass result: {:?}", result);
+        tsp_debug!("getMetaclass result: {:?}", result);
         Ok(result)
     }
 }
