@@ -7,21 +7,70 @@
 
 //! Implementation of the combineTypes TSP request
 
+use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::common::lsp_debug;
+use crate::types::simplify::unions;
 
 impl Server {
     pub(crate) fn combine_types(
         &self,
         _transaction: &Transaction<'_>,
-        _params: tsp::CombineTypesParams,
+        params: tsp::CombineTypesParams,
     ) -> Result<Option<tsp::Type>, ResponseError> {
-        // TODO: Implement combineTypes
-        // This should combine multiple types into a single union type
-        // For now, return None
-        Ok(None)
+        // Check if the snapshot is still valid
+        if params.snapshot != self.current_snapshot() {
+            return Err(Self::snapshot_outdated_error());
+        }
+
+        lsp_debug!("Combining {} types", params.types.len());
+
+        // Validate input
+        if params.types.is_empty() {
+            return Err(ResponseError {
+                code: ErrorCode::InvalidParams as i32,
+                message: "combineTypes requires at least one type".to_owned(),
+                data: None,
+            });
+        }
+
+        if params.types.len() == 1 {
+            // Single type, just return it as-is
+            return Ok(Some(params.types[0].clone()));
+        }
+
+        // Convert all TSP types to internal pyrefly types
+        let mut py_types = Vec::new();
+        for tsp_type in &params.types {
+            let Some(py_type) = self.lookup_type_from_tsp_type(tsp_type) else {
+                lsp_debug!("Warning: Could not resolve type handle: {:?}", tsp_type.handle);
+                // Skip unresolvable types rather than failing completely
+                continue;
+            };
+            py_types.push(py_type);
+        }
+
+        if py_types.is_empty() {
+            // No valid types found
+            return Ok(None);
+        }
+
+        if py_types.len() == 1 {
+            // Only one valid type found
+            return Ok(Some(crate::tsp::protocol::convert_to_tsp_type(py_types.into_iter().next().unwrap())));
+        }
+
+        // Create a union of all the types using pyrefly's union simplification logic
+        let union_type = unions(py_types);
+
+        // Convert back to TSP type format
+        let result = Some(crate::tsp::protocol::convert_to_tsp_type(union_type));
+
+        lsp_debug!("combineTypes result: {:?}", result);
+        Ok(result)
     }
 }
