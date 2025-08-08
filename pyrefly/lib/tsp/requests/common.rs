@@ -19,7 +19,6 @@ use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::snapshot_outdated_error;
 /// Common validation for snapshot
-
 impl Server {
     pub(crate) fn validate_snapshot(&self, snapshot: i32) -> Result<(), ResponseError> {
         if snapshot != self.current_snapshot() {
