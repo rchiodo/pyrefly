@@ -24,10 +24,8 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::ResolveImportParams,
     ) -> Result<Option<lsp_types::Url>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate snapshot
+        self.validate_snapshot(params.snapshot)?;
 
         // Convert source URI to file path (validation only)
         if params.source_uri.to_file_path().is_err() {
@@ -38,7 +36,9 @@ impl Server {
             });
         }
 
-        // Check if workspace has language services enabled and get the source handle
+        // Validate language services enabled for workspace
+        self.validate_language_services(&params.source_uri)?;
+        // After validation, make the handle
         let Some(source_handle) = self.make_handle_if_enabled(&params.source_uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,

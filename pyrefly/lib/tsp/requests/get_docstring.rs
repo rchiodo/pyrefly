@@ -13,6 +13,7 @@ use pyrefly_python::docstring::Docstring;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::requests::common::node_start_position;
 
 /// Extract docstring from a transaction at a specific position
 ///
@@ -55,40 +56,39 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetDocstringParams,
     ) -> Result<Option<String>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
-        // Extract the location information from the declaration
+        // Validate and obtain handle/module info (and potentially a fresh transaction)
         let Some(node) = &params.decl.node else {
-            // If there's no node information, we can't find the docstring
             return Ok(None);
         };
 
-        // Convert Node URI to a handle
-        let uri = &node.uri;
+        let (handle, module_info, maybe_fresh_tx) = self.with_active_transaction(
+            transaction,
+            &node.uri,
+            params.snapshot,
+            crate::state::require::Require::Everything,
+        )?;
 
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
+        let active_tx = maybe_fresh_tx.as_ref().unwrap_or(transaction);
+
+        // Compute position and find definition
+        let position = node_start_position(&module_info, node);
+        let Some(first_definition) = active_tx
+            .find_definition(&handle, position, true)
+            .into_iter()
+            .next()
+        else {
             return Ok(None);
         };
 
-        // Get module info for position conversion
-        let Some(_module_info) = transaction.get_module_info(&handle) else {
-            // If module not loaded in transaction, try to load it
-            let Some(fresh_transaction) = self.load_module_if_needed(
-                transaction,
-                &handle,
-                crate::state::require::Require::Everything,
-            ) else {
-                return Ok(None);
-            };
-
-            return Ok(get_docstring_at_position(&fresh_transaction, &handle, node));
+        let Some(docstring_range) = first_definition.docstring_range else {
+            return Ok(None);
         };
 
-        // Use the current transaction to find the docstring
-        Ok(get_docstring_at_position(transaction, &handle, node))
+        // get_load for Docstring context
+        let Some(module_load) = active_tx.get_load(&handle) else {
+            return Ok(None);
+        };
+        let doc = Docstring(docstring_range, module_load.module_info.clone());
+        Ok(Some(doc.resolve()))
     }
 }

@@ -20,10 +20,8 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetDiagnosticsVersionParams,
     ) -> Result<u32, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate snapshot
+        self.validate_snapshot(params.snapshot)?;
 
         // Convert URI to file path (validation only)
         if params.uri.to_file_path().is_err() {
@@ -34,7 +32,8 @@ impl Server {
             });
         }
 
-        // Check if workspace has language services enabled
+        // Validate language services; then create handle
+        self.validate_language_services(&params.uri)?;
         let Some(handle) = self.make_handle_if_enabled(&params.uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,

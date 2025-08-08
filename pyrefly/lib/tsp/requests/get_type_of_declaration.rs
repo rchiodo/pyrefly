@@ -7,7 +7,6 @@
 
 //! TSP get type of declaration request implementation
 
-use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 
 use crate::lsp::server::Server;
@@ -77,94 +76,57 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetTypeOfDeclarationParams,
     ) -> Result<tsp::Type, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
-
         // Extract the location information from the declaration
         let Some(node) = &params.decl.node else {
-            // If there's no node information, we can't get the type
             return Err(ResponseError {
-                code: ErrorCode::InvalidParams as i32,
+                code: lsp_server::ErrorCode::InvalidParams as i32,
                 message: "Declaration has no node information".to_owned(),
                 data: None,
             });
         };
 
-        // Convert Node URI to a handle
-        let uri = &node.uri;
+        // Use common helper to validate, get handle, module info and maybe a fresh transaction
+        let (handle, module_info, transaction_to_use) = self.with_active_transaction(
+            transaction,
+            &node.uri,
+            params.snapshot,
+            crate::state::require::Require::Everything,
+        )?;
 
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_owned(),
-                data: None,
-            });
-        };
-
-        // Get module info for position conversion
-        // Note: If the module is not loaded in the transaction, we'll load it ourselves
-        // If we can't get module info, the file might not be loaded in the transaction
-        // This can happen when the declaration points to a definition in a file that's not currently loaded
-        let module_info = match transaction.get_module_info(&handle) {
-            Some(info) => info,
-            None => {
-                // Module not loaded in transaction, try to load it
-                let Some(mut fresh_transaction) = self.load_module_if_needed(
-                    transaction,
-                    &handle,
-                    crate::state::require::Require::Everything,
-                ) else {
-                    // If we still can't load the module, fall back to default type
-                    return Ok(create_default_type_for_declaration(&params.decl));
-                };
-
-                // Get module info from the fresh transaction for position conversion
-                let Some(fresh_module_info) = fresh_transaction.get_module_info(&handle) else {
-                    return Ok(create_default_type_for_declaration(&params.decl));
-                };
-
-                // Try to extract type using standalone function
-                if let Some(type_info) = extract_type_from_declaration(
-                    &fresh_transaction,
-                    &handle,
-                    &fresh_module_info,
-                    &params,
-                ) {
-                    return Ok(self.convert_and_register_type(type_info));
-                }
-
-                // For imports, we might need to resolve the imported symbol first
-                if params.decl.category == tsp::DeclarationCategory::IMPORT
-                    && let Ok(Some(import_type)) = self
-                        .get_type_for_import_declaration_with_fresh_transaction(
-                            &mut fresh_transaction,
-                            &params,
-                        )
-                {
-                    return Ok(import_type);
-                }
-
-                // If still no type found, create a generic type based on the declaration category
-                return Ok(create_default_type_for_declaration(&params.decl));
-            }
-        };
-
-        // Try to extract type using standalone function
+        // Try to extract type using standalone function against the appropriate transaction
+        let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
         if let Some(type_info) =
-            extract_type_from_declaration(transaction, &handle, &module_info, &params)
+            extract_type_from_declaration(active_transaction, &handle, &module_info, &params)
         {
             return Ok(self.convert_and_register_type(type_info));
         }
 
         // For imports, we might need to resolve the imported symbol first
-        if params.decl.category == tsp::DeclarationCategory::IMPORT
-            && let Ok(Some(import_type)) =
-                self.get_type_for_import_declaration(transaction, &params)
-        {
-            return Ok(import_type);
+        if params.decl.category == tsp::DeclarationCategory::IMPORT {
+            // First attempt with the active transaction
+            if let Ok(Some(import_type)) =
+                self.get_type_for_import_declaration(active_transaction, &params)
+            {
+                return Ok(import_type);
+            }
+
+            // If we don't yet have a fresh transaction, try resolving with one
+            if transaction_to_use.is_none() {
+                if let Some(mut fresh_transaction) = self.load_module_if_needed(
+                    transaction,
+                    &handle,
+                    crate::state::require::Require::Everything,
+                ) {
+                    if let Ok(Some(import_type)) = self
+                        .get_type_for_import_declaration_with_fresh_transaction(
+                            &mut fresh_transaction,
+                            &params,
+                        )
+                    {
+                        return Ok(import_type);
+                    }
+                }
+            }
         }
 
         // If still no type found, create a generic type based on the declaration category

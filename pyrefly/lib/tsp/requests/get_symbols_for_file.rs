@@ -7,7 +7,6 @@
 
 //! Implementation of the getSymbolsForFile TSP request
 
-use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 use pyrefly_python::module::Module;
 
@@ -21,51 +20,13 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolsForFileParams,
     ) -> Result<Option<tsp::FileSymbolInfo>, ResponseError> {
-        // Common validation logic
-        self.validate_snapshot(params.snapshot)?;
-
-        let uri = &params.uri;
-
-        // Common language services validation
-        self.validate_language_services(uri)?;
-
-        // Check if workspace has language services enabled
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            return Err(ResponseError {
-                code: ErrorCode::RequestFailed as i32,
-                message: "Language services disabled".to_owned(),
-                data: None,
-            });
-        };
-
-        // Get module info - try to load it if not already loaded
-        let (module_info, transaction_to_use) = match transaction.get_module_info(&handle) {
-            Some(info) => (info, None), // Use the existing transaction
-            None => {
-                // Module not loaded in transaction, try to load it
-                let Some(fresh_transaction) = self.load_module_if_needed(
-                    transaction,
-                    &handle,
-                    crate::state::require::Require::Everything,
-                ) else {
-                    return Err(ResponseError {
-                        code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to load module".to_owned(),
-                        data: None,
-                    });
-                };
-
-                let Some(info) = fresh_transaction.get_module_info(&handle) else {
-                    return Err(ResponseError {
-                        code: ErrorCode::RequestFailed as i32,
-                        message: "Failed to get module info after loading".to_owned(),
-                        data: None,
-                    });
-                };
-
-                (info, Some(fresh_transaction))
-            }
-        };
+        // Use common helper to validate, get handle, module info and maybe a fresh transaction
+        let (handle, module_info, transaction_to_use) = self.with_active_transaction(
+            transaction,
+            &params.uri,
+            params.snapshot,
+            crate::state::require::Require::Everything,
+        )?;
 
         // Use the appropriate transaction for the rest of the function
         let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
@@ -78,7 +39,7 @@ impl Server {
         Self::convert_document_symbols_to_tsp(
             &document_symbols,
             &mut tsp_symbols,
-            uri,
+            &params.uri,
             &module_info,
             module_info.name().as_str(),
         );
@@ -130,27 +91,25 @@ impl Server {
         // Convert LSP SymbolKind to TSP DeclarationCategory using common function
         let (category, flags) = Self::lsp_symbol_kind_to_tsp_category(doc_symbol.kind);
 
-        // Create a unique handle for this declaration
-        let declaration_handle = tsp::TypeHandle::String(format!(
+        // Parse module name into ModuleName struct using common function
+        let module_name = Self::create_tsp_module_name(module_name_str);
+
+        // Create a declaration for this symbol via builder
+        let declaration = crate::tsp::requests::common::DeclarationBuilder::new(
+            doc_symbol.name.clone(),
+            module_name,
+            uri.clone(),
+        )
+        .handle_str(format!(
             "symbol_{}_{}_{}",
             doc_symbol.name,
             doc_symbol.selection_range.start.line,
             doc_symbol.selection_range.start.character
-        ));
-
-        // Parse module name into ModuleName struct using common function
-        let module_name = Self::create_tsp_module_name(module_name_str);
-
-        // Create a declaration for this symbol
-        let declaration = tsp::Declaration {
-            handle: declaration_handle,
-            category,
-            flags,
-            node: Some(node.clone()),
-            module_name,
-            name: doc_symbol.name.clone(),
-            uri: uri.clone(),
-        };
+        ))
+        .category(category)
+        .flags(flags)
+        .node(node.clone())
+        .build();
 
         tsp::Symbol {
             node,

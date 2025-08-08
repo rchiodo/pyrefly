@@ -7,9 +7,7 @@
 
 //! TSP resolve import declaration request implementation
 
-use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
-use ruff_text_size::TextSize;
 
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
@@ -126,19 +124,10 @@ pub fn create_resolved_declaration_from_definition(
     // Create a resolved declaration with proper category and flags
     let (category, flags) = metadata_to_tsp_category_and_flags(def_metadata);
 
-    tsp::Declaration {
-        handle: tsp::TypeHandle::String(format!(
-            "resolved_{}_{}",
-            def_module.name().as_str(),
-            import_name
-        )),
-        category,
-        flags,
-        node: Some(tsp::Node {
-            uri: uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone()),
-            range: target_module_info.lined_buffer().to_lsp_range(def_range),
-        }),
-        module_name: tsp::ModuleName {
+    // Build declaration using the common DeclarationBuilder for consistency
+    crate::tsp::requests::common::DeclarationBuilder::new(
+        import_name.to_owned(),
+        tsp::ModuleName {
             leading_dots: 0,
             name_parts: def_module
                 .name()
@@ -147,9 +136,20 @@ pub fn create_resolved_declaration_from_definition(
                 .map(|s| s.to_owned())
                 .collect(),
         },
-        name: import_name.to_owned(),
-        uri: uri_converter(def_module).unwrap_or(fallback_uri),
-    }
+        uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone()),
+    )
+    .handle_str(format!(
+        "resolved_{}_{}",
+        def_module.name().as_str(),
+        import_name
+    ))
+    .category(category)
+    .flags(flags)
+    .node(tsp::Node {
+        uri: uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone()),
+        range: target_module_info.lined_buffer().to_lsp_range(def_range),
+    })
+    .build()
 }
 
 /// Create a fallback resolved declaration when specific symbol is not found
@@ -162,16 +162,9 @@ pub fn create_fallback_resolved_declaration(
     uri_converter: impl Fn(&ModuleInfo) -> Option<lsp_types::Url>,
     fallback_uri: lsp_types::Url,
 ) -> tsp::Declaration {
-    tsp::Declaration {
-        handle: tsp::TypeHandle::String(format!(
-            "resolved_{}_{}",
-            target_module_info.name().as_str(),
-            import_name
-        )),
-        category: tsp::DeclarationCategory::VARIABLE, // Default to variable since we couldn't determine the type
-        flags: tsp::DeclarationFlags::new(),
-        node: None, // We don't have the exact location in the target module
-        module_name: tsp::ModuleName {
+    crate::tsp::requests::common::DeclarationBuilder::new(
+        import_name.to_owned(),
+        tsp::ModuleName {
             leading_dots: 0,
             name_parts: target_module_info
                 .name()
@@ -180,9 +173,17 @@ pub fn create_fallback_resolved_declaration(
                 .map(|s| s.to_owned())
                 .collect(),
         },
-        name: import_name.to_owned(),
-        uri: uri_converter(target_module_info).unwrap_or(fallback_uri),
-    }
+        uri_converter(target_module_info).unwrap_or_else(|| fallback_uri.clone()),
+    )
+    .handle_str(format!(
+        "resolved_{}_{}",
+        target_module_info.name().as_str(),
+        import_name
+    ))
+    .category(tsp::DeclarationCategory::VARIABLE) // Default to variable since we couldn't determine the type
+    .flags(tsp::DeclarationFlags::new())
+    // No node available in fallback
+    .build()
 }
 
 impl Server {
@@ -198,65 +199,51 @@ impl Server {
 
         // Only resolve import declarations
         if params.decl.category != tsp::DeclarationCategory::IMPORT {
-            // Return the same declaration if it's not an import
             return Ok(Some(params.decl));
         }
 
-        // Parse the module name from the declaration
         let module_name = &params.decl.module_name;
         let import_name = &params.decl.name;
 
-        // Convert source URI to file path (validation only)
         let importing_uri = &params.decl.uri;
         if importing_uri.to_file_path().is_err() {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         }
 
-        // Check if workspace has language services enabled and get the source handle
         let Some(source_handle) = self.make_handle_if_enabled(importing_uri) else {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         };
 
-        // Use standalone function to resolve import target handle
-        let target_handle =
-            match resolve_import_target_handle(transaction, &source_handle, module_name) {
-                Ok(handle) => handle,
-                Err(_) => {
-                    // Import resolution failed, return unresolved import
-                    return Ok(Some(create_unresolved_import_declaration(&params.decl)));
-                }
-            };
+        let target_handle = match resolve_import_target_handle(transaction, &source_handle, module_name) {
+            Ok(handle) => handle,
+            Err(_) => {
+                return Ok(Some(create_unresolved_import_declaration(&params.decl)));
+            }
+        };
 
-        // Try to get module info for the target module, loading it if necessary
-        let (target_module_info, fresh_transaction) =
-            match self.get_module_info_with_loading(transaction, &target_handle) {
-                Ok((Some(info), fresh_tx)) => (info, fresh_tx),
-                Ok((None, _)) => {
-                    // Module not found, possibly an unresolved import
-                    return Ok(Some(create_unresolved_import_declaration(&params.decl)));
-                }
-                Err(_) => {
-                    return Err(ResponseError {
-                        code: ErrorCode::InternalError as i32,
-                        message: "Failed to load target module".to_owned(),
-                        data: None,
-                    });
-                }
-            };
+        // Use common helper to get or load module info for the target handle
+        let (target_module_info, fresh_transaction) = match self.get_or_load_module_info(
+            transaction,
+            &target_handle,
+            crate::state::require::Require::Everything,
+        ) {
+            Ok((info, fresh)) => (info, fresh),
+            Err(_) => {
+                return Ok(Some(create_unresolved_import_declaration(&params.decl)));
+            }
+        };
 
-        // Use the appropriate transaction (fresh if module was loaded, original if already loaded)
         let active_transaction = fresh_transaction.as_ref().unwrap_or(transaction);
 
-        // Use standalone function to search for symbol definition
+        // Search for definition using AST when possible
         let module_content = target_module_info.contents();
         if let Some(pos) = find_symbol_definition_position(module_content, import_name) {
-            let text_pos = TextSize::new(pos as u32);
+            let text_pos = ruff_text_size::TextSize::new(pos as u32);
             if let Some(first_definition) = active_transaction
                 .find_definition(&target_handle, text_pos, true)
                 .into_iter()
                 .next()
             {
-                // Use standalone function to create resolved declaration
                 return Ok(Some(create_resolved_declaration_from_definition(
                     &first_definition,
                     &target_module_info,
@@ -267,7 +254,6 @@ impl Server {
             }
         }
 
-        // Use standalone function to create fallback resolved declaration
         Ok(Some(create_fallback_resolved_declaration(
             &target_module_info,
             import_name,

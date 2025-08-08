@@ -27,10 +27,8 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetDiagnosticsParams,
     ) -> Result<Option<Vec<Diagnostic>>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate snapshot
+        self.validate_snapshot(params.snapshot)?;
 
         lsp_debug!("Getting diagnostics for URI: {}", params.uri);
 

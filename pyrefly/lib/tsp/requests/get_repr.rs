@@ -21,10 +21,8 @@ impl Server {
         _transaction: &Transaction<'_>,
         params: tsp::GetReprParams,
     ) -> Result<String, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate snapshot
+        self.validate_snapshot(params.snapshot)?;
 
         // Use the handle mapping to get the actual pyrefly type
         let Some(internal_type) = self.lookup_type_from_tsp_type(&params.type_param) else {

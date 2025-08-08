@@ -64,10 +64,8 @@ impl Server {
         _transaction: &Transaction<'_>,
         params: tsp::GetOverloadsParams,
     ) -> Result<Option<Vec<tsp::Type>>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate snapshot
+        self.validate_snapshot(params.snapshot)?;
 
         // Get the internal type from the type handle
         let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {

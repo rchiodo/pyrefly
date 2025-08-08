@@ -8,12 +8,12 @@
 //! TSP get matching overloads request implementation
 
 use lsp_server::ResponseError;
-use ruff_text_size::TextSize;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
 use crate::tsp::common::lsp_debug;
+use crate::tsp::requests::common::node_start_position;
 
 impl Server {
     /// Get matching overloads for a function call site
@@ -31,36 +31,26 @@ impl Server {
         transaction: &Transaction<'_>,
         params: tsp::GetMatchingOverloadsParams,
     ) -> Result<Option<Vec<tsp::Type>>, ResponseError> {
-        // Check if the snapshot is still valid
-        if params.snapshot != self.current_snapshot() {
-            return Err(Self::snapshot_outdated_error());
-        }
+        // Validate and get handle/module info; load if needed
+        let (handle, module_info, maybe_fresh_tx) = self.with_active_transaction(
+            transaction,
+            &params.call_node.uri,
+            params.snapshot,
+            crate::state::require::Require::Everything,
+        )?;
 
         lsp_debug!(
             "Getting matching overloads for call node: {:?}",
             params.call_node
         );
 
-        // Get the URI and check if workspace has language services enabled
-        let uri = &params.call_node.uri;
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
-            lsp_debug!("Language services disabled for workspace");
-            return Ok(None);
-        };
+        let active_tx = maybe_fresh_tx.as_ref().unwrap_or(transaction);
 
-        // Get module info to ensure the module is loaded
-        let Some(module_info) = transaction.get_module_info(&handle) else {
-            lsp_debug!("Module not loaded for handle: {:?}", handle);
-            return Ok(None);
-        };
-
-        // Convert the Range position to TextSize using the module's line buffer
-        let position = module_info
-            .lined_buffer()
-            .from_lsp_position(params.call_node.range.start);
+        // Convert the Range position to TextSize using helper
+        let position = node_start_position(&module_info, &params.call_node);
 
         // Try to find the type at the call site position
-        let Some(call_site_type) = self.get_type_at_position(transaction, &handle, position) else {
+        let Some(call_site_type) = active_tx.get_type_at(&handle, position) else {
             lsp_debug!("Could not determine type at call site position");
             return Ok(None);
         };
@@ -113,15 +103,5 @@ impl Server {
                 Ok(None)
             }
         }
-    }
-
-    /// Helper method to get the type at a specific position in a module
-    fn get_type_at_position(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        position: TextSize,
-    ) -> Option<crate::types::types::Type> {
-        transaction.get_type_at(handle, position)
     }
 }
