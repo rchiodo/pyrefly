@@ -18,6 +18,7 @@ pub mod get_symbols_for_file;
 pub mod get_type;
 pub mod get_type_alias_info;
 pub mod get_type_args;
+pub mod get_type_attributes;
 pub mod get_type_of_declaration;
 pub mod resolve_import;
 pub mod resolve_import_declaration;
