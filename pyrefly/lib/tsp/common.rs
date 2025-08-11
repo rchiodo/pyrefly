@@ -32,7 +32,7 @@ pub(crate) use tsp_debug;
 #[allow(dead_code)]
 pub(crate) fn snapshot_outdated_error() -> ResponseError {
     ResponseError {
-        code: ErrorCode::RequestFailed as i32,
+        code: ErrorCode::ServerCancelled as i32,
         message: "Snapshot outdated".to_owned(),
         data: None,
     }

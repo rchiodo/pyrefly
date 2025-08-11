@@ -254,7 +254,7 @@ y = 2
                 id: RequestId::from(3),
                 result: None,
                 error: Some(lsp_server::ResponseError {
-                    code: ErrorCode::RequestFailed as i32,
+                    code: ErrorCode::ServerCancelled as i32,
                     message: "Snapshot outdated".to_string(),
                     data: None,
                 }),
