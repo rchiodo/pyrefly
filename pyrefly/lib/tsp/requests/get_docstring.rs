@@ -13,7 +13,6 @@ use pyrefly_python::docstring::Docstring;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
-use crate::tsp::requests::common::node_start_position;
 
 /// Extract docstring from a transaction at a specific position
 ///
@@ -61,7 +60,7 @@ impl Server {
             return Ok(None);
         };
 
-        let (handle, module_info, maybe_fresh_tx) = self.with_active_transaction(
+        let (handle, _module_info, maybe_fresh_tx) = self.with_active_transaction(
             transaction,
             &node.uri,
             params.snapshot,
@@ -70,25 +69,7 @@ impl Server {
 
         let active_tx = maybe_fresh_tx.as_ref().unwrap_or(transaction);
 
-        // Compute position and find definition
-        let position = node_start_position(&module_info, node);
-        let Some(first_definition) = active_tx
-            .find_definition(&handle, position, true)
-            .into_iter()
-            .next()
-        else {
-            return Ok(None);
-        };
-
-        let Some(docstring_range) = first_definition.docstring_range else {
-            return Ok(None);
-        };
-
-        // get_load for Docstring context
-        let Some(module_load) = active_tx.get_load(&handle) else {
-            return Ok(None);
-        };
-        let doc = Docstring(docstring_range, module_load.module_info.clone());
-        Ok(Some(doc.resolve()))
+        // Use the common function for getting docstring at position
+        Ok(get_docstring_at_position(active_tx, &handle, node))
     }
 }

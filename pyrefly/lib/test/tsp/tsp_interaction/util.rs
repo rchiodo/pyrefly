@@ -26,7 +26,6 @@ use lsp_types::notification::DidOpenTextDocument;
 use lsp_types::notification::Exit;
 use lsp_types::notification::Notification as _;
 use regex::Regex;
-use tempfile::TempDir;
 
 use crate::commands::lsp::IndexingMode;
 use crate::commands::lsp::LspArgs;
@@ -360,27 +359,6 @@ fn match_json_values(
     }
 }
 
-pub fn get_test_files_root() -> TempDir {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let test_file_path = temp_dir.path().join("test_file.py");
-    std::fs::write(
-        test_file_path,
-        r#"
-# Test file for TSP interaction tests
-x = 42
-y = "hello"
-def func(a: int) -> str:
-    return str(a)
-
-class MyClass:
-    def __init__(self):
-        self.value = 123
-"#,
-    )
-    .unwrap();
-    temp_dir
-}
-
 pub fn build_did_open_notification(file_path: std::path::PathBuf) -> lsp_server::Notification {
     let content = std::fs::read_to_string(&file_path).unwrap();
     let uri = Url::from_file_path(file_path).unwrap();
@@ -397,19 +375,4 @@ pub fn build_did_open_notification(file_path: std::path::PathBuf) -> lsp_server:
         })
         .unwrap(),
     }
-}
-
-/// Simple TSP test runner (delegates to existing LSP infrastructure)
-pub fn run_test_tsp(test_case: TspTestCase) {
-    use crate::test::lsp::lsp_interaction::util::TestCase;
-    use crate::test::lsp::lsp_interaction::util::run_test_lsp;
-
-    run_test_lsp(TestCase {
-        messages_from_language_client: test_case.messages_from_language_client,
-        expected_messages_from_language_server: test_case.expected_messages_from_language_server,
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
-    });
 }

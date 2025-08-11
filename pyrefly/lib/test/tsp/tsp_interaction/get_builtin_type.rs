@@ -11,6 +11,7 @@
  * the complete TSP protocol implementation rather than individual handler components.
  */
 
+use lsp_server::ErrorCode;
 use lsp_server::Message;
 use lsp_server::Request;
 use lsp_server::RequestId;
@@ -257,8 +258,8 @@ x = 42
                 id: RequestId::from(3),
                 result: None,
                 error: Some(lsp_server::ResponseError {
-                    code: -32802, // Actual error code from logs
-                    message: "Snapshot is outdated".to_string(),
+                    code: ErrorCode::RequestFailed as i32,
+                    message: "Snapshot outdated".to_string(),
                     data: None,
                 }),
             }),

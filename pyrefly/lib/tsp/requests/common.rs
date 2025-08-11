@@ -291,69 +291,6 @@ impl Server {
         }
     }
 
-    /// Helper function to get module info from either the current transaction or a fresh one if needed
-    pub(crate) fn get_module_info_with_loading(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-    ) -> Result<
-        (
-            Option<crate::module::module_info::ModuleInfo>,
-            Option<Transaction<'_>>,
-        ),
-        (),
-    > {
-        self.get_module_info_with_loading_level(
-            transaction,
-            handle,
-            crate::state::require::Require::Everything,
-        )
-    }
-
-    /// Helper function to get module info with a specific requirement level
-    fn get_module_info_with_loading_level(
-        &self,
-        transaction: &Transaction<'_>,
-        handle: &crate::state::handle::Handle,
-        required_level: crate::state::require::Require,
-    ) -> Result<
-        (
-            Option<crate::module::module_info::ModuleInfo>,
-            Option<Transaction<'_>>,
-        ),
-        (),
-    > {
-        // Try to get module info from the current transaction first
-        if let Some(module_info) = transaction.get_module_info(handle) {
-            // For lighter requirements, existing module info is usually sufficient
-            match required_level {
-                crate::state::require::Require::Exports
-                | crate::state::require::Require::Errors
-                | crate::state::require::Require::Indexing => {
-                    return Ok((Some(module_info), None));
-                }
-                crate::state::require::Require::Everything => {
-                    // For Everything requirement, we may need to reload
-                    // For now, we'll assume existing module info is sufficient
-                    // unless explicitly requested to reload
-                    return Ok((Some(module_info), None));
-                }
-            }
-        }
-
-        // Module not loaded or needs specific requirement level, try to load it
-        if let Some(fresh_transaction) =
-            self.load_module_if_needed(transaction, handle, required_level)
-        {
-            if let Some(module_info) = fresh_transaction.get_module_info(handle) {
-                return Ok((Some(module_info), Some(fresh_transaction)));
-            }
-        }
-
-        // Could not load the module
-        Ok((None, None))
-    }
-
     pub(crate) fn current_snapshot(&self) -> i32 {
         self.state.current_snapshot()
     }
