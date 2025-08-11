@@ -69,7 +69,7 @@ fn test_extract_symbol_name_with_provided_name() {
     };
 
     // Test with provided name
-    let result = extract_symbol_name(Some("provided_name".to_string()), &node, &module_info);
+    let result = extract_symbol_name(Some("provided_name".to_owned()), &node, &module_info);
     assert_eq!(result, "provided_name");
 }
 

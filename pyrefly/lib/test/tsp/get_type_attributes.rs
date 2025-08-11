@@ -19,10 +19,10 @@ use crate::tsp::TypeHandle;
 #[test]
 fn test_get_type_attributes_params_construction() {
     // Test creating GetTypeAttributesParams with valid data
-    let handle = TypeHandle::String("test_handle_123".to_string());
+    let handle = TypeHandle::String("test_handle_123".to_owned());
     let test_type = Type {
         category: TypeCategory::CLASS,
-        name: "TestClass".to_string(),
+        name: "TestClass".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new(),
         category_flags: 0,
@@ -44,17 +44,17 @@ fn test_get_type_attributes_params_construction() {
 #[test]
 fn test_get_type_attributes_params_serialization() {
     // Test JSON serialization/deserialization of GetTypeAttributesParams
-    let handle = TypeHandle::String("handle_456".to_string());
+    let handle = TypeHandle::String("handle_456".to_owned());
     let test_type = Type {
         category: TypeCategory::FUNCTION,
-        name: "test_function".to_string(),
+        name: "test_function".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new().with_callable(),
         category_flags: 16,
         decl: None,
         module_name: Some(ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test_module".to_string()],
+            name_parts: vec!["test_module".to_owned()],
         }),
     };
 
@@ -87,17 +87,17 @@ fn test_get_type_attributes_params_serialization() {
 #[test]
 fn test_get_type_attributes_params_json_format() {
     // Test that JSON format matches expected TSP structure
-    let handle = TypeHandle::String("json_test_handle".to_string());
+    let handle = TypeHandle::String("json_test_handle".to_owned());
     let test_type = Type {
         category: TypeCategory::CLASS,
-        name: "JsonTestClass".to_string(),
+        name: "JsonTestClass".to_owned(),
         handle,
         flags: TypeFlags::new().with_instantiable(),
         category_flags: 24,
         decl: None,
         module_name: Some(ModuleName {
             leading_dots: 0,
-            name_parts: vec!["json_module".to_string()],
+            name_parts: vec!["json_module".to_owned()],
         }),
     };
 
@@ -124,17 +124,17 @@ fn test_get_type_attributes_params_json_format() {
 #[test]
 fn test_get_type_attributes_params_function_type() {
     // Test GetTypeAttributesParams with function type to verify our enhancement
-    let handle = TypeHandle::String("function_handle_123".to_string());
+    let handle = TypeHandle::String("function_handle_123".to_owned());
     let function_type = Type {
         category: TypeCategory::FUNCTION,
-        name: "test_function".to_string(),
+        name: "test_function".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new().with_callable(),
         category_flags: 0,
         decl: None,
         module_name: Some(ModuleName {
             leading_dots: 0,
-            name_parts: vec!["test_module".to_string()],
+            name_parts: vec!["test_module".to_owned()],
         }),
     };
 
@@ -163,7 +163,7 @@ fn test_get_type_attributes_params_callable_type() {
     let handle = TypeHandle::Integer(999);
     let callable_type = Type {
         category: TypeCategory::FUNCTION, // Callable types use FUNCTION category
-        name: "Callable[[int, str], bool]".to_string(),
+        name: "Callable[[int, str], bool]".to_owned(),
         handle,
         flags: TypeFlags::new().with_callable(),
         category_flags: 0,

@@ -81,8 +81,7 @@ impl Server {
 
                 // Use the built-in 'type' class as the default metaclass
                 let stdlib = transaction.get_stdlib(&handle);
-                let builtin_type = stdlib.builtins_type().clone();
-                builtin_type
+                stdlib.builtins_type().clone()
             }
         };
 

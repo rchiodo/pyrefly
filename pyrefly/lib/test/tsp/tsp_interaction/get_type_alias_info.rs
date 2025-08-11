@@ -130,7 +130,7 @@ MyDict = Dict[str, int]
                 result: None,
                 error: Some(lsp_server::ResponseError {
                     code: lsp_server::ErrorCode::InvalidParams as i32, // Changed from ParseError to InvalidParams
-                    message: "$$MATCH_EVERYTHING$$".to_string(), // Accept any parse error message
+                    message: "$$MATCH_EVERYTHING$$".to_owned(), // Accept any parse error message
                     data: None,
                 }),
             }),

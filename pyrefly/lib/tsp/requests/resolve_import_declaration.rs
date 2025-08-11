@@ -250,7 +250,7 @@ impl Server {
                     &first_definition,
                     &target_module_info,
                     import_name,
-                    |module_info| module_info_to_uri(module_info),
+                    module_info_to_uri,
                     params.decl.uri.clone(),
                 )));
             }
@@ -259,7 +259,7 @@ impl Server {
         Ok(Some(create_fallback_resolved_declaration(
             &target_module_info,
             import_name,
-            |module_info| module_info_to_uri(module_info),
+            module_info_to_uri,
             params.decl.uri.clone(),
         )))
     }

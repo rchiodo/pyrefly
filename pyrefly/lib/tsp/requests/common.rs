@@ -314,7 +314,7 @@ impl Server {
     fn lookup_type_by_int_handle(&self, id: i32) -> Option<crate::types::types::Type> {
         // For now, convert integer handle to string and use the existing lookup
         // In a more sophisticated implementation, we might have separate integer and string lookups
-        let handle_str = format!("{}", id);
+        let handle_str = format!("{id}");
         self.state.lookup_type_from_handle(&handle_str)
     }
 

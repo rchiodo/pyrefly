@@ -62,12 +62,12 @@ fn test_get_type_alias_info_params_different_handles() {
 
     // Test with string handle
     let string_type = Type {
-        handle: TypeHandle::String("alias_handle".to_string()),
+        handle: TypeHandle::String("alias_handle".to_owned()),
         category: TypeCategory::CLASS,
         flags: TypeFlags::new().with_from_alias(),
         module_name: Some(ModuleName {
             leading_dots: 0,
-            name_parts: vec!["typing".to_string()],
+            name_parts: vec!["typing".to_owned()],
         }),
         name: "List[str]".to_owned(),
         category_flags: 0,
@@ -95,13 +95,13 @@ fn test_type_alias_info_creation() {
         category: TypeCategory::CLASS,
         flags: TypeFlags::new(),
         module_name: None,
-        name: "str".to_string(),
+        name: "str".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_alias_info = TypeAliasInfo {
-        name: "MyList".to_string(),
+        name: "MyList".to_owned(),
         type_args: Some(vec![str_type]),
     };
 
@@ -114,7 +114,7 @@ fn test_type_alias_info_creation() {
 fn test_type_alias_info_no_type_arguments() {
     // Test TypeAliasInfo for non-generic type alias
     let type_alias_info = TypeAliasInfo {
-        name: "SimpleAlias".to_string(),
+        name: "SimpleAlias".to_owned(),
         type_args: None,
     };
 
@@ -130,7 +130,7 @@ fn test_type_alias_info_multiple_type_arguments() {
         category: TypeCategory::CLASS,
         flags: TypeFlags::new(),
         module_name: None,
-        name: "str".to_string(),
+        name: "str".to_owned(),
         category_flags: 0,
         decl: None,
     };
@@ -140,13 +140,13 @@ fn test_type_alias_info_multiple_type_arguments() {
         category: TypeCategory::CLASS,
         flags: TypeFlags::new(),
         module_name: None,
-        name: "int".to_string(),
+        name: "int".to_owned(),
         category_flags: 0,
         decl: None,
     };
 
     let type_alias_info = TypeAliasInfo {
-        name: "MyDict".to_string(),
+        name: "MyDict".to_owned(),
         type_args: Some(vec![str_type, int_type]),
     };
 
@@ -163,7 +163,7 @@ fn test_params_serialization_structure() {
     // Test that the params structure matches expected JSON structure
     let (_handle, _uri, _state) = build_tsp_test_server();
 
-    let type_handle = TypeHandle::String("test_handle".to_string());
+    let type_handle = TypeHandle::String("test_handle".to_owned());
     let tsp_type = Type {
         handle: type_handle,
         category: TypeCategory::CLASS,

@@ -26,7 +26,7 @@ fn get_param_name(param: &crate::types::callable::Param, index: usize) -> String
         Param::PosOnly(name, _, _) => name
             .as_ref()
             .map(|n| n.as_str().to_owned())
-            .unwrap_or_else(|| format!("param{}", index)),
+            .unwrap_or_else(|| format!("param{index}")),
         Param::Pos(name, _, _) => name.as_str().to_owned(),
         Param::VarArg(name, _) => name
             .as_ref()
@@ -158,7 +158,7 @@ pub fn extract_type_attributes(
                 crate::types::callable::Params::ParamSpec(types, param_spec) => {
                     // Handle concatenated parameters with ParamSpec
                     for (i, param_type) in types.iter().enumerate() {
-                        let param_name = format!("param{}", i);
+                        let param_name = format!("param{i}");
                         let tsp_type =
                             crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
 
@@ -238,7 +238,7 @@ pub fn extract_type_attributes(
                 }
                 crate::types::callable::Params::ParamSpec(types, param_spec) => {
                     for (i, param_type) in types.iter().enumerate() {
-                        let param_name = format!("param{}", i);
+                        let param_name = format!("param{i}");
                         let tsp_type =
                             crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
 
@@ -294,7 +294,7 @@ pub fn extract_type_attributes(
             // For overloaded functions, we could show all overload signatures
             // For now, we'll return a summary
             for (i, signature) in overload_type.signatures.iter().enumerate() {
-                let signature_name = format!("overload_{}", i);
+                let signature_name = format!("overload_{i}");
                 match signature {
                     crate::types::types::OverloadType::Function(function) => {
                         let function_type = Type::Function(Box::new(function.clone()));

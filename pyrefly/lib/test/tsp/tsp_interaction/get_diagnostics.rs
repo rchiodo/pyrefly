@@ -197,7 +197,7 @@ fn test_tsp_get_diagnostics_interaction_invalid_uri() {
                 result: None,
                 error: Some(lsp_server::ResponseError {
                     code: lsp_server::ErrorCode::InvalidParams as i32,
-                    message: "Invalid URI - cannot convert to file path".to_string(),
+                    message: "Invalid URI - cannot convert to file path".to_owned(),
                     data: None,
                 }),
             }),
@@ -255,7 +255,7 @@ y = 2
                 result: None,
                 error: Some(lsp_server::ResponseError {
                     code: ErrorCode::ServerCancelled as i32,
-                    message: "Snapshot outdated".to_string(),
+                    message: "Snapshot outdated".to_owned(),
                     data: None,
                 }),
             }),

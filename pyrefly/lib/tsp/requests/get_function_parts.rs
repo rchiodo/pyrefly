@@ -185,7 +185,7 @@ fn expand_type_aliases(
         Type::Function(func) => {
             // Expand aliases in function signature
             let expanded_callable = expand_callable_aliases(&func.signature, transaction);
-            if &expanded_callable != &func.signature {
+            if expanded_callable != func.signature {
                 // Create a new function with expanded signature
                 // Note: We can't modify the existing function, so we return the original for now
                 // In a real implementation, you'd need to create a new Function type
@@ -207,7 +207,7 @@ fn expand_type_aliases(
 /// Convert class types to instance types
 fn convert_to_instance_type(
     type_obj: crate::types::types::Type,
-    transaction: &Transaction<'_>,
+    _transaction: &Transaction<'_>,
 ) -> crate::types::types::Type {
     use pyrefly_types::simplify::unions;
 
@@ -224,7 +224,7 @@ fn convert_to_instance_type(
             // Convert class types in union members
             let converted_types: Vec<_> = union_types
                 .iter()
-                .map(|t| convert_to_instance_type(t.clone(), transaction))
+                .map(|t| convert_to_instance_type(t.clone(), _transaction))
                 .collect();
             unions(converted_types)
         }

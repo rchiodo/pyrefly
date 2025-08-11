@@ -62,7 +62,7 @@ fn test_file_symbol_info_construction() {
                 },
             },
         },
-        name: "test_symbol".to_string(),
+        name: "test_symbol".to_owned(),
         decls: vec![],
         synthesized_types: vec![],
     }];

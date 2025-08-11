@@ -571,7 +571,7 @@ fn test_tsp_get_metaclass_interaction_invalid_snapshot() {
                 result: None,
                 error: Some(lsp_server::ResponseError {
                     code: ErrorCode::ServerCancelled as i32,
-                    message: "Snapshot outdated".to_string(),
+                    message: "Snapshot outdated".to_owned(),
                     data: None,
                 }),
             }),

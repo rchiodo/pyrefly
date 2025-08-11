@@ -49,7 +49,7 @@ fn test_get_builtin_type_params_construction() {
                 end: position,
             },
         },
-        name: "int".to_string(),
+        name: "int".to_owned(),
         snapshot: 1,
     };
 
@@ -198,7 +198,7 @@ z = [1, 2, 3]
                 },
             },
         },
-        name: "int".to_string(),
+        name: "int".to_owned(),
         snapshot: 1, // Use a dummy snapshot number
     };
 
@@ -274,7 +274,7 @@ x = 42
                     },
                 },
             },
-            name: type_name.to_string(),
+            name: type_name.to_owned(),
             snapshot: 1,
         };
 

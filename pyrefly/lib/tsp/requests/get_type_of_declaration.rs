@@ -54,14 +54,10 @@ pub fn extract_type_from_resolved_import(
     };
 
     let resolved_uri = &resolved_node.uri;
-    let Some(resolved_handle) = handle_factory(resolved_uri) else {
-        return None;
-    };
+    let resolved_handle = handle_factory(resolved_uri)?;
 
     // Get module info for the resolved declaration to convert position
-    let Some(resolved_module_info) = transaction.get_module_info(&resolved_handle) else {
-        return None;
-    };
+    let resolved_module_info = transaction.get_module_info(&resolved_handle)?;
 
     let resolved_position = resolved_module_info
         .lined_buffer()
@@ -111,21 +107,19 @@ impl Server {
             }
 
             // If we don't yet have a fresh transaction, try resolving with one
-            if transaction_to_use.is_none() {
-                if let Some(mut fresh_transaction) = self.load_module_if_needed(
+            if transaction_to_use.is_none()
+                && let Some(mut fresh_transaction) = self.load_module_if_needed(
                     transaction,
                     &handle,
                     crate::state::require::Require::Everything,
-                ) {
-                    if let Ok(Some(import_type)) = self
-                        .get_type_for_import_declaration_with_fresh_transaction(
-                            &mut fresh_transaction,
-                            &params,
-                        )
-                    {
-                        return Ok(import_type);
-                    }
-                }
+                )
+                && let Ok(Some(import_type)) = self
+                    .get_type_for_import_declaration_with_fresh_transaction(
+                        &mut fresh_transaction,
+                        &params,
+                    )
+            {
+                return Ok(import_type);
             }
         }
 
@@ -177,13 +171,13 @@ impl Server {
             self.resolve_import_declaration(fresh_transaction, resolve_params)
         {
             // Make sure the resolved module is also loaded
-            if let Some(resolved_node) = &resolved_decl.node {
-                if let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_node.uri) {
-                    fresh_transaction.run(&[(
-                        resolved_handle.clone(),
-                        crate::state::require::Require::Everything,
-                    )]);
-                }
+            if let Some(resolved_node) = &resolved_decl.node
+                && let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_node.uri)
+            {
+                fresh_transaction.run(&[(
+                    resolved_handle.clone(),
+                    crate::state::require::Require::Everything,
+                )]);
             }
 
             // Use standalone function to extract type from resolved import
