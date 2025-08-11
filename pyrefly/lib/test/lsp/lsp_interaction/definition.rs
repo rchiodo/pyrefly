@@ -210,7 +210,7 @@ fn malformed_missing_position() {
             id: RequestId::from(2),
             result: None,
             error: Some(ResponseError {
-                code: ErrorCode::InternalError as i32,
+                code: ErrorCode::InvalidParams as i32,
                 message: "missing field `position`".to_owned(),
                 data: None,
             }),
