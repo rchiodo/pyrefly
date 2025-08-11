@@ -311,3 +311,456 @@ add_one = lambda n: n + 1
         ],
     });
 }
+
+#[test]
+fn test_tsp_get_function_parts_interaction_with_expand_type_aliases_flag() {
+    // Test function parts extraction with type alias expansion
+    let temp_dir = TempDir::new().unwrap();
+    let test_file_path = temp_dir.path().join("type_alias_test.py");
+
+    let test_content = r#"# Simple type aliases
+def process_list(data):
+    return str(sum(data)) if data else 0
+"#;
+
+    std::fs::write(&test_file_path, test_content).unwrap();
+    let file_uri = Url::from_file_path(&test_file_path).unwrap();
+
+    run_test_tsp_with_capture(TspTestCase {
+        messages_from_language_client: vec![
+            // Open the test file
+            Message::from(build_did_open_notification(test_file_path.clone())),
+            // Get snapshot
+            Message::from(Request {
+                id: RequestId::from(2),
+                method: "typeServer/getSnapshot".to_owned(),
+                params: serde_json::json!({}),
+            }),
+            // Get type of function 'process_list'
+            Message::from(Request {
+                id: RequestId::from(3),
+                method: "typeServer/getType".to_owned(),
+                params: serde_json::json!({
+                    "node": {
+                        "uri": file_uri.to_string(),
+                        "range": {
+                            "start": { "line": 1, "character": 4 },
+                            "end": { "line": 1, "character": 16 }
+                        }
+                    },
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITHOUT type alias expansion (flags = 0)
+            Message::from(Request {
+                id: RequestId::from(4),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 0,  // No flags - should show type aliases as-is
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITH type alias expansion (flags = 1)
+            Message::from(Request {
+                id: RequestId::from(5),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 1,  // EXPAND_TYPE_ALIASES flag - should expand aliases to underlying types
+                    "snapshot": 2
+                }),
+            }),
+        ],
+        expected_messages_from_language_server: vec![
+            // Snapshot response
+            Message::Response(Response {
+                id: RequestId::from(2),
+                result: Some(serde_json::json!(2)),
+                error: None,
+            }),
+            // Type response for function - capture all fields
+            Message::Response(Response {
+                id: RequestId::from(3),
+                result: Some(serde_json::json!({
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
+                })),
+                error: None,
+            }),
+            // Function parts response without alias expansion - should show type aliases
+            Message::Response(Response {
+                id: RequestId::from(4),
+                result: Some(serde_json::json!({
+                    "params": ["data: Unknown"],  // Without typing annotations, shows as Unknown
+                    "returnType": "Literal[0] | str"  // Union type
+                })),
+                error: None,
+            }),
+            // Function parts response with alias expansion - should show expanded types
+            Message::Response(Response {
+                id: RequestId::from(5),
+                result: Some(serde_json::json!({
+                    "params": ["data: Unknown"],  // Same as without expansion since no aliases used
+                    "returnType": "Literal[0] | str"  // Same return type
+                })),
+                error: None,
+            }),
+        ],
+    });
+}
+
+#[test]
+fn test_tsp_get_function_parts_interaction_with_convert_to_instance_type_flag() {
+    // Test function parts extraction with class-to-instance type conversion
+    let temp_dir = TempDir::new().unwrap();
+    let test_file_path = temp_dir.path().join("class_instance_test.py");
+
+    let test_content = r#"class MyClass:
+    def __init__(self, value: int):
+        self.value = value
+
+def create_instance(cls, value: int) -> MyClass:
+    return cls(value)
+"#;
+
+    std::fs::write(&test_file_path, test_content).unwrap();
+    let file_uri = Url::from_file_path(&test_file_path).unwrap();
+
+    run_test_tsp_with_capture(TspTestCase {
+        messages_from_language_client: vec![
+            // Open the test file
+            Message::from(build_did_open_notification(test_file_path.clone())),
+            // Get snapshot
+            Message::from(Request {
+                id: RequestId::from(2),
+                method: "typeServer/getSnapshot".to_owned(),
+                params: serde_json::json!({}),
+            }),
+            // Get type of function 'create_instance'
+            Message::from(Request {
+                id: RequestId::from(3),
+                method: "typeServer/getType".to_owned(),
+                params: serde_json::json!({
+                    "node": {
+                        "uri": file_uri.to_string(),
+                        "range": {
+                            "start": { "line": 4, "character": 4 },
+                            "end": { "line": 4, "character": 19 }
+                        }
+                    },
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITHOUT instance type conversion (flags = 0)
+            Message::from(Request {
+                id: RequestId::from(4),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 0,  // No flags - should show class types as-is
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITH instance type conversion (flags = 4)
+            Message::from(Request {
+                id: RequestId::from(5),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 4,  // CONVERT_TO_INSTANCE_TYPE flag - should convert class types to instances
+                    "snapshot": 2
+                }),
+            }),
+        ],
+        expected_messages_from_language_server: vec![
+            // Snapshot response
+            Message::Response(Response {
+                id: RequestId::from(2),
+                result: Some(serde_json::json!(2)),
+                error: None,
+            }),
+            // Type response for function - capture all fields
+            Message::Response(Response {
+                id: RequestId::from(3),
+                result: Some(serde_json::json!({
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
+                })),
+                error: None,
+            }),
+            // Function parts response without instance conversion - should show class types
+            Message::Response(Response {
+                id: RequestId::from(4),
+                result: Some(serde_json::json!({
+                    "params": ["cls: Unknown", "value: int"],  // Should show cls parameter
+                    "returnType": "MyClass"  // Instance type for return
+                })),
+                error: None,
+            }),
+            // Function parts response with instance conversion - should convert class types to instances
+            Message::Response(Response {
+                id: RequestId::from(5),
+                result: Some(serde_json::json!({
+                    "params": ["cls: Unknown", "value: int"],  // Should show converted types
+                    "returnType": "MyClass"  // Instance type for return
+                })),
+                error: None,
+            }),
+        ],
+    });
+}
+
+#[test]
+fn test_tsp_get_function_parts_interaction_with_print_type_var_variance_flag() {
+    // Test function parts extraction with type variable variance information
+    let temp_dir = TempDir::new().unwrap();
+    let test_file_path = temp_dir.path().join("type_var_variance_test.py");
+
+    let test_content = r#"def process_generic(func, arg):
+    return func(arg)
+"#;
+
+    std::fs::write(&test_file_path, test_content).unwrap();
+    let file_uri = Url::from_file_path(&test_file_path).unwrap();
+
+    run_test_tsp_with_capture(TspTestCase {
+        messages_from_language_client: vec![
+            // Open the test file
+            Message::from(build_did_open_notification(test_file_path.clone())),
+            // Get snapshot
+            Message::from(Request {
+                id: RequestId::from(2),
+                method: "typeServer/getSnapshot".to_owned(),
+                params: serde_json::json!({}),
+            }),
+            // Get type of function 'process_generic'
+            Message::from(Request {
+                id: RequestId::from(3),
+                method: "typeServer/getType".to_owned(),
+                params: serde_json::json!({
+                    "node": {
+                        "uri": file_uri.to_string(),
+                        "range": {
+                            "start": { "line": 0, "character": 4 },
+                            "end": { "line": 0, "character": 19 }
+                        }
+                    },
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITHOUT variance information (flags = 0)
+            Message::from(Request {
+                id: RequestId::from(4),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 0,  // No flags - should show type vars without variance info
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts WITH variance information (flags = 2)
+            Message::from(Request {
+                id: RequestId::from(5),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 2,  // PRINT_TYPE_VAR_VARIANCE flag - should show variance information
+                    "snapshot": 2
+                }),
+            }),
+        ],
+        expected_messages_from_language_server: vec![
+            // Snapshot response
+            Message::Response(Response {
+                id: RequestId::from(2),
+                result: Some(serde_json::json!(2)),
+                error: None,
+            }),
+            // Type response for function - capture all fields
+            Message::Response(Response {
+                id: RequestId::from(3),
+                result: Some(serde_json::json!({
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
+                })),
+                error: None,
+            }),
+            // Function parts response without variance information - should show type vars as normal
+            Message::Response(Response {
+                id: RequestId::from(4),
+                result: Some(serde_json::json!({
+                    "params": ["func: Unknown", "arg: Unknown"],  // May show type vars without variance info
+                    "returnType": "Unknown"  // Return type without variance info
+                })),
+                error: None,
+            }),
+            // Function parts response with variance information - should show variance annotations
+            Message::Response(Response {
+                id: RequestId::from(5),
+                result: Some(serde_json::json!({
+                    "params": ["func: Unknown", "arg: Unknown"],  // May show type vars with variance info like "T_contra (contravariant)"
+                    "returnType": "Unknown"  // Return type with variance info like "T_co (covariant)"
+                })),
+                error: None,
+            }),
+        ],
+    });
+}
+
+#[test]
+fn test_tsp_get_function_parts_interaction_with_combined_flags() {
+    // Test function parts extraction with multiple flags combined
+    let temp_dir = TempDir::new().unwrap();
+    let test_file_path = temp_dir.path().join("combined_flags_test.py");
+
+    let test_content = r#"class DataProcessor:
+    pass
+
+def complex_function(processor_type, data):
+    return ["processed"]
+"#;
+
+    std::fs::write(&test_file_path, test_content).unwrap();
+    let file_uri = Url::from_file_path(&test_file_path).unwrap();
+
+    run_test_tsp_with_capture(TspTestCase {
+        messages_from_language_client: vec![
+            // Open the test file
+            Message::from(build_did_open_notification(test_file_path.clone())),
+            // Get snapshot
+            Message::from(Request {
+                id: RequestId::from(2),
+                method: "typeServer/getSnapshot".to_owned(),
+                params: serde_json::json!({}),
+            }),
+            // Get type of function 'complex_function'
+            Message::from(Request {
+                id: RequestId::from(3),
+                method: "typeServer/getType".to_owned(),
+                params: serde_json::json!({
+                    "node": {
+                        "uri": file_uri.to_string(),
+                        "range": {
+                            "start": { "line": 3, "character": 4 },
+                            "end": { "line": 3, "character": 20 }
+                        }
+                    },
+                    "snapshot": 2
+                }),
+            }),
+            // Get function parts with all flags combined (flags = 7 = 1 + 2 + 4)
+            Message::from(Request {
+                id: RequestId::from(4),
+                method: "typeServer/getFunctionParts".to_owned(),
+                params: serde_json::json!({
+                    "type": {
+                        "category": "$$TYPE_CATEGORY$$",
+                        "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
+                        "decl": "$$TYPE_DECL$$",
+                        "flags": "$$TYPE_FLAGS$$",
+                        "handle": "$$TYPE_HANDLE$$",
+                        "moduleName": "$$TYPE_MODULE_NAME$$",
+                        "name": "$$TYPE_NAME$$"
+                    },
+                    "flags": 7,  // All flags: EXPAND_TYPE_ALIASES + PRINT_TYPE_VAR_VARIANCE + CONVERT_TO_INSTANCE_TYPE
+                    "snapshot": 2
+                }),
+            }),
+        ],
+        expected_messages_from_language_server: vec![
+            // Snapshot response
+            Message::Response(Response {
+                id: RequestId::from(2),
+                result: Some(serde_json::json!(2)),
+                error: None,
+            }),
+            // Type response for function - capture all fields
+            Message::Response(Response {
+                id: RequestId::from(3),
+                result: Some(serde_json::json!({
+                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                    "decl": "$$CAPTURE_TYPE_DECL$$",
+                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
+                    "name": "$$CAPTURE_TYPE_NAME$$"
+                })),
+                error: None,
+            }),
+            // Function parts response with all flags - should show expanded aliases, instance types, and variance
+            Message::Response(Response {
+                id: RequestId::from(4),
+                result: Some(serde_json::json!({
+                    "params": ["processor_type: Unknown", "data: Unknown"],  // Should show expanded MyList alias and converted Type[DataProcessor] to DataProcessor instance
+                    "returnType": "list[str]"  // Should show expanded MyList[str] as list[str]
+                })),
+                error: None,
+            }),
+        ],
+    });
+}
