@@ -161,6 +161,32 @@ pub fn extract_symbol_from_transaction(
         let definition_range = first_definition.definition_range;
         let definition_module = &first_definition.module;
 
+        // Check if this is a named parameter case - these cases currently don't work properly
+        // because find_definition returns the function definition instead of the parameter definition
+        // We can detect this by checking if the definition we got is for a function but we're
+        // looking at a much smaller range that's likely a parameter name
+        // This is likely a problem in find_definition_for_keyword_argument, it seems to not be
+        // setting the metadata to  Parameter
+        if let crate::state::lsp::DefinitionMetadata::Variable(Some(
+            pyrefly_python::symbol_kind::SymbolKind::Variable,
+        )) = &first_definition.metadata
+        {
+            // Extract the symbol name to check if it looks like a parameter
+            let name = extract_symbol_name(params.name.clone(), &params.node, module_info);
+
+            // Check if our query position doesn't match the definition range
+            // (which would indicate find_definition returned the wrong thing)
+            if !definition_range.contains(position) {
+                tsp_debug!(
+                    "Detected named parameter case: symbol '{}' at position {} has definition at {:?} which doesn't contain query position - returning None until find_definition is fixed for named parameters",
+                    name,
+                    position.to_usize(),
+                    definition_range
+                );
+                return None;
+            }
+        }
+
         // Extract symbol name
         let name = extract_symbol_name(params.name.clone(), &params.node, module_info);
 

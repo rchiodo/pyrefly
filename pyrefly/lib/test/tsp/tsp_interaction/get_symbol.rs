@@ -224,3 +224,73 @@ fn test_tsp_get_symbol_interaction_with_name() {
         file_watch: false,
     });
 }
+
+#[test]
+fn test_tsp_get_symbol_interaction_named_parameters() {
+    // Test symbol lookup for named parameters in function calls
+    // Currently this should return None because find_definition doesn't work properly for named parameters
+    let temp_dir = TempDir::new().unwrap();
+    let test_file_path = temp_dir.path().join("named_params.py");
+
+    let test_content = r#"def my_function(param: int) -> str:
+    return str(param)
+
+# Function call with named parameter
+result = my_function(param=42)
+"#;
+
+    std::fs::write(&test_file_path, test_content).unwrap();
+    let file_uri = Url::from_file_path(&test_file_path).unwrap();
+
+    run_test_lsp(TestCase {
+        messages_from_language_client: vec![
+            // Open the test file
+            Message::from(build_did_open_notification(test_file_path.clone())),
+            // Get snapshot
+            Message::from(Request {
+                id: RequestId::from(2),
+                method: "typeServer/getSnapshot".to_owned(),
+                params: serde_json::json!({}),
+            }),
+            // Get symbol information for named parameter 'param' in the function call at line 4
+            // This should return None because find_definition currently returns the function definition
+            // instead of the parameter definition
+            Message::from(Request {
+                id: RequestId::from(3),
+                method: "typeServer/getSymbol".to_owned(),
+                params: serde_json::json!({
+                    "node": {
+                        "uri": file_uri.to_string(),
+                        "range": {
+                            "start": { "line": 4, "character": 22 },  // Position of 'param' in 'param=42'
+                            "end": { "line": 4, "character": 27 }
+                        }
+                    },
+                    "name": null,
+                    "skipUnreachableCode": false,
+                    "snapshot": 2
+                }),
+            }),
+        ],
+        expected_messages_from_language_server: vec![
+            // Snapshot response
+            Message::Response(Response {
+                id: RequestId::from(2),
+                result: Some(serde_json::json!(2)),
+                error: None,
+            }),
+            // TODO: Fix this test once find_definition works for named parameters
+            // Currently get_symbol returns None for named parameters because find_definition
+            // returns the function definition instead of the parameter definition
+            Message::Response(Response {
+                id: RequestId::from(3),
+                result: Some(serde_json::json!(null)),
+                error: None,
+            }),
+        ],
+        indexing_mode: IndexingMode::LazyBlocking,
+        workspace_folders: None,
+        configuration: false,
+        file_watch: false,
+    });
+}
