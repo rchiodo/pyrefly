@@ -42,7 +42,7 @@ pub fn resolve_import_target_handle(
     module_name: &tsp::ModuleName,
 ) -> Result<Handle, ()> {
     // Convert TSP ModuleName to pyrefly ModuleName
-    let pyrefly_module_name = tsp::convert_tsp_module_name_to_pyrefly(module_name);
+    let pyrefly_module_name = crate::tsp::common::convert_tsp_module_name_to_pyrefly(module_name);
 
     // Use the transaction to resolve the import
     transaction

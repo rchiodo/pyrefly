@@ -14,6 +14,7 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp;
+use crate::tsp::common::convert_to_tsp_type;
 use crate::tsp::common::snapshot_outdated_error;
 use crate::tsp::common::tsp_debug;
 use crate::types::types::Type;
@@ -95,7 +96,7 @@ pub fn extract_type_attributes(
                     );
 
                     // Convert the pyrefly type to TSP type
-                    let tsp_type = crate::tsp::protocol::convert_to_tsp_type(attribute_type);
+                    let tsp_type = crate::tsp::common::convert_to_tsp_type(attribute_type);
 
                     let attribute = tsp::Attribute {
                         name: field_name.as_str().to_owned(),
@@ -127,8 +128,7 @@ pub fn extract_type_attributes(
                     for (i, param) in param_list.items().iter().enumerate() {
                         let param_name = get_param_name(param, i);
                         let param_type = get_param_type(param);
-                        let tsp_type =
-                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+                        let tsp_type = convert_to_tsp_type(param_type.clone());
 
                         let attribute = tsp::Attribute {
                             name: param_name,
@@ -145,7 +145,7 @@ pub fn extract_type_attributes(
                     // Handle ellipsis parameters
                     let attribute = tsp::Attribute {
                         name: "...".to_owned(),
-                        type_info: crate::tsp::protocol::convert_to_tsp_type(Type::Any(
+                        type_info: convert_to_tsp_type(Type::Any(
                             crate::types::types::AnyStyle::Implicit,
                         )),
                         owner: None,
@@ -159,8 +159,7 @@ pub fn extract_type_attributes(
                     // Handle concatenated parameters with ParamSpec
                     for (i, param_type) in types.iter().enumerate() {
                         let param_name = format!("param{i}");
-                        let tsp_type =
-                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+                        let tsp_type = convert_to_tsp_type(param_type.clone());
 
                         let attribute = tsp::Attribute {
                             name: param_name,
@@ -174,8 +173,7 @@ pub fn extract_type_attributes(
                     }
 
                     // Add the ParamSpec itself
-                    let param_spec_tsp =
-                        crate::tsp::protocol::convert_to_tsp_type(param_spec.clone());
+                    let param_spec_tsp = convert_to_tsp_type(param_spec.clone());
                     let attribute = tsp::Attribute {
                         name: "*param_spec".to_owned(),
                         type_info: param_spec_tsp,
@@ -189,7 +187,7 @@ pub fn extract_type_attributes(
             }
 
             // Add return type as an attribute
-            let return_tsp_type = crate::tsp::protocol::convert_to_tsp_type(signature.ret.clone());
+            let return_tsp_type = convert_to_tsp_type(signature.ret.clone());
             let return_attribute = tsp::Attribute {
                 name: "return".to_owned(),
                 type_info: return_tsp_type,
@@ -209,8 +207,7 @@ pub fn extract_type_attributes(
                     for (i, param) in param_list.items().iter().enumerate() {
                         let param_name = get_param_name(param, i);
                         let param_type = get_param_type(param);
-                        let tsp_type =
-                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+                        let tsp_type = convert_to_tsp_type(param_type.clone());
 
                         let attribute = tsp::Attribute {
                             name: param_name,
@@ -226,7 +223,7 @@ pub fn extract_type_attributes(
                 crate::types::callable::Params::Ellipsis => {
                     let attribute = tsp::Attribute {
                         name: "...".to_owned(),
-                        type_info: crate::tsp::protocol::convert_to_tsp_type(Type::Any(
+                        type_info: convert_to_tsp_type(Type::Any(
                             crate::types::types::AnyStyle::Implicit,
                         )),
                         owner: None,
@@ -239,8 +236,7 @@ pub fn extract_type_attributes(
                 crate::types::callable::Params::ParamSpec(types, param_spec) => {
                     for (i, param_type) in types.iter().enumerate() {
                         let param_name = format!("param{i}");
-                        let tsp_type =
-                            crate::tsp::protocol::convert_to_tsp_type(param_type.clone());
+                        let tsp_type = convert_to_tsp_type(param_type.clone());
 
                         let attribute = tsp::Attribute {
                             name: param_name,
@@ -253,8 +249,7 @@ pub fn extract_type_attributes(
                         attributes.push(attribute);
                     }
 
-                    let param_spec_tsp =
-                        crate::tsp::protocol::convert_to_tsp_type(param_spec.clone());
+                    let param_spec_tsp = convert_to_tsp_type(param_spec.clone());
                     let attribute = tsp::Attribute {
                         name: "*param_spec".to_owned(),
                         type_info: param_spec_tsp,
@@ -268,8 +263,7 @@ pub fn extract_type_attributes(
             }
 
             // Add return type as an attribute
-            let return_tsp_type =
-                crate::tsp::protocol::convert_to_tsp_type(callable_type.ret.clone());
+            let return_tsp_type = convert_to_tsp_type(callable_type.ret.clone());
             let return_attribute = tsp::Attribute {
                 name: "return".to_owned(),
                 type_info: return_tsp_type,
@@ -298,7 +292,7 @@ pub fn extract_type_attributes(
                 match signature {
                     crate::types::types::OverloadType::Function(function) => {
                         let function_type = Type::Function(Box::new(function.clone()));
-                        let tsp_type = crate::tsp::protocol::convert_to_tsp_type(function_type);
+                        let tsp_type = convert_to_tsp_type(function_type);
 
                         let attribute = tsp::Attribute {
                             name: signature_name,
@@ -312,7 +306,7 @@ pub fn extract_type_attributes(
                     }
                     crate::types::types::OverloadType::Forall(forall) => {
                         let function_type = Type::Function(Box::new(forall.body.clone()));
-                        let tsp_type = crate::tsp::protocol::convert_to_tsp_type(function_type);
+                        let tsp_type = convert_to_tsp_type(function_type);
 
                         let attribute = tsp::Attribute {
                             name: signature_name,

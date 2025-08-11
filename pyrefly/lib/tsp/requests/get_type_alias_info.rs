@@ -50,7 +50,7 @@ pub fn extract_type_arguments(py_type: &PyType) -> Option<Vec<tsp::Type>> {
                     .iter()
                     .map(|arg| {
                         // Convert each pyrefly type argument to TSP Type
-                        crate::tsp::protocol::convert_to_tsp_type(arg.clone())
+                        crate::tsp::common::convert_to_tsp_type(arg.clone())
                     })
                     .collect();
 

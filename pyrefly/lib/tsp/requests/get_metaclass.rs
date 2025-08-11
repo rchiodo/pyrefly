@@ -87,7 +87,7 @@ impl Server {
 
         // Convert the metaclass ClassType back to a TSP type
         let metaclass_type = PyType::ClassType(metaclass);
-        let result = Some(crate::tsp::protocol::convert_to_tsp_type(metaclass_type));
+        let result = Some(crate::tsp::common::convert_to_tsp_type(metaclass_type));
 
         tsp_debug!("getMetaclass result: {:?}", result);
         Ok(result)

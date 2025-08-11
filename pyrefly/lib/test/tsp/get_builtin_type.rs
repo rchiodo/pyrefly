@@ -96,7 +96,7 @@ fn call_tsp_get_builtin_type_handler(
 
     // 4. Convert to TSP type if found
     if let Some(pyrefly_type) = result {
-        let tsp_type = crate::tsp::protocol::convert_to_tsp_type(pyrefly_type);
+        let tsp_type = crate::tsp::common::convert_to_tsp_type(pyrefly_type);
         Ok(Some(tsp_type))
     } else {
         Ok(None)
@@ -153,7 +153,7 @@ x = 42
             Some(pyrefly_type) => {
                 println!("Successfully found builtin type '{type_name}': {pyrefly_type:?}");
                 // Verify we can convert to TSP type
-                let _tsp_type = crate::tsp::protocol::convert_to_tsp_type(pyrefly_type);
+                let _tsp_type = crate::tsp::common::convert_to_tsp_type(pyrefly_type);
             }
             None => {
                 println!(

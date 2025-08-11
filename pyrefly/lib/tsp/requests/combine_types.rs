@@ -65,7 +65,7 @@ impl Server {
 
         if py_types.len() == 1 {
             // Only one valid type found
-            return Ok(Some(crate::tsp::protocol::convert_to_tsp_type(
+            return Ok(Some(crate::tsp::common::convert_to_tsp_type(
                 py_types.into_iter().next().unwrap(),
             )));
         }
@@ -74,7 +74,7 @@ impl Server {
         let union_type = unions(py_types);
 
         // Convert back to TSP type format
-        let result = Some(crate::tsp::protocol::convert_to_tsp_type(union_type));
+        let result = Some(crate::tsp::common::convert_to_tsp_type(union_type));
 
         tsp_debug!("combineTypes result: {:?}", result);
         Ok(result)

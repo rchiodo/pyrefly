@@ -300,7 +300,7 @@ impl Server {
         &self,
         py_type: crate::types::types::Type,
     ) -> tsp::Type {
-        let tsp_type = tsp::convert_to_tsp_type(py_type.clone());
+        let tsp_type = crate::tsp::common::convert_to_tsp_type(py_type.clone());
 
         // Register the type in the lookup table
         if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {

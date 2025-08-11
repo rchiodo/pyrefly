@@ -49,7 +49,7 @@ impl Server {
 
         // Use the transaction to resolve the import
         let pyrefly_module_name =
-            tsp::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
+            crate::tsp::common::convert_tsp_module_name_to_pyrefly(&params.module_descriptor);
         match transaction.import_handle(&source_handle, pyrefly_module_name, None) {
             Ok(resolved_handle) => {
                 // For import resolution, we don't need to load the module at all.

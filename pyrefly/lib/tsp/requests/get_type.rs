@@ -34,7 +34,7 @@ pub fn get_type(
     let type_info = transaction.get_type_at(handle, position)?;
 
     // Convert pyrefly Type to TSP Type format using protocol helper
-    Some(crate::tsp::protocol::convert_to_tsp_type(type_info))
+    Some(crate::tsp::common::convert_to_tsp_type(type_info))
 }
 
 impl Server {

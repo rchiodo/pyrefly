@@ -77,7 +77,7 @@ impl Server {
         };
 
         // Convert back to TSP type format
-        let result = Some(crate::tsp::protocol::convert_to_tsp_type(instance_type));
+        let result = Some(crate::tsp::common::convert_to_tsp_type(instance_type));
 
         tsp_debug!("createInstanceType result: {:?}", result);
         Ok(result)
