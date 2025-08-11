@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::sys_info::PythonVersion;
+
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -164,6 +166,30 @@ class A(Generic[_T1, _T2]):
 class B(A[_T1, int]):
     pass
 class C(B[str]):
+    pass
+    "#,
+);
+
+testcase!(
+    test_legacy_generic_syntax_duplicated_names,
+    r#"
+from typing import Any, Generic, Protocol, TypeVar, TypeVarTuple, ParamSpec
+T = TypeVar('T')
+Ts = TypeVarTuple('Ts')
+P = ParamSpec('P')
+
+class A(Generic[T, T]):  # E: Duplicated type parameter declaration
+    pass
+class B(Generic[*Ts, *Ts]):  # E: Duplicated type parameter declaration
+    pass
+class C(Generic[P, P]):  # E: Duplicated type parameter declaration
+    pass
+
+class D(Protocol[T, T]):  # E: Duplicated type parameter declaration
+    pass
+class E(Protocol[*Ts, *Ts]):  # E: Duplicated type parameter declaration
+    pass
+class F(Protocol[P, P]):  # E: Duplicated type parameter declaration
     pass
     "#,
 );
@@ -945,5 +971,14 @@ class Identity(Protocol):
 def f[T]() -> Callable[[T], T]:
     return lambda x: x
 x: Identity = f()  # E: `[T](T) -> T` is not assignable to `Identity`
+    "#,
+);
+
+testcase!(
+    test_too_new_syntax,
+    TestEnv::new_with_version(PythonVersion::new(3, 8, 0)),
+    r#"
+class A[T]:  # E: Cannot use type parameter lists on Python 3.8 (syntax was added in Python 3.12)
+    x: T
     "#,
 );
