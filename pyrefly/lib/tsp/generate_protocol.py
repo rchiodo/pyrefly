@@ -222,6 +222,9 @@ class RustCodeGenerator:
             "use serde::Deserialize;",
             "use serde::Serialize;",
             "",
+            "// Re-export common utilities",
+            "pub use super::common::*;",
+            "",
             "// Type alias for string | number union",
             "#[derive(Serialize, Deserialize, Debug, Clone)]",
             "#[serde(untagged)]",
@@ -257,6 +260,29 @@ class RustCodeGenerator:
         """Generate request type definitions."""
         lines = []
         
+        # Collect interface names to avoid duplicates
+        interface_names = {interface.name for interface in self.parser.interfaces}
+        
+        # Generate parameter structs for requests that have complex parameters
+        # but only if there's no corresponding interface already
+        for request in self.parser.requests:
+            if request.params_type and request.params_type not in ['void', 'null', 'undefined']:
+                param_struct_name = request.name.replace('Request', 'Params')
+                
+                # Only generate if no interface already exists with this name
+                if param_struct_name not in interface_names:
+                    lines.append(f"#[derive(Serialize, Deserialize, Debug, Clone)]")
+                    lines.append(f"pub struct {param_struct_name} {{")
+                    
+                    # For now, we'll use generic JSON value since we don't have detailed parameter info
+                    # This can be improved when we have the actual TypeScript parameter definitions
+                    lines.append(f"    #[serde(flatten)]")
+                    lines.append(f"    pub data: serde_json::Value,")
+                    
+                    lines.append("}")
+                    lines.append("")
+        
+        # Generate request type structs
         for request in self.parser.requests:
             lines.append(f"#[derive(Debug)]")
             lines.append(f"pub struct {request.name};")
@@ -291,6 +317,20 @@ class RustCodeGenerator:
                     else:
                         lines.append(f"    pub const {const_name}: {enum_def.name} = {enum_def.name}(0);")
                 
+                # Add common methods for flag enums
+                lines.append("")
+                lines.append(f"    pub fn new() -> Self {{")
+                lines.append(f"        {enum_def.name}(0)")
+                lines.append(f"    }}")
+                lines.append("")
+                lines.append(f"    pub fn has(self, flag: {enum_def.name}) -> bool {{")
+                lines.append(f"        (self.0 & flag.0) != 0")
+                lines.append(f"    }}")
+                lines.append("")
+                lines.append(f"    pub fn with(self, flag: {enum_def.name}) -> Self {{")
+                lines.append(f"        {enum_def.name}(self.0 | flag.0)")
+                lines.append(f"    }}")
+                
                 lines.append("}")
             else:
                 lines.append(f"#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]")
@@ -314,8 +354,8 @@ class RustCodeGenerator:
         lines = []
         
         for interface in self.parser.interfaces:
-            if interface.name in ['RequestSender', 'NotificationSender', 'RequestReceiver', 'NotificationReceiver']:
-                continue  # Skip these utility interfaces
+            if interface.name in ['RequestSender', 'NotificationSender', 'RequestReceiver', 'NotificationReceiver', 'TypeHandle']:
+                continue  # Skip these utility interfaces and TypeHandle (handled separately)
                 
             lines.append(f"#[derive(Serialize, Deserialize, Debug, Clone)]")
             lines.append(f"pub struct {interface.name} {{")
@@ -329,8 +369,12 @@ class RustCodeGenerator:
                     original_name = field.name
                     lines.append(f'    #[serde(rename = "{original_name}")]')
                 
-                if field.optional or rust_type.endswith(' | undefined'):
-                    rust_type = rust_type.replace(' | undefined', '')
+                # Handle optionality - either from TypeScript optional field (?) or from | undefined
+                is_optional = field.optional or rust_type.startswith('__OPTIONAL__')
+                if rust_type.startswith('__OPTIONAL__'):
+                    rust_type = rust_type[12:]  # Remove __OPTIONAL__ prefix
+                
+                if is_optional:
                     rust_type = f"Option<{rust_type}>"
                 
                 lines.append(f"    pub {field_name}: {rust_type},")
@@ -346,13 +390,18 @@ class RustCodeGenerator:
         
         for request in self.parser.requests:
             # Determine params and result types
-            params_type = "GetSnapshotParams"  # Default
-            result_type = "i32"  # Default
+            params_type = "serde_json::Value"  # Default to generic JSON
+            result_type = "serde_json::Value"  # Default to generic JSON
             
             if request.params_type:
                 params_type = self._map_request_params_type(request.params_type, request.name)
             if request.result_type:
-                result_type = self._map_typescript_type(request.result_type)
+                mapped_result = self._map_typescript_type(request.result_type)
+                # Clean up __OPTIONAL__ markers for result types
+                if mapped_result.startswith('__OPTIONAL__'):
+                    result_type = f"Option<{mapped_result[12:]}>"
+                else:
+                    result_type = mapped_result
             
             # Generate the implementation
             lines.append(f"impl lsp_types::request::Request for {request.name} {{")
@@ -380,10 +429,12 @@ class RustCodeGenerator:
         # Clean up the type
         ts_type = ts_type.strip()
         
-        # Handle union with undefined (make it optional)
+        # Handle union with undefined (make it optional) - but return info about optionality
         if ' | undefined' in ts_type:
             inner_type = ts_type.replace(' | undefined', '').strip()
-            return f"Option<{self._map_typescript_type(inner_type)}>"
+            # Return a special marker that this should be optional
+            mapped_inner = self._map_typescript_type(inner_type)
+            return f"__OPTIONAL__{mapped_inner}"
         
         # Handle string | number union specifically (common in handle types)
         if ts_type == 'string | number':
@@ -415,6 +466,10 @@ class RustCodeGenerator:
     
     def _to_snake_case(self, name: str) -> str:
         """Convert camelCase to snake_case."""
+        # Handle reserved keywords
+        if name == 'type':
+            return 'type_'
+        
         # Insert underscore before uppercase letters
         result = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', name)
         return result.lower()
