@@ -4,54 +4,97 @@ use lsp_types::Url;
 use serde::Deserialize;
 use serde::Serialize;
 
-// TSP Protocol Version
-pub const TSP_PROTOCOL_VERSION: &str = "0.1.0";
+// Re-export common utilities
+pub use super::common::*;
 
-pub enum GetTypeRequest {}
-
-pub enum GetSymbolRequest {}
-
-pub enum GetPythonSearchPathsRequest {}
-
-pub enum GetSnapshotRequest {}
-
-pub enum GetSupportedProtocolVersionRequest {}
-
-pub enum GetDiagnosticsRequest {}
-
-pub enum GetBuiltinTypeRequest {}
-
-pub enum GetTypeAttributesRequest {}
-
-pub enum GetSymbolsForFileRequest {}
-
-pub enum GetMetaclassRequest {}
-
-pub enum GetTypeAliasInfoRequest {}
-
-pub enum CombineTypesRequest {}
-
-pub enum CreateInstanceTypeRequest {}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Type {
-    pub handle: TypeHandle,
-    pub category: TypeCategory,
-    pub flags: TypeFlags,
-    #[serde(rename = "moduleName")]
-    pub module_name: Option<ModuleName>,
-    pub name: String,
-    #[serde(rename = "categoryFlags")]
-    pub category_flags: i32,
-    pub decl: Option<serde_json::Value>, // Generic object for declaration info
-}
-
+// Type alias for string | number union
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum TypeHandle {
     String(String),
-    Integer(i32),
+    Number(i32),
 }
+
+// TSP Protocol Version
+pub const TSP_PROTOCOL_VERSION: &str = "0.1.0";
+
+pub const RETURN_ATTRIBUTE_NAME: &str = "__return__";
+pub const INVALID_HANDLE: i32 = -1;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetSnapshotParams {
+    #[serde(flatten)]
+    pub data: serde_json::Value,
+}
+
+#[derive(Debug)]
+pub struct GetSnapshotRequest;
+
+#[derive(Debug)]
+pub struct GetDiagnosticsRequest;
+
+#[derive(Debug)]
+pub struct GetDiagnosticsVersionRequest;
+
+#[derive(Debug)]
+pub struct GetTypeRequest;
+
+#[derive(Debug)]
+pub struct GetBuiltinTypeRequest;
+
+#[derive(Debug)]
+pub struct GetTypeArgsRequest;
+
+#[derive(Debug)]
+pub struct SearchForTypeAttributeRequest;
+
+#[derive(Debug)]
+pub struct GetTypeAttributesRequest;
+
+#[derive(Debug)]
+pub struct GetOverloadsRequest;
+
+#[derive(Debug)]
+pub struct GetMatchingOverloadsRequest;
+
+#[derive(Debug)]
+pub struct GetMetaclassRequest;
+
+#[derive(Debug)]
+pub struct GetTypeOfDeclarationRequest;
+
+#[derive(Debug)]
+pub struct GetSymbolRequest;
+
+#[derive(Debug)]
+pub struct GetSymbolsForFileRequest;
+
+#[derive(Debug)]
+pub struct GetFunctionPartsRequest;
+
+#[derive(Debug)]
+pub struct GetReprRequest;
+
+#[derive(Debug)]
+pub struct GetDocStringRequest;
+
+#[derive(Debug)]
+pub struct ResolveImportDeclarationRequest;
+
+#[derive(Debug)]
+pub struct ResolveImportRequest;
+
+#[derive(Debug)]
+pub struct GetTypeAliasInfoRequest;
+
+#[derive(Debug)]
+pub struct CombineTypesRequest;
+
+#[derive(Debug)]
+pub struct CreateInstanceTypeRequest;
+
+#[derive(Debug)]
+pub struct GetPythonSearchPathsRequest;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeCategory(i32);
@@ -70,73 +113,134 @@ impl TypeCategory {
 pub struct TypeFlags(i32);
 
 impl TypeFlags {
-    #[allow(dead_code)]
     pub const NONE: TypeFlags = TypeFlags(0);
-    pub const INSTANTIABLE: TypeFlags = TypeFlags(1);
-    pub const INSTANCE: TypeFlags = TypeFlags(2);
-    pub const CALLABLE: TypeFlags = TypeFlags(4);
-    pub const LITERAL: TypeFlags = TypeFlags(8);
-    #[allow(dead_code)]
-    pub const INTERFACE: TypeFlags = TypeFlags(16);
-    #[allow(dead_code)]
-    pub const GENERIC: TypeFlags = TypeFlags(32);
-    pub const FROM_ALIAS: TypeFlags = TypeFlags(64);
+    pub const INSTANTIABLE: TypeFlags = TypeFlags(1  <<  0);
+    pub const INSTANCE: TypeFlags = TypeFlags(1  <<  1);
+    pub const CALLABLE: TypeFlags = TypeFlags(1  <<  2);
+    pub const LITERAL: TypeFlags = TypeFlags(1  <<  3);
+    pub const INTERFACE: TypeFlags = TypeFlags(1  <<  4);
+    pub const GENERIC: TypeFlags = TypeFlags(1  <<  5);
+    pub const FROM_ALIAS: TypeFlags = TypeFlags(1  <<  6);
 
     pub fn new() -> Self {
         TypeFlags(0)
     }
 
-    pub fn with_instantiable(mut self) -> Self {
-        self.0 |= Self::INSTANTIABLE.0;
-        self
+    pub fn has(self, flag: TypeFlags) -> bool {
+        (self.0 & flag.0) != 0
     }
 
-    pub fn with_instance(mut self) -> Self {
-        self.0 |= Self::INSTANCE.0;
-        self
-    }
-
-    pub fn with_callable(mut self) -> Self {
-        self.0 |= Self::CALLABLE.0;
-        self
-    }
-
-    pub fn with_literal(mut self) -> Self {
-        self.0 |= Self::LITERAL.0;
-        self
-    }
-
-    pub fn with_from_alias(mut self) -> Self {
-        self.0 |= Self::FROM_ALIAS.0;
-        self
+    pub fn with(self, flag: TypeFlags) -> Self {
+        TypeFlags(self.0 | flag.0)
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct ModuleName {
-    #[serde(rename = "leadingDots")]
-    pub leading_dots: i32,
-    #[serde(rename = "nameParts")]
-    pub name_parts: Vec<String>,
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct FunctionFlags(i32);
+
+impl FunctionFlags {
+    pub const NONE: FunctionFlags = FunctionFlags(0);
+    pub const ASYNC: FunctionFlags = FunctionFlags(1  <<  0);
+    pub const GENERATOR: FunctionFlags = FunctionFlags(1  <<  1);
+    pub const ABSTRACT: FunctionFlags = FunctionFlags(1  <<  2);
+    pub const STATIC: FunctionFlags = FunctionFlags(1  <<  3);
+
+    pub fn new() -> Self {
+        FunctionFlags(0)
+    }
+
+    pub fn has(self, flag: FunctionFlags) -> bool {
+        (self.0 & flag.0) != 0
+    }
+
+    pub fn with(self, flag: FunctionFlags) -> Self {
+        FunctionFlags(self.0 | flag.0)
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Node {
-    pub uri: Url,
-    pub range: Range,
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ClassFlags(i32);
+
+impl ClassFlags {
+    pub const NONE: ClassFlags = ClassFlags(0);
+    pub const ENUM: ClassFlags = ClassFlags(1  <<  0);
+    pub const TYPED_DICT: ClassFlags = ClassFlags(1  <<  1);
+
+    pub fn new() -> Self {
+        ClassFlags(0)
+    }
+
+    pub fn has(self, flag: ClassFlags) -> bool {
+        (self.0 & flag.0) != 0
+    }
+
+    pub fn with(self, flag: ClassFlags) -> Self {
+        ClassFlags(self.0 | flag.0)
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Attribute {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub type_info: Type,
-    pub owner: Option<Type>,
-    #[serde(rename = "boundType")]
-    pub bound_type: Option<Type>,
-    pub flags: AttributeFlags,
-    // The declarations for the attribute
-    pub decls: Vec<Declaration>,
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TypeVarFlags(i32);
+
+impl TypeVarFlags {
+    pub const NONE: TypeVarFlags = TypeVarFlags(0);
+    pub const IS_PARAM_SPEC: TypeVarFlags = TypeVarFlags(1  <<  0);
+
+    pub fn new() -> Self {
+        TypeVarFlags(0)
+    }
+
+    pub fn has(self, flag: TypeVarFlags) -> bool {
+        (self.0 & flag.0) != 0
+    }
+
+    pub fn with(self, flag: TypeVarFlags) -> Self {
+        TypeVarFlags(self.0 | flag.0)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct AttributeFlags(i32);
+
+impl AttributeFlags {
+    pub const NONE: AttributeFlags = AttributeFlags(0);
+    pub const IS_ARGS_LIST: AttributeFlags = AttributeFlags(1  <<  0);
+    pub const IS_KWARGS_DICT: AttributeFlags = AttributeFlags(1  <<  1);
+
+    pub fn new() -> Self {
+        AttributeFlags(0)
+    }
+
+    pub fn has(self, flag: AttributeFlags) -> bool {
+        (self.0 & flag.0) != 0
+    }
+
+    pub fn with(self, flag: AttributeFlags) -> Self {
+        AttributeFlags(self.0 | flag.0)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct AttributeAccessFlags(i32);
+
+impl AttributeAccessFlags {
+    pub const NONE: AttributeAccessFlags = AttributeAccessFlags(0);
+    pub const SKIP_INSTANCE_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1  <<  0);
+    pub const SKIP_TYPE_BASE_CLASS: AttributeAccessFlags = AttributeAccessFlags(1  <<  1);
+    pub const SKIP_ATTRIBUTE_ACCESS_OVERRIDES: AttributeAccessFlags = AttributeAccessFlags(1  <<  2);
+    pub const GET_BOUND_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1  <<  3);
+
+    pub fn new() -> Self {
+        AttributeAccessFlags(0)
+    }
+
+    pub fn has(self, flag: AttributeAccessFlags) -> bool {
+        (self.0 & flag.0) != 0
+    }
+
+    pub fn with(self, flag: AttributeAccessFlags) -> Self {
+        AttributeAccessFlags(self.0 | flag.0)
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,66 +261,100 @@ impl DeclarationCategory {
 pub struct DeclarationFlags(i32);
 
 impl DeclarationFlags {
-    #[allow(dead_code)]
     pub const NONE: DeclarationFlags = DeclarationFlags(0);
-    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1 << 0); // Method defined within a class
-    pub const CONSTANT: DeclarationFlags = DeclarationFlags(1 << 1); // Variable that cannot be changed
-    #[allow(dead_code)]
-    pub const FINAL: DeclarationFlags = DeclarationFlags(1 << 2); // Final variable/class
-    #[allow(dead_code)]
-    pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(1 << 3); // Class uses __slots__
-    #[allow(dead_code)]
-    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1 << 4); // Import uses 'as' alias
-    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1 << 5); // Import is unresolved
+    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1  <<  0);
+    pub const CONSTANT: DeclarationFlags = DeclarationFlags(1  <<  1);
+    pub const FINAL: DeclarationFlags = DeclarationFlags(1  <<  2);
+    pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(1  <<  3);
+    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(1  <<  4);
+    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(1  <<  5);
 
     pub fn new() -> Self {
         DeclarationFlags(0)
     }
 
-    pub fn with_class_member(mut self) -> Self {
-        self.0 |= Self::CLASS_MEMBER.0;
-        self
+    pub fn has(self, flag: DeclarationFlags) -> bool {
+        (self.0 & flag.0) != 0
     }
 
-    pub fn with_constant(mut self) -> Self {
-        self.0 |= Self::CONSTANT.0;
-        self
+    pub fn with(self, flag: DeclarationFlags) -> Self {
+        DeclarationFlags(self.0 | flag.0)
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TypeReprFlags(i32);
+
+impl TypeReprFlags {
+    pub const NONE: TypeReprFlags = TypeReprFlags(0);
+    pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1  <<  0);
+    pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1  <<  1);
+    pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(1  <<  2);
+
+    pub fn new() -> Self {
+        TypeReprFlags(0)
     }
 
-    #[allow(dead_code)]
-    pub fn with_final(mut self) -> Self {
-        self.0 |= Self::FINAL.0;
-        self
+    pub fn has(self, flag: TypeReprFlags) -> bool {
+        (self.0 & flag.0) != 0
     }
 
-    #[allow(dead_code)]
-    pub fn with_defined_by_slots(mut self) -> Self {
-        self.0 |= Self::IS_DEFINED_BY_SLOTS.0;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_local_name(mut self) -> Self {
-        self.0 |= Self::USES_LOCAL_NAME.0;
-        self
-    }
-
-    pub fn with_unresolved_import(mut self) -> Self {
-        self.0 |= Self::UNRESOLVED_IMPORT.0;
-        self
+    pub fn with(self, flag: TypeReprFlags) -> Self {
+        TypeReprFlags(self.0 | flag.0)
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Declaration {
-    pub handle: TypeHandle,            // Unique identifier for the declaration
-    pub category: DeclarationCategory, // Category of the symbol
-    pub flags: DeclarationFlags,       // Extra information about the declaration
-    pub node: Option<Node>,            // Parse node associated with the declaration
+pub struct Node {
+    pub uri: String,
+    pub range: Range,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ModuleName {
+    #[serde(rename = "leadingDots")]
+    pub leading_dots: i32,
+    #[serde(rename = "nameParts")]
+    pub name_parts: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Type {
+    #[serde(rename = "aliasName")]
+    pub alias_name: Option<String>,
+    pub handle: TypeHandle,
+    pub category: TypeCategory,
+    pub flags: TypeFlags,
     #[serde(rename = "moduleName")]
-    pub module_name: ModuleName, // Dot-separated import name for the file
-    pub name: String,                  // Symbol name as the user sees it
-    pub uri: Url,                      // File that contains the declaration
+    pub module_name: Option<ModuleName>,
+    pub name: String,
+    #[serde(rename = "categoryFlags")]
+    pub category_flags: i32,
+    pub decl: Option<Declaration>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Attribute {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub type_: Type,
+    pub owner: Option<Type>,
+    #[serde(rename = "boundType")]
+    pub bound_type: Option<Type>,
+    pub flags: i32,
+    pub decls: Vec<Declaration>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Declaration {
+    pub node: Option<Node>,
+    pub handle: TypeHandle,
+    pub category: DeclarationCategory,
+    pub flags: DeclarationFlags,
+    #[serde(rename = "moduleName")]
+    pub module_name: ModuleName,
+    pub name: String,
+    pub uri: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -228,310 +366,13 @@ pub struct Symbol {
     pub synthesized_types: Vec<Type>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub struct AttributeFlags(i32);
-
-impl AttributeFlags {
-    pub const NONE: AttributeFlags = AttributeFlags(0);
-    #[allow(dead_code)]
-    pub const IS_ARGS_LIST: AttributeFlags = AttributeFlags(1);
-    #[allow(dead_code)]
-    pub const IS_KWARGS_DICT: AttributeFlags = AttributeFlags(2);
-    #[allow(dead_code)]
-    pub const PARAMETER: AttributeFlags = AttributeFlags(4);
-    #[allow(dead_code)]
-    pub const RETURN_TYPE: AttributeFlags = AttributeFlags(8);
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct GetTypeParams {
-    pub node: Node,    // Location in the file
-    pub snapshot: i32, // Snapshot version
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct GetSymbolParams {
-    pub node: Node,           // Location in the file
-    pub name: Option<String>, // Optional symbol name
-    #[serde(rename = "skipUnreachableCode")]
-    pub skip_unreachable_code: bool, // Whether to skip unreachable code
-    pub snapshot: i32,        // Snapshot version
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct GetPythonSearchPathsParams {
-    #[serde(rename = "fromUri")]
-    pub from_uri: Url, // File URI to determine which config to use
-    pub snapshot: i32, // Snapshot version
-}
-
-#[derive(Serialize, Default)]
-pub struct GetSnapshotParams {
-    // No parameters needed for getting snapshot, but we need an empty struct
-    // to handle both {} and null parameter cases
-}
-
-#[derive(Serialize, Default)]
-pub struct GetSupportedProtocolVersionParams {
-    // No parameters needed for getting protocol version, but we need an empty struct
-    // to handle both {} and null parameter cases
-}
-
-// Custom deserializer that handles both null and empty object
-impl<'de> serde::Deserialize<'de> for GetSnapshotParams {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use std::fmt;
-
-        use serde::de::MapAccess;
-        use serde::de::Visitor;
-        use serde::de::{self};
-
-        struct GetSnapshotParamsVisitor;
-
-        impl<'de> Visitor<'de> for GetSnapshotParamsVisitor {
-            type Value = GetSnapshotParams;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("null or an empty object")
-            }
-
-            fn visit_unit<E>(self) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(GetSnapshotParams {})
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(GetSnapshotParams {})
-            }
-
-            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-            where
-                M: MapAccess<'de>,
-            {
-                // Read any fields in the map but ignore them since we don't need any params
-                while let Some((key, _value)) = map.next_entry::<String, serde_json::Value>()? {
-                    // Ignore unknown fields for flexibility
-                    let _ = key;
-                }
-                Ok(GetSnapshotParams {})
-            }
-        }
-
-        deserializer.deserialize_any(GetSnapshotParamsVisitor)
-    }
-}
-
-// Custom deserializer that handles both null and empty object for GetSupportedProtocolVersionParams
-impl<'de> serde::Deserialize<'de> for GetSupportedProtocolVersionParams {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use std::fmt;
-
-        use serde::de::MapAccess;
-        use serde::de::Visitor;
-        use serde::de::{self};
-
-        struct GetSupportedProtocolVersionParamsVisitor;
-
-        impl<'de> Visitor<'de> for GetSupportedProtocolVersionParamsVisitor {
-            type Value = GetSupportedProtocolVersionParams;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("null or an empty object")
-            }
-
-            fn visit_unit<E>(self) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(GetSupportedProtocolVersionParams {})
-            }
-
-            fn visit_none<E>(self) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(GetSupportedProtocolVersionParams {})
-            }
-
-            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-            where
-                M: MapAccess<'de>,
-            {
-                // Read any fields in the map but ignore them since we don't need any params
-                while let Some((key, _value)) = map.next_entry::<String, serde_json::Value>()? {
-                    // Ignore unknown fields for flexibility
-                    let _ = key;
-                }
-                Ok(GetSupportedProtocolVersionParams {})
-            }
-        }
-
-        deserializer.deserialize_any(GetSupportedProtocolVersionParamsVisitor)
-    }
-}
-
-// Additional parameter types for missing requests
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetDiagnosticsParams {
-    pub uri: Url,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetBuiltinTypeParams {
-    #[serde(rename = "scopingNode")]
-    pub scoping_node: Node,
-    pub name: String,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTypeAttributesParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetSymbolsForFileParams {
-    pub uri: Url,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetMetaclassParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTypeAliasInfoParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CombineTypesParams {
-    pub types: Vec<Type>,
-    pub snapshot: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateInstanceTypeParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub snapshot: i32,
-}
-
-// Additional response types
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FileSymbolInfo {
-    pub uri: Url,
+    pub uri: String,
     pub symbols: Vec<Symbol>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TypeAliasInfo {
-    pub name: String,
-    #[serde(rename = "typeArgs")]
-    pub type_args: Option<Vec<Type>>,
-}
-
-impl lsp_types::request::Request for GetTypeRequest {
-    type Params = GetTypeParams;
-    type Result = Option<Type>;
-    const METHOD: &'static str = "typeServer/getType";
-}
-
-impl lsp_types::request::Request for GetSymbolRequest {
-    type Params = GetSymbolParams;
-    type Result = Option<Symbol>;
-    const METHOD: &'static str = "typeServer/getSymbol";
-}
-
-impl lsp_types::request::Request for GetPythonSearchPathsRequest {
-    type Params = GetPythonSearchPathsParams;
-    type Result = Vec<Url>;
-    const METHOD: &'static str = "typeServer/getPythonSearchPaths";
-}
-
-impl lsp_types::request::Request for GetSnapshotRequest {
-    type Params = GetSnapshotParams;
-    type Result = i32;
-    const METHOD: &'static str = "typeServer/getSnapshot";
-}
-
-impl lsp_types::request::Request for GetSupportedProtocolVersionRequest {
-    type Params = GetSupportedProtocolVersionParams;
-    type Result = String;
-    const METHOD: &'static str = "typeServer/getSupportedProtocolVersion";
-}
-
-impl lsp_types::request::Request for GetDiagnosticsRequest {
-    type Params = GetDiagnosticsParams;
-    type Result = Option<Vec<Diagnostic>>;
-    const METHOD: &'static str = "typeServer/getDiagnostics";
-}
-
-impl lsp_types::request::Request for GetBuiltinTypeRequest {
-    type Params = GetBuiltinTypeParams;
-    type Result = Option<Type>;
-    const METHOD: &'static str = "typeServer/getBuiltinType";
-}
-
-impl lsp_types::request::Request for GetTypeAttributesRequest {
-    type Params = GetTypeAttributesParams;
-    type Result = Option<Vec<Attribute>>;
-    const METHOD: &'static str = "typeServer/getTypeAttributes";
-}
-
-impl lsp_types::request::Request for GetSymbolsForFileRequest {
-    type Params = GetSymbolsForFileParams;
-    type Result = Option<FileSymbolInfo>;
-    const METHOD: &'static str = "typeServer/getSymbolsForFile";
-}
-
-impl lsp_types::request::Request for GetMetaclassRequest {
-    type Params = GetMetaclassParams;
-    type Result = Option<Type>;
-    const METHOD: &'static str = "typeServer/getMetaclass";
-}
-
-impl lsp_types::request::Request for GetTypeAliasInfoRequest {
-    type Params = GetTypeAliasInfoParams;
-    type Result = Option<TypeAliasInfo>;
-    const METHOD: &'static str = "typeServer/getTypeAliasInfo";
-}
-
-impl lsp_types::request::Request for CombineTypesRequest {
-    type Params = CombineTypesParams;
-    type Result = Option<Type>;
-    const METHOD: &'static str = "typeServer/combineTypes";
-}
-
-impl lsp_types::request::Request for CreateInstanceTypeRequest {
-    type Params = CreateInstanceTypeParams;
-    type Result = Option<Type>;
-    const METHOD: &'static str = "typeServer/createInstanceType";
-}
-
-// Request/Response types for resolveImportDeclaration
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ResolveImportOptions {
     #[serde(rename = "resolveLocalNames")]
     pub resolve_local_names: Option<bool>,
@@ -541,277 +382,209 @@ pub struct ResolveImportOptions {
     pub skip_file_needed_check: Option<bool>,
 }
 
-impl Default for ResolveImportOptions {
-    fn default() -> Self {
-        Self {
-            resolve_local_names: Some(false),
-            allow_externally_hidden_access: Some(false),
-            skip_file_needed_check: Some(false),
-        }
-    }
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TextDocumentOpenParams {
+    #[serde(rename = "chainedFileUri")]
+    pub chained_file_uri: Option<String>,
+    pub uri: String,
+    pub text: String,
+    pub version: i32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ResolveImportDeclarationParams {
-    pub decl: Declaration,
-    pub options: ResolveImportOptions,
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TextDocumentCloseParams {
+    pub uri: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ResolveImportParams {
+    #[serde(rename = "sourceUri")]
+    pub source_uri: String,
+    #[serde(rename = "moduleDescriptor")]
+    pub module_descriptor: ModuleName,
     pub snapshot: i32,
 }
 
-// LSP request type for resolveImportDeclaration
-pub enum ResolveImportDeclarationRequest {}
-
-impl lsp_types::request::Request for ResolveImportDeclarationRequest {
-    type Params = ResolveImportDeclarationParams;
-    type Result = Option<Declaration>;
-    const METHOD: &'static str = "typeServer/resolveImportDeclaration";
-}
-
-// Request/Response types for getTypeOfDeclaration
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetTypeOfDeclarationParams {
-    pub decl: Declaration,
-    pub snapshot: i32,
-}
-
-// LSP request type for getTypeOfDeclaration
-pub enum GetTypeOfDeclarationRequest {}
-
-impl lsp_types::request::Request for GetTypeOfDeclarationRequest {
-    type Params = GetTypeOfDeclarationParams;
-    type Result = Type;
-    const METHOD: &'static str = "typeServer/getTypeOfDeclaration";
-}
-
-// Flags that control how type representations are formatted
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub struct TypeReprFlags(i32);
-
-impl TypeReprFlags {
-    #[allow(dead_code)]
-    pub const NONE: TypeReprFlags = TypeReprFlags(0);
-    pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1 << 0);
-    pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(1 << 1);
-    pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(1 << 2);
-
-    pub fn has_expand_type_aliases(self) -> bool {
-        self.0 & Self::EXPAND_TYPE_ALIASES.0 != 0
-    }
-
-    pub fn has_print_type_var_variance(self) -> bool {
-        self.0 & Self::PRINT_TYPE_VAR_VARIANCE.0 != 0
-    }
-
-    pub fn has_convert_to_instance_type(self) -> bool {
-        self.0 & Self::CONVERT_TO_INSTANCE_TYPE.0 != 0
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetReprParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub flags: TypeReprFlags,
-    pub snapshot: i32,
-}
-
-// LSP request type for getRepr
-pub enum GetReprRequest {}
-
-impl lsp_types::request::Request for GetReprRequest {
-    type Params = GetReprParams;
-    type Result = String;
-    const METHOD: &'static str = "typeServer/getRepr";
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetDocstringParams {
-    #[serde(rename = "type")]
-    pub type_param: Option<Type>,
-    pub decl: Declaration,
-    #[serde(rename = "boundObjectOrClass")]
-    pub bound_object_or_class: Option<Type>,
-    pub snapshot: i32,
-}
-
-// LSP request type for getDocstring
-pub enum GetDocstringRequest {}
-
-impl lsp_types::request::Request for GetDocstringRequest {
-    type Params = GetDocstringParams;
-    type Result = Option<String>;
-    const METHOD: &'static str = "typeServer/getDocString";
-}
-
-// Flags that are used for searching for attributes of a class Type
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct AttributeAccessFlags(pub u32);
-
-impl AttributeAccessFlags {
-    #[allow(dead_code)]
-    pub const NONE: AttributeAccessFlags = AttributeAccessFlags(0);
-    // Skip instance attributes when searching for attributes of a type
-    #[allow(dead_code)]
-    pub const SKIP_INSTANCE_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 0);
-    // Skip members from the base class of a type when searching for members of a type
-    #[allow(dead_code)]
-    pub const SKIP_TYPE_BASE_CLASS: AttributeAccessFlags = AttributeAccessFlags(1 << 1);
-    // Skip attribute access overrides when searching for members of a type
-    #[allow(dead_code)]
-    pub const SKIP_ATTRIBUTE_ACCESS_OVERRIDES: AttributeAccessFlags = AttributeAccessFlags(1 << 2);
-    // Look for bound attributes when searching for attributes of a type. That is methods bound specifically to an instance
-    #[allow(dead_code)]
-    pub const GET_BOUND_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1 << 3);
-}
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SearchForTypeAttributeParams {
-    // The starting point in the type hierarchy to search for the attribute
-    #[serde(rename = "startType")]
-    pub start_type: Type,
-    // The name of the attribute being requested
-    #[serde(rename = "attributeName")]
-    pub attribute_name: String,
-    // Flags that control how the attribute is accessed
-    #[serde(rename = "accessFlags")]
-    pub access_flags: AttributeAccessFlags,
-    // Optional: The expression node that the member is being accessed from
     #[serde(rename = "expressionNode")]
     pub expression_node: Option<Node>,
-    // Optional: The type of an instance that the attribute is being accessed from
     #[serde(rename = "instanceType")]
     pub instance_type: Option<Type>,
-    // The snapshot version of the type server state
+    #[serde(rename = "startType")]
+    pub start_type: Type,
+    #[serde(rename = "attributeName")]
+    pub attribute_name: String,
+    #[serde(rename = "accessFlags")]
+    pub access_flags: AttributeAccessFlags,
     pub snapshot: i32,
 }
 
-// LSP request type for searchForTypeAttribute
-pub enum SearchForTypeAttributeRequest {}
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetTypeAttributesParams {
+    #[serde(rename = "type")]
+    pub type_: Type,
+    pub snapshot: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetSymbolParams {
+    pub name: Option<String>,
+    pub node: Node,
+    #[serde(rename = "skipUnreachableCode")]
+    pub skip_unreachable_code: bool,
+    pub snapshot: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetBuiltinTypeParams {
+    #[serde(rename = "scopingNode")]
+    pub scoping_node: Node,
+    pub name: String,
+    pub snapshot: i32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TypeAliasInfo {
+    pub name: String,
+    #[serde(rename = "typeArgs")]
+    pub type_args: Option<Vec<Type>>,
+}
+
+impl lsp_types::request::Request for GetSnapshotRequest {
+    type Params = i32;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetSnapshotRequest";
+}
+
+impl lsp_types::request::Request for GetDiagnosticsRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetDiagnosticsRequest";
+}
+
+impl lsp_types::request::Request for GetDiagnosticsVersionRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetDiagnosticsVersionRequest";
+}
+
+impl lsp_types::request::Request for GetTypeRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetTypeRequest";
+}
+
+impl lsp_types::request::Request for GetBuiltinTypeRequest {
+    type Params = GetBuiltinTypeParams;
+    type Result = Option<Type>;
+    const METHOD: &'static str = "typeServer/GetBuiltinTypeRequest";
+}
+
+impl lsp_types::request::Request for GetTypeArgsRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetTypeArgsRequest";
+}
 
 impl lsp_types::request::Request for SearchForTypeAttributeRequest {
     type Params = SearchForTypeAttributeParams;
     type Result = Option<Attribute>;
-    const METHOD: &'static str = "typeServer/searchForTypeAttribute";
+    const METHOD: &'static str = "typeServer/SearchForTypeAttributeRequest";
 }
 
-// Parts of a function, including its parameters and return type.
-// This is used to provide a string representation of a function's signature.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FunctionParts {
-    pub params: Vec<String>,
-    #[serde(rename = "returnType")]
-    pub return_type: String,
+impl lsp_types::request::Request for GetTypeAttributesRequest {
+    type Params = GetTypeAttributesParams;
+    type Result = Option<Vec<Attribute>>;
+    const METHOD: &'static str = "typeServer/GetTypeAttributesRequest";
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetFunctionPartsParams {
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    pub flags: TypeReprFlags,
-    pub snapshot: i32,
+impl lsp_types::request::Request for GetOverloadsRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetOverloadsRequest";
 }
 
-// LSP request type for getFunctionParts
-pub enum GetFunctionPartsRequest {}
+impl lsp_types::request::Request for GetMatchingOverloadsRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetMatchingOverloadsRequest";
+}
+
+impl lsp_types::request::Request for GetMetaclassRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetMetaclassRequest";
+}
+
+impl lsp_types::request::Request for GetTypeOfDeclarationRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetTypeOfDeclarationRequest";
+}
+
+impl lsp_types::request::Request for GetSymbolRequest {
+    type Params = GetSymbolParams;
+    type Result = Option<Symbol>;
+    const METHOD: &'static str = "typeServer/GetSymbolRequest";
+}
+
+impl lsp_types::request::Request for GetSymbolsForFileRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetSymbolsForFileRequest";
+}
 
 impl lsp_types::request::Request for GetFunctionPartsRequest {
-    type Params = GetFunctionPartsParams;
-    type Result = Option<FunctionParts>;
-    const METHOD: &'static str = "typeServer/getFunctionParts";
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetFunctionPartsRequest";
 }
 
-// Request/Response types for getDiagnosticsVersion
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GetDiagnosticsVersionParams {
-    pub uri: Url,
-    pub snapshot: i32,
+impl lsp_types::request::Request for GetReprRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetReprRequest";
 }
 
-// LSP request type for getDiagnosticsVersion
-pub enum GetDiagnosticsVersionRequest {}
-
-impl lsp_types::request::Request for GetDiagnosticsVersionRequest {
-    type Params = GetDiagnosticsVersionParams;
-    type Result = u32;
-    const METHOD: &'static str = "typeServer/getDiagnosticsVersion";
+impl lsp_types::request::Request for GetDocStringRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetDocStringRequest";
 }
 
-// Parameters for resolving an import
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResolveImportParams {
-    /// The URI of the source file where the import is referenced.
-    #[serde(rename = "sourceUri")]
-    pub source_uri: Url,
-    /// The descriptor of the imported module.
-    #[serde(rename = "moduleDescriptor")]
-    pub module_descriptor: ModuleName,
-    /// The snapshot number for validation
-    pub snapshot: i32,
+impl lsp_types::request::Request for ResolveImportDeclarationRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/ResolveImportDeclarationRequest";
 }
-
-// LSP request type for resolveImport
-pub enum ResolveImportRequest {}
 
 impl lsp_types::request::Request for ResolveImportRequest {
     type Params = ResolveImportParams;
-    type Result = Option<Url>;
-    const METHOD: &'static str = "typeServer/resolveImport";
+    type Result = Option<String>;
+    const METHOD: &'static str = "typeServer/ResolveImportRequest";
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetTypeArgsParams {
-    /// The type to get arguments from (union members or generic arguments)
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    /// The snapshot number for validation
-    pub snapshot: i32,
+impl lsp_types::request::Request for GetTypeAliasInfoRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetTypeAliasInfoRequest";
 }
 
-// LSP request type for getTypeArgs
-pub enum GetTypeArgsRequest {}
-
-impl lsp_types::request::Request for GetTypeArgsRequest {
-    type Params = GetTypeArgsParams;
-    type Result = Vec<Type>;
-    const METHOD: &'static str = "typeServer/getTypeArgs";
+impl lsp_types::request::Request for CombineTypesRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/CombineTypesRequest";
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetOverloadsParams {
-    /// The overloaded type to get individual overloads from
-    #[serde(rename = "type")]
-    pub type_param: Type,
-    /// The snapshot number for validation
-    pub snapshot: i32,
+impl lsp_types::request::Request for CreateInstanceTypeRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/CreateInstanceTypeRequest";
 }
 
-// LSP request type for getOverloads
-pub enum GetOverloadsRequest {}
-
-impl lsp_types::request::Request for GetOverloadsRequest {
-    type Params = GetOverloadsParams;
-    type Result = Option<Vec<Type>>;
-    const METHOD: &'static str = "typeServer/getOverloads";
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GetMatchingOverloadsParams {
-    /// The call site node to analyze for matching overloads
-    #[serde(rename = "callNode")]
-    pub call_node: Node,
-    /// The snapshot number for validation
-    pub snapshot: i32,
-}
-
-// LSP request type for getMatchingOverloads
-pub enum GetMatchingOverloadsRequest {}
-
-impl lsp_types::request::Request for GetMatchingOverloadsRequest {
-    type Params = GetMatchingOverloadsParams;
-    type Result = Option<Vec<Type>>;
-    const METHOD: &'static str = "typeServer/getMatchingOverloads";
+impl lsp_types::request::Request for GetPythonSearchPathsRequest {
+    type Params = serde_json::Value;
+    type Result = serde_json::Value;
+    const METHOD: &'static str = "typeServer/GetPythonSearchPathsRequest";
 }

@@ -479,12 +479,12 @@ class RustCodeGenerator:
         return self._to_snake_case(name).upper()
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python generate_protocol.py <input_typescript_file> <output_rust_file>")
+    if len(sys.argv) != 2:
+        print("Usage: python generate_protocol.py <input_typescript_file>")
         sys.exit(1)
     
     input_file = sys.argv[1]
-    output_file = sys.argv[2]
+    output_file = "./protocol.rs"
     
     if not Path(input_file).exists():
         print(f"Error: Input file '{input_file}' not found")
