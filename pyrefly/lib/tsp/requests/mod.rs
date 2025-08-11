@@ -31,3 +31,4 @@ pub mod get_type_of_declaration;
 pub mod resolve_import;
 pub mod resolve_import_declaration;
 pub mod search_for_type_attribute;
+pub mod type_formatting;

@@ -9,6 +9,8 @@
 
 use lsp_server::ResponseError;
 
+// Import shared type formatting utilities
+use super::type_formatting;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp;
@@ -18,7 +20,7 @@ use crate::tsp::common::tsp_debug;
 impl Server {
     pub(crate) fn get_repr(
         &self,
-        _transaction: &Transaction<'_>,
+        transaction: &Transaction<'_>,
         params: tsp::GetReprParams,
     ) -> Result<String, ResponseError> {
         // Validate snapshot
@@ -35,41 +37,16 @@ impl Server {
             return Ok(type_repr);
         };
 
-        // Use pyrefly's native type formatting
-        let type_repr = if params.flags.has_convert_to_instance_type() {
-            // Convert class types to instance types
-            match &internal_type {
-                crate::types::types::Type::ClassDef(class) => {
-                    // Convert ClassDef to ClassType (instance)
-                    let empty_tparams =
-                        std::sync::Arc::new(crate::types::types::TParams::new(Vec::new()));
-                    let empty_targs = crate::types::types::TArgs::new(empty_tparams, Vec::new());
-                    let class_type =
-                        crate::types::class::ClassType::new(class.clone(), empty_targs);
-                    format!("{}", crate::types::types::Type::ClassType(class_type))
-                }
-                _ => format!("{internal_type}"),
-            }
-        } else {
-            // Standard type representation
-            format!("{internal_type}")
-        };
-
-        // Apply additional formatting based on flags
-        let final_repr = if params.flags.has_expand_type_aliases() {
-            // For now, we don't have specific alias expansion logic in the Display impl,
-            // but this is where we would implement it if needed
-            type_repr
-        } else {
-            type_repr
-        };
+        // Use pyrefly's native type formatting with flags support
+        let type_repr =
+            type_formatting::format_type_for_display(internal_type, params.flags, transaction);
 
         tsp_debug!(
             "Generated repr for type {:?}: {}",
             params.type_param.handle,
-            final_repr
+            type_repr
         );
-        Ok(final_repr)
+        Ok(type_repr)
     }
 }
 
