@@ -2064,3 +2064,13 @@ pub struct GetPythonSearchPathsResponse
 }
 
 
+
+
+// Type Server Protocol Constants
+
+/// The version of the Type Server Protocol
+pub const TypeServerVersion: &str = "0.1.0";
+
+/// Represents an invalid handle value
+pub const InvalidHandle: i32 = -1;
+

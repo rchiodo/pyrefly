@@ -803,7 +803,7 @@ impl Server {
                 } else if let Some(params) = as_tsp_request::<GetSupportedProtocolVersionRequest>(&x, "typeServer/getSupportedProtocolVersion") {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, Ok(self.get_supported_protocol_version(&transaction, params.unwrap_or_default()))));
+                    self.send_response(new_response(x.id, Ok(self.get_supported_protocol_version(&transaction))));
                     ide_transaction_manager.save(transaction);
                 } else if let Some(params) = as_tsp_request::<GetTypeRequest>(&x, "typeServer/getType")
                     && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeRequest>(params, &x.id)

@@ -1002,6 +1002,26 @@
             "documentation": "Notification sent by the server to indicate that diagnostics have changed and the client should re-request diagnostics for the file."
         }
     ],
+    "constants": [
+        {
+            "name": "TypeServerVersion",
+            "type": {
+                "kind": "base",
+                "name": "string"
+            },
+            "value": "0.1.0",
+            "documentation": "The version of the Type Server Protocol"
+        },
+        {
+            "name": "InvalidHandle",
+            "type": {
+                "kind": "base", 
+                "name": "integer"
+            },
+            "value": -1,
+            "documentation": "Represents an invalid handle value"
+        }
+    ],
     "structures": [
         {
             "name": "Position",

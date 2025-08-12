@@ -181,6 +181,44 @@ def convert_type_reference(type_def: Dict[str, Any]) -> model.LSP_TYPE_SPEC:
         raise ValueError(f"Unsupported type kind: {kind}")
 
 
+def generate_constants_rust(tsp_json: Dict[str, Any]) -> str:
+    """Generate Rust constant definitions from the constants section in tsp.json."""
+    constants = tsp_json.get("constants", [])
+    if not constants:
+        return ""
+    
+    rust_code = "// Type Server Protocol Constants\n\n"
+    
+    for const_def in constants:
+        name = const_def["name"]
+        const_type = const_def["type"]
+        value = const_def["value"]
+        doc = const_def.get("documentation", "")
+        
+        # Generate documentation comment if available
+        if doc:
+            rust_code += f"/// {doc}\n"
+        
+        # Determine Rust type
+        if const_type["kind"] == "base":
+            if const_type["name"] == "string":
+                rust_type = "&str"
+                rust_value = f'"{value}"'
+            elif const_type["name"] == "integer":
+                rust_type = "i32"
+                rust_value = str(value)
+            else:
+                rust_type = const_type["name"]
+                rust_value = str(value)
+        else:
+            rust_type = "/* unsupported type */"
+            rust_value = str(value)
+        
+        rust_code += f"pub const {name}: {rust_type} = {rust_value};\n\n"
+    
+    return rust_code
+
+
 def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
     """Generate the Rust protocol.rs file from TSP JSON."""
     
@@ -230,6 +268,11 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         )
         
         shutil.rmtree(output_path / "lsprotocol")
+        
+        # Add constants from tsp.json if they exist
+        constants_rust = generate_constants_rust(tsp_json)
+        if constants_rust:
+            content = content + "\n\n" + constants_rust
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")
     else:
