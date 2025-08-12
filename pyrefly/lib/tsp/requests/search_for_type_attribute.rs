@@ -71,19 +71,15 @@ pub fn create_tsp_attribute_from_type(
     attribute_name: &str,
     type_converter: impl Fn(crate::types::types::Type) -> tsp::Type,
 ) -> tsp::Attribute {
-    // Convert the pyrefly type to TSP type
     let tsp_type = type_converter(attribute_type);
-
-    // For now, create default flags - we could enhance this later with more attribute metadata
-    let flags = tsp::AttributeFlags::None as i32;
-
+    let flags = tsp::AttributeFlags::None.0;
     tsp::Attribute {
         name: attribute_name.to_owned(),
         type_: tsp_type,
-        owner: None,      // TODO: Could set this to the class type if needed
-        bound_type: None, // TODO: Could implement bound type if needed
+        owner: None,
+        bound_type: None,
         flags,
-        decls: Vec::new(), // TODO: Could add declaration information if available
+        decls: Vec::new(),
     }
 }
 

@@ -7,9 +7,9 @@
 
 //! Common utilities and helper Functions for TSP request handling
 
-use lsp_server::ErrorCode;
 use lsp_server::Request;
 use lsp_server::ResponseError;
+use lsp_server::ErrorCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -38,25 +38,23 @@ pub struct GetSupportedProtocolVersionParams {}
 // Keep this section minimal; remove once all call sites are migrated.
 // -------------------------------------------------------------------------------------------------
 
-/// Legacy builder-style API expected on DeclarationFlags
+// Legacy builder-style aliases now delegate to generated camelCase helpers (avoid duplicate methods)
 impl tsp::DeclarationFlags {
     #[inline]
-    pub fn new() -> Self {
-        tsp::DeclarationFlags::None
-    }
+    pub fn with_class_member(self) -> Self { self.with_classMember() }
     #[inline]
-    pub fn with_class_member(self) -> Self {
-        tsp::DeclarationFlags::ClassMember
-    }
-    #[inline]
-    pub fn with_constant(self) -> Self {
-        tsp::DeclarationFlags::Constant
-    }
-    #[inline]
-    pub fn with_unresolved_import(self) -> Self {
-        tsp::DeclarationFlags::UnresolvedImport
-    }
+    pub fn with_unresolved_import(self) -> Self { self.with_unresolvedImport() }
 }
+
+// Lightweight debug macro used by request handlers (avoids pulling in tracing for generated-ish code)
+#[macro_export]
+macro_rules! tsp_debug {
+    ($($arg:tt)*) => {{
+        if cfg!(debug_assertions) { eprintln!("[TSP] {}:", module_path!()); eprintln!($($arg)*); }
+    }};
+}
+pub use tsp_debug;
+
 /// Legacy constant-like ALL_CAPS variants for DeclarationCategory (optional)
 #[cfg(feature = "legacy_tsp_aliases")]
 #[allow(non_upper_case_globals)]
@@ -113,15 +111,15 @@ pub mod legacy_type_flags {
 impl tsp::TypeReprFlags {
     #[inline]
     pub fn has_expand_type_aliases(&self) -> bool {
-        matches!(self, tsp::TypeReprFlags::ExpandTypeAliases)
+        self.contains(tsp::TypeReprFlags::ExpandTypeAliases)
     }
     #[inline]
     pub fn has_print_type_var_variance(&self) -> bool {
-        matches!(self, tsp::TypeReprFlags::PrintTypeVarVariance)
+        self.contains(tsp::TypeReprFlags::PrintTypeVarVariance)
     }
     #[inline]
     pub fn has_convert_to_instance_type(&self) -> bool {
-        matches!(self, tsp::TypeReprFlags::ConvertToInstanceType)
+        self.contains(tsp::TypeReprFlags::ConvertToInstanceType)
     }
 }
 
@@ -184,21 +182,14 @@ where
     }
 }
 
-/// LSP debug logging that can be disabled in release builds
-#[cfg(debug_assertions)]
-macro_rules! tsp_debug {
-    ($($arg:tt)*) => {
-        eprintln!($($arg)*);
-    };
+/// Helper to build a JSON-RPC error response for TSP handlers
+pub fn error_response(id: lsp_server::RequestId, code: i32, message: String) -> lsp_server::Response {
+    lsp_server::Response {
+        id,
+        result: None,
+        error: Some(ResponseError { code, message, data: None }),
+    }
 }
-
-#[cfg(not(debug_assertions))]
-macro_rules! tsp_debug {
-    ($($arg:tt)*) => {};
-}
-
-// Re-export the macro for use in TSP request modules
-pub(crate) use tsp_debug;
 
 /// Creates a snapshot outdated error
 #[allow(dead_code)]

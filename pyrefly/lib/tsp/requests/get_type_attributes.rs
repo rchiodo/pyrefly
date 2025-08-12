@@ -103,7 +103,7 @@ pub fn extract_type_attributes(
                         type_: tsp_type,
                         owner: None, // Could be enhanced to include owner type
                         bound_type: None,
-                        flags: tsp::AttributeFlags::None as i32,
+                        flags: tsp::AttributeFlags::None.0,
                         decls: Vec::new(), // Could be enhanced with declaration info
                     };
                     class_attributes.push(attribute);
@@ -135,7 +135,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -150,7 +150,7 @@ pub fn extract_type_attributes(
                         )),
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::None as i32,
+                        flags: tsp::AttributeFlags::None.0,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -166,7 +166,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -179,7 +179,7 @@ pub fn extract_type_attributes(
                         type_: param_spec_tsp,
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::None as i32,
+                        flags: tsp::AttributeFlags::None.0,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -193,7 +193,7 @@ pub fn extract_type_attributes(
                 type_: return_tsp_type,
                 owner: None,
                 bound_type: None,
-                flags: tsp::AttributeFlags::None as i32,
+                flags: tsp::AttributeFlags::None.0,
                 decls: Vec::new(),
             };
             attributes.push(return_attribute);
@@ -214,7 +214,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -228,7 +228,7 @@ pub fn extract_type_attributes(
                         )),
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::None as i32,
+                        flags: tsp::AttributeFlags::None.0,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -243,7 +243,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -255,7 +255,7 @@ pub fn extract_type_attributes(
                         type_: param_spec_tsp,
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::None as i32,
+                        flags: tsp::AttributeFlags::None.0,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -269,7 +269,7 @@ pub fn extract_type_attributes(
                 type_: return_tsp_type,
                 owner: None,
                 bound_type: None,
-                flags: tsp::AttributeFlags::None as i32,
+                flags: tsp::AttributeFlags::None.0,
                 decls: Vec::new(),
             };
             attributes.push(return_attribute);
@@ -299,7 +299,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -313,7 +313,7 @@ pub fn extract_type_attributes(
                             type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::None as i32,
+                            flags: tsp::AttributeFlags::None.0,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);

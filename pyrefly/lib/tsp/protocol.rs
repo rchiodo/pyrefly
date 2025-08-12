@@ -230,270 +230,396 @@ impl<'de> Deserialize<'de> for TypeCategory {
 }
 
 /// Flags that describe the characteristics of a type. These flags can be combined using bitwise operations.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum TypeFlags {
-    None = 0,
-
-    /// Indicates if the type can be instantiated.
-    Instantiable = 1,
-
-    /// Indicates if the type represents an instance (as opposed to a class or type itself).
-    Instance = 2,
-
-    /// Indicates if an instance of the type can be called like a function.
-    Callable = 4,
-
-    /// Indicates if the instance is a literal (like `42`, `"hello"`, etc.).
-    Literal = 8,
-
-    /// Indicates if the type is an interface (a type that defines a set of methods and properties).
-    Interface = 16,
-
-    /// Indicates if the type is a generic type (a type that can be parameterized with other types).
-    Generic = 32,
-
-    /// Indicates if the type came from an alias (a type that refers to another type).
-    FromAlias = 64,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct TypeFlags(pub i32);
+impl TypeFlags {
+    pub const None: TypeFlags = TypeFlags(0);
+    pub const Instantiable: TypeFlags = TypeFlags(1);
+    pub const Instance: TypeFlags = TypeFlags(2);
+    pub const Callable: TypeFlags = TypeFlags(4);
+    pub const Literal: TypeFlags = TypeFlags(8);
+    pub const Interface: TypeFlags = TypeFlags(16);
+    pub const Generic: TypeFlags = TypeFlags(32);
+    pub const FromAlias: TypeFlags = TypeFlags(64);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_instantiable(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Instantiable.0)
+    }
+    #[inline]
+    pub fn with_instance(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Instance.0)
+    }
+    #[inline]
+    pub fn with_callable(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Callable.0)
+    }
+    #[inline]
+    pub fn with_literal(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Literal.0)
+    }
+    #[inline]
+    pub fn with_interface(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Interface.0)
+    }
+    #[inline]
+    pub fn with_generic(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::Generic.0)
+    }
+    #[inline]
+    pub fn with_fromAlias(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::FromAlias.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for TypeFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            TypeFlags::None => serializer.serialize_i32(0),
-            TypeFlags::Instantiable => serializer.serialize_i32(1),
-            TypeFlags::Instance => serializer.serialize_i32(2),
-            TypeFlags::Callable => serializer.serialize_i32(4),
-            TypeFlags::Literal => serializer.serialize_i32(8),
-            TypeFlags::Interface => serializer.serialize_i32(16),
-            TypeFlags::Generic => serializer.serialize_i32(32),
-            TypeFlags::FromAlias => serializer.serialize_i32(64),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeFlags {
-    fn deserialize<D>(deserializer: D) -> Result<TypeFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(TypeFlags::None),
-            1 => Ok(TypeFlags::Instantiable),
-            2 => Ok(TypeFlags::Instance),
-            4 => Ok(TypeFlags::Callable),
-            8 => Ok(TypeFlags::Literal),
-            16 => Ok(TypeFlags::Interface),
-            32 => Ok(TypeFlags::Generic),
-            64 => Ok(TypeFlags::FromAlias),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(TypeFlags(value))
+    }
+}
+impl std::ops::BitOr for TypeFlags {
+    type Output = TypeFlags;
+    fn bitor(self, rhs: TypeFlags) -> TypeFlags {
+        TypeFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for TypeFlags {
+    fn bitor_assign(&mut self, rhs: TypeFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for TypeFlags {
+    type Output = TypeFlags;
+    fn bitand(self, rhs: TypeFlags) -> TypeFlags {
+        TypeFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that describe the characteristics of a function or method. These flags can be combined using bitwise operations.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum FunctionFlags {
-    None = 0,
-
-    /// Indicates if the function is asynchronous.
-    Async = 1,
-
-    /// Indicates if the function is a generator (can yield values).
-    Generator = 2,
-
-    /// Indicates if the function is abstract (must be implemented in a subclass).
-    Abstract = 4,
-
-    /// Indicates if the function has a @staticmethod decorator.
-    Static = 8,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct FunctionFlags(pub i32);
+impl FunctionFlags {
+    pub const None: FunctionFlags = FunctionFlags(0);
+    pub const Async: FunctionFlags = FunctionFlags(1);
+    pub const Generator: FunctionFlags = FunctionFlags(2);
+    pub const Abstract: FunctionFlags = FunctionFlags(4);
+    pub const Static: FunctionFlags = FunctionFlags(8);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_async(self) -> Self {
+        FunctionFlags(self.0 | FunctionFlags::Async.0)
+    }
+    #[inline]
+    pub fn with_generator(self) -> Self {
+        FunctionFlags(self.0 | FunctionFlags::Generator.0)
+    }
+    #[inline]
+    pub fn with_abstract(self) -> Self {
+        FunctionFlags(self.0 | FunctionFlags::Abstract.0)
+    }
+    #[inline]
+    pub fn with_static(self) -> Self {
+        FunctionFlags(self.0 | FunctionFlags::Static.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for FunctionFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            FunctionFlags::None => serializer.serialize_i32(0),
-            FunctionFlags::Async => serializer.serialize_i32(1),
-            FunctionFlags::Generator => serializer.serialize_i32(2),
-            FunctionFlags::Abstract => serializer.serialize_i32(4),
-            FunctionFlags::Static => serializer.serialize_i32(8),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for FunctionFlags {
-    fn deserialize<D>(deserializer: D) -> Result<FunctionFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(FunctionFlags::None),
-            1 => Ok(FunctionFlags::Async),
-            2 => Ok(FunctionFlags::Generator),
-            4 => Ok(FunctionFlags::Abstract),
-            8 => Ok(FunctionFlags::Static),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(FunctionFlags(value))
+    }
+}
+impl std::ops::BitOr for FunctionFlags {
+    type Output = FunctionFlags;
+    fn bitor(self, rhs: FunctionFlags) -> FunctionFlags {
+        FunctionFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for FunctionFlags {
+    fn bitor_assign(&mut self, rhs: FunctionFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for FunctionFlags {
+    type Output = FunctionFlags;
+    fn bitand(self, rhs: FunctionFlags) -> FunctionFlags {
+        FunctionFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that describe the characteristics of a class. These flags can be combined using bitwise operations.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum ClassFlags {
-    None = 0,
-
-    /// Indicates if the class is an enum (a special kind of class that defines a set of named values).
-    Enum = 1,
-
-    /// Indicates if the class is a TypedDict or derived from a TypedDict.
-    TypedDict = 2,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct ClassFlags(pub i32);
+impl ClassFlags {
+    pub const None: ClassFlags = ClassFlags(0);
+    pub const Enum: ClassFlags = ClassFlags(1);
+    pub const TypedDict: ClassFlags = ClassFlags(2);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_enum(self) -> Self {
+        ClassFlags(self.0 | ClassFlags::Enum.0)
+    }
+    #[inline]
+    pub fn with_typedDict(self) -> Self {
+        ClassFlags(self.0 | ClassFlags::TypedDict.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for ClassFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            ClassFlags::None => serializer.serialize_i32(0),
-            ClassFlags::Enum => serializer.serialize_i32(1),
-            ClassFlags::TypedDict => serializer.serialize_i32(2),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for ClassFlags {
-    fn deserialize<D>(deserializer: D) -> Result<ClassFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(ClassFlags::None),
-            1 => Ok(ClassFlags::Enum),
-            2 => Ok(ClassFlags::TypedDict),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(ClassFlags(value))
+    }
+}
+impl std::ops::BitOr for ClassFlags {
+    type Output = ClassFlags;
+    fn bitor(self, rhs: ClassFlags) -> ClassFlags {
+        ClassFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for ClassFlags {
+    fn bitor_assign(&mut self, rhs: ClassFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for ClassFlags {
+    type Output = ClassFlags;
+    fn bitand(self, rhs: ClassFlags) -> ClassFlags {
+        ClassFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that describe the characteristics of a type variable. These flags can be combined using bitwise operations.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum TypeVarFlags {
-    None = 0,
-
-    /// Indicates if the type variable is a ParamSpec (as defined in PEP 612).
-    IsParamSpec = 1,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct TypeVarFlags(pub i32);
+impl TypeVarFlags {
+    pub const None: TypeVarFlags = TypeVarFlags(0);
+    pub const IsParamSpec: TypeVarFlags = TypeVarFlags(1);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_isParamSpec(self) -> Self {
+        TypeVarFlags(self.0 | TypeVarFlags::IsParamSpec.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for TypeVarFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            TypeVarFlags::None => serializer.serialize_i32(0),
-            TypeVarFlags::IsParamSpec => serializer.serialize_i32(1),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeVarFlags {
-    fn deserialize<D>(deserializer: D) -> Result<TypeVarFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(TypeVarFlags::None),
-            1 => Ok(TypeVarFlags::IsParamSpec),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(TypeVarFlags(value))
+    }
+}
+impl std::ops::BitOr for TypeVarFlags {
+    type Output = TypeVarFlags;
+    fn bitor(self, rhs: TypeVarFlags) -> TypeVarFlags {
+        TypeVarFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for TypeVarFlags {
+    fn bitor_assign(&mut self, rhs: TypeVarFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for TypeVarFlags {
+    type Output = TypeVarFlags;
+    fn bitand(self, rhs: TypeVarFlags) -> TypeVarFlags {
+        TypeVarFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that describe extra data about an attribute.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum AttributeFlags {
-    None = 0,
-
-    /// Indicates if a parameter is an argument list (e.g., `*args`).
-    IsArgsList = 1,
-
-    /// Indicates if the attribute is a keyword argument dictionary (e.g., `**kwargs`).
-    IsKwargsDict = 2,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct AttributeFlags(pub i32);
+impl AttributeFlags {
+    pub const None: AttributeFlags = AttributeFlags(0);
+    pub const IsArgsList: AttributeFlags = AttributeFlags(1);
+    pub const IsKwargsDict: AttributeFlags = AttributeFlags(2);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_isArgsList(self) -> Self {
+        AttributeFlags(self.0 | AttributeFlags::IsArgsList.0)
+    }
+    #[inline]
+    pub fn with_isKwargsDict(self) -> Self {
+        AttributeFlags(self.0 | AttributeFlags::IsKwargsDict.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for AttributeFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            AttributeFlags::None => serializer.serialize_i32(0),
-            AttributeFlags::IsArgsList => serializer.serialize_i32(1),
-            AttributeFlags::IsKwargsDict => serializer.serialize_i32(2),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for AttributeFlags {
-    fn deserialize<D>(deserializer: D) -> Result<AttributeFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(AttributeFlags::None),
-            1 => Ok(AttributeFlags::IsArgsList),
-            2 => Ok(AttributeFlags::IsKwargsDict),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(AttributeFlags(value))
+    }
+}
+impl std::ops::BitOr for AttributeFlags {
+    type Output = AttributeFlags;
+    fn bitor(self, rhs: AttributeFlags) -> AttributeFlags {
+        AttributeFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for AttributeFlags {
+    fn bitor_assign(&mut self, rhs: AttributeFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for AttributeFlags {
+    type Output = AttributeFlags;
+    fn bitand(self, rhs: AttributeFlags) -> AttributeFlags {
+        AttributeFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that are used for searching for attributes of a class Type.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum AttributeAccessFlags {
-    None = 0,
-
-    /// Skip instance attributes when searching for attributes of a type.
-    SkipInstanceAttributes = 1,
-
-    /// Skip members from the base class of a type when searching for members of a type.
-    SkipTypeBaseClass = 2,
-
-    /// Skip attribute access overrides when searching for members of a type.
-    SkipAttributeAccessOverrides = 4,
-
-    /// Look for bound attributes when searching for attributes of a type.
-    GetBoundAttributes = 8,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct AttributeAccessFlags(pub i32);
+impl AttributeAccessFlags {
+    pub const None: AttributeAccessFlags = AttributeAccessFlags(0);
+    pub const SkipInstanceAttributes: AttributeAccessFlags = AttributeAccessFlags(1);
+    pub const SkipTypeBaseClass: AttributeAccessFlags = AttributeAccessFlags(2);
+    pub const SkipAttributeAccessOverrides: AttributeAccessFlags = AttributeAccessFlags(4);
+    pub const GetBoundAttributes: AttributeAccessFlags = AttributeAccessFlags(8);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_skipInstanceAttributes(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipInstanceAttributes.0)
+    }
+    #[inline]
+    pub fn with_skipTypeBaseClass(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipTypeBaseClass.0)
+    }
+    #[inline]
+    pub fn with_skipAttributeAccessOverrides(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipAttributeAccessOverrides.0)
+    }
+    #[inline]
+    pub fn with_getBoundAttributes(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::GetBoundAttributes.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for AttributeAccessFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            AttributeAccessFlags::None => serializer.serialize_i32(0),
-            AttributeAccessFlags::SkipInstanceAttributes => serializer.serialize_i32(1),
-            AttributeAccessFlags::SkipTypeBaseClass => serializer.serialize_i32(2),
-            AttributeAccessFlags::SkipAttributeAccessOverrides => serializer.serialize_i32(4),
-            AttributeAccessFlags::GetBoundAttributes => serializer.serialize_i32(8),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for AttributeAccessFlags {
-    fn deserialize<D>(deserializer: D) -> Result<AttributeAccessFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(AttributeAccessFlags::None),
-            1 => Ok(AttributeAccessFlags::SkipInstanceAttributes),
-            2 => Ok(AttributeAccessFlags::SkipTypeBaseClass),
-            4 => Ok(AttributeAccessFlags::SkipAttributeAccessOverrides),
-            8 => Ok(AttributeAccessFlags::GetBoundAttributes),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(AttributeAccessFlags(value))
+    }
+}
+impl std::ops::BitOr for AttributeAccessFlags {
+    type Output = AttributeAccessFlags;
+    fn bitor(self, rhs: AttributeAccessFlags) -> AttributeAccessFlags {
+        AttributeAccessFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for AttributeAccessFlags {
+    fn bitor_assign(&mut self, rhs: AttributeAccessFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for AttributeAccessFlags {
+    type Output = AttributeAccessFlags;
+    fn bitand(self, rhs: AttributeAccessFlags) -> AttributeAccessFlags {
+        AttributeAccessFlags(self.0 & rhs.0)
     }
 }
 
@@ -562,103 +688,145 @@ impl<'de> Deserialize<'de> for DeclarationCategory {
 }
 
 /// Flags that describe extra information about a declaration.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum DeclarationFlags {
-    None = 0,
-
-    /// Indicates if the declaration is a method (a function defined within a class).
-    ClassMember = 1,
-
-    /// Indicates if the declaration is a constant (a variable that cannot be changed).
-    Constant = 2,
-
-    /// Indicates if the declaration is final variable (a class that cannot be subclassed).
-    Final = 4,
-
-    /// Indicates if the declaration is defined by slots (a class that uses __slots__).
-    IsDefinedBySlots = 8,
-
-    /// Indicates if the import declaration uses 'as' with a different name.
-    UsesLocalName = 16,
-
-    /// Indicates if the import declaration is unresolved (the module or symbol could not be found).
-    UnresolvedImport = 32,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct DeclarationFlags(pub i32);
+impl DeclarationFlags {
+    pub const None: DeclarationFlags = DeclarationFlags(0);
+    pub const ClassMember: DeclarationFlags = DeclarationFlags(1);
+    pub const Constant: DeclarationFlags = DeclarationFlags(2);
+    pub const Final: DeclarationFlags = DeclarationFlags(4);
+    pub const IsDefinedBySlots: DeclarationFlags = DeclarationFlags(8);
+    pub const UsesLocalName: DeclarationFlags = DeclarationFlags(16);
+    pub const UnresolvedImport: DeclarationFlags = DeclarationFlags(32);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_classMember(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::ClassMember.0)
+    }
+    #[inline]
+    pub fn with_constant(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::Constant.0)
+    }
+    #[inline]
+    pub fn with_final(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::Final.0)
+    }
+    #[inline]
+    pub fn with_isDefinedBySlots(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::IsDefinedBySlots.0)
+    }
+    #[inline]
+    pub fn with_usesLocalName(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::UsesLocalName.0)
+    }
+    #[inline]
+    pub fn with_unresolvedImport(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::UnresolvedImport.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for DeclarationFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            DeclarationFlags::None => serializer.serialize_i32(0),
-            DeclarationFlags::ClassMember => serializer.serialize_i32(1),
-            DeclarationFlags::Constant => serializer.serialize_i32(2),
-            DeclarationFlags::Final => serializer.serialize_i32(4),
-            DeclarationFlags::IsDefinedBySlots => serializer.serialize_i32(8),
-            DeclarationFlags::UsesLocalName => serializer.serialize_i32(16),
-            DeclarationFlags::UnresolvedImport => serializer.serialize_i32(32),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for DeclarationFlags {
-    fn deserialize<D>(deserializer: D) -> Result<DeclarationFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(DeclarationFlags::None),
-            1 => Ok(DeclarationFlags::ClassMember),
-            2 => Ok(DeclarationFlags::Constant),
-            4 => Ok(DeclarationFlags::Final),
-            8 => Ok(DeclarationFlags::IsDefinedBySlots),
-            16 => Ok(DeclarationFlags::UsesLocalName),
-            32 => Ok(DeclarationFlags::UnresolvedImport),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(DeclarationFlags(value))
+    }
+}
+impl std::ops::BitOr for DeclarationFlags {
+    type Output = DeclarationFlags;
+    fn bitor(self, rhs: DeclarationFlags) -> DeclarationFlags {
+        DeclarationFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for DeclarationFlags {
+    fn bitor_assign(&mut self, rhs: DeclarationFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for DeclarationFlags {
+    type Output = DeclarationFlags;
+    fn bitand(self, rhs: DeclarationFlags) -> DeclarationFlags {
+        DeclarationFlags(self.0 & rhs.0)
     }
 }
 
 /// Flags that control how type representations are formatted.
-#[derive(PartialEq, Debug, Eq, Clone)]
-pub enum TypeReprFlags {
-    None = 0,
-
-    /// Turn type aliases into their original type.
-    ExpandTypeAliases = 1,
-
-    /// Print the variance of a type parameter.
-    PrintTypeVarVariance = 2,
-
-    /// Convert the type into an instance type before printing it.
-    ConvertToInstanceType = 4,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct TypeReprFlags(pub i32);
+impl TypeReprFlags {
+    pub const None: TypeReprFlags = TypeReprFlags(0);
+    pub const ExpandTypeAliases: TypeReprFlags = TypeReprFlags(1);
+    pub const PrintTypeVarVariance: TypeReprFlags = TypeReprFlags(2);
+    pub const ConvertToInstanceType: TypeReprFlags = TypeReprFlags(4);
+    #[inline]
+    pub fn new() -> Self {
+        Self::None
+    }
+    #[inline]
+    pub fn with_expandTypeAliases(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::ExpandTypeAliases.0)
+    }
+    #[inline]
+    pub fn with_printTypeVarVariance(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::PrintTypeVarVariance.0)
+    }
+    #[inline]
+    pub fn with_convertToInstanceType(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::ConvertToInstanceType.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
 }
 impl Serialize for TypeReprFlags {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        match self {
-            TypeReprFlags::None => serializer.serialize_i32(0),
-            TypeReprFlags::ExpandTypeAliases => serializer.serialize_i32(1),
-            TypeReprFlags::PrintTypeVarVariance => serializer.serialize_i32(2),
-            TypeReprFlags::ConvertToInstanceType => serializer.serialize_i32(4),
-        }
+        serializer.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeReprFlags {
-    fn deserialize<D>(deserializer: D) -> Result<TypeReprFlags, D::Error>
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let value = i32::deserialize(deserializer)?;
-        match value {
-            0 => Ok(TypeReprFlags::None),
-            1 => Ok(TypeReprFlags::ExpandTypeAliases),
-            2 => Ok(TypeReprFlags::PrintTypeVarVariance),
-            4 => Ok(TypeReprFlags::ConvertToInstanceType),
-            _ => Err(serde::de::Error::custom("Unexpected value")),
-        }
+        Ok(TypeReprFlags(value))
+    }
+}
+impl std::ops::BitOr for TypeReprFlags {
+    type Output = TypeReprFlags;
+    fn bitor(self, rhs: TypeReprFlags) -> TypeReprFlags {
+        TypeReprFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for TypeReprFlags {
+    fn bitor_assign(&mut self, rhs: TypeReprFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for TypeReprFlags {
+    type Output = TypeReprFlags;
+    fn bitand(self, rhs: TypeReprFlags) -> TypeReprFlags {
+        TypeReprFlags(self.0 & rhs.0)
     }
 }
 

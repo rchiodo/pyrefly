@@ -280,6 +280,125 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         # Turn off clippy warnings on generated code.
         content = "#![allow(clippy::all)]\n\n" + content
 
+        # Post-process certain enums that represent bitmask flags into bitflag-style structs
+        # so they can be combined with bitwise operations. We implement a simple brace-balanced
+        # removal of the original enum + its Serialize/Deserialize impl blocks to avoid the
+        # brittleness of a large regex (which previously left stray closing braces).
+        def replace_flag_enum(name: str, mapping: dict[str, int]) -> None:
+            nonlocal content
+
+            def find_block_end(start_idx: int) -> int | None:
+                """Given index of first '{', return index just after its matching '}' using brace counting."""
+                if start_idx < 0:
+                    return None
+                depth = 0
+                i = start_idx
+                while i < len(content):
+                    c = content[i]
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            return i + 1
+                    i += 1
+                return None
+
+            # Locate enum
+            enum_marker = f"pub enum {name} "
+            enum_start = content.find(enum_marker)
+            if enum_start == -1:
+                return
+            enum_brace = content.find('{', enum_start)
+            enum_end = find_block_end(enum_brace)
+            if enum_end is None:
+                return
+            # Locate impl Serialize
+            ser_marker = f"impl Serialize for {name}"
+            ser_start = content.find(ser_marker, enum_end)
+            if ser_start == -1:
+                return
+            ser_brace = content.find('{', ser_start)
+            ser_end = find_block_end(ser_brace)
+            if ser_end is None:
+                return
+            # Locate impl Deserialize
+            de_marker = f"impl<'de> Deserialize<'de> for {name}"
+            de_start = content.find(de_marker, ser_end)
+            if de_start == -1:
+                return
+            de_brace = content.find('{', de_start)
+            de_end = find_block_end(de_brace)
+            if de_end is None:
+                return
+
+            # Extend backwards to include doc comments and derive attributes immediately preceding enum
+            doc_start = enum_start
+            line_start = content.rfind('\n', 0, enum_start) + 1
+            while line_start >= 0:
+                line = content[line_start:enum_start]
+                stripped = line.strip()
+                if stripped.startswith('///') or stripped.startswith('#[derive') or stripped == '':
+                    doc_start = line_start
+                    # move to previous line
+                    if line_start == 0:
+                        break
+                    prev_line_end = content.rfind('\n', 0, line_start - 1)
+                    if prev_line_end == -1:
+                        line_start = 0
+                    else:
+                        line_start = prev_line_end + 1
+                else:
+                    break
+
+            # Capture existing doc comments (lines starting with ///) to re-emit
+            pre_block = content[doc_start:enum_start]
+            doc_lines = [l for l in pre_block.splitlines() if l.strip().startswith('///')]
+
+            # Build replacement struct definition. Keep original doc comments if present.
+            lines: list[str] = []
+            if doc_lines:
+                lines.extend(doc_lines)
+            lines.append(f"#[derive(PartialEq, Eq, Clone, Copy, Debug)]")
+            lines.append(f"pub struct {name}(pub i32);")
+            lines.append(f"impl {name} {{")
+            lines.append(f"    pub const None: {name} = {name}(0);")
+            for const_name, value in mapping.items():
+                if const_name == 'None':
+                    continue
+                lines.append(f"    pub const {const_name}: {name} = {name}({value});")
+            lines.append("    #[inline] pub fn new() -> Self { Self::None }")
+            for const_name in mapping.keys():
+                if const_name == 'None':
+                    continue
+                method = const_name[0].lower() + const_name[1:]
+                lines.append(f"    #[inline] pub fn with_{method}(self) -> Self {{ {name}(self.0 | {name}::{const_name}.0) }}")
+            lines.append("    #[inline] pub fn contains(self, other: Self) -> bool { (self.0 & other.0) == other.0 }")
+            lines.append("}")
+            lines.append(f"impl Serialize for {name} {{ fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {{ serializer.serialize_i32(self.0) }} }}")
+            lines.append(f"impl<'de> Deserialize<'de> for {name} {{ fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {{ let value = i32::deserialize(deserializer)?; Ok({name}(value)) }} }}")
+            lines.append(f"impl std::ops::BitOr for {name} {{ type Output = {name}; fn bitor(self, rhs: {name}) -> {name} {{ {name}(self.0 | rhs.0) }} }}")
+            lines.append(f"impl std::ops::BitOrAssign for {name} {{ fn bitor_assign(&mut self, rhs: {name}) {{ self.0 |= rhs.0; }} }}")
+            lines.append(f"impl std::ops::BitAnd for {name} {{ type Output = {name}; fn bitand(self, rhs: {name}) -> {name} {{ {name}(self.0 & rhs.0) }} }}")
+            replacement = "\n" + "\n".join(lines) + "\n"
+
+            # Splice new content
+            content = content[:doc_start] + replacement + content[de_end:]
+
+        # Flag enums and their bit values
+        flag_mappings = {
+            "TypeFlags": {"None": 0, "Instantiable": 1, "Instance": 2, "Callable": 4, "Literal": 8, "Interface": 16, "Generic": 32, "FromAlias": 64},
+            "AttributeFlags": {"None": 0, "IsArgsList": 1, "IsKwargsDict": 2},
+            "DeclarationFlags": {"None": 0, "ClassMember": 1, "Constant": 2, "Final": 4, "IsDefinedBySlots": 8, "UsesLocalName": 16, "UnresolvedImport": 32},
+            "TypeReprFlags": {"None": 0, "ExpandTypeAliases": 1, "PrintTypeVarVariance": 2, "ConvertToInstanceType": 4},
+            "AttributeAccessFlags": {"None": 0, "SkipInstanceAttributes": 1, "SkipTypeBaseClass": 2, "SkipAttributeAccessOverrides": 4, "GetBoundAttributes": 8},
+            "FunctionFlags": {"None": 0, "Async": 1, "Generator": 2, "Abstract": 4, "Static": 8},
+            "ClassFlags": {"None": 0, "Enum": 1, "TypedDict": 2},
+            "TypeVarFlags": {"None": 0, "IsParamSpec": 1},
+        }
+        for enum_name, map_vals in flag_mappings.items():
+            replace_flag_enum(enum_name, map_vals)
+
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")
 
