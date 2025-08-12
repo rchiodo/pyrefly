@@ -11,6 +11,7 @@ import pathlib
 import sys
 import os
 import shutil
+import subprocess
 from typing import Dict, Any
 
 # Import the lsprotocol generator modules
@@ -275,8 +276,15 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         constants_rust = generate_constants_rust(tsp_json)
         if constants_rust:
             content = content + "\n\n" + constants_rust
+
+        # Turn off clippy warnings on generated code.
+        content = "#![allow(clippy::all)]\n\n" + content
+
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")
+
+        # Format the file 
+        subprocess.run(["cargo", "fmt", "--", str(target_protocol)], check=False)
     else:
         print(f"Warning: Generated lib.rs not found at {generated_lib}")
 
