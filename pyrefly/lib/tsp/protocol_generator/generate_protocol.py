@@ -265,6 +265,8 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             "LSPAny", "serde_json::Value"
         ).replace(
             "use std::collections::HashMap;\nuse url::Url;\nuse rust_decimal::Decimal;", ""
+        ).replace(
+            "GetDocString", "GetDocstring"
         )
         
         shutil.rmtree(output_path / "lsprotocol")

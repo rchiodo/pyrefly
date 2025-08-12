@@ -44,27 +44,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "uri",
-                            "type": {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            "documentation": "The URI of the file to get diagnostics for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetDiagnosticsParams"
             },
             "documentation": "Request to get diagnostics for a specific file."
         },
@@ -86,27 +67,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "uri",
-                            "type": {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            "documentation": "The URI of the file"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetDiagnosticsVersionParams"
             },
             "documentation": "Request to get the version of diagnostics for a specific file."
         },
@@ -128,27 +90,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "node",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Node"
-                            },
-                            "documentation": "The node to get type information for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetTypeParams"
             },
             "documentation": "Request to get the type information for a specific node."
         },
@@ -196,27 +139,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to get arguments for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetTypeArgsParams"
             },
             "documentation": "Request to get the collection of subtypes that make up a union type or the types that makes up a generic type."
         },
@@ -1736,6 +1660,495 @@
                 }
             ],
             "documentation": "Information about a type alias."
+        },
+        {
+            "name": "GetDiagnosticsParams",
+            "properties": [
+                {
+                    "name": "uri",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The URI of the file to get diagnostics for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting diagnostics for a file."
+        },
+        {
+            "name": "GetDiagnosticsVersionParams",
+            "properties": [
+                {
+                    "name": "uri",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The URI of the file"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting diagnostics version for a file."
+        },
+        {
+            "name": "GetTypeParams",
+            "properties": [
+                {
+                    "name": "node",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Node"
+                    },
+                    "documentation": "The node to get type information for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting type information for a node."
+        },
+        {
+            "name": "GetTypeArgsParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to get arguments for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting type arguments."
+        },
+        {
+            "name": "GetOverloadsParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to get overloads for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting function overloads."
+        },
+        {
+            "name": "GetMatchingOverloadsParams",
+            "properties": [
+                {
+                    "name": "callNode",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Node"
+                    },
+                    "documentation": "The call node to get matching overloads for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting matching overloads for a call."
+        },
+        {
+            "name": "GetMetaclassParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to get metaclass for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting metaclass of a type."
+        },
+        {
+            "name": "GetTypeOfDeclarationParams",
+            "properties": [
+                {
+                    "name": "decl",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Declaration"
+                    },
+                    "documentation": "The declaration to get type for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting type of a declaration."
+        },
+        {
+            "name": "GetSymbolsForFileParams",
+            "properties": [
+                {
+                    "name": "uri",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The URI of the file"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting symbols for a file."
+        },
+        {
+            "name": "GetFunctionPartsParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The function type"
+                },
+                {
+                    "name": "flags",
+                    "type": {
+                        "kind": "reference",
+                        "name": "TypeReprFlags"
+                    },
+                    "documentation": "Formatting flags"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting function parts."
+        },
+        {
+            "name": "GetReprParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to get representation for"
+                },
+                {
+                    "name": "flags",
+                    "type": {
+                        "kind": "reference",
+                        "name": "TypeReprFlags"
+                    },
+                    "documentation": "Formatting flags"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting type representation."
+        },
+        {
+            "name": "GetDocStringParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "or",
+                        "items": [
+                            {
+                                "kind": "reference",
+                                "name": "Type"
+                            },
+                            {
+                                "kind": "base",
+                                "name": "null"
+                            }
+                        ]
+                    },
+                    "optional": true,
+                    "documentation": "The type context"
+                },
+                {
+                    "name": "decl",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Declaration"
+                    },
+                    "documentation": "The declaration to get documentation for"
+                },
+                {
+                    "name": "boundObjectOrClass",
+                    "type": {
+                        "kind": "or",
+                        "items": [
+                            {
+                                "kind": "reference",
+                                "name": "Type"
+                            },
+                            {
+                                "kind": "base",
+                                "name": "null"
+                            }
+                        ]
+                    },
+                    "optional": true,
+                    "documentation": "The bound object or class type"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting documentation string."
+        },
+        {
+            "name": "ResolveImportDeclarationParams",
+            "properties": [
+                {
+                    "name": "decl",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Declaration"
+                    },
+                    "documentation": "The import declaration to resolve"
+                },
+                {
+                    "name": "options",
+                    "type": {
+                        "kind": "reference",
+                        "name": "ResolveImportOptions"
+                    },
+                    "documentation": "Resolution options"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for resolving import declaration."
+        },
+        {
+            "name": "GetTypeAliasInfoParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to get alias info for"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting type alias information."
+        },
+        {
+            "name": "CombineTypesParams",
+            "properties": [
+                {
+                    "name": "types",
+                    "type": {
+                        "kind": "array",
+                        "element": {
+                            "kind": "reference",
+                            "name": "Type"
+                        }
+                    },
+                    "documentation": "The types to combine"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for combining types."
+        },
+        {
+            "name": "CreateInstanceTypeParams",
+            "properties": [
+                {
+                    "name": "type",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Type"
+                    },
+                    "documentation": "The type to create instance from"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for creating instance type."
+        },
+        {
+            "name": "GetPythonSearchPathsParams",
+            "properties": [
+                {
+                    "name": "fromUri",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The URI to get search paths from"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                }
+            ],
+            "documentation": "Parameters for getting Python search paths."
+        },
+        {
+            "name": "SnapshotChangedParams",
+            "properties": [
+                {
+                    "name": "old",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The old snapshot version"
+                },
+                {
+                    "name": "new",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The new snapshot version"
+                }
+            ],
+            "documentation": "Parameters for snapshot changed notification."
+        },
+        {
+            "name": "DiagnosticsChangedParams",
+            "properties": [
+                {
+                    "name": "uri",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The URI of the file with changed diagnostics"
+                },
+                {
+                    "name": "snapshot",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The snapshot version"
+                },
+                {
+                    "name": "version",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "documentation": "The diagnostics version"
+                }
+            ],
+            "documentation": "Parameters for diagnostics changed notification."
         }
     ],
     "enumerations": [

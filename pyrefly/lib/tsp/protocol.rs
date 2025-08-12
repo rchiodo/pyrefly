@@ -154,7 +154,7 @@ pub enum TSPRequestMethods{
     #[serde(rename = "typeServer/getRepr")]
     TypeServerGetRepr,
     #[serde(rename = "typeServer/getDocString")]
-    TypeServerGetDocString,
+    TypeServerGetDocstring,
     #[serde(rename = "typeServer/resolveImportDeclaration")]
     TypeServerResolveImportDeclaration,
     #[serde(rename = "typeServer/resolveImport")]
@@ -1026,6 +1026,317 @@ pub struct TypeAliasInfo
 
 
 
+/// Parameters for getting diagnostics for a file.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDiagnosticsParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The URI of the file to get diagnostics for
+    pub uri: String,
+    
+}
+
+
+
+/// Parameters for getting diagnostics version for a file.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDiagnosticsVersionParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The URI of the file
+    pub uri: String,
+    
+}
+
+
+
+/// Parameters for getting type information for a node.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeParams
+{
+    /// The node to get type information for
+    pub node: Node,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+}
+
+
+
+/// Parameters for getting type arguments.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeArgsParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to get arguments for
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting function overloads.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetOverloadsParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to get overloads for
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting matching overloads for a call.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetMatchingOverloadsParams
+{
+    /// The call node to get matching overloads for
+    pub call_node: Node,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+}
+
+
+
+/// Parameters for getting metaclass of a type.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetMetaclassParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to get metaclass for
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting type of a declaration.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeOfDeclarationParams
+{
+    /// The declaration to get type for
+    pub decl: Declaration,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+}
+
+
+
+/// Parameters for getting symbols for a file.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSymbolsForFileParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The URI of the file
+    pub uri: String,
+    
+}
+
+
+
+/// Parameters for getting function parts.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetFunctionPartsParams
+{
+    /// Formatting flags
+    pub flags: TypeReprFlags,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The function type
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting type representation.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetReprParams
+{
+    /// Formatting flags
+    pub flags: TypeReprFlags,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to get representation for
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting documentation string.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDocstringParams
+{
+    /// The bound object or class type
+    pub bound_object_or_class: Option<Type>,
+    
+    /// The declaration to get documentation for
+    pub decl: Declaration,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type context
+    #[serde(rename = "type")]
+    pub type_: Option<Type>,
+    
+}
+
+
+
+/// Parameters for resolving import declaration.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveImportDeclarationParams
+{
+    /// The import declaration to resolve
+    pub decl: Declaration,
+    
+    /// Resolution options
+    pub options: ResolveImportOptions,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+}
+
+
+
+/// Parameters for getting type alias information.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeAliasInfoParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to get alias info for
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for combining types.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CombineTypesParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The types to combine
+    pub types: Vec<Type>,
+    
+}
+
+
+
+/// Parameters for creating instance type.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateInstanceTypeParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The type to create instance from
+    #[serde(rename = "type")]
+    pub type_: Type,
+    
+}
+
+
+
+/// Parameters for getting Python search paths.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetPythonSearchPathsParams
+{
+    /// The URI to get search paths from
+    pub from_uri: String,
+    
+    /// The snapshot version
+    pub snapshot: i32,
+    
+}
+
+
+
+/// Parameters for snapshot changed notification.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SnapshotChangedParams
+{
+    /// The new snapshot version
+    pub new: i32,
+    
+    /// The old snapshot version
+    pub old: i32,
+    
+}
+
+
+
+/// Parameters for diagnostics changed notification.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DiagnosticsChangedParams
+{
+    /// The snapshot version
+    pub snapshot: i32,
+    
+    /// The URI of the file with changed diagnostics
+    pub uri: String,
+    
+    /// The diagnostics version
+    pub version: i32,
+    
+}
+
+
+
 /// Notification sent by the server to indicate any outstanding snapshots are invalid.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1177,7 +1488,7 @@ pub struct GetDiagnosticsRequest
     /// The request id.
     pub id: LSPId,
     
-    pub params: Option<serde_json::Value>,
+    pub params: GetDiagnosticsParams,
     
 }
 
@@ -1218,7 +1529,7 @@ pub struct GetDiagnosticsVersionRequest
     /// The request id.
     pub id: LSPId,
     
-    pub params: Option<serde_json::Value>,
+    pub params: GetDiagnosticsVersionParams,
     
 }
 
@@ -1259,7 +1570,7 @@ pub struct GetTypeRequest
     /// The request id.
     pub id: LSPId,
     
-    pub params: Option<serde_json::Value>,
+    pub params: GetTypeParams,
     
 }
 
@@ -1341,7 +1652,7 @@ pub struct GetTypeArgsRequest
     /// The request id.
     pub id: LSPId,
     
-    pub params: Option<serde_json::Value>,
+    pub params: GetTypeArgsParams,
     
 }
 
@@ -1781,7 +2092,7 @@ pub struct GetReprResponse
 /// Request to get the docstring for a specific declaration.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDocStringRequest
+pub struct GetDocstringRequest
 {
     /// The version of the JSON RPC protocol.
     pub jsonrpc: String,
@@ -1798,10 +2109,10 @@ pub struct GetDocStringRequest
 
 
 
-/// Response to the [GetDocStringRequest].
+/// Response to the [GetDocstringRequest].
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDocStringResponse
+pub struct GetDocstringResponse
 {
     /// The version of the JSON RPC protocol.
     pub jsonrpc: String,
