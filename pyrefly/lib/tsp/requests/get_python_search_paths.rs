@@ -20,7 +20,10 @@ impl Server {
         params: tsp::GetPythonSearchPathsParams,
     ) -> Vec<Url> {
         // Get the URI directly from params
-        let uri = &params.from_uri;
+        let uri = match lsp_types::Url::parse(&params.from_uri) {
+            Ok(u) => u,
+            Err(_) => return Vec::new(),
+        };
 
         // Convert URI to file path
         let path = match uri.to_file_path() {

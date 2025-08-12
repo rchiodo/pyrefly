@@ -23,7 +23,7 @@ use crate::tsp::common::tsp_debug;
 /// of the Server implementation for unit testing.
 pub fn extract_function_parts_from_function(
     func_type: &crate::types::callable::Function,
-    flags: tsp::TypeReprFlags,
+    flags: &tsp::TypeReprFlags,
     transaction: &Transaction<'_>,
 ) -> Option<tsp::FunctionParts> {
     // Extract parameter information from the function's signature
@@ -37,7 +37,7 @@ pub fn extract_function_parts_from_function(
 /// independently of the Server implementation for unit testing.
 pub fn extract_function_parts_from_callable(
     callable_type: &crate::types::callable::Callable,
-    flags: tsp::TypeReprFlags,
+    flags: &tsp::TypeReprFlags,
     transaction: &Transaction<'_>,
 ) -> Option<tsp::FunctionParts> {
     // Extract parameter information from callable
@@ -59,20 +59,26 @@ pub fn extract_function_parts_from_callable(
             for (i, param_type) in types.iter().enumerate() {
                 let type_str = type_formatting::format_type_for_display(
                     param_type.clone(),
-                    flags,
+                    flags.clone(),
                     transaction,
                 );
                 params.push(format!("param{i}: {type_str}"));
             }
-            let param_spec_str =
-                type_formatting::format_type_for_display(param_spec.clone(), flags, transaction);
+            let param_spec_str = type_formatting::format_type_for_display(
+                param_spec.clone(),
+                flags.clone(),
+                transaction,
+            );
             params.push(format!("*{param_spec_str}"));
         }
     }
 
     // Get return type
-    let return_type_str =
-        type_formatting::format_type_for_display(callable_type.ret.clone(), flags, transaction);
+    let return_type_str = type_formatting::format_type_for_display(
+        callable_type.ret.clone(),
+        flags.clone(),
+        transaction,
+    );
 
     Some(tsp::FunctionParts {
         params,
@@ -85,15 +91,18 @@ pub fn extract_function_parts_from_callable(
 /// This is a helper function that can be used independently for formatting parameters.
 pub fn format_param_for_display(
     param: &crate::types::callable::Param,
-    flags: tsp::TypeReprFlags,
+    flags: &tsp::TypeReprFlags,
     transaction: &Transaction<'_>,
 ) -> String {
     use crate::types::callable::Param;
 
     match param {
         Param::PosOnly(name, param_type, _required) => {
-            let type_str =
-                type_formatting::format_type_for_display(param_type.clone(), flags, transaction);
+            let type_str = type_formatting::format_type_for_display(
+                param_type.clone(),
+                flags.clone(),
+                transaction,
+            );
             if let Some(name) = name {
                 format!("{name}: {type_str}")
             } else {
@@ -101,13 +110,19 @@ pub fn format_param_for_display(
             }
         }
         Param::Pos(name, param_type, _required) => {
-            let type_str =
-                type_formatting::format_type_for_display(param_type.clone(), flags, transaction);
+            let type_str = type_formatting::format_type_for_display(
+                param_type.clone(),
+                flags.clone(),
+                transaction,
+            );
             format!("{name}: {type_str}")
         }
         Param::VarArg(name, param_type) => {
-            let type_str =
-                type_formatting::format_type_for_display(param_type.clone(), flags, transaction);
+            let type_str = type_formatting::format_type_for_display(
+                param_type.clone(),
+                flags.clone(),
+                transaction,
+            );
             if let Some(name) = name {
                 format!("*{name}: {type_str}")
             } else {
@@ -115,13 +130,19 @@ pub fn format_param_for_display(
             }
         }
         Param::KwOnly(name, param_type, _required) => {
-            let type_str =
-                type_formatting::format_type_for_display(param_type.clone(), flags, transaction);
+            let type_str = type_formatting::format_type_for_display(
+                param_type.clone(),
+                flags.clone(),
+                transaction,
+            );
             format!("{name}: {type_str}")
         }
         Param::Kwargs(name, param_type) => {
-            let type_str =
-                type_formatting::format_type_for_display(param_type.clone(), flags, transaction);
+            let type_str = type_formatting::format_type_for_display(
+                param_type.clone(),
+                flags.clone(),
+                transaction,
+            );
             if let Some(name) = name {
                 format!("**{name}: {type_str}")
             } else {
@@ -146,28 +167,29 @@ impl Server {
 
         tsp_debug!(
             "Getting function parts for type: {:?}",
-            params.type_param.handle
+            params.type_.handle
         );
 
         // Get the internal type from the type handle
-        let internal_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+    let internal_type = match self.lookup_type_from_tsp_type(&params.type_) {
             Some(t) => t,
             None => {
                 tsp_debug!(
                     "Could not resolve type handle: {:?}",
-                    params.type_param.handle
+            params.type_.handle
                 );
                 return Ok(None);
             }
         };
 
         // Extract function parts based on the type
+    let flags = params.flags.clone();
         match &internal_type {
             crate::types::types::Type::Function(func_type) => Ok(
-                extract_function_parts_from_function(func_type, params.flags, transaction),
+                extract_function_parts_from_function(func_type, &flags, transaction),
             ),
             crate::types::types::Type::Callable(callable_type) => Ok(
-                extract_function_parts_from_callable(callable_type, params.flags, transaction),
+                extract_function_parts_from_callable(callable_type, &flags, transaction),
             ),
             crate::types::types::Type::Overload(_overload_type) => {
                 // For overloaded functions, we could return the signature of the first overload

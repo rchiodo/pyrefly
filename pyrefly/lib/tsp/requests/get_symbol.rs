@@ -31,8 +31,10 @@ pub fn extract_symbol_name(
     params_name.unwrap_or_else(|| {
         let start = module_info
             .lined_buffer()
-            .from_lsp_position(node.range.start);
-        let end = module_info.lined_buffer().from_lsp_position(node.range.end);
+            .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.start));
+        let end = module_info
+            .lined_buffer()
+            .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.end));
         module_info.code_at(TextRange::new(start, end)).to_owned()
     })
 }
@@ -46,7 +48,7 @@ pub fn create_declaration_from_definition(
     position: ruff_text_size::TextSize,
     name: &str,
     node_range: lsp_types::Range,
-    node_uri: lsp_types::Url,
+    node_uri: &lsp_types::Url,
     type_info: Option<&crate::types::types::Type>,
 ) -> tsp::Declaration {
     let definition_metadata = &definition.metadata;
@@ -64,12 +66,12 @@ pub fn create_declaration_from_definition(
                 // If we can't get type info for an import, it might be unresolved
                 import_flags = import_flags.with_unresolved_import();
             }
-            (tsp::DeclarationCategory::IMPORT, import_flags)
+            (tsp::DeclarationCategory::Import, import_flags)
         }
         crate::state::lsp::DefinitionMetadata::Attribute(_) => {
             // Attributes are typically class members
             (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_class_member(),
             )
         }
@@ -77,7 +79,7 @@ pub fn create_declaration_from_definition(
             Server::symbol_kind_to_tsp_category_with_class_member(*symbol_kind)
         }
         _ => (
-            tsp::DeclarationCategory::VARIABLE,
+            tsp::DeclarationCategory::Variable,
             tsp::DeclarationFlags::new(),
         ),
     };
@@ -92,8 +94,8 @@ pub fn create_declaration_from_definition(
 
     // Create the declaration node
     let declaration_node = tsp::Node {
-        uri: node_uri.clone(),
-        range: node_range,
+        uri: node_uri.to_string(),
+        range: crate::tsp::common::from_lsp_range(node_range),
     };
 
     DeclarationBuilder::new(name.to_owned(), module_name, node_uri.clone())
@@ -122,11 +124,18 @@ pub fn determine_declaration_node_info(
     // because the definition range points to the target module, not the symbol in the current module
     if definition_module.name() != current_module.name() {
         // Different module: use the original range in the current module
-        (original_node.range, original_node.uri.clone())
+        (
+            crate::tsp::common::to_lsp_range(&original_node.range),
+            lsp_types::Url::parse(&original_node.uri)
+                .unwrap_or_else(|_| lsp_types::Url::parse("file:///unknown").unwrap()),
+        )
     } else {
         // Same module: use the definition range and URI
         let definition_uri = module_info_to_uri(definition_module);
-        let definition_uri_final = definition_uri.unwrap_or_else(|| original_node.uri.clone());
+        let definition_uri_final = definition_uri.unwrap_or_else(|| {
+            lsp_types::Url::parse(&original_node.uri)
+                .unwrap_or_else(|_| lsp_types::Url::parse("file:///unknown").unwrap())
+        });
         (
             current_module.lined_buffer().to_lsp_range(definition_range),
             definition_uri_final,
@@ -204,7 +213,7 @@ pub fn extract_symbol_from_transaction(
             position,
             &name,
             node_range,
-            node_uri,
+            &node_uri,
             type_info.as_ref(),
         );
 
@@ -219,7 +228,9 @@ pub fn extract_symbol_from_transaction(
 
         let declaration_text_range = validation_module_info
             .lined_buffer()
-            .from_lsp_range(declaration.node.as_ref().unwrap().range);
+            .from_lsp_range(crate::tsp::common::to_lsp_range(
+                &declaration.node.as_ref().unwrap().range,
+            ));
         let declaration_text = validation_module_info.code_at(declaration_text_range);
 
         if declaration_text != name {
@@ -265,9 +276,11 @@ impl Server {
         params: tsp::GetSymbolParams,
     ) -> Result<Option<tsp::Symbol>, ResponseError> {
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
+        let node_url = lsp_types::Url::parse(&params.node.uri)
+            .map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid node.uri".to_owned(), data: None })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
-            &params.node.uri,
+            &node_url,
             params.snapshot,
             crate::state::require::Require::Everything,
         )?;

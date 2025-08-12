@@ -32,9 +32,10 @@ impl Server {
         params: tsp::GetMatchingOverloadsParams,
     ) -> Result<Option<Vec<tsp::Type>>, ResponseError> {
         // Validate and get handle/module info; load if needed
+        let call_url = lsp_types::Url::parse(&params.call_node.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid call_node.uri".to_owned(), data: None })?;
         let (handle, module_info, maybe_fresh_tx) = self.with_active_transaction(
             transaction,
-            &params.call_node.uri,
+            &call_url,
             params.snapshot,
             crate::state::require::Require::Everything,
         )?;

@@ -100,10 +100,10 @@ pub fn extract_type_attributes(
 
                     let attribute = tsp::Attribute {
                         name: field_name.as_str().to_owned(),
-                        type_info: tsp_type,
+                        type_: tsp_type,
                         owner: None, // Could be enhanced to include owner type
                         bound_type: None,
-                        flags: tsp::AttributeFlags::NONE,
+                        flags: tsp::AttributeFlags::None as i32,
                         decls: Vec::new(), // Could be enhanced with declaration info
                     };
                     class_attributes.push(attribute);
@@ -132,10 +132,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: param_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::PARAMETER,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -145,12 +145,12 @@ pub fn extract_type_attributes(
                     // Handle ellipsis parameters
                     let attribute = tsp::Attribute {
                         name: "...".to_owned(),
-                        type_info: convert_to_tsp_type(Type::Any(
+                        type_: convert_to_tsp_type(Type::Any(
                             crate::types::types::AnyStyle::Implicit,
                         )),
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::PARAMETER,
+                        flags: tsp::AttributeFlags::None as i32,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -163,10 +163,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: param_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::PARAMETER,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -176,10 +176,10 @@ pub fn extract_type_attributes(
                     let param_spec_tsp = convert_to_tsp_type(param_spec.clone());
                     let attribute = tsp::Attribute {
                         name: "*param_spec".to_owned(),
-                        type_info: param_spec_tsp,
+                        type_: param_spec_tsp,
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::PARAMETER,
+                        flags: tsp::AttributeFlags::None as i32,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -190,10 +190,10 @@ pub fn extract_type_attributes(
             let return_tsp_type = convert_to_tsp_type(signature.ret.clone());
             let return_attribute = tsp::Attribute {
                 name: "return".to_owned(),
-                type_info: return_tsp_type,
+                type_: return_tsp_type,
                 owner: None,
                 bound_type: None,
-                flags: tsp::AttributeFlags::RETURN_TYPE,
+                flags: tsp::AttributeFlags::None as i32,
                 decls: Vec::new(),
             };
             attributes.push(return_attribute);
@@ -211,10 +211,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: param_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::PARAMETER,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -223,12 +223,12 @@ pub fn extract_type_attributes(
                 crate::types::callable::Params::Ellipsis => {
                     let attribute = tsp::Attribute {
                         name: "...".to_owned(),
-                        type_info: convert_to_tsp_type(Type::Any(
+                        type_: convert_to_tsp_type(Type::Any(
                             crate::types::types::AnyStyle::Implicit,
                         )),
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::PARAMETER,
+                        flags: tsp::AttributeFlags::None as i32,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -240,10 +240,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: param_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::PARAMETER,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -252,10 +252,10 @@ pub fn extract_type_attributes(
                     let param_spec_tsp = convert_to_tsp_type(param_spec.clone());
                     let attribute = tsp::Attribute {
                         name: "*param_spec".to_owned(),
-                        type_info: param_spec_tsp,
+                        type_: param_spec_tsp,
                         owner: None,
                         bound_type: None,
-                        flags: tsp::AttributeFlags::PARAMETER,
+                        flags: tsp::AttributeFlags::None as i32,
                         decls: Vec::new(),
                     };
                     attributes.push(attribute);
@@ -266,10 +266,10 @@ pub fn extract_type_attributes(
             let return_tsp_type = convert_to_tsp_type(callable_type.ret.clone());
             let return_attribute = tsp::Attribute {
                 name: "return".to_owned(),
-                type_info: return_tsp_type,
+                type_: return_tsp_type,
                 owner: None,
                 bound_type: None,
-                flags: tsp::AttributeFlags::RETURN_TYPE,
+                flags: tsp::AttributeFlags::None as i32,
                 decls: Vec::new(),
             };
             attributes.push(return_attribute);
@@ -296,10 +296,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: signature_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::NONE,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -310,10 +310,10 @@ pub fn extract_type_attributes(
 
                         let attribute = tsp::Attribute {
                             name: signature_name,
-                            type_info: tsp_type,
+                            type_: tsp_type,
                             owner: None,
                             bound_type: None,
-                            flags: tsp::AttributeFlags::NONE,
+                            flags: tsp::AttributeFlags::None as i32,
                             decls: Vec::new(),
                         };
                         attributes.push(attribute);
@@ -342,10 +342,10 @@ impl Server {
             return Err(snapshot_outdated_error());
         }
 
-        tsp_debug!("Getting attributes for type: {:?}", params.type_param);
+    tsp_debug!("Getting attributes for type: {:?}", params.type_);
 
         // Convert TSP type to pyrefly type
-        let pyrefly_type = match self.lookup_type_from_tsp_type(&params.type_param) {
+    let pyrefly_type = match self.lookup_type_from_tsp_type(&params.type_) {
             Some(pyrefly_type) => pyrefly_type,
             None => {
                 tsp_debug!("Could not convert TSP type to pyrefly type");

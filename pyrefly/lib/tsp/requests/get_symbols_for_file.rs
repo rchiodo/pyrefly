@@ -21,9 +21,10 @@ impl Server {
         params: tsp::GetSymbolsForFileParams,
     ) -> Result<Option<tsp::FileSymbolInfo>, ResponseError> {
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
+        let file_url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid uri".to_owned(), data: None })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
-            &params.uri,
+            &file_url,
             params.snapshot,
             crate::state::require::Require::Everything,
         )?;
@@ -39,7 +40,7 @@ impl Server {
         Self::convert_document_symbols_to_tsp(
             &document_symbols,
             &mut tsp_symbols,
-            &params.uri,
+            &file_url,
             &module_info,
             module_info.name().as_str(),
         );
@@ -84,8 +85,8 @@ impl Server {
     ) -> tsp::Symbol {
         // Create a Node from the symbol's selection range
         let node = tsp::Node {
-            uri: uri.clone(),
-            range: doc_symbol.selection_range,
+            uri: uri.to_string(),
+            range: crate::tsp::common::from_lsp_range(doc_symbol.selection_range),
         };
 
         // Convert LSP SymbolKind to TSP DeclarationCategory using common function

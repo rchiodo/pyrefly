@@ -11,6 +11,7 @@ use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 use lsp_server::Request;
 use serde::de::DeserializeOwned;
+use serde::{Serialize, Deserialize};
 
 use crate::tsp;
 
@@ -18,7 +19,8 @@ use crate::tsp;
 // Backward compatibility shims (manually added)
 // ---------------------------------------------------------------------------
 // Older code expected a TSP_PROTOCOL_VERSION constant; alias to generated name.
-pub const TSP_PROTOCOL_VERSION: &str = TypeServerVersion;
+// Reference the generated version constant without editing the generated file.
+pub const TSP_PROTOCOL_VERSION: &str = crate::tsp::TypeServerVersion;
 
 // Older handlers referenced GetSupportedProtocolVersionParams even though
 // the generator only emits a Request with no params. Provide an empty params
@@ -100,6 +102,37 @@ impl tsp::TypeReprFlags {
     #[inline] pub fn has_expand_type_aliases(&self) -> bool { matches!(self, tsp::TypeReprFlags::ExpandTypeAliases) }
     #[inline] pub fn has_print_type_var_variance(&self) -> bool { matches!(self, tsp::TypeReprFlags::PrintTypeVarVariance) }
     #[inline] pub fn has_convert_to_instance_type(&self) -> bool { matches!(self, tsp::TypeReprFlags::ConvertToInstanceType) }
+}
+
+/// Provide a Default implementation shim for ResolveImportOptions (all None)
+impl Default for tsp::ResolveImportOptions {
+    fn default() -> Self {
+        tsp::ResolveImportOptions {
+            allow_externally_hidden_access: None,
+            resolve_local_names: None,
+            skip_file_needed_check: None,
+        }
+    }
+}
+
+/// Helper: convert protocol Position to lsp_types::Position
+pub fn to_lsp_position(pos: &tsp::Position) -> lsp_types::Position {
+    lsp_types::Position { line: pos.line, character: pos.character }
+}
+
+/// Helper: convert lsp_types::Position to protocol Position
+pub fn from_lsp_position(pos: lsp_types::Position) -> tsp::Position {
+    tsp::Position { line: pos.line, character: pos.character }
+}
+
+/// Helper: convert protocol Range to lsp_types::Range
+pub fn to_lsp_range(r: &tsp::Range) -> lsp_types::Range {
+    lsp_types::Range { start: to_lsp_position(&r.start), end: to_lsp_position(&r.end) }
+}
+
+/// Helper: convert lsp_types::Range to protocol Range
+pub fn from_lsp_range(r: lsp_types::Range) -> tsp::Range {
+    tsp::Range { start: from_lsp_position(r.start), end: from_lsp_position(r.end) }
 }
 
 

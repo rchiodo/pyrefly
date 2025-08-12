@@ -24,8 +24,8 @@ use crate::tsp::common::snapshot_outdated_error;
 pub fn create_unresolved_import_declaration(original_decl: &tsp::Declaration) -> tsp::Declaration {
     tsp::Declaration {
         handle: original_decl.handle.clone(),
-        category: original_decl.category,
-        flags: original_decl.flags.with_unresolved_import(),
+    category: original_decl.category.clone(),
+    flags: original_decl.flags.clone().with_unresolved_import(),
         node: original_decl.node.clone(),
         module_name: original_decl.module_name.clone(),
         name: original_decl.name.clone(),
@@ -81,28 +81,28 @@ pub fn metadata_to_tsp_category_and_flags(
     match metadata {
         crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => match symbol_kind {
             pyrefly_python::symbol_kind::SymbolKind::Function => (
-                tsp::DeclarationCategory::FUNCTION,
+                tsp::DeclarationCategory::Function,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Class => (
-                tsp::DeclarationCategory::CLASS,
+                tsp::DeclarationCategory::Class,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Variable => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Constant => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_constant(),
             ),
             _ => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
         },
         _ => (
-            tsp::DeclarationCategory::VARIABLE,
+            tsp::DeclarationCategory::Variable,
             tsp::DeclarationFlags::new(),
         ),
     }
@@ -126,6 +126,7 @@ pub fn create_resolved_declaration_from_definition(
     let (category, flags) = metadata_to_tsp_category_and_flags(def_metadata);
 
     // Build declaration using the common DeclarationBuilder for consistency
+    let resolved_url = uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone());
     crate::tsp::requests::common::DeclarationBuilder::new(
         import_name.to_owned(),
         tsp::ModuleName {
@@ -137,7 +138,7 @@ pub fn create_resolved_declaration_from_definition(
                 .map(|s| s.to_owned())
                 .collect(),
         },
-        uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone()),
+        resolved_url.clone(),
     )
     .handle_str(format!(
         "resolved_{}_{}",
@@ -147,8 +148,10 @@ pub fn create_resolved_declaration_from_definition(
     .category(category)
     .flags(flags)
     .node(tsp::Node {
-        uri: uri_converter(def_module).unwrap_or_else(|| fallback_uri.clone()),
-        range: target_module_info.lined_buffer().to_lsp_range(def_range),
+        uri: resolved_url.to_string(),
+        range: crate::tsp::common::from_lsp_range(
+            target_module_info.lined_buffer().to_lsp_range(def_range),
+        ),
     })
     .build()
 }
@@ -163,6 +166,7 @@ pub fn create_fallback_resolved_declaration(
     uri_converter: impl Fn(&ModuleInfo) -> Option<lsp_types::Url>,
     fallback_uri: lsp_types::Url,
 ) -> tsp::Declaration {
+    let resolved_url = uri_converter(target_module_info).unwrap_or_else(|| fallback_uri.clone());
     crate::tsp::requests::common::DeclarationBuilder::new(
         import_name.to_owned(),
         tsp::ModuleName {
@@ -174,14 +178,14 @@ pub fn create_fallback_resolved_declaration(
                 .map(|s| s.to_owned())
                 .collect(),
         },
-        uri_converter(target_module_info).unwrap_or_else(|| fallback_uri.clone()),
+        resolved_url.clone(),
     )
     .handle_str(format!(
         "resolved_{}_{}",
         target_module_info.name().as_str(),
         import_name
     ))
-    .category(tsp::DeclarationCategory::VARIABLE) // Default to variable since we couldn't determine the type
+    .category(tsp::DeclarationCategory::Variable) // Default to variable since we couldn't determine the type
     .flags(tsp::DeclarationFlags::new())
     // No node available in fallback
     .build()
@@ -199,19 +203,24 @@ impl Server {
         }
 
         // Only resolve import declarations
-        if params.decl.category != tsp::DeclarationCategory::IMPORT {
+    if params.decl.category != tsp::DeclarationCategory::Import {
             return Ok(Some(params.decl));
         }
 
         let module_name = &params.decl.module_name;
         let import_name = &params.decl.name;
 
-        let importing_uri = &params.decl.uri;
-        if importing_uri.to_file_path().is_err() {
+        let importing_uri_str = &params.decl.uri;
+        let importing_url = match lsp_types::Url::parse(importing_uri_str) {
+            Ok(u) => u,
+            Err(_) => {
+                return Ok(Some(create_unresolved_import_declaration(&params.decl)));
+            }
+        };
+        if importing_url.to_file_path().is_err() {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         }
-
-        let Some(source_handle) = self.make_handle_if_enabled(importing_uri) else {
+        let Some(source_handle) = self.make_handle_if_enabled(&importing_url) else {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         };
 
@@ -246,21 +255,22 @@ impl Server {
                 .into_iter()
                 .next()
             {
+                let fallback_url = importing_url.clone();
                 return Ok(Some(create_resolved_declaration_from_definition(
                     &first_definition,
                     &target_module_info,
                     import_name,
                     module_info_to_uri,
-                    params.decl.uri.clone(),
+                    fallback_url,
                 )));
             }
         }
-
+        let fallback_url = importing_url.clone();
         Ok(Some(create_fallback_resolved_declaration(
             &target_module_info,
             import_name,
             module_info_to_uri,
-            params.decl.uri.clone(),
+            fallback_url,
         )))
     }
 }

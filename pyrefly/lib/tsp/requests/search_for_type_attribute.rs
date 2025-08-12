@@ -75,14 +75,14 @@ pub fn create_tsp_attribute_from_type(
     let tsp_type = type_converter(attribute_type);
 
     // For now, create default flags - we could enhance this later with more attribute metadata
-    let flags = tsp::AttributeFlags::NONE;
+    let flags = tsp::AttributeFlags::None as i32;
 
     tsp::Attribute {
         name: attribute_name.to_owned(),
-        type_info: tsp_type,
+        type_: tsp_type,
         owner: None,      // TODO: Could set this to the class type if needed
         bound_type: None, // TODO: Could implement bound type if needed
-        flags,
+    flags,
         decls: Vec::new(), // TODO: Could add declaration information if available
     }
 }

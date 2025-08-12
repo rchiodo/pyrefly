@@ -32,9 +32,9 @@ pub fn extract_type_from_declaration(
     };
 
     // Convert declaration position to TextSize using module_info
-    let position = module_info
-        .lined_buffer()
-        .from_lsp_position(node.range.start);
+    let position = module_info.lined_buffer().from_lsp_position(
+        crate::tsp::common::to_lsp_position(&node.range.start),
+    );
 
     // Try to get the type at the declaration's position
     transaction.get_type_at(handle, position)
@@ -54,14 +54,15 @@ pub fn extract_type_from_resolved_import(
     };
 
     let resolved_uri = &resolved_node.uri;
-    let resolved_handle = handle_factory(resolved_uri)?;
+    let resolved_url = lsp_types::Url::parse(resolved_uri).ok()?;
+    let resolved_handle = handle_factory(&resolved_url)?;
 
     // Get module info for the resolved declaration to convert position
     let resolved_module_info = transaction.get_module_info(&resolved_handle)?;
 
-    let resolved_position = resolved_module_info
-        .lined_buffer()
-        .from_lsp_position(resolved_node.range.start);
+    let resolved_position = resolved_module_info.lined_buffer().from_lsp_position(
+        crate::tsp::common::to_lsp_position(&resolved_node.range.start),
+    );
 
     transaction.get_type_at(&resolved_handle, resolved_position)
 }
@@ -82,9 +83,10 @@ impl Server {
         };
 
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
+        let node_url = lsp_types::Url::parse(&node.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid decl.node.uri".to_owned(), data: None })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
-            &node.uri,
+            &node_url,
             params.snapshot,
             crate::state::require::Require::Everything,
         )?;
@@ -98,7 +100,7 @@ impl Server {
         }
 
         // For imports, we might need to resolve the imported symbol first
-        if params.decl.category == tsp::DeclarationCategory::IMPORT {
+    if params.decl.category == tsp::DeclarationCategory::Import {
             // First attempt with the active transaction
             if let Ok(Some(import_type)) =
                 self.get_type_for_import_declaration(active_transaction, &params)
@@ -172,7 +174,8 @@ impl Server {
         {
             // Make sure the resolved module is also loaded
             if let Some(resolved_node) = &resolved_decl.node
-                && let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_node.uri)
+                && let Ok(resolved_url) = lsp_types::Url::parse(&resolved_node.uri)
+                && let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_url)
             {
                 fresh_transaction.run(&[(
                     resolved_handle.clone(),

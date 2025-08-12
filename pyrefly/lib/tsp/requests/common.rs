@@ -177,10 +177,10 @@ impl Server {
             .is_some_and(|first| first == "builtins")
         {
             match category {
-                tsp::DeclarationCategory::FUNCTION
-                | tsp::DeclarationCategory::CLASS
-                | tsp::DeclarationCategory::VARIABLE => {
-                    (tsp::DeclarationCategory::INTRINSIC, flags)
+                tsp::DeclarationCategory::Function
+                | tsp::DeclarationCategory::Class
+                | tsp::DeclarationCategory::Variable => {
+                    (tsp::DeclarationCategory::Intrinsic, flags)
                 }
                 _ => (category, flags),
             }
@@ -325,14 +325,14 @@ impl Server {
     ) -> Option<crate::types::types::Type> {
         match &tsp_type.handle {
             tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
-            tsp::TypeHandle::Integer(id) => self.lookup_type_by_int_handle(*id),
+            tsp::TypeHandle::Int(id) => self.lookup_type_by_int_handle(*id),
         }
     }
 }
 
 /// A builder to create TSP declarations consistently across handlers
 pub struct DeclarationBuilder {
-    handle: Option<tsp::TypeHandle>,
+    handle: Option<tsp::DeclarationHandle>,
     category: tsp::DeclarationCategory,
     flags: tsp::DeclarationFlags,
     node: Option<tsp::Node>,
@@ -346,7 +346,7 @@ impl DeclarationBuilder {
     pub fn new(name: impl Into<String>, module_name: tsp::ModuleName, uri: lsp_types::Url) -> Self {
         Self {
             handle: None,
-            category: tsp::DeclarationCategory::VARIABLE,
+            category: tsp::DeclarationCategory::Variable,
             flags: tsp::DeclarationFlags::new(),
             node: None,
             module_name,
@@ -357,7 +357,7 @@ impl DeclarationBuilder {
 
     /// Set a string handle
     pub fn handle_str(mut self, handle: impl Into<String>) -> Self {
-        self.handle = Some(tsp::TypeHandle::String(handle.into()));
+        self.handle = Some(tsp::DeclarationHandle::String(handle.into()));
         self
     }
 
@@ -384,7 +384,7 @@ impl DeclarationBuilder {
         tsp::Declaration {
             handle: self.handle.unwrap_or_else(|| {
                 // default unique-ish handle from name and uri
-                tsp::TypeHandle::String(format!(
+                tsp::DeclarationHandle::String(format!(
                     "decl_{}_{}_{}",
                     self.name,
                     self.uri,
@@ -399,7 +399,7 @@ impl DeclarationBuilder {
             node: self.node,
             module_name: self.module_name,
             name: self.name,
-            uri: self.uri,
+            uri: self.uri.to_string(),
         }
     }
 }

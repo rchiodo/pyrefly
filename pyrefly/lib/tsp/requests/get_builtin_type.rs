@@ -99,10 +99,10 @@ impl Server {
         }
 
         // Convert Node to URI to get the handle for the scoping node
-        let uri = &params.scoping_node.uri;
+    let uri = lsp_types::Url::parse(&params.scoping_node.uri).map_err(|_| ResponseError { code: ErrorCode::InvalidParams as i32, message: "Invalid scoping_node.uri".to_owned(), data: None })?;
 
         // Check if workspace has language services enabled
-        let Some(scoping_handle) = self.make_handle_if_enabled(uri) else {
+    let Some(scoping_handle) = self.make_handle_if_enabled(&uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_owned(),

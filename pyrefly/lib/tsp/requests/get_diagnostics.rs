@@ -32,20 +32,19 @@ impl Server {
 
         tsp_debug!("Getting diagnostics for URI: {}", params.uri);
 
+        // Parse URI string
+        let url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError { code: ErrorCode::InvalidParams as i32, message: "Invalid URI".to_owned(), data: None })?;
+
         // Convert URI to file path
-        let file_path = match params.uri.to_file_path() {
+        let file_path = match url.to_file_path() {
             Ok(path) => path,
             Err(_) => {
-                return Err(ResponseError {
-                    code: ErrorCode::InvalidParams as i32,
-                    message: "Invalid URI - cannot convert to file path".to_owned(),
-                    data: None,
-                });
+                return Err(ResponseError { code: ErrorCode::InvalidParams as i32, message: "Invalid URI - cannot convert to file path".to_owned(), data: None });
             }
         };
 
         // Check if workspace has language services enabled
-        let Some(_handle) = self.make_handle_if_enabled(&params.uri) else {
+        let Some(_handle) = self.make_handle_if_enabled(&url) else {
             tsp_debug!("Language services disabled for workspace");
             return Ok(Some(Vec::new()));
         };

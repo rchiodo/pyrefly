@@ -9,7 +9,7 @@
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
+use crate::tsp::common::TSP_PROTOCOL_VERSION;
 
 impl Server {
     pub(crate) fn get_supported_protocol_version(
@@ -17,6 +17,6 @@ impl Server {
     _transaction: &Transaction<'_>,
     ) -> String {
     // Return the hardcoded protocol version (compat shim)
-    tsp::TSP_PROTOCOL_VERSION.to_owned()
+    TSP_PROTOCOL_VERSION.to_owned()
     }
 }
