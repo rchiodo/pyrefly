@@ -48,39 +48,39 @@ impl Server {
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         match symbol_kind {
             pyrefly_python::symbol_kind::SymbolKind::Function => (
-                tsp::DeclarationCategory::FUNCTION,
+                tsp::DeclarationCategory::Function,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Class => (
-                tsp::DeclarationCategory::CLASS,
+                tsp::DeclarationCategory::Class,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Variable => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Constant => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_constant(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Parameter => (
-                tsp::DeclarationCategory::PARAM,
+                tsp::DeclarationCategory::Param,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::TypeParameter => (
-                tsp::DeclarationCategory::TYPE_PARAM,
+                tsp::DeclarationCategory::TypeParam,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::TypeAlias => (
-                tsp::DeclarationCategory::TYPE_ALIAS,
+                tsp::DeclarationCategory::TypeAlias,
                 tsp::DeclarationFlags::new(),
             ),
             pyrefly_python::symbol_kind::SymbolKind::Attribute => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_class_member(),
             ),
             _ => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
         }
@@ -94,7 +94,7 @@ impl Server {
 
         // Add class member flag for appropriate categories
         match category {
-            tsp::DeclarationCategory::FUNCTION | tsp::DeclarationCategory::VARIABLE => {
+            tsp::DeclarationCategory::Function | tsp::DeclarationCategory::Variable => {
                 flags = flags.with_class_member();
             }
             _ => {}
@@ -109,48 +109,48 @@ impl Server {
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         match kind {
             lsp_types::SymbolKind::FUNCTION | lsp_types::SymbolKind::METHOD => (
-                tsp::DeclarationCategory::FUNCTION,
+                tsp::DeclarationCategory::Function,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::CLASS => (
-                tsp::DeclarationCategory::CLASS,
+                tsp::DeclarationCategory::Class,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::VARIABLE | lsp_types::SymbolKind::FIELD => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::CONSTANT => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_constant(),
             ),
             lsp_types::SymbolKind::MODULE | lsp_types::SymbolKind::NAMESPACE => (
-                tsp::DeclarationCategory::IMPORT,
+                tsp::DeclarationCategory::Import,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::CONSTRUCTOR => (
-                tsp::DeclarationCategory::FUNCTION,
+                tsp::DeclarationCategory::Function,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::PROPERTY => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_class_member(),
             ),
             lsp_types::SymbolKind::ENUM | lsp_types::SymbolKind::ENUM_MEMBER => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new().with_constant(),
             ),
             lsp_types::SymbolKind::INTERFACE => (
-                tsp::DeclarationCategory::CLASS,
+                tsp::DeclarationCategory::Class,
                 tsp::DeclarationFlags::new(),
             ),
             lsp_types::SymbolKind::TYPE_PARAMETER => (
-                tsp::DeclarationCategory::TYPE_PARAM,
+                tsp::DeclarationCategory::TypeParam,
                 tsp::DeclarationFlags::new(),
             ),
             // Default to variable for other kinds
             _ => (
-                tsp::DeclarationCategory::VARIABLE,
+                tsp::DeclarationCategory::Variable,
                 tsp::DeclarationFlags::new(),
             ),
         }
@@ -406,7 +406,8 @@ impl DeclarationBuilder {
 
 /// Helper to compute the start position of a TSP node in the given module.
 pub(crate) fn node_start_position(module_info: &ModuleInfo, node: &tsp::Node) -> TextSize {
+    let pos = &node.range.start;
     module_info
         .lined_buffer()
-        .from_lsp_position(node.range.start)
+        .from_lsp_position(lsp_types::Position { line: pos.line, character: pos.character })
 }

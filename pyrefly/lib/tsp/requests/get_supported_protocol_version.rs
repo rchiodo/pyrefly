@@ -14,10 +14,9 @@ use crate::tsp;
 impl Server {
     pub(crate) fn get_supported_protocol_version(
         &self,
-        _transaction: &Transaction<'_>,
-        _params: tsp::GetSupportedProtocolVersionParams,
+    _transaction: &Transaction<'_>,
     ) -> String {
-        // Return the hardcoded protocol version
-        tsp::TSP_PROTOCOL_VERSION.to_owned()
+    // Return the hardcoded protocol version (compat shim)
+    tsp::TSP_PROTOCOL_VERSION.to_owned()
     }
 }

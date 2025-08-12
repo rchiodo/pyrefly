@@ -184,31 +184,7 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
-use crate::tsp::common::as_tsp_request;
-use crate::tsp::CombineTypesRequest;
-use crate::tsp::CreateInstanceTypeRequest;
-use crate::tsp::GetBuiltinTypeRequest;
-use crate::tsp::GetDiagnosticsRequest;
-use crate::tsp::GetDiagnosticsVersionRequest;
-use crate::tsp::GetDocStringRequest;
-use crate::tsp::GetFunctionPartsRequest;
-use crate::tsp::GetMatchingOverloadsRequest;
-use crate::tsp::GetMetaclassRequest;
-use crate::tsp::GetOverloadsRequest;
-use crate::tsp::GetPythonSearchPathsRequest;
-use crate::tsp::GetReprRequest;
-use crate::tsp::GetSnapshotRequest;
-use crate::tsp::GetSupportedProtocolVersionRequest;
-use crate::tsp::GetSymbolRequest;
-use crate::tsp::GetSymbolsForFileRequest;
-use crate::tsp::GetTypeAliasInfoRequest;
-use crate::tsp::GetTypeArgsRequest;
-use crate::tsp::GetTypeAttributesRequest;
-use crate::tsp::GetTypeOfDeclarationRequest;
-use crate::tsp::GetTypeRequest;
-use crate::tsp::ResolveImportDeclarationRequest;
-use crate::tsp::ResolveImportRequest;
-use crate::tsp::SearchForTypeAttributeRequest;
+use crate::tsp; // bring generated TSP protocol module into scope for *Params usage
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
@@ -454,6 +430,18 @@ pub fn lsp_loop(
 
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
+
+    // Helper for TSP requests: if the JSON-RPC method matches, attempt to
+    // deserialize the params Value directly into the provided Params type.
+    // This bypasses the generated *Request wrapper structs so we can pass
+    // strongly typed *Params directly to handlers.
+    fn tsp_params<P: DeserializeOwned>(x: &lsp_server::Request, method: &str) -> Option<Result<P, serde_json::Error>> {
+        if x.method == method {
+            Some(serde_json::from_value(x.params.clone()))
+        } else {
+            None
+        }
+    }
 
     fn extract_request_params_or_send_err_response<T>(
         &self,
@@ -791,162 +779,164 @@ impl Server {
                         Ok(self.document_diagnostics(&transaction, params)),
                     ));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetPythonSearchPathsRequest>(&x, "typeServer/getPythonSearchPaths")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetPythonSearchPathsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetPythonSearchPathsParams>(&x, "typeServer/getPythonSearchPaths")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetPythonSearchPathsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response(x.id, Ok(self.get_python_search_paths(&transaction, params))));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(_params) = as_tsp_request::<GetSnapshotRequest>(&x, "typeServer/getSnapshot") {
+                } else if x.method == "typeServer/getSnapshot" {
+                    // No params for this request
                     self.send_response(new_response(x.id, Ok(self.current_snapshot())));
-                } else if let Some(params) = as_tsp_request::<GetSupportedProtocolVersionRequest>(&x, "typeServer/getSupportedProtocolVersion") {
+                } else if x.method == "typeServer/getSupportedProtocolVersion" {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
+                    // No params for this request
                     self.send_response(new_response(x.id, Ok(self.get_supported_protocol_version(&transaction))));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetTypeRequest>(&x, "typeServer/getType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeParams>(&x, "typeServer/getType")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetSymbolRequest>(&x, "typeServer/getSymbol")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetSymbolRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetSymbolParams>(&x, "typeServer/getSymbol")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetSymbolParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_symbol(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<ResolveImportDeclarationRequest>(&x, "typeServer/resolveImportDeclaration")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<ResolveImportDeclarationRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::ResolveImportDeclarationParams>(&x, "typeServer/resolveImportDeclaration")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::ResolveImportDeclarationParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetTypeOfDeclarationRequest>(&x, "typeServer/getTypeOfDeclaration")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeOfDeclarationRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeOfDeclarationParams>(&x, "typeServer/getTypeOfDeclaration")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeOfDeclarationParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_of_declaration(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetReprRequest>(&x, "typeServer/getRepr")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetReprRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetReprParams>(&x, "typeServer/getRepr")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetReprParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_repr(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetDocStringRequest>(&x, "typeServer/getDocString")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetDocStringRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetDocstringParams>(&x, "typeServer/getDocString")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDocstringParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_docstring(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<SearchForTypeAttributeRequest>(&x, "typeServer/searchForTypeAttribute")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<SearchForTypeAttributeRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::SearchForTypeAttributeParams>(&x, "typeServer/searchForTypeAttribute")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::SearchForTypeAttributeParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetFunctionPartsRequest>(&x, "typeServer/getFunctionParts")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetFunctionPartsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetFunctionPartsParams>(&x, "typeServer/getFunctionParts")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetFunctionPartsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_function_parts(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetDiagnosticsVersionRequest>(&x, "typeServer/getDiagnosticsVersion")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetDiagnosticsVersionRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetDiagnosticsVersionParams>(&x, "typeServer/getDiagnosticsVersion")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDiagnosticsVersionParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<ResolveImportRequest>(&x, "typeServer/resolveImport")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<ResolveImportRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::ResolveImportParams>(&x, "typeServer/resolveImport")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::ResolveImportParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetTypeArgsRequest>(&x, "typeServer/getTypeArgs")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeArgsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeArgsParams>(&x, "typeServer/getTypeArgs")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeArgsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetOverloadsRequest>(&x, "typeServer/getOverloads")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetOverloadsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetOverloadsParams>(&x, "typeServer/getOverloads")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetOverloadsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetMatchingOverloadsRequest>(&x, "typeServer/getMatchingOverloads")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetMatchingOverloadsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetMatchingOverloadsParams>(&x, "typeServer/getMatchingOverloads")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetMatchingOverloadsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetDiagnosticsRequest>(&x, "typeServer/getDiagnostics")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetDiagnosticsRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetDiagnosticsParams>(&x, "typeServer/getDiagnostics")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDiagnosticsParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_diagnostics(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetBuiltinTypeRequest>(&x, "typeServer/getBuiltinType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetBuiltinTypeRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetBuiltinTypeParams>(&x, "typeServer/getBuiltinType")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetBuiltinTypeParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_builtin_type(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetTypeAttributesRequest>(&x, "typeServer/getTypeAttributes")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeAttributesRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeAttributesParams>(&x, "typeServer/getTypeAttributes")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeAttributesParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_attributes(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetSymbolsForFileRequest>(&x, "typeServer/getSymbolsForFile")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetSymbolsForFileRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetSymbolsForFileParams>(&x, "typeServer/getSymbolsForFile")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetSymbolsForFileParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_symbols_for_file(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetMetaclassRequest>(&x, "typeServer/getMetaclass")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetMetaclassRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetMetaclassParams>(&x, "typeServer/getMetaclass")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetMetaclassParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_metaclass(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<GetTypeAliasInfoRequest>(&x, "typeServer/getTypeAliasInfo")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<GetTypeAliasInfoRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeAliasInfoParams>(&x, "typeServer/getTypeAliasInfo")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeAliasInfoParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.get_type_alias_info(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<CombineTypesRequest>(&x, "typeServer/combineTypes")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<CombineTypesRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::CombineTypesParams>(&x, "typeServer/combineTypes")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::CombineTypesParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);
                     self.send_response(new_response_with_error_code(x.id, self.combine_types(&transaction, params)));
                     ide_transaction_manager.save(transaction);
-                } else if let Some(params) = as_tsp_request::<CreateInstanceTypeRequest>(&x, "typeServer/createInstanceType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<CreateInstanceTypeRequest>(params, &x.id)
+                } else if let Some(params) = Server::tsp_params::<tsp::CreateInstanceTypeParams>(&x, "typeServer/createInstanceType")
+                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::CreateInstanceTypeParams>(params, &x.id)
                 {
                     let transaction =
                         ide_transaction_manager.non_commitable_transaction(&self.state);

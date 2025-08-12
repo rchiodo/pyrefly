@@ -14,6 +14,95 @@ use serde::de::DeserializeOwned;
 
 use crate::tsp;
 
+// ---------------------------------------------------------------------------
+// Backward compatibility shims (manually added)
+// ---------------------------------------------------------------------------
+// Older code expected a TSP_PROTOCOL_VERSION constant; alias to generated name.
+pub const TSP_PROTOCOL_VERSION: &str = TypeServerVersion;
+
+// Older handlers referenced GetSupportedProtocolVersionParams even though
+// the generator only emits a Request with no params. Provide an empty params
+// struct so existing handler signatures (before refactor) can compile or we
+// can simplify handlers to omit it. This can be removed once all handlers
+// are updated to not expect params.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSupportedProtocolVersionParams {}
+
+// -------------------------------------------------------------------------------------------------
+// Compatibility shims for legacy handwritten code expecting older enum shapes / helper builders.
+// These adapt the generated protocol.rs API (do NOT modify the generated file).
+// Keep this section minimal; remove once all call sites are migrated.
+// -------------------------------------------------------------------------------------------------
+
+/// Legacy builder-style API expected on DeclarationFlags
+impl tsp::DeclarationFlags {
+    #[inline]
+    pub fn new() -> Self { tsp::DeclarationFlags::None }
+    #[inline]
+    pub fn with_class_member(self) -> Self { tsp::DeclarationFlags::ClassMember }
+    #[inline]
+    pub fn with_constant(self) -> Self { tsp::DeclarationFlags::Constant }
+    #[inline]
+    pub fn with_unresolved_import(self) -> Self { tsp::DeclarationFlags::UnresolvedImport }
+}
+
+/// Legacy constant-like ALL_CAPS variants for DeclarationCategory
+#[allow(non_upper_case_globals)]
+pub mod legacy_decl_category {
+    pub use crate::tsp::DeclarationCategory as DC; // alias for brevity inside module
+    pub const FUNCTION: DC = DC::Function;
+    pub const CLASS: DC = DC::Class;
+    pub const VARIABLE: DC = DC::Variable;
+    pub const PARAM: DC = DC::Param;
+    pub const TYPE_PARAM: DC = DC::TypeParam;
+    pub const TYPE_ALIAS: DC = DC::TypeAlias;
+    pub const IMPORT: DC = DC::Import;
+    pub const INTRINSIC: DC = DC::Intrinsic;
+}
+pub use legacy_decl_category as decl_cat; // optional re-export if needed
+
+/// Legacy ALL_CAPS for TypeCategory
+#[allow(non_upper_case_globals)]
+pub mod legacy_type_category {
+    pub use crate::tsp::TypeCategory as TC;
+    pub const ANY: TC = TC::Any;
+    pub const FUNCTION: TC = TC::Function;
+    pub const OVERLOADED: TC = TC::Overloaded;
+    pub const CLASS: TC = TC::Class;
+    pub const MODULE: TC = TC::Module;
+    pub const UNION: TC = TC::Union;
+    pub const TYPE_VAR: TC = TC::TypeVar;
+}
+
+/// Legacy ALL_CAPS for AttributeFlags (old code referenced NONE / PARAMETER / RETURN_TYPE etc.)
+/// Only existing flags are mapped; removed flags are intentionally omitted.
+#[allow(non_upper_case_globals)]
+pub mod legacy_attribute_flags {
+    pub use crate::tsp::AttributeFlags as AF;
+    pub const NONE: AF = AF::None;
+}
+
+/// Legacy ALL_CAPS for TypeFlags if referenced (INSTANCE / CALLABLE etc.)
+#[allow(non_upper_case_globals)]
+pub mod legacy_type_flags {
+    pub use crate::tsp::TypeFlags as TF;
+    pub const NONE: TF = TF::None;
+    pub const CALLABLE: TF = TF::Callable;
+    pub const INSTANCE: TF = TF::Instance;
+    pub const INSTANTIABLE: TF = TF::Instantiable;
+    pub const LITERAL: TF = TF::Literal;
+    pub const FROM_ALIAS: TF = TF::FromAlias;
+}
+
+/// Add the query helper methods that legacy code expected on TypeReprFlags
+impl tsp::TypeReprFlags {
+    #[inline] pub fn has_expand_type_aliases(&self) -> bool { matches!(self, tsp::TypeReprFlags::ExpandTypeAliases) }
+    #[inline] pub fn has_print_type_var_variance(&self) -> bool { matches!(self, tsp::TypeReprFlags::PrintTypeVarVariance) }
+    #[inline] pub fn has_convert_to_instance_type(&self) -> bool { matches!(self, tsp::TypeReprFlags::ConvertToInstanceType) }
+}
+
+
 /// Handle TypeServer Protocol (TSP) requests that don't implement the LSP Request trait
 pub fn as_tsp_request<T>(x: &Request, method_name: &str) -> Option<Result<T, serde_json::Error>>
 where
@@ -80,26 +169,34 @@ pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type
     let (category, flags) = match decl.category {
         tsp::DeclarationCategory::Function => (
             tsp::TypeCategory::Function,
-            tsp::TypeFlags::new().with_callable(),
+            tsp::TypeFlags::Callable,
         ),
         tsp::DeclarationCategory::Class => (
             tsp::TypeCategory::Class,
-            tsp::TypeFlags::new().with_instantiable(),
+            tsp::TypeFlags::Instantiable,
         ),
-        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::new()),
+        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::None),
         tsp::DeclarationCategory::TypeAlias => (
             tsp::TypeCategory::Any,
-            tsp::TypeFlags::new().with_from_alias(),
+            tsp::TypeFlags::FromAlias,
         ),
         tsp::DeclarationCategory::TypeParam => {
-            (tsp::TypeCategory::TypeVar, tsp::TypeFlags::new())
+            (tsp::TypeCategory::TypeVar, tsp::TypeFlags::None)
         }
-        _ => (tsp::TypeCategory::Any, tsp::TypeFlags::new()),
+        _ => (tsp::TypeCategory::Any, tsp::TypeFlags::None),
+    };
+
+    // Convert the declaration handle into a type handle. We just mirror the
+    // underlying representation (string or int) so synthesized types remain
+    // stable within the snapshot.
+    let type_handle = match &decl.handle {
+        tsp::DeclarationHandle::String(s) => tsp::TypeHandle::String(s.clone()),
+        tsp::DeclarationHandle::Int(i) => tsp::TypeHandle::Int(*i),
     };
 
     tsp::Type {
         alias_name: None,
-        handle: decl.handle.clone(),
+        handle: type_handle,
         category,
         flags,
         module_name: Some(decl.module_name.clone()),
@@ -137,19 +234,14 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> tsp::Type {
 /// Calculate type flags for a pyrefly Type
 pub fn calculate_type_flags(py_type: &crate::types::types::Type) -> tsp::TypeFlags {
     use crate::types::types::Type as PyType;
-
-    let mut flags = tsp::TypeFlags::new();
-
     match py_type {
-        PyType::ClassDef(_) => flags = flags.with_instantiable(),
-        PyType::ClassType(_) => flags = flags.with_instance(),
-        PyType::Function(_) | PyType::Callable(_) => flags = flags.with_callable(),
-        PyType::Literal(_) => flags = flags.with_literal(),
-        PyType::TypeAlias(_) => flags = flags.with_from_alias(),
-        _ => {}
+        PyType::ClassDef(_) => tsp::TypeFlags::Instantiable,
+        PyType::ClassType(_) => tsp::TypeFlags::Instance,
+        PyType::Function(_) | PyType::Callable(_) => tsp::TypeFlags::Callable,
+        PyType::Literal(_) => tsp::TypeFlags::Literal,
+        PyType::TypeAlias(_) => tsp::TypeFlags::FromAlias,
+        _ => tsp::TypeFlags::None,
     }
-
-    flags
 }
 
 /// Extract module name from a pyrefly Type
