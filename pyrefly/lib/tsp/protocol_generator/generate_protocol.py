@@ -10,6 +10,7 @@ import json
 import pathlib
 import sys
 import os
+import shutil
 from typing import Dict, Any
 
 # Import the lsprotocol generator modules
@@ -218,8 +219,17 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         ).replace(
             "// Steps to generate:\n// 1. Checkout https://github.com/microsoft/lsprotocol\n// 2. Install nox: `python -m pip install nox`\n// 3. Run command: `python -m nox --session build_lsp`",
             "// Steps to generate:\n// 1. Create tsp.json and tsp.schema.json from typeServerProtocol.ts\n// 2. Install lsprotocol generator: `pip install git+https://github.com/microsoft/lsprotocol.git`\n// 3. Run: `python generate_protocol.py`"
+        ).replace(
+            "LSPRequestMethods", "TSPRequestMethods"
+        ).replace(
+            "LSPNotificationMethods", "TSPNotificationMethods"
+        ).replace(
+            "LSPAny", "serde_json::Value"
+        ).replace(
+            "use std::collections::HashMap;\nuse url::Url;\nuse rust_decimal::Decimal;", ""
         )
         
+        shutil.rmtree(output_path / "lsprotocol")
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")
     else:

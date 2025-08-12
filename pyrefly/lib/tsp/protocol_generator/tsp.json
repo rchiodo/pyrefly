@@ -1004,6 +1004,108 @@
     ],
     "structures": [
         {
+            "name": "Position",
+            "properties": [
+                {
+                    "name": "line",
+                    "type": {
+                        "kind": "base",
+                        "name": "uinteger"
+                    },
+                    "documentation": "Line position in a document (zero-based)."
+                },
+                {
+                    "name": "character",
+                    "type": {
+                        "kind": "base",
+                        "name": "uinteger"
+                    },
+                    "documentation": "Character offset on a line in a document (zero-based)."
+                }
+            ],
+            "documentation": "Position in a text document expressed as zero-based line and character offset."
+        },
+        {
+            "name": "Range",
+            "properties": [
+                {
+                    "name": "start",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Position"
+                    },
+                    "documentation": "The range's start position."
+                },
+                {
+                    "name": "end",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Position"
+                    },
+                    "documentation": "The range's end position."
+                }
+            ],
+            "documentation": "A range in a text document expressed as (zero-based) start and end positions."
+        },
+        {
+            "name": "Diagnostic",
+            "properties": [
+                {
+                    "name": "range",
+                    "type": {
+                        "kind": "reference",
+                        "name": "Range"
+                    },
+                    "documentation": "The range at which the message applies."
+                },
+                {
+                    "name": "severity",
+                    "type": {
+                        "kind": "base",
+                        "name": "integer"
+                    },
+                    "optional": true,
+                    "documentation": "The diagnostic's severity."
+                },
+                {
+                    "name": "code",
+                    "type": {
+                        "kind": "or",
+                        "items": [
+                            {
+                                "kind": "base",
+                                "name": "integer"
+                            },
+                            {
+                                "kind": "base",
+                                "name": "string"
+                            }
+                        ]
+                    },
+                    "optional": true,
+                    "documentation": "The diagnostic's code."
+                },
+                {
+                    "name": "source",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "optional": true,
+                    "documentation": "A human-readable string describing the source of this diagnostic."
+                },
+                {
+                    "name": "message",
+                    "type": {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    "documentation": "The diagnostic's message."
+                }
+            ],
+            "documentation": "Represents a diagnostic, such as a compiler error or warning."
+        },
+        {
             "name": "Node",
             "properties": [
                 {
@@ -1056,17 +1158,8 @@
                 {
                     "name": "handle",
                     "type": {
-                        "kind": "or",
-                        "items": [
-                            {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            {
-                                "kind": "base",
-                                "name": "integer"
-                            }
-                        ]
+                        "kind": "reference",
+                        "name": "TypeHandle"
                     },
                     "documentation": "Unique identifier for the type definition within the snapshot. A handle doesn't need to exist beyond the lifetime of the snapshot."
                 },
@@ -1229,17 +1322,8 @@
                 {
                     "name": "handle",
                     "type": {
-                        "kind": "or",
-                        "items": [
-                            {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            {
-                                "kind": "base",
-                                "name": "integer"
-                            }
-                        ]
+                        "kind": "reference",
+                        "name": "DeclarationHandle"
                     },
                     "documentation": "Unique identifier for the declaration within the session."
                 },
@@ -1990,20 +2074,38 @@
     ],
     "typeAliases": [
         {
-            "name": "Range",
+            "name": "TypeHandle",
             "type": {
-                "kind": "reference",
-                "name": "LSPRange"
+                "kind": "or",
+                "items": [
+                    {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    {
+                        "kind": "base",
+                        "name": "integer"
+                    }
+                ]
             },
-            "documentation": "Re-export of LSP Range type for compatibility"
+            "documentation": "Unique identifier for a type definition within the snapshot. A handle doesn't need to exist beyond the lifetime of the snapshot."
         },
         {
-            "name": "Diagnostic",
+            "name": "DeclarationHandle",
             "type": {
-                "kind": "reference",
-                "name": "LSPDiagnostic"
+                "kind": "or",
+                "items": [
+                    {
+                        "kind": "base",
+                        "name": "string"
+                    },
+                    {
+                        "kind": "base",
+                        "name": "integer"
+                    }
+                ]
             },
-            "documentation": "Re-export of LSP Diagnostic type for compatibility"
+            "documentation": "Unique identifier for a declaration within the session."
         }
     ]
 }

@@ -5,12 +5,29 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Common utilities and helper functions for TSP request handling
+//! Common utilities and helper Functions for TSP request handling
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use lsp_server::Request;
+use serde::de::DeserializeOwned;
 
 use crate::tsp;
+
+/// Handle TypeServer Protocol (TSP) requests that don't implement the LSP Request trait
+pub fn as_tsp_request<T>(x: &Request, method_name: &str) -> Option<Result<T, serde_json::Error>>
+where
+    T: DeserializeOwned,
+{
+    if x.method == method_name {
+        match serde_json::from_value(x.params.clone()) {
+            Ok(request) => Some(Ok(request)),
+            Err(err) => Some(Err(err)),
+        }
+    } else {
+        None
+    }
+}
 
 /// LSP debug logging that can be disabled in release builds
 #[cfg(debug_assertions)]
@@ -61,26 +78,27 @@ pub(crate) fn language_services_disabled_error() -> ResponseError {
 /// Create a default type for a declaration when we can't determine the exact type
 pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
     let (category, flags) = match decl.category {
-        tsp::DeclarationCategory::FUNCTION => (
-            tsp::TypeCategory::FUNCTION,
+        tsp::DeclarationCategory::Function => (
+            tsp::TypeCategory::Function,
             tsp::TypeFlags::new().with_callable(),
         ),
-        tsp::DeclarationCategory::CLASS => (
-            tsp::TypeCategory::CLASS,
+        tsp::DeclarationCategory::Class => (
+            tsp::TypeCategory::Class,
             tsp::TypeFlags::new().with_instantiable(),
         ),
-        tsp::DeclarationCategory::IMPORT => (tsp::TypeCategory::MODULE, tsp::TypeFlags::new()),
-        tsp::DeclarationCategory::TYPE_ALIAS => (
-            tsp::TypeCategory::ANY,
+        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::new()),
+        tsp::DeclarationCategory::TypeAlias => (
+            tsp::TypeCategory::Any,
             tsp::TypeFlags::new().with_from_alias(),
         ),
-        tsp::DeclarationCategory::TYPE_PARAM => {
-            (tsp::TypeCategory::TYPE_VAR, tsp::TypeFlags::new())
+        tsp::DeclarationCategory::TypeParam => {
+            (tsp::TypeCategory::TypeVar, tsp::TypeFlags::new())
         }
-        _ => (tsp::TypeCategory::ANY, tsp::TypeFlags::new()),
+        _ => (tsp::TypeCategory::Any, tsp::TypeFlags::new()),
     };
 
     tsp::Type {
+        alias_name: None,
         handle: decl.handle.clone(),
         category,
         flags,
@@ -98,20 +116,21 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> tsp::Type {
     tsp::Type {
         handle: tsp::TypeHandle::String(format!("{:p}", &py_type as *const _)),
         category: match &py_type {
-            PyType::Any(_) => tsp::TypeCategory::ANY,
-            PyType::Function(_) | PyType::Callable(_) => tsp::TypeCategory::FUNCTION,
-            PyType::Overload(_) => tsp::TypeCategory::OVERLOADED,
-            PyType::ClassType(_) | PyType::ClassDef(_) => tsp::TypeCategory::CLASS,
-            PyType::Module(_) => tsp::TypeCategory::MODULE,
-            PyType::Union(_) => tsp::TypeCategory::UNION,
-            PyType::TypeVar(_) => tsp::TypeCategory::TYPE_VAR,
-            _ => tsp::TypeCategory::ANY,
+            PyType::Any(_) => tsp::TypeCategory::Any,
+            PyType::Function(_) | PyType::Callable(_) => tsp::TypeCategory::Function,
+            PyType::Overload(_) => tsp::TypeCategory::Overloaded,
+            PyType::ClassType(_) | PyType::ClassDef(_) => tsp::TypeCategory::Class,
+            PyType::Module(_) => tsp::TypeCategory::Module,
+            PyType::Union(_) => tsp::TypeCategory::Union,
+            PyType::TypeVar(_) => tsp::TypeCategory::TypeVar,
+            _ => tsp::TypeCategory::Any,
         },
         flags: calculate_type_flags(&py_type),
         module_name: extract_module_name(&py_type),
         name: py_type.to_string(),
         category_flags: 0,
         decl: None,
+        alias_name: None
     }
 }
 

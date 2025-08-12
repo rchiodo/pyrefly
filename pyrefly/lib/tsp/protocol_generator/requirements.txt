@@ -1,1 +1,1 @@
-lsprotocol
+git+https://github.com/microsoft/lsprotocol.git
