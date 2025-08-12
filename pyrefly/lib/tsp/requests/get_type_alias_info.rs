@@ -72,7 +72,7 @@ impl Server {
         self.validate_snapshot(params.snapshot)?;
 
         // Look up the pyrefly type from the TSP type handle
-    let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
+        let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
             // If we can't find the type, return None
             return Ok(None);
         };

@@ -24,10 +24,10 @@ impl Server {
         // Validate snapshot
         self.validate_snapshot(params.snapshot)?;
 
-    tsp_debug!("Creating instance type for: {:?}", params.type_);
+        tsp_debug!("Creating instance type for: {:?}", params.type_);
 
         // Use the handle mapping to get the actual pyrefly type
-    let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
+        let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
             tsp_debug!("Warning: Could not resolve type handle for createInstanceType");
             return Ok(None);
         };
@@ -77,7 +77,7 @@ impl Server {
         };
 
         // Convert back to TSP type format
-    let result = Some(crate::tsp::common::convert_to_tsp_type(instance_type));
+        let result = Some(crate::tsp::common::convert_to_tsp_type(instance_type));
 
         tsp_debug!("createInstanceType result: {:?}", result);
         Ok(result)

@@ -165,25 +165,19 @@ impl Server {
             return Err(snapshot_outdated_error());
         }
 
-        tsp_debug!(
-            "Getting function parts for type: {:?}",
-            params.type_.handle
-        );
+        tsp_debug!("Getting function parts for type: {:?}", params.type_.handle);
 
         // Get the internal type from the type handle
-    let internal_type = match self.lookup_type_from_tsp_type(&params.type_) {
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_) {
             Some(t) => t,
             None => {
-                tsp_debug!(
-                    "Could not resolve type handle: {:?}",
-            params.type_.handle
-                );
+                tsp_debug!("Could not resolve type handle: {:?}", params.type_.handle);
                 return Ok(None);
             }
         };
 
         // Extract function parts based on the type
-    let flags = params.flags.clone();
+        let flags = params.flags.clone();
         match &internal_type {
             crate::types::types::Type::Function(func_type) => Ok(
                 extract_function_parts_from_function(func_type, &flags, transaction),

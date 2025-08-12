@@ -44,7 +44,11 @@ impl Server {
         params: tsp::GetTypeParams,
     ) -> Result<Option<tsp::Type>, ResponseError> {
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
-        let node_url = lsp_types::Url::parse(&params.node.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid node.uri".to_owned(), data: None })?;
+        let node_url = lsp_types::Url::parse(&params.node.uri).map_err(|_| ResponseError {
+            code: lsp_server::ErrorCode::InvalidParams as i32,
+            message: "Invalid node.uri".to_owned(),
+            data: None,
+        })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
             &node_url,
@@ -56,7 +60,7 @@ impl Server {
         let active_transaction = transaction_to_use.as_ref().unwrap_or(transaction);
 
         // Compute position and get internal type once
-    let position = node_start_position(&module_info, &params.node);
+        let position = node_start_position(&module_info, &params.node);
         let Some(internal_type) = active_transaction.get_type_at(&handle, position) else {
             return Ok(None);
         };

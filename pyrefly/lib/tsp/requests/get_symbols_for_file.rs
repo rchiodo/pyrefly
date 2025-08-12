@@ -21,7 +21,11 @@ impl Server {
         params: tsp::GetSymbolsForFileParams,
     ) -> Result<Option<tsp::FileSymbolInfo>, ResponseError> {
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
-        let file_url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid uri".to_owned(), data: None })?;
+        let file_url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError {
+            code: lsp_server::ErrorCode::InvalidParams as i32,
+            message: "Invalid uri".to_owned(),
+            data: None,
+        })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
             &file_url,

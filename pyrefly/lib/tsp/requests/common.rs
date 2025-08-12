@@ -409,5 +409,8 @@ pub(crate) fn node_start_position(module_info: &ModuleInfo, node: &tsp::Node) ->
     let pos = &node.range.start;
     module_info
         .lined_buffer()
-        .from_lsp_position(lsp_types::Position { line: pos.line, character: pos.character })
+        .from_lsp_position(lsp_types::Position {
+            line: pos.line,
+            character: pos.character,
+        })
 }

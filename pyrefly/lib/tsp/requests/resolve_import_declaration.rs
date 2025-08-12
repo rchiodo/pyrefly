@@ -24,8 +24,8 @@ use crate::tsp::common::snapshot_outdated_error;
 pub fn create_unresolved_import_declaration(original_decl: &tsp::Declaration) -> tsp::Declaration {
     tsp::Declaration {
         handle: original_decl.handle.clone(),
-    category: original_decl.category.clone(),
-    flags: original_decl.flags.clone().with_unresolved_import(),
+        category: original_decl.category.clone(),
+        flags: original_decl.flags.clone().with_unresolved_import(),
         node: original_decl.node.clone(),
         module_name: original_decl.module_name.clone(),
         name: original_decl.name.clone(),
@@ -203,7 +203,7 @@ impl Server {
         }
 
         // Only resolve import declarations
-    if params.decl.category != tsp::DeclarationCategory::Import {
+        if params.decl.category != tsp::DeclarationCategory::Import {
             return Ok(Some(params.decl));
         }
 

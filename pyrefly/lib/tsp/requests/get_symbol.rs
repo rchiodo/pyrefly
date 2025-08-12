@@ -226,11 +226,12 @@ pub fn extract_symbol_from_transaction(
             module_info
         };
 
-        let declaration_text_range = validation_module_info
-            .lined_buffer()
-            .from_lsp_range(crate::tsp::common::to_lsp_range(
-                &declaration.node.as_ref().unwrap().range,
-            ));
+        let declaration_text_range =
+            validation_module_info
+                .lined_buffer()
+                .from_lsp_range(crate::tsp::common::to_lsp_range(
+                    &declaration.node.as_ref().unwrap().range,
+                ));
         let declaration_text = validation_module_info.code_at(declaration_text_range);
 
         if declaration_text != name {
@@ -276,8 +277,11 @@ impl Server {
         params: tsp::GetSymbolParams,
     ) -> Result<Option<tsp::Symbol>, ResponseError> {
         // Use common helper to validate, get handle, module info and maybe a fresh transaction
-        let node_url = lsp_types::Url::parse(&params.node.uri)
-            .map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid node.uri".to_owned(), data: None })?;
+        let node_url = lsp_types::Url::parse(&params.node.uri).map_err(|_| ResponseError {
+            code: lsp_server::ErrorCode::InvalidParams as i32,
+            message: "Invalid node.uri".to_owned(),
+            data: None,
+        })?;
         let (handle, module_info, transaction_to_use) = self.with_active_transaction(
             transaction,
             &node_url,

@@ -27,13 +27,10 @@ impl Server {
         }
 
         // Get the internal type from the type handle
-    let internal_type = match self.lookup_type_from_tsp_type(&params.type_) {
+        let internal_type = match self.lookup_type_from_tsp_type(&params.type_) {
             Some(t) => t,
             None => {
-                tsp_debug!(
-                    "Could not resolve type handle: {:?}",
-            params.type_.handle
-                );
+                tsp_debug!("Could not resolve type handle: {:?}", params.type_.handle);
                 return Ok(Vec::new());
             }
         };

@@ -435,7 +435,10 @@ impl Server {
     // deserialize the params Value directly into the provided Params type.
     // This bypasses the generated *Request wrapper structs so we can pass
     // strongly typed *Params directly to handlers.
-    fn tsp_params<P: DeserializeOwned>(x: &lsp_server::Request, method: &str) -> Option<Result<P, serde_json::Error>> {
+    fn tsp_params<P: DeserializeOwned>(
+        x: &lsp_server::Request,
+        method: &str,
+    ) -> Option<Result<P, serde_json::Error>> {
         if x.method == method {
             Some(serde_json::from_value(x.params.clone()))
         } else {

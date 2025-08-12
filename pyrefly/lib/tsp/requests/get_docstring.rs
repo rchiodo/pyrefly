@@ -27,9 +27,9 @@ pub fn get_docstring_at_position(
     let module_info = transaction.get_module_info(handle)?;
 
     // Convert Range position to TextSize using the module's line buffer
-    let position = module_info.lined_buffer().from_lsp_position(
-        crate::tsp::common::to_lsp_position(&node.range.start),
-    );
+    let position = module_info
+        .lined_buffer()
+        .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.start));
 
     // Try to find definition at the position - this is the same logic as hover
     let first_definition = transaction
@@ -60,7 +60,11 @@ impl Server {
             return Ok(None);
         };
 
-        let node_url = lsp_types::Url::parse(&node.uri).map_err(|_| ResponseError { code: lsp_server::ErrorCode::InvalidParams as i32, message: "Invalid node.uri".to_owned(), data: None })?;
+        let node_url = lsp_types::Url::parse(&node.uri).map_err(|_| ResponseError {
+            code: lsp_server::ErrorCode::InvalidParams as i32,
+            message: "Invalid node.uri".to_owned(),
+            data: None,
+        })?;
         let (handle, _module_info, maybe_fresh_tx) = self.with_active_transaction(
             transaction,
             &node_url,

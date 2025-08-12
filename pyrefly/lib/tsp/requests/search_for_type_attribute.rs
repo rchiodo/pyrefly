@@ -82,7 +82,7 @@ pub fn create_tsp_attribute_from_type(
         type_: tsp_type,
         owner: None,      // TODO: Could set this to the class type if needed
         bound_type: None, // TODO: Could implement bound type if needed
-    flags,
+        flags,
         decls: Vec::new(), // TODO: Could add declaration information if available
     }
 }

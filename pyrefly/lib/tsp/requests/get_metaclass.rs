@@ -29,10 +29,10 @@ impl Server {
             return Err(snapshot_outdated_error());
         }
 
-    tsp_debug!("Getting metaclass for type: {:?}", params.type_);
+        tsp_debug!("Getting metaclass for type: {:?}", params.type_);
 
         // Convert TSP type to internal pyrefly type
-    let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
+        let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
             tsp_debug!("Warning: Could not resolve type handle for getMetaclass");
             return Ok(None);
         };

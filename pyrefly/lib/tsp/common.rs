@@ -8,10 +8,11 @@
 //! Common utilities and helper Functions for TSP request handling
 
 use lsp_server::ErrorCode;
-use lsp_server::ResponseError;
 use lsp_server::Request;
+use lsp_server::ResponseError;
+use serde::Deserialize;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Serialize, Deserialize};
 
 use crate::tsp;
 
@@ -40,20 +41,27 @@ pub struct GetSupportedProtocolVersionParams {}
 /// Legacy builder-style API expected on DeclarationFlags
 impl tsp::DeclarationFlags {
     #[inline]
-    pub fn new() -> Self { tsp::DeclarationFlags::None }
+    pub fn new() -> Self {
+        tsp::DeclarationFlags::None
+    }
     #[inline]
-    pub fn with_class_member(self) -> Self { tsp::DeclarationFlags::ClassMember }
+    pub fn with_class_member(self) -> Self {
+        tsp::DeclarationFlags::ClassMember
+    }
     #[inline]
-    pub fn with_constant(self) -> Self { tsp::DeclarationFlags::Constant }
+    pub fn with_constant(self) -> Self {
+        tsp::DeclarationFlags::Constant
+    }
     #[inline]
-    pub fn with_unresolved_import(self) -> Self { tsp::DeclarationFlags::UnresolvedImport }
+    pub fn with_unresolved_import(self) -> Self {
+        tsp::DeclarationFlags::UnresolvedImport
+    }
 }
-
-/// Legacy constant-like ALL_CAPS variants for DeclarationCategory
+/// Legacy constant-like ALL_CAPS variants for DeclarationCategory (optional)
+#[cfg(feature = "legacy_tsp_aliases")]
 #[allow(non_upper_case_globals)]
 pub mod legacy_decl_category {
     pub use crate::tsp::DeclarationCategory as DC; // alias for brevity inside module
-    pub const FUNCTION: DC = DC::Function;
     pub const CLASS: DC = DC::Class;
     pub const VARIABLE: DC = DC::Variable;
     pub const PARAM: DC = DC::Param;
@@ -62,9 +70,11 @@ pub mod legacy_decl_category {
     pub const IMPORT: DC = DC::Import;
     pub const INTRINSIC: DC = DC::Intrinsic;
 }
-pub use legacy_decl_category as decl_cat; // optional re-export if needed
+#[cfg(feature = "legacy_tsp_aliases")]
+pub use legacy_decl_category as decl_cat; // optional re-export
 
 /// Legacy ALL_CAPS for TypeCategory
+#[cfg(feature = "legacy_tsp_aliases")]
 #[allow(non_upper_case_globals)]
 pub mod legacy_type_category {
     pub use crate::tsp::TypeCategory as TC;
@@ -79,6 +89,7 @@ pub mod legacy_type_category {
 
 /// Legacy ALL_CAPS for AttributeFlags (old code referenced NONE / PARAMETER / RETURN_TYPE etc.)
 /// Only existing flags are mapped; removed flags are intentionally omitted.
+#[cfg(feature = "legacy_tsp_aliases")]
 #[allow(non_upper_case_globals)]
 pub mod legacy_attribute_flags {
     pub use crate::tsp::AttributeFlags as AF;
@@ -86,6 +97,7 @@ pub mod legacy_attribute_flags {
 }
 
 /// Legacy ALL_CAPS for TypeFlags if referenced (INSTANCE / CALLABLE etc.)
+#[cfg(feature = "legacy_tsp_aliases")]
 #[allow(non_upper_case_globals)]
 pub mod legacy_type_flags {
     pub use crate::tsp::TypeFlags as TF;
@@ -99,9 +111,18 @@ pub mod legacy_type_flags {
 
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
-    #[inline] pub fn has_expand_type_aliases(&self) -> bool { matches!(self, tsp::TypeReprFlags::ExpandTypeAliases) }
-    #[inline] pub fn has_print_type_var_variance(&self) -> bool { matches!(self, tsp::TypeReprFlags::PrintTypeVarVariance) }
-    #[inline] pub fn has_convert_to_instance_type(&self) -> bool { matches!(self, tsp::TypeReprFlags::ConvertToInstanceType) }
+    #[inline]
+    pub fn has_expand_type_aliases(&self) -> bool {
+        matches!(self, tsp::TypeReprFlags::ExpandTypeAliases)
+    }
+    #[inline]
+    pub fn has_print_type_var_variance(&self) -> bool {
+        matches!(self, tsp::TypeReprFlags::PrintTypeVarVariance)
+    }
+    #[inline]
+    pub fn has_convert_to_instance_type(&self) -> bool {
+        matches!(self, tsp::TypeReprFlags::ConvertToInstanceType)
+    }
 }
 
 /// Provide a Default implementation shim for ResolveImportOptions (all None)
@@ -117,26 +138,38 @@ impl Default for tsp::ResolveImportOptions {
 
 /// Helper: convert protocol Position to lsp_types::Position
 pub fn to_lsp_position(pos: &tsp::Position) -> lsp_types::Position {
-    lsp_types::Position { line: pos.line, character: pos.character }
+    lsp_types::Position {
+        line: pos.line,
+        character: pos.character,
+    }
 }
 
 /// Helper: convert lsp_types::Position to protocol Position
 pub fn from_lsp_position(pos: lsp_types::Position) -> tsp::Position {
-    tsp::Position { line: pos.line, character: pos.character }
+    tsp::Position {
+        line: pos.line,
+        character: pos.character,
+    }
 }
 
 /// Helper: convert protocol Range to lsp_types::Range
 pub fn to_lsp_range(r: &tsp::Range) -> lsp_types::Range {
-    lsp_types::Range { start: to_lsp_position(&r.start), end: to_lsp_position(&r.end) }
+    lsp_types::Range {
+        start: to_lsp_position(&r.start),
+        end: to_lsp_position(&r.end),
+    }
 }
 
 /// Helper: convert lsp_types::Range to protocol Range
 pub fn from_lsp_range(r: lsp_types::Range) -> tsp::Range {
-    tsp::Range { start: from_lsp_position(r.start), end: from_lsp_position(r.end) }
+    tsp::Range {
+        start: from_lsp_position(r.start),
+        end: from_lsp_position(r.end),
+    }
 }
 
-
 /// Handle TypeServer Protocol (TSP) requests that don't implement the LSP Request trait
+#[allow(dead_code)]
 pub fn as_tsp_request<T>(x: &Request, method_name: &str) -> Option<Result<T, serde_json::Error>>
 where
     T: DeserializeOwned,
@@ -200,22 +233,13 @@ pub(crate) fn language_services_disabled_error() -> ResponseError {
 /// Create a default type for a declaration when we can't determine the exact type
 pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
     let (category, flags) = match decl.category {
-        tsp::DeclarationCategory::Function => (
-            tsp::TypeCategory::Function,
-            tsp::TypeFlags::Callable,
-        ),
-        tsp::DeclarationCategory::Class => (
-            tsp::TypeCategory::Class,
-            tsp::TypeFlags::Instantiable,
-        ),
-        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::None),
-        tsp::DeclarationCategory::TypeAlias => (
-            tsp::TypeCategory::Any,
-            tsp::TypeFlags::FromAlias,
-        ),
-        tsp::DeclarationCategory::TypeParam => {
-            (tsp::TypeCategory::TypeVar, tsp::TypeFlags::None)
+        tsp::DeclarationCategory::Function => {
+            (tsp::TypeCategory::Function, tsp::TypeFlags::Callable)
         }
+        tsp::DeclarationCategory::Class => (tsp::TypeCategory::Class, tsp::TypeFlags::Instantiable),
+        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::None),
+        tsp::DeclarationCategory::TypeAlias => (tsp::TypeCategory::Any, tsp::TypeFlags::FromAlias),
+        tsp::DeclarationCategory::TypeParam => (tsp::TypeCategory::TypeVar, tsp::TypeFlags::None),
         _ => (tsp::TypeCategory::Any, tsp::TypeFlags::None),
     };
 
@@ -260,7 +284,7 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> tsp::Type {
         name: py_type.to_string(),
         category_flags: 0,
         decl: None,
-        alias_name: None
+        alias_name: None,
     }
 }
 
@@ -355,19 +379,19 @@ mod tests {
     fn test_get_supported_protocol_version_params_deserialization() {
         // Test null case
         let null_json = serde_json::Value::Null;
-        let result: Result<tsp::GetSupportedProtocolVersionParams, _> =
+        let result: Result<GetSupportedProtocolVersionParams, _> =
             serde_json::from_value(null_json);
         assert!(result.is_ok());
 
         // Test empty object case
         let empty_obj_json = serde_json::json!({});
-        let result: Result<tsp::GetSupportedProtocolVersionParams, _> =
+        let result: Result<GetSupportedProtocolVersionParams, _> =
             serde_json::from_value(empty_obj_json);
         assert!(result.is_ok());
 
         // Test object with unknown fields (should be ignored)
         let obj_with_fields = serde_json::json!({"unknown_field": "value"});
-        let result: Result<tsp::GetSupportedProtocolVersionParams, _> =
+        let result: Result<GetSupportedProtocolVersionParams, _> =
             serde_json::from_value(obj_with_fields);
         assert!(result.is_ok());
     }

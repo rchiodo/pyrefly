@@ -342,10 +342,10 @@ impl Server {
             return Err(snapshot_outdated_error());
         }
 
-    tsp_debug!("Getting attributes for type: {:?}", params.type_);
+        tsp_debug!("Getting attributes for type: {:?}", params.type_);
 
         // Convert TSP type to pyrefly type
-    let pyrefly_type = match self.lookup_type_from_tsp_type(&params.type_) {
+        let pyrefly_type = match self.lookup_type_from_tsp_type(&params.type_) {
             Some(pyrefly_type) => pyrefly_type,
             None => {
                 tsp_debug!("Could not convert TSP type to pyrefly type");

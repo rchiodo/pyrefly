@@ -23,9 +23,13 @@ impl Server {
         // Validate snapshot
         self.validate_snapshot(params.snapshot)?;
 
-    let url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError { code: ErrorCode::InvalidParams as i32, message: "Invalid URI".to_owned(), data: None })?;
-    // Convert URI to file path (validation only)
-    if url.to_file_path().is_err() {
+        let url = lsp_types::Url::parse(&params.uri).map_err(|_| ResponseError {
+            code: ErrorCode::InvalidParams as i32,
+            message: "Invalid URI".to_owned(),
+            data: None,
+        })?;
+        // Convert URI to file path (validation only)
+        if url.to_file_path().is_err() {
             return Err(ResponseError {
                 code: ErrorCode::InvalidParams as i32,
                 message: "Invalid URI - cannot convert to file path".to_owned(),
@@ -34,8 +38,8 @@ impl Server {
         }
 
         // Validate language services; then create handle
-    self.validate_language_services(&url)?;
-    let Some(handle) = self.make_handle_if_enabled(&url) else {
+        self.validate_language_services(&url)?;
+        let Some(handle) = self.make_handle_if_enabled(&url) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled for this workspace".to_owned(),
