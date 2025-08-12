@@ -16,9 +16,7 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
-use lsp_types::Position;
-use lsp_types::Range;
-use lsp_types::Url;
+use crate::tsp::protocol::{Position, Range};
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
@@ -34,6 +32,7 @@ fn test_simple_get_type_verification() {
 fn test_get_type_params_construction() {
     // Test TSP GetType parameter construction like other TSP tests
     let (_handle, uri, state) = build_tsp_test_server();
+    let uri_str = uri.to_string();
     let _transaction = state.transaction();
 
     let position = Position {
@@ -41,16 +40,7 @@ fn test_get_type_params_construction() {
         character: 0,
     };
 
-    let params = tsp::GetTypeParams {
-        node: tsp::Node {
-            uri: uri.clone(),
-            range: Range {
-                start: position,
-                end: position,
-            },
-        },
-        snapshot: 1,
-    };
+    let params = tsp::GetTypeParams { node: tsp::Node { uri: uri_str.clone(), range: Range { start: position.clone(), end: position } }, snapshot: 1 };
 
     // Just test that we can construct the parameters correctly
     assert_eq!(params.snapshot, 1);
@@ -69,9 +59,9 @@ fn call_tsp_get_type_handler(
     let uri = &params.node.uri;
 
     // 2. Get the handle for this URI (simplified mapping for test)
-    let handle = if uri.path().ends_with("main.py") {
+    let handle = if uri.ends_with("main.py") {
         handles.get("main").cloned()
-    } else if uri.path().ends_with("types_test.py") {
+    } else if uri.ends_with("types_test.py") {
         handles.get("types_test").cloned()
     } else {
         None
@@ -117,22 +107,13 @@ z = [1, 2, 3]
     let transaction = state.transaction();
 
     // Create URI for main.py
-    let uri = Url::parse("file:///main.py").expect("Failed to create URI");
+    let uri = "file:///main.py".to_owned();
 
     // Create TSP GetTypeParams to test the TSP handler logic
     let params = tsp::GetTypeParams {
         node: tsp::Node {
             uri: uri.clone(),
-            range: Range {
-                start: Position {
-                    line: 1,
-                    character: 0,
-                }, // Position of 'x' variable
-                end: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
+            range: Range { start: Position { line: 1, character: 0 }, end: Position { line: 1, character: 1 } },
         },
         snapshot: 1, // Use a dummy snapshot number
     };
@@ -179,7 +160,7 @@ dict_var = {"key": "value"}
     let (handles, state) = mk_multi_file_state_assert_no_errors(&files);
     let transaction = state.transaction();
 
-    let uri = Url::parse("file:///types_test.py").expect("Failed to create URI");
+    let uri = "file:///types_test.py".to_owned();
 
     // Test multiple positions by calling our TSP handler implementation
     let test_positions = vec![
@@ -207,17 +188,13 @@ dict_var = {"key": "value"}
     ];
 
     for (pos, var_name) in test_positions {
-        // Create TSP GetTypeParams for this position
+        // Capture values before moving `pos` into start
+        let line = pos.line;
+        let character = pos.character;
         let params = tsp::GetTypeParams {
             node: tsp::Node {
                 uri: uri.clone(),
-                range: Range {
-                    start: pos,
-                    end: Position {
-                        line: pos.line,
-                        character: pos.character + 1,
-                    },
-                },
+                range: Range { start: pos, end: Position { line, character: character + 1 } },
             },
             snapshot: 1,
         };

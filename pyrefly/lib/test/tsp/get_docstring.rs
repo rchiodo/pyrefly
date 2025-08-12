@@ -11,8 +11,7 @@
 //! independently of the full TSP protocol. This allows for more targeted testing
 //! of the core docstring extraction logic.
 
-use lsp_types::Position;
-use lsp_types::Range;
+// Use protocol Position/Range instead of lsp_types
 
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp;
@@ -40,16 +39,10 @@ fn test_get_docstring_at_position_with_function_docstring() {
 
     // Create a node that points to the function name
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: Range {
-            start: Position {
-                line: 0,
-                character: 4,
-            }, // Points to 'calculate_area'
-            end: Position {
-                line: 0,
-                character: 18,
-            },
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 4 }, // Points to 'calculate_area'
+            end: tsp::Position { line: 0, character: 18 },
         },
     };
 
@@ -90,16 +83,10 @@ fn test_get_docstring_at_position_with_class_docstring() {
 
     // Create a node that points to the class name
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: Range {
-            start: Position {
-                line: 0,
-                character: 6,
-            }, // Points to 'DataProcessor'
-            end: Position {
-                line: 0,
-                character: 19,
-            },
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 6 }, // Points to 'DataProcessor'
+            end: tsp::Position { line: 0, character: 19 },
         },
     };
 
@@ -131,16 +118,10 @@ class SimpleClass:
 
     // Create a node that points to a function without docstring
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: Range {
-            start: Position {
-                line: 0,
-                character: 4,
-            }, // Points to 'simple_function'
-            end: Position {
-                line: 0,
-                character: 19,
-            },
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 4 }, // Points to 'simple_function'
+            end: tsp::Position { line: 0, character: 19 },
         },
     };
 
@@ -178,16 +159,10 @@ fn test_get_docstring_at_position_method_docstring() {
 
     // Create a node that points to the 'add' method
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: Range {
-            start: Position {
-                line: 1,
-                character: 8,
-            }, // Points to 'add' method
-            end: Position {
-                line: 1,
-                character: 11,
-            },
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 1, character: 8 }, // Points to 'add' method
+            end: tsp::Position { line: 1, character: 11 },
         },
     };
 

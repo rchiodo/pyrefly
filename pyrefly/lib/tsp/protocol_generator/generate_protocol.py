@@ -12,7 +12,8 @@ import sys
 import os
 import shutil
 import subprocess
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Iterable
 
 # Import the lsprotocol generator modules
 import generator.model as model
@@ -182,25 +183,29 @@ def convert_type_reference(type_def: Dict[str, Any]) -> model.LSP_TYPE_SPEC:
         raise ValueError(f"Unsupported type kind: {kind}")
 
 
+def camel_to_upper_snake(name: str) -> str:
+    """Convert CamelCase / mixedCase to UPPER_SNAKE."""
+    s1 = re.sub('(.)([A-Z][a-z0-9]+)', r'\1_\2', name)
+    s2 = re.sub('([a-z0-9])([A-Z])', r'\1_\2', s1)
+    return s2.upper()
+
+def camel_to_snake(name: str) -> str:
+    return camel_to_upper_snake(name).lower()
+
 def generate_constants_rust(tsp_json: Dict[str, Any]) -> str:
-    """Generate Rust constant definitions from the constants section in tsp.json."""
+    """Generate idiomatic Rust constant definitions (UPPER_SNAKE) from tsp.json."""
     constants = tsp_json.get("constants", [])
     if not constants:
         return ""
-    
-    rust_code = "// Type Server Protocol Constants\n\n"
-    
+    rust_code = "// Type Server Protocol Constants (idiomatic Rust)\n\n"
     for const_def in constants:
-        name = const_def["name"]
+        raw_name = const_def["name"]
+        name = camel_to_upper_snake(raw_name)
         const_type = const_def["type"]
         value = const_def["value"]
         doc = const_def.get("documentation", "")
-        
-        # Generate documentation comment if available
         if doc:
             rust_code += f"/// {doc}\n"
-        
-        # Determine Rust type
         if const_type["kind"] == "base":
             if const_type["name"] == "string":
                 rust_type = "&str"
@@ -214,10 +219,8 @@ def generate_constants_rust(tsp_json: Dict[str, Any]) -> str:
         else:
             rust_type = "/* unsupported type */"
             rust_value = str(value)
-        
-        rust_code += f"pub const {name}: {rust_type} = {rust_value};\n\n"
-    
-    return rust_code
+        rust_code += f"pub const {name}: {rust_type} = {rust_value};\n"
+    return rust_code + "\n"
 
 
 def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
@@ -280,19 +283,15 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         # Turn off clippy warnings on generated code.
         content = "#![allow(clippy::all)]\n\n" + content
 
-        # Post-process certain enums that represent bitmask flags into bitflag-style structs
-        # so they can be combined with bitwise operations. We implement a simple brace-balanced
-        # removal of the original enum + its Serialize/Deserialize impl blocks to avoid the
-        # brittleness of a large regex (which previously left stray closing braces).
-        def replace_flag_enum(name: str, mapping: dict[str, int]) -> None:
+        # --- Idiomatic flag generation (UPPER_SNAKE constants + snake_case builder methods) ---
+        def replace_flag_enum(name: str, mapping: dict[str, int]):
             nonlocal content
 
-            def find_block_end(start_idx: int) -> int | None:
-                """Given index of first '{', return index just after its matching '}' using brace counting."""
-                if start_idx < 0:
+            def find_block_end(idx: int) -> int | None:
+                if idx < 0:
                     return None
                 depth = 0
-                i = start_idx
+                i = idx
                 while i < len(content):
                     c = content[i]
                     if c == '{':
@@ -304,7 +303,6 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
                     i += 1
                 return None
 
-            # Locate enum
             enum_marker = f"pub enum {name} "
             enum_start = content.find(enum_marker)
             if enum_start == -1:
@@ -313,7 +311,6 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             enum_end = find_block_end(enum_brace)
             if enum_end is None:
                 return
-            # Locate impl Serialize
             ser_marker = f"impl Serialize for {name}"
             ser_start = content.find(ser_marker, enum_end)
             if ser_start == -1:
@@ -322,7 +319,6 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             ser_end = find_block_end(ser_brace)
             if ser_end is None:
                 return
-            # Locate impl Deserialize
             de_marker = f"impl<'de> Deserialize<'de> for {name}"
             de_start = content.find(de_marker, ser_end)
             if de_start == -1:
@@ -332,7 +328,7 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             if de_end is None:
                 return
 
-            # Extend backwards to include doc comments and derive attributes immediately preceding enum
+            # Capture doc comments
             doc_start = enum_start
             line_start = content.rfind('\n', 0, enum_start) + 1
             while line_start >= 0:
@@ -340,7 +336,6 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
                 stripped = line.strip()
                 if stripped.startswith('///') or stripped.startswith('#[derive') or stripped == '':
                     doc_start = line_start
-                    # move to previous line
                     if line_start == 0:
                         break
                     prev_line_end = content.rfind('\n', 0, line_start - 1)
@@ -350,42 +345,39 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
                         line_start = prev_line_end + 1
                 else:
                     break
+            doc_lines = [l for l in content[doc_start:enum_start].splitlines() if l.strip().startswith('///')]
 
-            # Capture existing doc comments (lines starting with ///) to re-emit
-            pre_block = content[doc_start:enum_start]
-            doc_lines = [l for l in pre_block.splitlines() if l.strip().startswith('///')]
-
-            # Build replacement struct definition. Keep original doc comments if present.
             lines: list[str] = []
             if doc_lines:
                 lines.extend(doc_lines)
             lines.append(f"#[derive(PartialEq, Eq, Clone, Copy, Debug)]")
             lines.append(f"pub struct {name}(pub i32);")
             lines.append(f"impl {name} {{")
-            lines.append(f"    pub const None: {name} = {name}(0);")
-            for const_name, value in mapping.items():
-                if const_name == 'None':
+            # Upper snake constants
+            for const_name, val in mapping.items():
+                upper = camel_to_upper_snake(const_name)
+                lines.append(f"    pub const {upper}: {name} = {name}({val});")
+            # new()
+            lines.append("    #[inline] pub fn new() -> Self { Self::NONE }")
+            # Snake_case builders for non-zero flags
+            for const_name, val in mapping.items():
+                if val == 0:
                     continue
-                lines.append(f"    pub const {const_name}: {name} = {name}({value});")
-            lines.append("    #[inline] pub fn new() -> Self { Self::None }")
-            for const_name in mapping.keys():
-                if const_name == 'None':
-                    continue
-                method = const_name[0].lower() + const_name[1:]
-                lines.append(f"    #[inline] pub fn with_{method}(self) -> Self {{ {name}(self.0 | {name}::{const_name}.0) }}")
+                snake = camel_to_snake(const_name)
+                upper = camel_to_upper_snake(const_name)
+                lines.append(f"    #[inline] pub fn with_{snake}(self) -> Self {{ {name}(self.0 | {name}::{upper}.0) }}")
+            # contains helpers
             lines.append("    #[inline] pub fn contains(self, other: Self) -> bool { (self.0 & other.0) == other.0 }")
             lines.append("}")
-            lines.append(f"impl Serialize for {name} {{ fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {{ serializer.serialize_i32(self.0) }} }}")
-            lines.append(f"impl<'de> Deserialize<'de> for {name} {{ fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {{ let value = i32::deserialize(deserializer)?; Ok({name}(value)) }} }}")
+            # serde + bit ops
+            lines.append(f"impl Serialize for {name} {{ fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {{ s.serialize_i32(self.0) }} }}")
+            lines.append(f"impl<'de> Deserialize<'de> for {name} {{ fn deserialize<D>(d: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {{ let v = i32::deserialize(d)?; Ok({name}(v)) }} }}")
             lines.append(f"impl std::ops::BitOr for {name} {{ type Output = {name}; fn bitor(self, rhs: {name}) -> {name} {{ {name}(self.0 | rhs.0) }} }}")
             lines.append(f"impl std::ops::BitOrAssign for {name} {{ fn bitor_assign(&mut self, rhs: {name}) {{ self.0 |= rhs.0; }} }}")
             lines.append(f"impl std::ops::BitAnd for {name} {{ type Output = {name}; fn bitand(self, rhs: {name}) -> {name} {{ {name}(self.0 & rhs.0) }} }}")
             replacement = "\n" + "\n".join(lines) + "\n"
-
-            # Splice new content
             content = content[:doc_start] + replacement + content[de_end:]
 
-        # Flag enums and their bit values
         flag_mappings = {
             "TypeFlags": {"None": 0, "Instantiable": 1, "Instance": 2, "Callable": 4, "Literal": 8, "Interface": 16, "Generic": 32, "FromAlias": 64},
             "AttributeFlags": {"None": 0, "IsArgsList": 1, "IsKwargsDict": 2},
@@ -396,8 +388,8 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             "ClassFlags": {"None": 0, "Enum": 1, "TypedDict": 2},
             "TypeVarFlags": {"None": 0, "IsParamSpec": 1},
         }
-        for enum_name, map_vals in flag_mappings.items():
-            replace_flag_enum(enum_name, map_vals)
+        for enum_name, mapping in flag_mappings.items():
+            replace_flag_enum(enum_name, mapping)
 
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")

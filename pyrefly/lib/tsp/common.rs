@@ -7,9 +7,9 @@
 
 //! Common utilities and helper Functions for TSP request handling
 
+use lsp_server::ErrorCode;
 use lsp_server::Request;
 use lsp_server::ResponseError;
-use lsp_server::ErrorCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -21,7 +21,7 @@ use crate::tsp;
 // ---------------------------------------------------------------------------
 // Older code expected a TSP_PROTOCOL_VERSION constant; alias to generated name.
 // Reference the generated version constant without editing the generated file.
-pub const TSP_PROTOCOL_VERSION: &str = crate::tsp::TypeServerVersion;
+pub const TSP_PROTOCOL_VERSION: &str = crate::tsp::TYPE_SERVER_VERSION;
 
 // Older handlers referenced GetSupportedProtocolVersionParams even though
 // the generator only emits a Request with no params. Provide an empty params
@@ -38,13 +38,7 @@ pub struct GetSupportedProtocolVersionParams {}
 // Keep this section minimal; remove once all call sites are migrated.
 // -------------------------------------------------------------------------------------------------
 
-// Legacy builder-style aliases now delegate to generated camelCase helpers (avoid duplicate methods)
-impl tsp::DeclarationFlags {
-    #[inline]
-    pub fn with_class_member(self) -> Self { self.with_classMember() }
-    #[inline]
-    pub fn with_unresolved_import(self) -> Self { self.with_unresolvedImport() }
-}
+// Legacy builder-style aliases removed (generator now supplies snake_case methods directly)
 
 // Lightweight debug macro used by request handlers (avoids pulling in tracing for generated-ish code)
 #[macro_export]
@@ -110,17 +104,11 @@ pub mod legacy_type_flags {
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
     #[inline]
-    pub fn has_expand_type_aliases(&self) -> bool {
-        self.contains(tsp::TypeReprFlags::ExpandTypeAliases)
-    }
+    pub fn has_expand_type_aliases(&self) -> bool { self.contains(tsp::TypeReprFlags::EXPAND_TYPE_ALIASES) }
     #[inline]
-    pub fn has_print_type_var_variance(&self) -> bool {
-        self.contains(tsp::TypeReprFlags::PrintTypeVarVariance)
-    }
+    pub fn has_print_type_var_variance(&self) -> bool { self.contains(tsp::TypeReprFlags::PRINT_TYPE_VAR_VARIANCE) }
     #[inline]
-    pub fn has_convert_to_instance_type(&self) -> bool {
-        self.contains(tsp::TypeReprFlags::ConvertToInstanceType)
-    }
+    pub fn has_convert_to_instance_type(&self) -> bool { self.contains(tsp::TypeReprFlags::CONVERT_TO_INSTANCE_TYPE) }
 }
 
 /// Provide a Default implementation shim for ResolveImportOptions (all None)
@@ -183,11 +171,19 @@ where
 }
 
 /// Helper to build a JSON-RPC error response for TSP handlers
-pub fn error_response(id: lsp_server::RequestId, code: i32, message: String) -> lsp_server::Response {
+pub fn error_response(
+    id: lsp_server::RequestId,
+    code: i32,
+    message: String,
+) -> lsp_server::Response {
     lsp_server::Response {
         id,
         result: None,
-        error: Some(ResponseError { code, message, data: None }),
+        error: Some(ResponseError {
+            code,
+            message,
+            data: None,
+        }),
     }
 }
 
@@ -225,13 +221,13 @@ pub(crate) fn language_services_disabled_error() -> ResponseError {
 pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type {
     let (category, flags) = match decl.category {
         tsp::DeclarationCategory::Function => {
-            (tsp::TypeCategory::Function, tsp::TypeFlags::Callable)
+            (tsp::TypeCategory::Function, tsp::TypeFlags::CALLABLE)
         }
-        tsp::DeclarationCategory::Class => (tsp::TypeCategory::Class, tsp::TypeFlags::Instantiable),
-        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::None),
-        tsp::DeclarationCategory::TypeAlias => (tsp::TypeCategory::Any, tsp::TypeFlags::FromAlias),
-        tsp::DeclarationCategory::TypeParam => (tsp::TypeCategory::TypeVar, tsp::TypeFlags::None),
-        _ => (tsp::TypeCategory::Any, tsp::TypeFlags::None),
+    tsp::DeclarationCategory::Class => (tsp::TypeCategory::Class, tsp::TypeFlags::INSTANTIABLE),
+    tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::NONE),
+    tsp::DeclarationCategory::TypeAlias => (tsp::TypeCategory::Any, tsp::TypeFlags::FROM_ALIAS),
+    tsp::DeclarationCategory::TypeParam => (tsp::TypeCategory::TypeVar, tsp::TypeFlags::NONE),
+    _ => (tsp::TypeCategory::Any, tsp::TypeFlags::NONE),
     };
 
     // Convert the declaration handle into a type handle. We just mirror the
@@ -283,12 +279,12 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> tsp::Type {
 pub fn calculate_type_flags(py_type: &crate::types::types::Type) -> tsp::TypeFlags {
     use crate::types::types::Type as PyType;
     match py_type {
-        PyType::ClassDef(_) => tsp::TypeFlags::Instantiable,
-        PyType::ClassType(_) => tsp::TypeFlags::Instance,
-        PyType::Function(_) | PyType::Callable(_) => tsp::TypeFlags::Callable,
-        PyType::Literal(_) => tsp::TypeFlags::Literal,
-        PyType::TypeAlias(_) => tsp::TypeFlags::FromAlias,
-        _ => tsp::TypeFlags::None,
+    PyType::ClassDef(_) => tsp::TypeFlags::INSTANTIABLE,
+    PyType::ClassType(_) => tsp::TypeFlags::INSTANCE,
+    PyType::Function(_) | PyType::Callable(_) => tsp::TypeFlags::CALLABLE,
+        PyType::Literal(_) => tsp::TypeFlags::LITERAL,
+    PyType::TypeAlias(_) => tsp::TypeFlags::FROM_ALIAS,
+    _ => tsp::TypeFlags::NONE,
     }
 }
 
@@ -347,24 +343,6 @@ mod tests {
     use serde_json;
 
     use super::*;
-
-    #[test]
-    fn test_get_snapshot_params_deserialization() {
-        // Test null case
-        let null_json = serde_json::Value::Null;
-        let result: Result<tsp::GetSnapshotParams, _> = serde_json::from_value(null_json);
-        assert!(result.is_ok());
-
-        // Test empty object case
-        let empty_obj_json = serde_json::json!({});
-        let result: Result<tsp::GetSnapshotParams, _> = serde_json::from_value(empty_obj_json);
-        assert!(result.is_ok());
-
-        // Test object with unknown fields (should be ignored)
-        let obj_with_fields = serde_json::json!({"unknown_field": "value"});
-        let result: Result<tsp::GetSnapshotParams, _> = serde_json::from_value(obj_with_fields);
-        assert!(result.is_ok());
-    }
 
     #[test]
     fn test_get_supported_protocol_version_params_deserialization() {

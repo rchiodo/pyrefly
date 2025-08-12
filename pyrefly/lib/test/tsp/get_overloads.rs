@@ -13,42 +13,47 @@
  * and edge cases without requiring full TSP message protocol flows.
  */
 
-use serde_json;
-
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp;
+use crate::tsp::protocol::{
+    Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, GetOverloadsParams,
+    ModuleName, Node, Position, Range, Type, TypeCategory, TypeFlags, TypeHandle,
+};
 use crate::tsp::requests::get_overloads::extract_overloads_from_type;
 
 #[test]
 fn test_get_overloads_params_construction() {
     // Test basic parameter construction
-    let type_param = tsp::Type {
-        handle: tsp::TypeHandle::String("test_overloaded_function".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["mymodule".to_owned()],
-        }),
+    let type_param = Type {
+        alias_name: None,
+        handle: TypeHandle::String("test_overloaded_function".to_owned()),
+        category: TypeCategory::Overloaded,
+        flags: TypeFlags::new(),
+        module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["mymodule".to_owned()] }),
         name: "overloaded_func".to_owned(),
         category_flags: 0,
-        decl: Some(serde_json::json!({
-            "kind": "function",
-            "name": "overloaded_func"
-        })),
+        decl: Some(Declaration {
+            category: DeclarationCategory::Function,
+            flags: DeclarationFlags::new(),
+            handle: DeclarationHandle::String("decl_handle_overloaded_func".to_owned()),
+            module_name: ModuleName { leading_dots: 0, name_parts: vec!["mymodule".to_owned()] },
+            name: "overloaded_func".to_owned(),
+            node: None,
+            uri: "file:///mymodule.py".to_owned(),
+        }),
     };
 
-    let params = tsp::GetOverloadsParams {
-        type_param: type_param.clone(),
+    let params = GetOverloadsParams {
+        type_: type_param.clone(),
         snapshot: 42,
     };
 
     // Verify parameter construction
     assert_eq!(params.snapshot, 42);
-    assert_eq!(params.type_param.name, "overloaded_func");
-    assert_eq!(params.type_param.category, tsp::TypeCategory::OVERLOADED);
-    match &params.type_param.handle {
-        tsp::TypeHandle::String(s) => assert_eq!(s, "test_overloaded_function"),
+    assert_eq!(params.type_.name, "overloaded_func");
+    assert_eq!(params.type_.category, TypeCategory::Overloaded);
+    match &params.type_.handle {
+        TypeHandle::String(s) => assert_eq!(s, "test_overloaded_function"),
         _ => panic!("Expected String handle"),
     }
 }
@@ -56,120 +61,62 @@ fn test_get_overloads_params_construction() {
 #[test]
 fn test_get_overloads_different_type_categories() {
     // Test with OVERLOADED category (expected case)
-    let overloaded_type = tsp::Type {
-        handle: tsp::TypeHandle::String("overloaded_handle".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "overloaded_function".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let overloaded_type = Type { alias_name: None, handle: TypeHandle::String("overloaded_handle".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "overloaded_function".to_owned(), category_flags: 0, decl: None };
 
-    let params_overloaded = tsp::GetOverloadsParams {
-        type_param: overloaded_type,
+    let params_overloaded = GetOverloadsParams {
+        type_: overloaded_type,
         snapshot: 1,
     };
 
     // Test with FUNCTION category (should not have overloads)
-    let function_type = tsp::Type {
-        handle: tsp::TypeHandle::String("function_handle".to_owned()),
-        category: tsp::TypeCategory::FUNCTION,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "simple_function".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let function_type = Type { alias_name: None, handle: TypeHandle::String("function_handle".to_owned()), category: TypeCategory::Function, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "simple_function".to_owned(), category_flags: 0, decl: None };
 
-    let params_function = tsp::GetOverloadsParams {
-        type_param: function_type,
+    let params_function = GetOverloadsParams {
+        type_: function_type,
         snapshot: 1,
     };
 
     // Test with ANY category (should not have overloads)
-    let any_type = tsp::Type {
-        handle: tsp::TypeHandle::String("any_handle".to_owned()),
-        category: tsp::TypeCategory::ANY,
-        flags: tsp::TypeFlags::new(),
-        module_name: None,
-        name: "any_type".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let any_type = Type { alias_name: None, handle: TypeHandle::String("any_handle".to_owned()), category: TypeCategory::Any, flags: TypeFlags::new(), module_name: None, name: "any_type".to_owned(), category_flags: 0, decl: None };
 
-    let params_any = tsp::GetOverloadsParams {
-        type_param: any_type,
+    let params_any = GetOverloadsParams {
+        type_: any_type,
         snapshot: 1,
     };
 
     // Verify different categories
-    assert_eq!(
-        params_overloaded.type_param.category,
-        tsp::TypeCategory::OVERLOADED
-    );
-    assert_eq!(
-        params_function.type_param.category,
-        tsp::TypeCategory::FUNCTION
-    );
-    assert_eq!(params_any.type_param.category, tsp::TypeCategory::ANY);
+    assert_eq!(params_overloaded.type_.category, TypeCategory::Overloaded);
+    assert_eq!(params_function.type_.category, TypeCategory::Function);
+    assert_eq!(params_any.type_.category, TypeCategory::Any);
 }
 
 #[test]
 fn test_get_overloads_type_handle_variants() {
     // Test with String handle
-    let string_handle_type = tsp::Type {
-        handle: tsp::TypeHandle::String("string_handle_123".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["module".to_owned()],
-        }),
-        name: "string_handle_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let string_handle_type = Type { alias_name: None, handle: TypeHandle::String("string_handle_123".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["module".to_owned()] }), name: "string_handle_func".to_owned(), category_flags: 0, decl: None };
 
-    let params_string = tsp::GetOverloadsParams {
-        type_param: string_handle_type,
+    let params_string = GetOverloadsParams {
+        type_: string_handle_type,
         snapshot: 5,
     };
 
     // Test with Integer handle
-    let integer_handle_type = tsp::Type {
-        handle: tsp::TypeHandle::Integer(42),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["module".to_owned()],
-        }),
-        name: "integer_handle_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let integer_handle_type = Type { alias_name: None, handle: TypeHandle::Int(42), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["module".to_owned()] }), name: "integer_handle_func".to_owned(), category_flags: 0, decl: None };
 
-    let params_integer = tsp::GetOverloadsParams {
-        type_param: integer_handle_type,
+    let params_integer = GetOverloadsParams {
+        type_: integer_handle_type,
         snapshot: 5,
     };
 
     // Verify handle types
-    match &params_string.type_param.handle {
-        tsp::TypeHandle::String(s) => assert_eq!(s, "string_handle_123"),
+    match &params_string.type_.handle {
+        TypeHandle::String(s) => assert_eq!(s, "string_handle_123"),
         _ => panic!("Expected String handle"),
     }
 
-    match &params_integer.type_param.handle {
-        tsp::TypeHandle::Integer(i) => assert_eq!(*i, 42),
-        _ => panic!("Expected Integer handle"),
+    match &params_integer.type_.handle {
+        TypeHandle::Int(i) => assert_eq!(*i, 42),
+        _ => panic!("Expected Int handle"),
     }
 }
 
@@ -194,79 +141,32 @@ fn test_get_overloads_module_name_variants() {
     };
 
     // Test with no module name (None)
-    let type_no_module = tsp::Type {
-        handle: tsp::TypeHandle::String("no_module".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: None,
-        name: "builtin_function".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let type_no_module = Type { alias_name: None, handle: TypeHandle::String("no_module".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: None, name: "builtin_function".to_owned(), category_flags: 0, decl: None };
 
-    let type_simple = tsp::Type {
-        handle: tsp::TypeHandle::String("simple".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(simple_module.clone()),
-        name: "simple_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let type_simple = Type { alias_name: None, handle: TypeHandle::String("simple".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(simple_module.clone()), name: "simple_func".to_owned(), category_flags: 0, decl: None };
 
-    let type_nested = tsp::Type {
-        handle: tsp::TypeHandle::String("nested".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(nested_module.clone()),
-        name: "nested_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let type_nested = Type { alias_name: None, handle: TypeHandle::String("nested".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(nested_module.clone()), name: "nested_func".to_owned(), category_flags: 0, decl: None };
 
-    let type_relative = tsp::Type {
-        handle: tsp::TypeHandle::String("relative".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(relative_module.clone()),
-        name: "relative_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let type_relative = Type { alias_name: None, handle: TypeHandle::String("relative".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(relative_module.clone()), name: "relative_func".to_owned(), category_flags: 0, decl: None };
 
     // Create params
-    let params_no_module = tsp::GetOverloadsParams {
-        type_param: type_no_module,
-        snapshot: 1,
-    };
-
-    let params_simple = tsp::GetOverloadsParams {
-        type_param: type_simple,
-        snapshot: 1,
-    };
-
-    let params_nested = tsp::GetOverloadsParams {
-        type_param: type_nested,
-        snapshot: 1,
-    };
-
-    let params_relative = tsp::GetOverloadsParams {
-        type_param: type_relative,
-        snapshot: 1,
-    };
+    let params_no_module = GetOverloadsParams { type_: type_no_module, snapshot: 1 };
+    let params_simple = GetOverloadsParams { type_: type_simple, snapshot: 1 };
+    let params_nested = GetOverloadsParams { type_: type_nested, snapshot: 1 };
+    let params_relative = GetOverloadsParams { type_: type_relative, snapshot: 1 };
 
     // Verify module name handling
-    assert!(params_no_module.type_param.module_name.is_none());
+    assert!(params_no_module.type_.module_name.is_none());
 
-    let simple_mod = params_simple.type_param.module_name.as_ref().unwrap();
+    let simple_mod = params_simple.type_.module_name.as_ref().unwrap();
     assert_eq!(simple_mod.leading_dots, 0);
     assert_eq!(simple_mod.name_parts, vec!["simple"]);
 
-    let nested_mod = params_nested.type_param.module_name.as_ref().unwrap();
+    let nested_mod = params_nested.type_.module_name.as_ref().unwrap();
     assert_eq!(nested_mod.leading_dots, 0);
     assert_eq!(nested_mod.name_parts, vec!["package", "submodule"]);
 
-    let relative_mod = params_relative.type_param.module_name.as_ref().unwrap();
+    let relative_mod = params_relative.type_.module_name.as_ref().unwrap();
     assert_eq!(relative_mod.leading_dots, 2);
     assert_eq!(relative_mod.name_parts, vec!["relative"]);
 }
@@ -274,171 +174,102 @@ fn test_get_overloads_module_name_variants() {
 #[test]
 fn test_get_overloads_flags_handling() {
     // Test with no flags
-    let no_flags_type = tsp::Type {
-        handle: tsp::TypeHandle::String("no_flags".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "no_flags_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let no_flags_type = Type { alias_name: None, handle: TypeHandle::String("no_flags".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "no_flags_func".to_owned(), category_flags: 0, decl: None };
 
     // Test with some flags set
-    let with_flags_type = tsp::Type {
-        handle: tsp::TypeHandle::String("with_flags".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new().with_callable(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "callable_func".to_owned(),
-        category_flags: 1, // Some category flags
-        decl: None,
-    };
+    let with_flags_type = Type { alias_name: None, handle: TypeHandle::String("with_flags".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new().with_callable(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "callable_func".to_owned(), category_flags: 1, decl: None };
 
-    let params_no_flags = tsp::GetOverloadsParams {
-        type_param: no_flags_type,
-        snapshot: 10,
-    };
-
-    let params_with_flags = tsp::GetOverloadsParams {
-        type_param: with_flags_type,
-        snapshot: 10,
-    };
+    let params_no_flags = GetOverloadsParams { type_: no_flags_type, snapshot: 10 };
+    let params_with_flags = GetOverloadsParams { type_: with_flags_type, snapshot: 10 };
 
     // Verify flag handling - just verify construction works properly
     // We can't compare TypeFlags directly since it doesn't implement PartialEq
-    let _no_flags = params_no_flags.type_param.flags;
-    let _with_flags = params_with_flags.type_param.flags;
-    assert_eq!(params_no_flags.type_param.category_flags, 0);
-    assert_eq!(params_with_flags.type_param.category_flags, 1);
+    let _no_flags = params_no_flags.type_.flags;
+    let _with_flags = params_with_flags.type_.flags;
+    assert_eq!(params_no_flags.type_.category_flags, 0);
+    assert_eq!(params_with_flags.type_.category_flags, 1);
 }
 
 #[test]
 fn test_get_overloads_declaration_handling() {
     // Test with null declaration
-    let null_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("null_decl".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "null_decl_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let null_decl_type = Type { alias_name: None, handle: TypeHandle::String("null_decl".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "null_decl_func".to_owned(), category_flags: 0, decl: None };
 
     // Test with simple declaration
-    let simple_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("simple_decl".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
+    let simple_decl_type = Type {
+        alias_name: None,
+        handle: TypeHandle::String("simple_decl".to_owned()),
+        category: TypeCategory::Overloaded,
+        flags: TypeFlags::new(),
+        module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }),
         name: "simple_decl_func".to_owned(),
         category_flags: 0,
-        decl: Some(serde_json::json!({
-            "kind": "function",
-            "name": "simple_decl_func",
-            "signature": "(int) -> str"
-        })),
+        decl: Some(Declaration {
+            category: DeclarationCategory::Function,
+            flags: DeclarationFlags::new(),
+            handle: DeclarationHandle::String("decl_handle_simple".to_owned()),
+            module_name: ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] },
+            name: "simple_decl_func".to_owned(),
+            node: Some(Node {
+                uri: "file:///test.py".to_owned(),
+                range: Range {
+                    start: Position { line: 0, character: 0 },
+                    end: Position { line: 0, character: 10 },
+                },
+            }),
+            uri: "file:///test.py".to_owned(),
+        }),
     };
 
     // Test with complex declaration
-    let complex_decl_type = tsp::Type {
-        handle: tsp::TypeHandle::String("complex_decl".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["complex".to_owned(), "module".to_owned()],
-        }),
+    let complex_decl_type = Type {
+        alias_name: None,
+        handle: TypeHandle::String("complex_decl".to_owned()),
+        category: TypeCategory::Overloaded,
+        flags: TypeFlags::new(),
+        module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["complex".to_owned(), "module".to_owned()] }),
         name: "complex_func".to_owned(),
         category_flags: 0,
-        decl: Some(serde_json::json!({
-            "kind": "overloaded_function",
-            "name": "complex_func",
-            "signatures": [
-                {"params": ["int"], "return": "str"},
-                {"params": ["str"], "return": "int"},
-                {"params": ["float"], "return": "str"}
-            ],
-            "module": "complex.module",
-            "docstring": "A function with multiple overloads"
-        })),
+        decl: Some(Declaration {
+            category: DeclarationCategory::Function,
+            flags: DeclarationFlags::new(),
+            handle: DeclarationHandle::String("decl_handle_complex".to_owned()),
+            module_name: ModuleName { leading_dots: 0, name_parts: vec!["complex".to_owned(), "module".to_owned()] },
+            name: "complex_func".to_owned(),
+            node: None,
+            uri: "file:///complex/module.py".to_owned(),
+        }),
     };
 
-    let params_null = tsp::GetOverloadsParams {
-        type_param: null_decl_type,
-        snapshot: 20,
-    };
-
-    let params_simple = tsp::GetOverloadsParams {
-        type_param: simple_decl_type,
-        snapshot: 20,
-    };
-
-    let params_complex = tsp::GetOverloadsParams {
-        type_param: complex_decl_type,
-        snapshot: 20,
-    };
+    let params_null = GetOverloadsParams { type_: null_decl_type, snapshot: 20 };
+    let params_simple = GetOverloadsParams { type_: simple_decl_type, snapshot: 20 };
+    let params_complex = GetOverloadsParams { type_: complex_decl_type, snapshot: 20 };
 
     // Verify declaration handling
-    assert!(params_null.type_param.decl.is_none());
+    assert!(params_null.type_.decl.is_none());
 
-    let simple_decl = params_simple.type_param.decl.as_ref().unwrap();
-    assert_eq!(simple_decl["kind"], "function");
-    assert_eq!(simple_decl["name"], "simple_decl_func");
+    let simple_decl = params_simple.type_.decl.as_ref().unwrap();
+    assert_eq!(simple_decl.category, DeclarationCategory::Function);
+    assert_eq!(simple_decl.name, "simple_decl_func");
 
-    let complex_decl = params_complex.type_param.decl.as_ref().unwrap();
-    assert_eq!(complex_decl["kind"], "overloaded_function");
-    assert_eq!(complex_decl["name"], "complex_func");
-    assert!(complex_decl["signatures"].is_array());
-    assert_eq!(complex_decl["signatures"].as_array().unwrap().len(), 3);
+    let complex_decl = params_complex.type_.decl.as_ref().unwrap();
+    assert_eq!(complex_decl.category, DeclarationCategory::Function);
+    assert_eq!(complex_decl.name, "complex_func");
 }
 
 #[test]
 fn test_get_overloads_snapshot_validation() {
     // Test with different snapshot values
-    let type_param = tsp::Type {
-        handle: tsp::TypeHandle::String("snapshot_test".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
-        flags: tsp::TypeFlags::new(),
-        module_name: Some(tsp::ModuleName {
-            leading_dots: 0,
-            name_parts: vec!["test".to_owned()],
-        }),
-        name: "snapshot_func".to_owned(),
-        category_flags: 0,
-        decl: None,
-    };
+    let type_param = Type { alias_name: None, handle: TypeHandle::String("snapshot_test".to_owned()), category: TypeCategory::Overloaded, flags: TypeFlags::new(), module_name: Some(ModuleName { leading_dots: 0, name_parts: vec!["test".to_owned()] }), name: "snapshot_func".to_owned(), category_flags: 0, decl: None };
 
     // Test with zero snapshot
-    let params_zero = tsp::GetOverloadsParams {
-        type_param: type_param.clone(),
-        snapshot: 0,
-    };
+    let params_zero = GetOverloadsParams { type_: type_param.clone(), snapshot: 0 };
 
     // Test with positive snapshot
-    let params_positive = tsp::GetOverloadsParams {
-        type_param: type_param.clone(),
-        snapshot: 12345,
-    };
+    let params_positive = GetOverloadsParams { type_: type_param.clone(), snapshot: 12345 };
 
     // Test with negative snapshot (should be valid in parameter construction)
-    let params_negative = tsp::GetOverloadsParams {
-        type_param: type_param.clone(),
-        snapshot: -1,
-    };
+    let params_negative = GetOverloadsParams { type_: type_param.clone(), snapshot: -1 };
 
     // Verify snapshot values
     assert_eq!(params_zero.snapshot, 0);
@@ -449,21 +280,24 @@ fn test_get_overloads_snapshot_validation() {
 #[test]
 fn test_get_overloads_serialization_deserialization() {
     // Test that parameters can be properly serialized and deserialized
-    let original_params = tsp::GetOverloadsParams {
-        type_param: tsp::Type {
-            handle: tsp::TypeHandle::String("serialization_test".to_owned()),
-            category: tsp::TypeCategory::OVERLOADED,
-            flags: tsp::TypeFlags::new().with_callable(),
-            module_name: Some(tsp::ModuleName {
-                leading_dots: 1,
-                name_parts: vec!["serialization".to_owned(), "test".to_owned()],
-            }),
+    let original_params = GetOverloadsParams {
+        type_: Type {
+            alias_name: None,
+            handle: TypeHandle::String("serialization_test".to_owned()),
+            category: TypeCategory::Overloaded,
+            flags: TypeFlags::new().with_callable(),
+            module_name: Some(ModuleName { leading_dots: 1, name_parts: vec!["serialization".to_owned(), "test".to_owned()] }),
             name: "serializable_func".to_owned(),
             category_flags: 2,
-            decl: Some(serde_json::json!({
-                "kind": "overloaded_function",
-                "overloads": ["(int) -> str", "(str) -> int"]
-            })),
+            decl: Some(Declaration {
+                category: DeclarationCategory::Function,
+                flags: DeclarationFlags::new(),
+                handle: DeclarationHandle::String("decl_handle_serialization_test".to_owned()),
+                module_name: ModuleName { leading_dots: 1, name_parts: vec!["serialization".to_owned(), "test".to_owned()] },
+                name: "serializable_func".to_owned(),
+                node: None,
+                uri: "file:///serialization/test.py".to_owned(),
+            }),
         },
         snapshot: 999,
     };
@@ -472,36 +306,27 @@ fn test_get_overloads_serialization_deserialization() {
     let json_str = serde_json::to_string(&original_params).expect("Failed to serialize");
 
     // Deserialize back from JSON
-    let deserialized_params: tsp::GetOverloadsParams =
+    let deserialized_params: GetOverloadsParams =
         serde_json::from_str(&json_str).expect("Failed to deserialize");
 
     // Verify round-trip serialization
     assert_eq!(deserialized_params.snapshot, original_params.snapshot);
-    assert_eq!(
-        deserialized_params.type_param.name,
-        original_params.type_param.name
-    );
-    assert_eq!(
-        deserialized_params.type_param.category,
-        original_params.type_param.category
-    );
+    assert_eq!(deserialized_params.type_.name, original_params.type_.name);
+    assert_eq!(deserialized_params.type_.category, original_params.type_.category);
     // Note: TypeFlags doesn't implement PartialEq so we can't directly compare
     // but serialization/deserialization should preserve the flag structure
     assert_eq!(
-        deserialized_params.type_param.category_flags,
-        original_params.type_param.category_flags
+    deserialized_params.type_.category_flags,
+    original_params.type_.category_flags
     );
 
-    match (
-        &deserialized_params.type_param.handle,
-        &original_params.type_param.handle,
-    ) {
-        (tsp::TypeHandle::String(d), tsp::TypeHandle::String(o)) => assert_eq!(d, o),
+    match (&deserialized_params.type_.handle, &original_params.type_.handle) {
+        (TypeHandle::String(d), TypeHandle::String(o)) => assert_eq!(d, o),
         _ => panic!("Handle type mismatch"),
     }
 
-    let orig_module = original_params.type_param.module_name.as_ref().unwrap();
-    let deser_module = deserialized_params.type_param.module_name.as_ref().unwrap();
+    let orig_module = original_params.type_.module_name.as_ref().unwrap();
+    let deser_module = deserialized_params.type_.module_name.as_ref().unwrap();
     assert_eq!(deser_module.leading_dots, orig_module.leading_dots);
     assert_eq!(deser_module.name_parts, orig_module.name_parts);
 }

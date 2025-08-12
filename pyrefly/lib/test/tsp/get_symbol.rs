@@ -21,10 +21,16 @@ my_function()
 
     let params = tsp::GetSymbolParams {
         node: tsp::Node {
-            uri: uri.clone(),
-            range: lsp_types::Range {
-                start: position,
-                end: position,
+            uri: uri.to_string(),
+            range: tsp::Range {
+                start: tsp::Position {
+                    line: position.line,
+                    character: position.character,
+                },
+                end: tsp::Position {
+                    line: position.line,
+                    character: position.character,
+                },
             },
         },
         name: None,
@@ -55,16 +61,10 @@ fn test_extract_symbol_name_with_provided_name() {
     let module_info = transaction.get_module_info(handle).unwrap();
 
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: lsp_types::Range {
-            start: lsp_types::Position {
-                line: 0,
-                character: 4,
-            },
-            end: lsp_types::Position {
-                line: 0,
-                character: 15,
-            },
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 4 },
+            end: tsp::Position { line: 0, character: 15 },
         },
     };
 
@@ -88,16 +88,10 @@ fn test_extract_symbol_name_from_node_range() {
     let module_info = transaction.get_module_info(handle).unwrap();
 
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: lsp_types::Range {
-            start: lsp_types::Position {
-                line: 0,
-                character: 4,
-            }, // Start of "my_function"
-            end: lsp_types::Position {
-                line: 0,
-                character: 15,
-            }, // End of "my_function"
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 4 }, // Start of "my_function"
+            end: tsp::Position { line: 0, character: 15 }, // End of "my_function"
         },
     };
 
@@ -121,16 +115,10 @@ y = "hello"
     let module_info = transaction.get_module_info(handle).unwrap();
 
     let node = tsp::Node {
-        uri: lsp_types::Url::parse("file:///test.py").unwrap(),
-        range: lsp_types::Range {
-            start: lsp_types::Position {
-                line: 0,
-                character: 0,
-            }, // Start of "x"
-            end: lsp_types::Position {
-                line: 0,
-                character: 1,
-            }, // End of "x"
+        uri: "file:///test.py".to_string(),
+        range: tsp::Range {
+            start: tsp::Position { line: 0, character: 0 }, // Start of "x"
+            end: tsp::Position { line: 0, character: 1 },   // End of "x"
         },
     };
 

@@ -233,45 +233,45 @@ impl<'de> Deserialize<'de> for TypeCategory {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct TypeFlags(pub i32);
 impl TypeFlags {
-    pub const None: TypeFlags = TypeFlags(0);
-    pub const Instantiable: TypeFlags = TypeFlags(1);
-    pub const Instance: TypeFlags = TypeFlags(2);
-    pub const Callable: TypeFlags = TypeFlags(4);
-    pub const Literal: TypeFlags = TypeFlags(8);
-    pub const Interface: TypeFlags = TypeFlags(16);
-    pub const Generic: TypeFlags = TypeFlags(32);
-    pub const FromAlias: TypeFlags = TypeFlags(64);
+    pub const NONE: TypeFlags = TypeFlags(0);
+    pub const INSTANTIABLE: TypeFlags = TypeFlags(1);
+    pub const INSTANCE: TypeFlags = TypeFlags(2);
+    pub const CALLABLE: TypeFlags = TypeFlags(4);
+    pub const LITERAL: TypeFlags = TypeFlags(8);
+    pub const INTERFACE: TypeFlags = TypeFlags(16);
+    pub const GENERIC: TypeFlags = TypeFlags(32);
+    pub const FROM_ALIAS: TypeFlags = TypeFlags(64);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
     pub fn with_instantiable(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Instantiable.0)
+        TypeFlags(self.0 | TypeFlags::INSTANTIABLE.0)
     }
     #[inline]
     pub fn with_instance(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Instance.0)
+        TypeFlags(self.0 | TypeFlags::INSTANCE.0)
     }
     #[inline]
     pub fn with_callable(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Callable.0)
+        TypeFlags(self.0 | TypeFlags::CALLABLE.0)
     }
     #[inline]
     pub fn with_literal(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Literal.0)
+        TypeFlags(self.0 | TypeFlags::LITERAL.0)
     }
     #[inline]
     pub fn with_interface(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Interface.0)
+        TypeFlags(self.0 | TypeFlags::INTERFACE.0)
     }
     #[inline]
     pub fn with_generic(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::Generic.0)
+        TypeFlags(self.0 | TypeFlags::GENERIC.0)
     }
     #[inline]
-    pub fn with_fromAlias(self) -> Self {
-        TypeFlags(self.0 | TypeFlags::FromAlias.0)
+    pub fn with_from_alias(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::FROM_ALIAS.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -279,20 +279,20 @@ impl TypeFlags {
     }
 }
 impl Serialize for TypeFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(TypeFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(TypeFlags(v))
     }
 }
 impl std::ops::BitOr for TypeFlags {
@@ -317,30 +317,30 @@ impl std::ops::BitAnd for TypeFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct FunctionFlags(pub i32);
 impl FunctionFlags {
-    pub const None: FunctionFlags = FunctionFlags(0);
-    pub const Async: FunctionFlags = FunctionFlags(1);
-    pub const Generator: FunctionFlags = FunctionFlags(2);
-    pub const Abstract: FunctionFlags = FunctionFlags(4);
-    pub const Static: FunctionFlags = FunctionFlags(8);
+    pub const NONE: FunctionFlags = FunctionFlags(0);
+    pub const ASYNC: FunctionFlags = FunctionFlags(1);
+    pub const GENERATOR: FunctionFlags = FunctionFlags(2);
+    pub const ABSTRACT: FunctionFlags = FunctionFlags(4);
+    pub const STATIC: FunctionFlags = FunctionFlags(8);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
     pub fn with_async(self) -> Self {
-        FunctionFlags(self.0 | FunctionFlags::Async.0)
+        FunctionFlags(self.0 | FunctionFlags::ASYNC.0)
     }
     #[inline]
     pub fn with_generator(self) -> Self {
-        FunctionFlags(self.0 | FunctionFlags::Generator.0)
+        FunctionFlags(self.0 | FunctionFlags::GENERATOR.0)
     }
     #[inline]
     pub fn with_abstract(self) -> Self {
-        FunctionFlags(self.0 | FunctionFlags::Abstract.0)
+        FunctionFlags(self.0 | FunctionFlags::ABSTRACT.0)
     }
     #[inline]
     pub fn with_static(self) -> Self {
-        FunctionFlags(self.0 | FunctionFlags::Static.0)
+        FunctionFlags(self.0 | FunctionFlags::STATIC.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -348,20 +348,20 @@ impl FunctionFlags {
     }
 }
 impl Serialize for FunctionFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for FunctionFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(FunctionFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(FunctionFlags(v))
     }
 }
 impl std::ops::BitOr for FunctionFlags {
@@ -386,20 +386,20 @@ impl std::ops::BitAnd for FunctionFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct ClassFlags(pub i32);
 impl ClassFlags {
-    pub const None: ClassFlags = ClassFlags(0);
-    pub const Enum: ClassFlags = ClassFlags(1);
-    pub const TypedDict: ClassFlags = ClassFlags(2);
+    pub const NONE: ClassFlags = ClassFlags(0);
+    pub const ENUM: ClassFlags = ClassFlags(1);
+    pub const TYPED_DICT: ClassFlags = ClassFlags(2);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
     pub fn with_enum(self) -> Self {
-        ClassFlags(self.0 | ClassFlags::Enum.0)
+        ClassFlags(self.0 | ClassFlags::ENUM.0)
     }
     #[inline]
-    pub fn with_typedDict(self) -> Self {
-        ClassFlags(self.0 | ClassFlags::TypedDict.0)
+    pub fn with_typed_dict(self) -> Self {
+        ClassFlags(self.0 | ClassFlags::TYPED_DICT.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -407,20 +407,20 @@ impl ClassFlags {
     }
 }
 impl Serialize for ClassFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for ClassFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(ClassFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(ClassFlags(v))
     }
 }
 impl std::ops::BitOr for ClassFlags {
@@ -445,15 +445,15 @@ impl std::ops::BitAnd for ClassFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct TypeVarFlags(pub i32);
 impl TypeVarFlags {
-    pub const None: TypeVarFlags = TypeVarFlags(0);
-    pub const IsParamSpec: TypeVarFlags = TypeVarFlags(1);
+    pub const NONE: TypeVarFlags = TypeVarFlags(0);
+    pub const IS_PARAM_SPEC: TypeVarFlags = TypeVarFlags(1);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
-    pub fn with_isParamSpec(self) -> Self {
-        TypeVarFlags(self.0 | TypeVarFlags::IsParamSpec.0)
+    pub fn with_is_param_spec(self) -> Self {
+        TypeVarFlags(self.0 | TypeVarFlags::IS_PARAM_SPEC.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -461,20 +461,20 @@ impl TypeVarFlags {
     }
 }
 impl Serialize for TypeVarFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeVarFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(TypeVarFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(TypeVarFlags(v))
     }
 }
 impl std::ops::BitOr for TypeVarFlags {
@@ -499,20 +499,20 @@ impl std::ops::BitAnd for TypeVarFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct AttributeFlags(pub i32);
 impl AttributeFlags {
-    pub const None: AttributeFlags = AttributeFlags(0);
-    pub const IsArgsList: AttributeFlags = AttributeFlags(1);
-    pub const IsKwargsDict: AttributeFlags = AttributeFlags(2);
+    pub const NONE: AttributeFlags = AttributeFlags(0);
+    pub const IS_ARGS_LIST: AttributeFlags = AttributeFlags(1);
+    pub const IS_KWARGS_DICT: AttributeFlags = AttributeFlags(2);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
-    pub fn with_isArgsList(self) -> Self {
-        AttributeFlags(self.0 | AttributeFlags::IsArgsList.0)
+    pub fn with_is_args_list(self) -> Self {
+        AttributeFlags(self.0 | AttributeFlags::IS_ARGS_LIST.0)
     }
     #[inline]
-    pub fn with_isKwargsDict(self) -> Self {
-        AttributeFlags(self.0 | AttributeFlags::IsKwargsDict.0)
+    pub fn with_is_kwargs_dict(self) -> Self {
+        AttributeFlags(self.0 | AttributeFlags::IS_KWARGS_DICT.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -520,20 +520,20 @@ impl AttributeFlags {
     }
 }
 impl Serialize for AttributeFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for AttributeFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(AttributeFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(AttributeFlags(v))
     }
 }
 impl std::ops::BitOr for AttributeFlags {
@@ -558,30 +558,30 @@ impl std::ops::BitAnd for AttributeFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct AttributeAccessFlags(pub i32);
 impl AttributeAccessFlags {
-    pub const None: AttributeAccessFlags = AttributeAccessFlags(0);
-    pub const SkipInstanceAttributes: AttributeAccessFlags = AttributeAccessFlags(1);
-    pub const SkipTypeBaseClass: AttributeAccessFlags = AttributeAccessFlags(2);
-    pub const SkipAttributeAccessOverrides: AttributeAccessFlags = AttributeAccessFlags(4);
-    pub const GetBoundAttributes: AttributeAccessFlags = AttributeAccessFlags(8);
+    pub const NONE: AttributeAccessFlags = AttributeAccessFlags(0);
+    pub const SKIP_INSTANCE_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(1);
+    pub const SKIP_TYPE_BASE_CLASS: AttributeAccessFlags = AttributeAccessFlags(2);
+    pub const SKIP_ATTRIBUTE_ACCESS_OVERRIDES: AttributeAccessFlags = AttributeAccessFlags(4);
+    pub const GET_BOUND_ATTRIBUTES: AttributeAccessFlags = AttributeAccessFlags(8);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
-    pub fn with_skipInstanceAttributes(self) -> Self {
-        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipInstanceAttributes.0)
+    pub fn with_skip_instance_attributes(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES.0)
     }
     #[inline]
-    pub fn with_skipTypeBaseClass(self) -> Self {
-        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipTypeBaseClass.0)
+    pub fn with_skip_type_base_class(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SKIP_TYPE_BASE_CLASS.0)
     }
     #[inline]
-    pub fn with_skipAttributeAccessOverrides(self) -> Self {
-        AttributeAccessFlags(self.0 | AttributeAccessFlags::SkipAttributeAccessOverrides.0)
+    pub fn with_skip_attribute_access_overrides(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::SKIP_ATTRIBUTE_ACCESS_OVERRIDES.0)
     }
     #[inline]
-    pub fn with_getBoundAttributes(self) -> Self {
-        AttributeAccessFlags(self.0 | AttributeAccessFlags::GetBoundAttributes.0)
+    pub fn with_get_bound_attributes(self) -> Self {
+        AttributeAccessFlags(self.0 | AttributeAccessFlags::GET_BOUND_ATTRIBUTES.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -589,20 +589,20 @@ impl AttributeAccessFlags {
     }
 }
 impl Serialize for AttributeAccessFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for AttributeAccessFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(AttributeAccessFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(AttributeAccessFlags(v))
     }
 }
 impl std::ops::BitOr for AttributeAccessFlags {
@@ -691,40 +691,40 @@ impl<'de> Deserialize<'de> for DeclarationCategory {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct DeclarationFlags(pub i32);
 impl DeclarationFlags {
-    pub const None: DeclarationFlags = DeclarationFlags(0);
-    pub const ClassMember: DeclarationFlags = DeclarationFlags(1);
-    pub const Constant: DeclarationFlags = DeclarationFlags(2);
-    pub const Final: DeclarationFlags = DeclarationFlags(4);
-    pub const IsDefinedBySlots: DeclarationFlags = DeclarationFlags(8);
-    pub const UsesLocalName: DeclarationFlags = DeclarationFlags(16);
-    pub const UnresolvedImport: DeclarationFlags = DeclarationFlags(32);
+    pub const NONE: DeclarationFlags = DeclarationFlags(0);
+    pub const CLASS_MEMBER: DeclarationFlags = DeclarationFlags(1);
+    pub const CONSTANT: DeclarationFlags = DeclarationFlags(2);
+    pub const FINAL: DeclarationFlags = DeclarationFlags(4);
+    pub const IS_DEFINED_BY_SLOTS: DeclarationFlags = DeclarationFlags(8);
+    pub const USES_LOCAL_NAME: DeclarationFlags = DeclarationFlags(16);
+    pub const UNRESOLVED_IMPORT: DeclarationFlags = DeclarationFlags(32);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
-    pub fn with_classMember(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::ClassMember.0)
+    pub fn with_class_member(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::CLASS_MEMBER.0)
     }
     #[inline]
     pub fn with_constant(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::Constant.0)
+        DeclarationFlags(self.0 | DeclarationFlags::CONSTANT.0)
     }
     #[inline]
     pub fn with_final(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::Final.0)
+        DeclarationFlags(self.0 | DeclarationFlags::FINAL.0)
     }
     #[inline]
-    pub fn with_isDefinedBySlots(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::IsDefinedBySlots.0)
+    pub fn with_is_defined_by_slots(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::IS_DEFINED_BY_SLOTS.0)
     }
     #[inline]
-    pub fn with_usesLocalName(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::UsesLocalName.0)
+    pub fn with_uses_local_name(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::USES_LOCAL_NAME.0)
     }
     #[inline]
-    pub fn with_unresolvedImport(self) -> Self {
-        DeclarationFlags(self.0 | DeclarationFlags::UnresolvedImport.0)
+    pub fn with_unresolved_import(self) -> Self {
+        DeclarationFlags(self.0 | DeclarationFlags::UNRESOLVED_IMPORT.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -732,20 +732,20 @@ impl DeclarationFlags {
     }
 }
 impl Serialize for DeclarationFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for DeclarationFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(DeclarationFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(DeclarationFlags(v))
     }
 }
 impl std::ops::BitOr for DeclarationFlags {
@@ -770,25 +770,25 @@ impl std::ops::BitAnd for DeclarationFlags {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct TypeReprFlags(pub i32);
 impl TypeReprFlags {
-    pub const None: TypeReprFlags = TypeReprFlags(0);
-    pub const ExpandTypeAliases: TypeReprFlags = TypeReprFlags(1);
-    pub const PrintTypeVarVariance: TypeReprFlags = TypeReprFlags(2);
-    pub const ConvertToInstanceType: TypeReprFlags = TypeReprFlags(4);
+    pub const NONE: TypeReprFlags = TypeReprFlags(0);
+    pub const EXPAND_TYPE_ALIASES: TypeReprFlags = TypeReprFlags(1);
+    pub const PRINT_TYPE_VAR_VARIANCE: TypeReprFlags = TypeReprFlags(2);
+    pub const CONVERT_TO_INSTANCE_TYPE: TypeReprFlags = TypeReprFlags(4);
     #[inline]
     pub fn new() -> Self {
-        Self::None
+        Self::NONE
     }
     #[inline]
-    pub fn with_expandTypeAliases(self) -> Self {
-        TypeReprFlags(self.0 | TypeReprFlags::ExpandTypeAliases.0)
+    pub fn with_expand_type_aliases(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::EXPAND_TYPE_ALIASES.0)
     }
     #[inline]
-    pub fn with_printTypeVarVariance(self) -> Self {
-        TypeReprFlags(self.0 | TypeReprFlags::PrintTypeVarVariance.0)
+    pub fn with_print_type_var_variance(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::PRINT_TYPE_VAR_VARIANCE.0)
     }
     #[inline]
-    pub fn with_convertToInstanceType(self) -> Self {
-        TypeReprFlags(self.0 | TypeReprFlags::ConvertToInstanceType.0)
+    pub fn with_convert_to_instance_type(self) -> Self {
+        TypeReprFlags(self.0 | TypeReprFlags::CONVERT_TO_INSTANCE_TYPE.0)
     }
     #[inline]
     pub fn contains(self, other: Self) -> bool {
@@ -796,20 +796,20 @@ impl TypeReprFlags {
     }
 }
 impl Serialize for TypeReprFlags {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        serializer.serialize_i32(self.0)
+        s.serialize_i32(self.0)
     }
 }
 impl<'de> Deserialize<'de> for TypeReprFlags {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = i32::deserialize(deserializer)?;
-        Ok(TypeReprFlags(value))
+        let v = i32::deserialize(d)?;
+        Ok(TypeReprFlags(v))
     }
 }
 impl std::ops::BitOr for TypeReprFlags {
@@ -2206,10 +2206,9 @@ pub struct GetPythonSearchPathsResponse {
     pub result: Option<Vec<String>>,
 }
 
-// Type Server Protocol Constants
+// Type Server Protocol Constants (idiomatic Rust)
 
 /// The version of the Type Server Protocol
-pub const TypeServerVersion: &str = "0.1.0";
-
+pub const TYPE_SERVER_VERSION: &str = "0.1.0";
 /// Represents an invalid handle value
-pub const InvalidHandle: i32 = -1;
+pub const INVALID_HANDLE: i32 = -1;

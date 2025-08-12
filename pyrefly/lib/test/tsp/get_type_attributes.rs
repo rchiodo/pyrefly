@@ -21,23 +21,24 @@ fn test_get_type_attributes_params_construction() {
     // Test creating GetTypeAttributesParams with valid data
     let handle = TypeHandle::String("test_handle_123".to_owned());
     let test_type = Type {
-        category: TypeCategory::CLASS,
+        category: TypeCategory::Class,
         name: "TestClass".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new(),
         category_flags: 0,
         decl: None,
         module_name: None,
+        alias_name: None,
     };
 
     let params = GetTypeAttributesParams {
         snapshot: 42,
-        type_param: test_type.clone(),
+        type_: test_type.clone(),
     };
 
     assert_eq!(params.snapshot, 42);
-    assert_eq!(params.type_param.name, "TestClass");
-    assert_eq!(params.type_param.category, TypeCategory::CLASS);
+    assert_eq!(params.type_.name, "TestClass");
+    assert_eq!(params.type_.category, TypeCategory::Class);
     // Note: handle comparison skipped as TypeHandle doesn't implement PartialEq
 }
 
@@ -46,7 +47,7 @@ fn test_get_type_attributes_params_serialization() {
     // Test JSON serialization/deserialization of GetTypeAttributesParams
     let handle = TypeHandle::String("handle_456".to_owned());
     let test_type = Type {
-        category: TypeCategory::FUNCTION,
+        category: TypeCategory::Function,
         name: "test_function".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new().with_callable(),
@@ -56,11 +57,12 @@ fn test_get_type_attributes_params_serialization() {
             leading_dots: 0,
             name_parts: vec!["test_module".to_owned()],
         }),
+        alias_name: None,
     };
 
     let original_params = GetTypeAttributesParams {
         snapshot: 123,
-        type_param: test_type,
+        type_: test_type,
     };
 
     // Serialize to JSON and back
@@ -69,19 +71,10 @@ fn test_get_type_attributes_params_serialization() {
         serde_json::from_str(&json).expect("Should deserialize");
 
     assert_eq!(deserialized.snapshot, original_params.snapshot);
-    assert_eq!(
-        deserialized.type_param.name,
-        original_params.type_param.name
-    );
-    assert_eq!(
-        deserialized.type_param.category,
-        original_params.type_param.category
-    );
+    assert_eq!(deserialized.type_.name, original_params.type_.name);
+    assert_eq!(deserialized.type_.category, original_params.type_.category);
     // Note: handle, flags, and module_name comparisons skipped as they don't implement PartialEq
-    assert_eq!(
-        deserialized.type_param.category_flags,
-        original_params.type_param.category_flags
-    );
+    assert_eq!(deserialized.type_.category_flags, original_params.type_.category_flags);
 }
 
 #[test]
@@ -89,7 +82,7 @@ fn test_get_type_attributes_params_json_format() {
     // Test that JSON format matches expected TSP structure
     let handle = TypeHandle::String("json_test_handle".to_owned());
     let test_type = Type {
-        category: TypeCategory::CLASS,
+        category: TypeCategory::Class,
         name: "JsonTestClass".to_owned(),
         handle,
         flags: TypeFlags::new().with_instantiable(),
@@ -99,11 +92,12 @@ fn test_get_type_attributes_params_json_format() {
             leading_dots: 0,
             name_parts: vec!["json_module".to_owned()],
         }),
+        alias_name: None,
     };
 
     let params = GetTypeAttributesParams {
         snapshot: 789,
-        type_param: test_type,
+        type_: test_type,
     };
 
     let json = serde_json::to_value(&params).expect("Should serialize to JSON");
@@ -126,7 +120,7 @@ fn test_get_type_attributes_params_function_type() {
     // Test GetTypeAttributesParams with function type to verify our enhancement
     let handle = TypeHandle::String("function_handle_123".to_owned());
     let function_type = Type {
-        category: TypeCategory::FUNCTION,
+        category: TypeCategory::Function,
         name: "test_function".to_owned(),
         handle: handle.clone(),
         flags: TypeFlags::new().with_callable(),
@@ -136,16 +130,17 @@ fn test_get_type_attributes_params_function_type() {
             leading_dots: 0,
             name_parts: vec!["test_module".to_owned()],
         }),
+        alias_name: None,
     };
 
     let params = GetTypeAttributesParams {
         snapshot: 100,
-        type_param: function_type.clone(),
+        type_: function_type.clone(),
     };
 
     assert_eq!(params.snapshot, 100);
-    assert_eq!(params.type_param.name, "test_function");
-    assert_eq!(params.type_param.category, TypeCategory::FUNCTION);
+    assert_eq!(params.type_.name, "test_function");
+    assert_eq!(params.type_.category, TypeCategory::Function);
 
     // Test serialization for function type
     let json = serde_json::to_string(&params).expect("Should serialize function type params");
@@ -153,32 +148,33 @@ fn test_get_type_attributes_params_function_type() {
         serde_json::from_str(&json).expect("Should deserialize function type params");
 
     assert_eq!(deserialized.snapshot, params.snapshot);
-    assert_eq!(deserialized.type_param.name, params.type_param.name);
-    assert_eq!(deserialized.type_param.category, TypeCategory::FUNCTION);
+    assert_eq!(deserialized.type_.name, params.type_.name);
+    assert_eq!(deserialized.type_.category, TypeCategory::Function);
 }
 
 #[test]
 fn test_get_type_attributes_params_callable_type() {
     // Test GetTypeAttributesParams with callable type (also maps to FUNCTION category)
-    let handle = TypeHandle::Integer(999);
+    let handle = TypeHandle::Int(999);
     let callable_type = Type {
-        category: TypeCategory::FUNCTION, // Callable types use FUNCTION category
+        category: TypeCategory::Function, // Callable types use Function category
         name: "Callable[[int, str], bool]".to_owned(),
         handle,
         flags: TypeFlags::new().with_callable(),
         category_flags: 0,
         decl: None,
         module_name: None,
+        alias_name: None,
     };
 
     let params = GetTypeAttributesParams {
         snapshot: 200,
-        type_param: callable_type.clone(),
+        type_: callable_type.clone(),
     };
 
     assert_eq!(params.snapshot, 200);
-    assert_eq!(params.type_param.name, "Callable[[int, str], bool]");
-    assert_eq!(params.type_param.category, TypeCategory::FUNCTION);
+    assert_eq!(params.type_.name, "Callable[[int, str], bool]");
+    assert_eq!(params.type_.category, TypeCategory::Function);
 
     // Test JSON round-trip for callable type
     let json_value = serde_json::to_value(&params).expect("Should serialize callable type params");
@@ -187,6 +183,6 @@ fn test_get_type_attributes_params_callable_type() {
         serde_json::from_str(&json_str).expect("Should deserialize callable type params");
 
     assert_eq!(deserialized.snapshot, params.snapshot);
-    assert_eq!(deserialized.type_param.name, params.type_param.name);
-    assert_eq!(deserialized.type_param.category, TypeCategory::FUNCTION);
+    assert_eq!(deserialized.type_.name, params.type_.name);
+    assert_eq!(deserialized.type_.category, TypeCategory::Function);
 }

@@ -7,28 +7,21 @@
 
 //! Tests for the getDiagnostics TSP request handler
 
-use lsp_types::Url;
 use serde_json;
 
 use crate::tsp;
 
 #[test]
 fn test_get_diagnostics_params_construction() {
-    let params = tsp::GetDiagnosticsParams {
-        uri: Url::parse("file:///test.py").expect("Failed to create test URL"),
-        snapshot: 1,
-    };
+    let params = tsp::GetDiagnosticsParams { uri: "file:///test.py".to_owned(), snapshot: 1 };
 
-    assert_eq!(params.uri.as_str(), "file:///test.py");
+    assert_eq!(params.uri, "file:///test.py");
     assert_eq!(params.snapshot, 1);
 }
 
 #[test]
 fn test_get_diagnostics_params_serialization() {
-    let params = tsp::GetDiagnosticsParams {
-        uri: Url::parse("file:///test.py").expect("Failed to create test URL"),
-        snapshot: 1,
-    };
+    let params = tsp::GetDiagnosticsParams { uri: "file:///test.py".to_owned(), snapshot: 1 };
 
     let serialized = serde_json::to_string(&params).expect("Failed to serialize params");
     let expected = r#"{"uri":"file:///test.py","snapshot":1}"#;

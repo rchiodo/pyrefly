@@ -8,12 +8,9 @@
 //! Tests for TSP getFunctionParts request parameter construction
 
 use super::util::build_tsp_test_server;
-use crate::tsp::GetFunctionPartsParams;
-use crate::tsp::Type;
-use crate::tsp::TypeCategory;
-use crate::tsp::TypeFlags;
-use crate::tsp::TypeHandle;
-use crate::tsp::TypeReprFlags;
+use crate::tsp::protocol::{
+    GetFunctionPartsParams, Type, TypeCategory, TypeFlags, TypeHandle, TypeReprFlags,
+};
 
 #[test]
 fn test_get_function_parts_params_construction() {
@@ -21,10 +18,11 @@ fn test_get_function_parts_params_construction() {
     let (_handle, _uri, _state) = build_tsp_test_server();
 
     // Test basic parameter construction
-    let type_handle = TypeHandle::Integer(42);
+    let type_handle = TypeHandle::Int(42);
     let tsp_type = Type {
+        alias_name: None,
         handle: type_handle.clone(),
-        category: TypeCategory::FUNCTION,
+        category: TypeCategory::Function,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
         name: "test_function".to_owned(),
@@ -33,28 +31,28 @@ fn test_get_function_parts_params_construction() {
     };
 
     let params = GetFunctionPartsParams {
-        type_param: tsp_type.clone(),
+        type_: tsp_type.clone(),
         flags: TypeReprFlags::NONE,
         snapshot: 123,
     };
 
     // Verify parameter construction
-    if let TypeHandle::Integer(handle_value) = &params.type_param.handle {
+    if let TypeHandle::Int(handle_value) = &params.type_.handle {
         assert_eq!(*handle_value, 42);
     } else {
         panic!("Expected integer type handle");
     }
     assert_eq!(params.snapshot, 123);
-    assert_eq!(params.type_param.name, "test_function");
+    assert_eq!(params.type_.name, "test_function");
 
     // Test with different flags
     let params_with_flags = GetFunctionPartsParams {
-        type_param: tsp_type.clone(),
+        type_: tsp_type.clone(),
         flags: TypeReprFlags::EXPAND_TYPE_ALIASES,
         snapshot: 456,
     };
 
-    if let TypeHandle::Integer(handle_value) = &params_with_flags.type_param.handle {
+    if let TypeHandle::Int(handle_value) = &params_with_flags.type_.handle {
         assert_eq!(*handle_value, 42);
     } else {
         panic!("Expected integer type handle");
@@ -65,7 +63,7 @@ fn test_get_function_parts_params_construction() {
     // Test parameter serialization/deserialization
     let json_str = serde_json::to_string(&params).unwrap();
     let deserialized: GetFunctionPartsParams = serde_json::from_str(&json_str).unwrap();
-    assert_eq!(deserialized.type_param.name, params.type_param.name);
+    assert_eq!(deserialized.type_.name, params.type_.name);
     assert_eq!(deserialized.snapshot, params.snapshot);
 }
 
@@ -76,8 +74,9 @@ fn test_get_function_parts_params_with_different_types() {
 
     // Test parameter construction for different function types
     let type1 = Type {
-        handle: TypeHandle::Integer(100),
-        category: TypeCategory::FUNCTION,
+        alias_name: None,
+        handle: TypeHandle::Int(100),
+        category: TypeCategory::Function,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
         name: "simple_func".to_owned(),
@@ -86,8 +85,9 @@ fn test_get_function_parts_params_with_different_types() {
     };
 
     let type2 = Type {
+        alias_name: None,
         handle: TypeHandle::String("async_func_handle".to_owned()),
-        category: TypeCategory::FUNCTION,
+        category: TypeCategory::Function,
         flags: TypeFlags::new().with_callable().with_instance(),
         module_name: None,
         name: "async_func".to_owned(),
@@ -96,8 +96,9 @@ fn test_get_function_parts_params_with_different_types() {
     };
 
     let type3 = Type {
-        handle: TypeHandle::Integer(300),
-        category: TypeCategory::OVERLOADED,
+        alias_name: None,
+        handle: TypeHandle::Int(300),
+        category: TypeCategory::Overloaded,
         flags: TypeFlags::new().with_callable(),
         module_name: None,
         name: "overloaded_func".to_owned(),
@@ -106,27 +107,27 @@ fn test_get_function_parts_params_with_different_types() {
     };
 
     let params1 = GetFunctionPartsParams {
-        type_param: type1,
+        type_: type1,
         flags: TypeReprFlags::NONE,
         snapshot: 1,
     };
 
     let params2 = GetFunctionPartsParams {
-        type_param: type2,
+        type_: type2,
         flags: TypeReprFlags::CONVERT_TO_INSTANCE_TYPE,
         snapshot: 2,
     };
 
     let params3 = GetFunctionPartsParams {
-        type_param: type3,
+        type_: type3,
         flags: TypeReprFlags::PRINT_TYPE_VAR_VARIANCE,
         snapshot: 3,
     };
 
     // Verify each parameter set is distinct
-    assert_eq!(params1.type_param.name, "simple_func");
-    assert_eq!(params2.type_param.name, "async_func");
-    assert_eq!(params3.type_param.name, "overloaded_func");
+    assert_eq!(params1.type_.name, "simple_func");
+    assert_eq!(params2.type_.name, "async_func");
+    assert_eq!(params3.type_.name, "overloaded_func");
 
     assert_eq!(params1.snapshot, 1);
     assert_eq!(params2.snapshot, 2);

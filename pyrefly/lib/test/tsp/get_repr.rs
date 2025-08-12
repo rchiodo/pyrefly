@@ -15,14 +15,15 @@ print(x)
     let _position = extract_cursor_location(content, &uri);
 
     let params = tsp::GetReprParams {
-        type_param: tsp::Type {
+        type_: tsp::Type {
             handle: tsp::TypeHandle::String("test".to_owned()),
-            category: tsp::TypeCategory::ANY,
+            category: tsp::TypeCategory::Any,
             flags: tsp::TypeFlags::new(),
             module_name: None,
             name: "str".to_owned(),
             category_flags: 0,
             decl: None,
+            alias_name: None,
         },
         flags: tsp::TypeReprFlags::NONE,
         snapshot: 1,

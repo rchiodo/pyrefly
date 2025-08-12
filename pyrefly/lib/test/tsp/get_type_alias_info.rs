@@ -25,10 +25,11 @@ fn test_get_type_alias_info_params_construction() {
     let (_handle, _uri, _state) = build_tsp_test_server();
 
     // Test basic parameter construction
-    let type_handle = TypeHandle::Integer(42);
+    let type_handle = TypeHandle::Int(42);
     let tsp_type = Type {
+        alias_name: None,
         handle: type_handle.clone(),
-        category: TypeCategory::CLASS,
+        category: TypeCategory::Class,
         flags: TypeFlags::new().with_from_alias(), // Use FROM_ALIAS flag to indicate type alias
         module_name: None,
         name: "MyTypeAlias".to_owned(),
@@ -37,22 +38,22 @@ fn test_get_type_alias_info_params_construction() {
     };
 
     let params = GetTypeAliasInfoParams {
-        type_param: tsp_type.clone(),
+        type_: tsp_type.clone(),
         snapshot: 123,
     };
 
     // Verify parameter construction
-    if let TypeHandle::Integer(handle_value) = &params.type_param.handle {
+    if let TypeHandle::Int(handle_value) = &params.type_.handle {
         assert_eq!(*handle_value, 42);
     } else {
         panic!("Expected integer type handle");
     }
     assert_eq!(params.snapshot, 123);
-    assert_eq!(params.type_param.name, "MyTypeAlias");
+    assert_eq!(params.type_.name, "MyTypeAlias");
 
     // Note: We can't directly test the FROM_ALIAS flag due to private fields,
     // but we can verify the type was constructed correctly
-    assert_eq!(params.type_param.category, TypeCategory::CLASS);
+    assert_eq!(params.type_.category, TypeCategory::Class);
 }
 
 #[test]
@@ -62,8 +63,9 @@ fn test_get_type_alias_info_params_different_handles() {
 
     // Test with string handle
     let string_type = Type {
+        alias_name: None,
         handle: TypeHandle::String("alias_handle".to_owned()),
-        category: TypeCategory::CLASS,
+        category: TypeCategory::Class,
         flags: TypeFlags::new().with_from_alias(),
         module_name: Some(ModuleName {
             leading_dots: 0,
@@ -75,13 +77,13 @@ fn test_get_type_alias_info_params_different_handles() {
     };
 
     let params = GetTypeAliasInfoParams {
-        type_param: string_type,
+        type_: string_type,
         snapshot: 456,
     };
 
     assert_eq!(params.snapshot, 456);
-    assert_eq!(params.type_param.name, "List[str]");
-    if let Some(module_name) = &params.type_param.module_name {
+    assert_eq!(params.type_.name, "List[str]");
+    if let Some(module_name) = &params.type_.module_name {
         assert_eq!(module_name.name_parts, vec!["typing"]);
         assert_eq!(module_name.leading_dots, 0);
     }
@@ -91,8 +93,9 @@ fn test_get_type_alias_info_params_different_handles() {
 fn test_type_alias_info_creation() {
     // Test TypeAliasInfo struct creation and validation
     let str_type = Type {
-        handle: TypeHandle::Integer(1),
-        category: TypeCategory::CLASS,
+        alias_name: None,
+        handle: TypeHandle::Int(1),
+        category: TypeCategory::Class,
         flags: TypeFlags::new(),
         module_name: None,
         name: "str".to_owned(),
@@ -126,8 +129,9 @@ fn test_type_alias_info_no_type_arguments() {
 fn test_type_alias_info_multiple_type_arguments() {
     // Test TypeAliasInfo with multiple type arguments
     let str_type = Type {
-        handle: TypeHandle::Integer(1),
-        category: TypeCategory::CLASS,
+        alias_name: None,
+        handle: TypeHandle::Int(1),
+        category: TypeCategory::Class,
         flags: TypeFlags::new(),
         module_name: None,
         name: "str".to_owned(),
@@ -136,8 +140,9 @@ fn test_type_alias_info_multiple_type_arguments() {
     };
 
     let int_type = Type {
-        handle: TypeHandle::Integer(2),
-        category: TypeCategory::CLASS,
+        alias_name: None,
+        handle: TypeHandle::Int(2),
+        category: TypeCategory::Class,
         flags: TypeFlags::new(),
         module_name: None,
         name: "int".to_owned(),
@@ -165,8 +170,9 @@ fn test_params_serialization_structure() {
 
     let type_handle = TypeHandle::String("test_handle".to_owned());
     let tsp_type = Type {
+        alias_name: None,
         handle: type_handle,
-        category: TypeCategory::CLASS,
+        category: TypeCategory::Class,
         flags: TypeFlags::new().with_from_alias(),
         module_name: None,
         name: "TestAlias".to_owned(),
@@ -175,13 +181,13 @@ fn test_params_serialization_structure() {
     };
 
     let params = GetTypeAliasInfoParams {
-        type_param: tsp_type,
+        type_: tsp_type,
         snapshot: 789,
     };
 
     // Basic validation that the structure is correct
     assert_eq!(params.snapshot, 789);
-    assert_eq!(params.type_param.name, "TestAlias");
+    assert_eq!(params.type_.name, "TestAlias");
 
     // Test serialization doesn't panic
     let _serialized = serde_json::to_string(&params).expect("Should serialize");

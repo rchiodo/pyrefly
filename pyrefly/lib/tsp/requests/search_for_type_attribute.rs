@@ -72,7 +72,7 @@ pub fn create_tsp_attribute_from_type(
     type_converter: impl Fn(crate::types::types::Type) -> tsp::Type,
 ) -> tsp::Attribute {
     let tsp_type = type_converter(attribute_type);
-    let flags = tsp::AttributeFlags::None.0;
+    let flags = tsp::AttributeFlags::NONE.0;
     tsp::Attribute {
         name: attribute_name.to_owned(),
         type_: tsp_type,

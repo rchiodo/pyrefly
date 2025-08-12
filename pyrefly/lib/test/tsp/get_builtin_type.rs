@@ -16,9 +16,7 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
-use lsp_types::Position;
-use lsp_types::Range;
-use lsp_types::Url;
+use crate::tsp::protocol::{Position, Range};
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
@@ -34,6 +32,7 @@ fn test_simple_get_builtin_type_verification() {
 fn test_get_builtin_type_params_construction() {
     // Test TSP GetBuiltinType parameter construction like other TSP tests
     let (_handle, uri, state) = build_tsp_test_server();
+    let uri_str = uri.to_string();
     let _transaction = state.transaction();
 
     let position = Position {
@@ -42,13 +41,7 @@ fn test_get_builtin_type_params_construction() {
     };
 
     let params = tsp::GetBuiltinTypeParams {
-        scoping_node: tsp::Node {
-            uri: uri.clone(),
-            range: Range {
-                start: position,
-                end: position,
-            },
-        },
+        scoping_node: tsp::Node { uri: uri_str.clone(), range: Range { start: position.clone(), end: position } },
         name: "int".to_owned(),
         snapshot: 1,
     };
@@ -71,9 +64,9 @@ fn call_tsp_get_builtin_type_handler(
     let uri = &params.scoping_node.uri;
 
     // 2. Get the handle for this URI (simplified mapping for test)
-    let handle = if uri.path().ends_with("main.py") {
+    let handle = if uri.ends_with("main.py") {
         handles.get("main").cloned()
-    } else if uri.path().ends_with("builtin_test.py") {
+    } else if uri.ends_with("builtin_test.py") {
         handles.get("builtin_test").cloned()
     } else {
         None
@@ -181,22 +174,13 @@ z = [1, 2, 3]
     let transaction = state.transaction();
 
     // Create URI for builtin_test.py
-    let uri = Url::parse("file:///builtin_test.py").expect("Failed to create URI");
+    let uri = "file:///builtin_test.py".to_owned();
 
     // Test int builtin type
     let params = tsp::GetBuiltinTypeParams {
         scoping_node: tsp::Node {
             uri: uri.clone(),
-            range: Range {
-                start: Position {
-                    line: 1,
-                    character: 0,
-                },
-                end: Position {
-                    line: 1,
-                    character: 1,
-                },
-            },
+            range: Range { start: Position { line: 1, character: 0 }, end: Position { line: 1, character: 1 } },
         },
         name: "int".to_owned(),
         snapshot: 1, // Use a dummy snapshot number
@@ -239,7 +223,7 @@ x = 42
     let (handles, state) = mk_multi_file_state_assert_no_errors(&files);
     let transaction = state.transaction();
 
-    let uri = Url::parse("file:///builtin_test.py").expect("Failed to create URI");
+    let uri = "file:///builtin_test.py".to_owned();
 
     // Test multiple builtin types by calling our TSP handler implementation
     let test_builtin_types = vec![
@@ -263,16 +247,7 @@ x = 42
         let params = tsp::GetBuiltinTypeParams {
             scoping_node: tsp::Node {
                 uri: uri.clone(),
-                range: Range {
-                    start: Position {
-                        line: 2,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: 2,
-                        character: 1,
-                    },
-                },
+                range: Range { start: Position { line: 2, character: 0 }, end: Position { line: 2, character: 1 } },
             },
             name: type_name.to_owned(),
             snapshot: 1,
