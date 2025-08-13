@@ -8,10 +8,10 @@
 //! Implementation of the getTypeAliasInfo TSP request
 
 use lsp_server::ResponseError;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
 use crate::types::types::Type as PyType;
 
 /// Standalone get_type_alias_info function that can be used independently of the Server

@@ -9,10 +9,10 @@
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
 
 impl Server {
     pub(crate) fn get_diagnostics_version(

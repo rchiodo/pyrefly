@@ -13,12 +13,12 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::types::TArgs;
 use pyrefly_types::types::Type;
 use ruff_python_ast::name::Name;
+use tsp_types::snapshot_outdated_error;
+use tsp_types::{self as tsp};
 
 use crate::lsp::server::Server;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::snapshot_outdated_error;
 use crate::types::class::ClassType;
 
 /// Standalone get_builtin_type function that can be used independently of the Server

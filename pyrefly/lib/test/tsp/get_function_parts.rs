@@ -7,11 +7,12 @@
 
 //! Tests for TSP getFunctionParts request parameter construction
 
+use tsp_types::GetFunctionPartsParams;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+
 use super::util::build_tsp_test_server;
-use crate::tsp::protocol::GetFunctionPartsParams;
-use crate::tsp::protocol::Type;
-use crate::tsp::protocol::TypeCategory;
-use crate::tsp::protocol::TypeFlags;
 use crate::tsp::protocol::TypeHandle;
 use crate::tsp::protocol::TypeReprFlags;
 

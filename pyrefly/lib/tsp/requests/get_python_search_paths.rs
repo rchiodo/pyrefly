@@ -8,10 +8,10 @@
 //! Implementation of the getPythonSearchPaths TSP request
 
 use lsp_types::Url;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
 
 impl Server {
     pub(crate) fn get_python_search_paths(

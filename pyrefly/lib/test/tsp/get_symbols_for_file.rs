@@ -7,10 +7,11 @@
 
 //! Tests for the getSymbolsForFile TSP request
 
+use tsp_types as tsp;
+use tsp_types::Position;
+use tsp_types::Range;
+
 use crate::test::tsp::util::build_tsp_test_server;
-use crate::tsp;
-use crate::tsp::protocol::Position;
-use crate::tsp::protocol::Range;
 
 #[test]
 fn test_get_symbols_for_file_params_construction() {

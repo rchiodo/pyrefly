@@ -9,14 +9,14 @@
 
 use lsp_server::ResponseError;
 use ruff_text_size::TextRange;
+use tsp_types::tsp_debug;
+use tsp_types::{self as tsp};
 
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::tsp_debug;
 use crate::tsp::requests::common::DeclarationBuilder;
 use crate::tsp::requests::common::node_start_position;
 
@@ -31,10 +31,10 @@ pub fn extract_symbol_name(
     params_name.unwrap_or_else(|| {
         let start = module_info
             .lined_buffer()
-            .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.start));
+            .from_lsp_position(tsp_types::to_lsp_position(&node.range.start));
         let end = module_info
             .lined_buffer()
-            .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.end));
+            .from_lsp_position(tsp_types::to_lsp_position(&node.range.end));
         module_info.code_at(TextRange::new(start, end)).to_owned()
     })
 }
@@ -95,7 +95,7 @@ pub fn create_declaration_from_definition(
     // Create the declaration node
     let declaration_node = tsp::Node {
         uri: node_uri.to_string(),
-        range: crate::tsp::common::from_lsp_range(node_range),
+        range: tsp_types::from_lsp_range(node_range),
     };
 
     DeclarationBuilder::new(name.to_owned(), module_name, node_uri.clone())
@@ -125,7 +125,7 @@ pub fn determine_declaration_node_info(
     if definition_module.name() != current_module.name() {
         // Different module: use the original range in the current module
         (
-            crate::tsp::common::to_lsp_range(&original_node.range),
+            tsp_types::to_lsp_range(&original_node.range),
             lsp_types::Url::parse(&original_node.uri)
                 .unwrap_or_else(|_| lsp_types::Url::parse("file:///unknown").unwrap()),
         )
@@ -229,7 +229,7 @@ pub fn extract_symbol_from_transaction(
         let declaration_text_range =
             validation_module_info
                 .lined_buffer()
-                .from_lsp_range(crate::tsp::common::to_lsp_range(
+                .from_lsp_range(tsp_types::to_lsp_range(
                     &declaration.node.as_ref().unwrap().range,
                 ));
         let declaration_text = validation_module_info.code_at(declaration_text_range);

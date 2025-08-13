@@ -10,14 +10,14 @@
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 use ruff_text_size::TextSize;
+use tsp_types as tsp;
+use tsp_types::snapshot_outdated_error;
 
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::snapshot_outdated_error;
 /// Common validation for snapshot
 impl Server {
     pub(crate) fn validate_snapshot(&self, snapshot: i32) -> Result<(), ResponseError> {

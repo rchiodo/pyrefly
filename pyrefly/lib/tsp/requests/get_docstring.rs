@@ -9,10 +9,10 @@
 
 use lsp_server::ResponseError;
 use pyrefly_python::docstring::Docstring;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
 
 /// Extract docstring from a transaction at a specific position
 ///
@@ -29,7 +29,7 @@ pub fn get_docstring_at_position(
     // Convert Range position to TextSize using the module's line buffer
     let position = module_info
         .lined_buffer()
-        .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.start));
+        .from_lsp_position(tsp_types::to_lsp_position(&node.range.start));
 
     // Try to find definition at the position - this is the same logic as hover
     let first_definition = transaction

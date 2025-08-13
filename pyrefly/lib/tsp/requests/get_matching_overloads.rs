@@ -8,11 +8,11 @@
 //! TSP get matching overloads request implementation
 
 use lsp_server::ResponseError;
+use tsp_types as tsp;
+use tsp_types::tsp_debug;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::tsp_debug;
 use crate::tsp::requests::common::node_start_position;
 
 impl Server {

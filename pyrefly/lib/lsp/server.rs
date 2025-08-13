@@ -155,6 +155,7 @@ use pyrefly_util::thread_pool::ThreadPool;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use starlark_map::small_map::SmallMap;
+use tsp_types::*;
 
 use crate::commands::lsp::IndexingMode;
 use crate::config::config::ConfigFile;
@@ -183,8 +184,7 @@ use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
-use crate::state::state::Transaction;
-use crate::tsp::*; // bring generated TSP protocol module into scope for *Params usage
+use crate::state::state::Transaction; // bring generated TSP protocol module into scope for *Params usage
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);

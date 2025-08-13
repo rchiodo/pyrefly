@@ -7,9 +7,10 @@
 
 //! Implementation of the getSupportedProtocolVersion TSP request
 
+use tsp_types::TSP_PROTOCOL_VERSION;
+
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp::common::TSP_PROTOCOL_VERSION;
 
 impl Server {
     pub(crate) fn get_supported_protocol_version(&self, _transaction: &Transaction<'_>) -> String {

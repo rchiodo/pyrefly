@@ -9,12 +9,12 @@
 
 // use lsp_server::ErrorCode; // removed unused import
 use lsp_server::ResponseError;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
-use crate::tsp;
 // use crate::tsp::common::lsp_debug; // removed unused import
 use crate::tsp::requests::common::node_start_position;
 

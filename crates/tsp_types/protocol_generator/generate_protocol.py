@@ -285,7 +285,7 @@ def fixup_request_in_content(content: str, request: model.Request) -> str:
             return content
 
         # Compute the result type. It might be an 'or' type
-        result_type = f"Option<{request.typeName.replace("Request", "Response")}>" if request.result.kind == 'or' else request.result.name
+        result_type = f"Option<{request.typeName.replace('Request', 'Response')}>" if request.result.kind == 'or' else request.result.name
 
         # Fixup some common names
         if result_type == "Any":

@@ -16,12 +16,12 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use tsp_types as tsp;
+use tsp_types::Position;
+use tsp_types::Range;
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp;
-use crate::tsp::protocol::Position;
-use crate::tsp::protocol::Range;
 
 #[test]
 fn test_simple_get_type_verification() {

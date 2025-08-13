@@ -13,21 +13,22 @@
  * and edge cases without requiring full TSP message protocol flows.
  */
 
+use tsp_types as tsp;
+use tsp_types::Declaration;
+use tsp_types::DeclarationCategory;
+use tsp_types::DeclarationFlags;
+use tsp_types::DeclarationHandle;
+use tsp_types::GetOverloadsParams;
+use tsp_types::ModuleName;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
+
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp;
-use crate::tsp::protocol::Declaration;
-use crate::tsp::protocol::DeclarationCategory;
-use crate::tsp::protocol::DeclarationFlags;
-use crate::tsp::protocol::DeclarationHandle;
-use crate::tsp::protocol::GetOverloadsParams;
-use crate::tsp::protocol::ModuleName;
-use crate::tsp::protocol::Node;
-use crate::tsp::protocol::Position;
-use crate::tsp::protocol::Range;
-use crate::tsp::protocol::Type;
-use crate::tsp::protocol::TypeCategory;
-use crate::tsp::protocol::TypeFlags;
-use crate::tsp::protocol::TypeHandle;
 use crate::tsp::requests::get_overloads::extract_overloads_from_type;
 
 #[test]

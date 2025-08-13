@@ -8,11 +8,11 @@
 //! Implementation of the createInstanceType TSP request
 
 use lsp_server::ResponseError;
+use tsp_types::tsp_debug;
+use tsp_types::{self as tsp};
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::tsp_debug;
 use crate::types::types::Type as PyType;
 
 impl Server {

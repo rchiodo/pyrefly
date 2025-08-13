@@ -8,13 +8,13 @@
 //! TSP get type of declaration request implementation
 
 use lsp_server::ResponseError;
+use tsp_types as tsp;
+use tsp_types::create_default_type_for_declaration;
 
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::create_default_type_for_declaration;
 
 /// Extract type from declaration using transaction and module info
 ///
@@ -34,7 +34,7 @@ pub fn extract_type_from_declaration(
     // Convert declaration position to TextSize using module_info
     let position = module_info
         .lined_buffer()
-        .from_lsp_position(crate::tsp::common::to_lsp_position(&node.range.start));
+        .from_lsp_position(tsp_types::to_lsp_position(&node.range.start));
 
     // Try to get the type at the declaration's position
     transaction.get_type_at(handle, position)
@@ -60,12 +60,9 @@ pub fn extract_type_from_resolved_import(
     // Get module info for the resolved declaration to convert position
     let resolved_module_info = transaction.get_module_info(&resolved_handle)?;
 
-    let resolved_position =
-        resolved_module_info
-            .lined_buffer()
-            .from_lsp_position(crate::tsp::common::to_lsp_position(
-                &resolved_node.range.start,
-            ));
+    let resolved_position = resolved_module_info
+        .lined_buffer()
+        .from_lsp_position(tsp_types::to_lsp_position(&resolved_node.range.start));
 
     transaction.get_type_at(&resolved_handle, resolved_position)
 }

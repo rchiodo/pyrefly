@@ -9,12 +9,12 @@
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use tsp_types::snapshot_outdated_error;
+use tsp_types::tsp_debug;
+use tsp_types::{self as tsp};
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::snapshot_outdated_error;
-use crate::tsp::common::tsp_debug;
 use crate::types::simplify::unions;
 
 impl Server {

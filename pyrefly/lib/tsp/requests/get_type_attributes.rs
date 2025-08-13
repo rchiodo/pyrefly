@@ -8,15 +8,15 @@
 //! Implementation of the getTypeAttributes TSP request
 
 use lsp_server::ResponseError;
+use tsp_types::snapshot_outdated_error;
+use tsp_types::tsp_debug;
+use tsp_types::{self as tsp};
 
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
-use crate::tsp;
 use crate::tsp::common::convert_to_tsp_type;
-use crate::tsp::common::snapshot_outdated_error;
-use crate::tsp::common::tsp_debug;
 use crate::types::types::Type;
 
 /// Helper function to extract parameter name from a Param
@@ -96,7 +96,7 @@ pub fn extract_type_attributes(
                     );
 
                     // Convert the pyrefly type to TSP type
-                    let tsp_type = crate::tsp::common::convert_to_tsp_type(attribute_type);
+                    let tsp_type = convert_to_tsp_type(attribute_type);
 
                     let attribute = tsp::Attribute {
                         name: field_name.as_str().to_owned(),

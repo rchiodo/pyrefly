@@ -9,10 +9,10 @@
 
 use lsp_server::ResponseError;
 use pyrefly_python::module::Module;
+use tsp_types as tsp;
 
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
 
 impl Server {
     pub(crate) fn get_symbols_for_file(
@@ -90,7 +90,7 @@ impl Server {
         // Create a Node from the symbol's selection range
         let node = tsp::Node {
             uri: uri.to_string(),
-            range: crate::tsp::common::from_lsp_range(doc_symbol.selection_range),
+            range: tsp_types::from_lsp_range(doc_symbol.selection_range),
         };
 
         // Convert LSP SymbolKind to TSP DeclarationCategory using common function

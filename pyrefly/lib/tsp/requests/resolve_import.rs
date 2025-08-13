@@ -11,12 +11,12 @@ use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 use lsp_types::Url;
 use pyrefly_util::absolutize::Absolutize;
+use tsp_types as tsp;
+use tsp_types::tsp_debug;
 
 use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn resolve_import(

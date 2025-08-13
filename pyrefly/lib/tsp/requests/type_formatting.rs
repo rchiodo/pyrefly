@@ -7,8 +7,9 @@
 
 //! Shared type formatting utilities for TSP requests
 
+use tsp_types as tsp;
+
 use crate::state::state::Transaction;
-use crate::tsp;
 use crate::types::types::Type;
 
 /// Apply TypeReprFlags formatting to a type

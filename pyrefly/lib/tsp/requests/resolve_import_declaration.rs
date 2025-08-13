@@ -8,14 +8,14 @@
 //! TSP resolve import declaration request implementation
 
 use lsp_server::ResponseError;
+use tsp_types::snapshot_outdated_error;
+use tsp_types::{self as tsp};
 
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
-use crate::tsp;
-use crate::tsp::common::snapshot_outdated_error;
 
 /// Create an unresolved import declaration
 ///
@@ -149,9 +149,7 @@ pub fn create_resolved_declaration_from_definition(
     .flags(flags)
     .node(tsp::Node {
         uri: resolved_url.to_string(),
-        range: crate::tsp::common::from_lsp_range(
-            target_module_info.lined_buffer().to_lsp_range(def_range),
-        ),
+        range: tsp_types::from_lsp_range(target_module_info.lined_buffer().to_lsp_range(def_range)),
     })
     .build()
 }

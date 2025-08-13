@@ -8,14 +8,14 @@
 //! TSP get repr request implementation
 
 use lsp_server::ResponseError;
+use tsp_types as tsp;
+// Import the lsp_debug macro from common
+use tsp_types::tsp_debug;
 
 // Import shared type formatting utilities
 use super::type_formatting;
 use crate::lsp::server::Server;
 use crate::state::state::Transaction;
-use crate::tsp;
-// Import the lsp_debug macro from common
-use crate::tsp::common::tsp_debug;
 
 impl Server {
     pub(crate) fn get_repr(
