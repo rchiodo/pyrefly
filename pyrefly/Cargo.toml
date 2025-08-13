@@ -59,10 +59,6 @@ yansi = { version = "1.0.0-rc.1", features = ["hyperlink"] }
 pretty_assertions = { version = "1.2", features = ["alloc"], default-features = false }
 tempfile = "3.15"
 
-[features]
-# Optional backwards-compat shim aliases for legacy TSP builder method names.
-legacy_tsp_aliases = []
-
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 tikv-jemallocator = "0.6.0"
 

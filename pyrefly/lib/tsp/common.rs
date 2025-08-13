@@ -50,8 +50,6 @@ impl<'de> Deserialize<'de> for GetSupportedProtocolVersionParams {
 // Keep this section minimal; remove once all call sites are migrated.
 // -------------------------------------------------------------------------------------------------
 
-// Legacy builder-style aliases removed (generator now supplies snake_case methods directly)
-
 // Lightweight debug macro used by request handlers (avoids pulling in tracing for generated-ish code)
 #[macro_export]
 macro_rules! tsp_debug {
@@ -61,57 +59,6 @@ macro_rules! tsp_debug {
 }
 pub use tsp_debug;
 
-/// Legacy constant-like ALL_CAPS variants for DeclarationCategory (optional)
-#[cfg(feature = "legacy_tsp_aliases")]
-#[allow(non_upper_case_globals)]
-pub mod legacy_decl_category {
-    pub use crate::tsp::DeclarationCategory as DC; // alias for brevity inside module
-    pub const CLASS: DC = DC::Class;
-    pub const VARIABLE: DC = DC::Variable;
-    pub const PARAM: DC = DC::Param;
-    pub const TYPE_PARAM: DC = DC::TypeParam;
-    pub const TYPE_ALIAS: DC = DC::TypeAlias;
-    pub const IMPORT: DC = DC::Import;
-    pub const INTRINSIC: DC = DC::Intrinsic;
-}
-#[cfg(feature = "legacy_tsp_aliases")]
-pub use legacy_decl_category as decl_cat; // optional re-export
-
-/// Legacy ALL_CAPS for TypeCategory
-#[cfg(feature = "legacy_tsp_aliases")]
-#[allow(non_upper_case_globals)]
-pub mod legacy_type_category {
-    pub use crate::tsp::TypeCategory as TC;
-    pub const ANY: TC = TC::Any;
-    pub const FUNCTION: TC = TC::Function;
-    pub const OVERLOADED: TC = TC::Overloaded;
-    pub const CLASS: TC = TC::Class;
-    pub const MODULE: TC = TC::Module;
-    pub const UNION: TC = TC::Union;
-    pub const TYPE_VAR: TC = TC::TypeVar;
-}
-
-/// Legacy ALL_CAPS for AttributeFlags (old code referenced NONE / PARAMETER / RETURN_TYPE etc.)
-/// Only existing flags are mapped; removed flags are intentionally omitted.
-#[cfg(feature = "legacy_tsp_aliases")]
-#[allow(non_upper_case_globals)]
-pub mod legacy_attribute_flags {
-    pub use crate::tsp::AttributeFlags as AF;
-    pub const NONE: AF = AF::None;
-}
-
-/// Legacy ALL_CAPS for TypeFlags if referenced (INSTANCE / CALLABLE etc.)
-#[cfg(feature = "legacy_tsp_aliases")]
-#[allow(non_upper_case_globals)]
-pub mod legacy_type_flags {
-    pub use crate::tsp::TypeFlags as TF;
-    pub const NONE: TF = TF::None;
-    pub const CALLABLE: TF = TF::Callable;
-    pub const INSTANCE: TF = TF::Instance;
-    pub const INSTANTIABLE: TF = TF::Instantiable;
-    pub const LITERAL: TF = TF::Literal;
-    pub const FROM_ALIAS: TF = TF::FromAlias;
-}
 
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
