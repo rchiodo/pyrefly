@@ -28,9 +28,21 @@ pub const TSP_PROTOCOL_VERSION: &str = crate::tsp::TYPE_SERVER_VERSION;
 // struct so existing handler signatures (before refactor) can compile or we
 // can simplify handlers to omit it. This can be removed once all handlers
 // are updated to not expect params.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone, Default)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Serialize, PartialEq, Debug, Eq, Clone, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct GetSupportedProtocolVersionParams {}
+
+// Custom Deserialize to allow `null`, `{}`, or any object with unknown fields.
+impl<'de> Deserialize<'de> for GetSupportedProtocolVersionParams {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Accept any JSON value (null / object / other) and ignore its contents.
+        let _ignored = serde_json::Value::deserialize(deserializer)?;
+        Ok(GetSupportedProtocolVersionParams {})
+    }
+}
 
 // -------------------------------------------------------------------------------------------------
 // Compatibility shims for legacy handwritten code expecting older enum shapes / helper builders.

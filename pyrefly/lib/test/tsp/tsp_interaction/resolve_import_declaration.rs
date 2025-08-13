@@ -102,9 +102,14 @@ CONSTANT = 42
                 method: "typeServer/resolveImportDeclaration".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "test_import_helper",
-                        "category": 4,  // IMPORT
+                        "category": 4,
                         "flags": 0,
+                        "handle": "test_import_helper",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["utils"]
+                        },
+                        "name": "helper_function",
                         "node": {
                             "uri": main_uri.to_string(),
                             "range": {
@@ -112,11 +117,6 @@ CONSTANT = 42
                                 "end": { "line": 0, "character": 32 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["utils"]
-                        },
-                        "name": "helper_function",
                         "uri": main_uri.to_string()
                     },
                     "options": {
@@ -140,9 +140,14 @@ CONSTANT = 42
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "handle": "test_import_helper",
-                    "category": 4,  // Currently IMPORT, should be FUNCTION (5) when fully implemented
+                    "category": 4,
                     "flags": 0,
+                    "handle": "test_import_helper",
+                    "moduleName": {
+                        "leadingDots": 0,
+                        "nameParts": ["utils"]
+                    },
+                    "name": "helper_function",
                     "node": {
                         "uri": main_uri.to_string(),
                         "range": {
@@ -150,11 +155,6 @@ CONSTANT = 42
                             "end": { "line": 0, "character": 32 }
                         }
                     },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["utils"]
-                    },
-                    "name": "helper_function",
                     "uri": main_uri.to_string()
                 })),
                 error: None,
@@ -215,9 +215,14 @@ class Category:
                 method: "typeServer/resolveImportDeclaration".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "test_import_user",
-                        "category": 4,  // IMPORT
+                        "category": 4,
                         "flags": 0,
+                        "handle": "test_import_user",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["models"]
+                        },
+                        "name": "User",
                         "node": {
                             "uri": main_uri.to_string(),
                             "range": {
@@ -225,11 +230,6 @@ class Category:
                                 "end": { "line": 0, "character": 22 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["models"]
-                        },
-                        "name": "User",
                         "uri": main_uri.to_string()
                     },
                     "options": {
@@ -253,9 +253,14 @@ class Category:
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "handle": "test_import_user",
-                    "category": 4,  // Currently IMPORT, should be CLASS (6) when fully implemented
+                    "category": 4,
                     "flags": 0,
+                    "handle": "test_import_user",
+                    "moduleName": {
+                        "leadingDots": 0,
+                        "nameParts": ["models"]
+                    },
+                    "name": "User",
                     "node": {
                         "uri": main_uri.to_string(),
                         "range": {
@@ -263,11 +268,6 @@ class Category:
                             "end": { "line": 0, "character": 22 }
                         }
                     },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["models"]
-                    },
-                    "name": "User",
                     "uri": main_uri.to_string()
                 })),
                 error: None,
@@ -313,9 +313,14 @@ CONSTANT = 42
                 method: "typeServer/resolveImportDeclaration".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "test_local_function",
-                        "category": 5,  // FUNCTION (not IMPORT)
+                        "category": 5,
                         "flags": 0,
+                        "handle": "test_local_function",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["main"]
+                        },
+                        "name": "my_function",
                         "node": {
                             "uri": main_uri.to_string(),
                             "range": {
@@ -323,11 +328,6 @@ CONSTANT = 42
                                 "end": { "line": 0, "character": 15 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["main"]
-                        },
-                        "name": "my_function",
                         "uri": main_uri.to_string()
                     },
                     "options": {
@@ -350,9 +350,14 @@ CONSTANT = 42
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "handle": "test_local_function",
-                    "category": 5,  // FUNCTION
+                    "category": 5,
                     "flags": 0,
+                    "handle": "test_local_function",
+                    "moduleName": {
+                        "leadingDots": 0,
+                        "nameParts": ["main"]
+                    },
+                    "name": "my_function",
                     "node": {
                         "uri": main_uri.to_string(),
                         "range": {
@@ -360,11 +365,6 @@ CONSTANT = 42
                             "end": { "line": 0, "character": 15 }
                         }
                     },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["main"]
-                    },
-                    "name": "my_function",
                     "uri": main_uri.to_string()
                 })),
                 error: None,
@@ -408,9 +408,14 @@ missing_symbol()
                 method: "typeServer/resolveImportDeclaration".to_owned(),
                 params: serde_json::json!({
                     "decl": {
+                        "category": 4,
+                        "flags": 2,
                         "handle": "test_unresolved_import",
-                        "category": 4,  // IMPORT
-                        "flags": 2,  // unresolved_import flag
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["nonexistent_module"]
+                        },
+                        "name": "missing_symbol",
                         "node": {
                             "uri": main_uri.to_string(),
                             "range": {
@@ -418,11 +423,6 @@ missing_symbol()
                                 "end": { "line": 0, "character": 48 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["nonexistent_module"]
-                        },
-                        "name": "missing_symbol",
                         "uri": main_uri.to_string()
                     },
                     "options": {
@@ -446,9 +446,14 @@ missing_symbol()
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "category": 4,
+                    "flags": 2,
                     "handle": "test_unresolved_import",
-                    "category": 4,  // IMPORT
-                    "flags": 2,    // UNRESOLVED_IMPORT flag set
+                    "moduleName": {
+                        "leadingDots": 0,
+                        "nameParts": ["nonexistent_module"]
+                    },
+                    "name": "missing_symbol",
                     "node": {
                         "uri": main_uri.to_string(),
                         "range": {
@@ -456,11 +461,6 @@ missing_symbol()
                             "end": { "line": 0, "character": 48 }
                         }
                     },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["nonexistent_module"]
-                    },
-                    "name": "missing_symbol",
                     "uri": main_uri.to_string()
                 })),
                 error: None,
@@ -515,9 +515,14 @@ FEATURE_FLAGS = {"new_ui": False}
                 method: "typeServer/resolveImportDeclaration".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "test_variable_import",
-                        "category": 4,  // IMPORT
+                        "category": 4,
                         "flags": 0,
+                        "handle": "test_variable_import",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["config"]
+                        },
+                        "name": "DEBUG",
                         "node": {
                             "uri": main_uri.to_string(),
                             "range": {
@@ -525,11 +530,6 @@ FEATURE_FLAGS = {"new_ui": False}
                                 "end": { "line": 0, "character": 24 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["config"]
-                        },
-                        "name": "DEBUG",
                         "uri": main_uri.to_string()
                     },
                     "options": {
@@ -553,9 +553,14 @@ FEATURE_FLAGS = {"new_ui": False}
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!({
-                    "handle": "test_variable_import",
-                    "category": 4,  // Currently IMPORT, should be VARIABLE (1) when fully implemented
+                    "category": 4,
                     "flags": 0,
+                    "handle": "test_variable_import",
+                    "moduleName": {
+                        "leadingDots": 0,
+                        "nameParts": ["config"]
+                    },
+                    "name": "DEBUG",
                     "node": {
                         "uri": main_uri.to_string(),
                         "range": {
@@ -563,11 +568,6 @@ FEATURE_FLAGS = {"new_ui": False}
                             "end": { "line": 0, "character": 24 }
                         }
                     },
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["config"]
-                    },
-                    "name": "DEBUG",
                     "uri": main_uri.to_string()
                 })),
                 error: None,

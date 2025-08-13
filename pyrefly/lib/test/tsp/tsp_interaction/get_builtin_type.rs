@@ -84,11 +84,11 @@ fn test_tsp_get_builtin_type_interaction_basic() {
                 result: Some(serde_json::json!({
                     "category": 3,  // Category 3 = CLASS
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 2,
                     "handle": "$$MATCH_EVERYTHING$$",  // Handle can vary, so use wildcard
                     "moduleName": {"leadingDots": 0, "nameParts": ["builtins"]},
-                    "name": "int"
+                    "name": "int",
+                    "aliasName": null
                 })),
                 error: None,
             }),
@@ -174,11 +174,11 @@ z = True
                 result: Some(serde_json::json!({
                     "category": 3,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 2,
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": {"leadingDots": 0, "nameParts": ["builtins"]},
-                    "name": "str"
+                    "name": "str",
+                    "aliasName": null
                 })),
                 error: None,
             }),
@@ -188,11 +188,11 @@ z = True
                 result: Some(serde_json::json!({
                     "category": 3,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 2,
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": {"leadingDots": 0, "nameParts": ["builtins"]},
-                    "name": "list[Any]"  // List types are parameterized
+                    "name": "list[Any]",  // List types are parameterized
+                    "aliasName": null
                 })),
                 error: None,
             }),
@@ -390,11 +390,11 @@ def test_function():
                 result: Some(serde_json::json!({
                     "category": 3,
                     "categoryFlags": 0,
-                    "decl": null,  // Builtin types typically don't have declarations
                     "flags": 2,
                     "handle": "$$MATCH_EVERYTHING$$",  // Handle format can vary
                     "moduleName": {"leadingDots": 0, "nameParts": ["types"]},  // Function type is in 'types' module
-                    "name": "FunctionType"
+                    "name": "FunctionType",
+                    "aliasName": null
                 })),
                 error: None,
             }),

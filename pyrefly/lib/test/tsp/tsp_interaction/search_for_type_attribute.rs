@@ -162,7 +162,6 @@ instance = MyClass()
 }
 
 #[test]
-#[ignore] // TODO: Fix getType returning null for instance variables - indicates potential bug in search_for_type_attribute implementation
 fn test_tsp_search_for_type_attribute_interaction_access_flags() {
     // Test different access flag combinations
     let temp_dir = TempDir::new().unwrap();
@@ -207,8 +206,8 @@ test_instance = TestClass()
                     "node": {
                         "uri": file_uri.to_string(),
                         "range": {
-                            "start": { "line": 14, "character": 0 },
-                            "end": { "line": 14, "character": 13 }
+                            "start": { "line": 15, "character": 0 },
+                            "end": { "line": 15, "character": 13 }
                         }
                     },
                     "snapshot": 2
@@ -281,7 +280,6 @@ test_instance = TestClass()
                 result: Some(serde_json::json!({
                     "name": "class_var",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -293,7 +291,6 @@ test_instance = TestClass()
                 result: Some(serde_json::json!({
                     "name": "class_var",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -439,7 +436,6 @@ dunder_instance = DunderClass(42)
 }
 
 #[test]
-#[ignore] // TODO: Fix getType returning null for instance variables - indicates potential bug in search_for_type_attribute implementation  
 fn test_tsp_search_for_type_attribute_interaction_inheritance() {
     // Test attribute search with inheritance
     let temp_dir = TempDir::new().unwrap();
@@ -484,8 +480,8 @@ derived_instance = DerivedClass()
                     "node": {
                         "uri": file_uri.to_string(),
                         "range": {
-                            "start": { "line": 14, "character": 0 },
-                            "end": { "line": 14, "character": 16 }
+                            "start": { "line": 15, "character": 0 },
+                            "end": { "line": 15, "character": 16 }
                         }
                     },
                     "snapshot": 2
@@ -558,7 +554,6 @@ derived_instance = DerivedClass()
                 result: Some(serde_json::json!({
                     "name": "base_method",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -570,7 +565,6 @@ derived_instance = DerivedClass()
                 result: Some(serde_json::json!({
                     "name": "derived_method",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -679,7 +673,6 @@ result = context_instance.get_value()
                 result: Some(serde_json::json!({
                     "name": "get_value",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),

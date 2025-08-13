@@ -268,11 +268,10 @@ def test_file_processing():
                     {
                         "category": 1,
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 4,
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "name": "$$MATCH_EVERYTHING$$",
+                        "aliasName": null
                     }
                 ])),
                 error: None,
@@ -356,20 +355,18 @@ def test_type_mismatch():
                     {
                         "category": 1,
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 4,
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "name": "$$MATCH_EVERYTHING$$",
+                        "aliasName": null
                     },
                     {
                         "category": 1,
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 4,
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": null,
-                        "name": "$$MATCH_EVERYTHING$$"
+                        "name": "$$MATCH_EVERYTHING$$",
+                        "aliasName": null
                     }
                 ])),
                 error: None,

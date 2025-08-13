@@ -65,9 +65,14 @@ fn test_tsp_get_docstring_interaction_function() {
                 method: "typeServer/getDocString".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "decl_function_handle",
                         "category": 1,
                         "flags": 1,
+                        "handle": "decl_function_handle",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["__unknown__"]
+                        },
+                        "name": "calculate_area",
                         "node": {
                             "uri": file_uri.to_string(),
                             "range": {
@@ -75,11 +80,6 @@ fn test_tsp_get_docstring_interaction_function() {
                                 "end": { "line": 0, "character": 18 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["__unknown__"]
-                        },
-                        "name": "calculate_area",
                         "uri": file_uri.to_string()
                     },
                     "snapshot": 2
@@ -157,9 +157,14 @@ fn test_tsp_get_docstring_interaction_class() {
                 method: "typeServer/getDocString".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "decl_class_handle",
                         "category": 1,
                         "flags": 1,
+                        "handle": "decl_class_handle",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["__unknown__"]
+                        },
+                        "name": "DataProcessor",
                         "node": {
                             "uri": file_uri.to_string(),
                             "range": {
@@ -167,11 +172,6 @@ fn test_tsp_get_docstring_interaction_class() {
                                 "end": { "line": 0, "character": 19 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["__unknown__"]
-                        },
-                        "name": "DataProcessor",
                         "uri": file_uri.to_string()
                     },
                     "snapshot": 2
@@ -242,9 +242,14 @@ fn test_tsp_get_docstring_interaction_method() {
                 method: "typeServer/getDocString".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "decl_method_handle",
                         "category": 1,
                         "flags": 1,
+                        "handle": "decl_method_handle",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["__unknown__"]
+                        },
+                        "name": "add",
                         "node": {
                             "uri": file_uri.to_string(),
                             "range": {
@@ -252,11 +257,6 @@ fn test_tsp_get_docstring_interaction_method() {
                                 "end": { "line": 1, "character": 11 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["__unknown__"]
-                        },
-                        "name": "add",
                         "uri": file_uri.to_string()
                     },
                     "snapshot": 2
@@ -317,9 +317,14 @@ class SimpleClass:
                 method: "typeServer/getDocString".to_owned(),
                 params: serde_json::json!({
                     "decl": {
-                        "handle": "decl_no_docstring_handle",
                         "category": 1,
                         "flags": 1,
+                        "handle": "decl_no_docstring_handle",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["__unknown__"]
+                        },
+                        "name": "simple_function",
                         "node": {
                             "uri": file_uri.to_string(),
                             "range": {
@@ -327,11 +332,6 @@ class SimpleClass:
                                 "end": { "line": 0, "character": 19 }
                             }
                         },
-                        "moduleName": {
-                            "leadingDots": 0,
-                            "nameParts": ["__unknown__"]
-                        },
-                        "name": "simple_function",
                         "uri": file_uri.to_string()
                     },
                     "snapshot": 2

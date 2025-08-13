@@ -68,11 +68,11 @@ StringList = List[str]
                     "type": {
                         "category": 3,  // CLASS category
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 2,
                         "handle": "test_handle",
                         "moduleName": {"leadingDots": 0, "nameParts": ["typing"]},
-                        "name": "list[str]"
+                        "name": "list[str]",
+                        "aliasName": null
                     },
                     "snapshot": 2
                 }),
@@ -180,11 +180,11 @@ NestedGeneric = Dict[str, List[Optional[int]]]
                     "type": {
                         "category": 3,  // CLASS category
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 2,
                         "handle": "test_handle_1",
                         "moduleName": {"leadingDots": 0, "nameParts": ["typing"]},
-                        "name": "list[str]"
+                        "name": "list[str]",
+                        "aliasName": null
                     },
                     "snapshot": 2
                 }),
@@ -197,11 +197,11 @@ NestedGeneric = Dict[str, List[Optional[int]]]
                     "type": {
                         "category": 3,  // CLASS category
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 2,
                         "handle": "test_handle_2",
                         "moduleName": {"leadingDots": 0, "nameParts": ["typing"]},
-                        "name": "dict[str, Union[int, str, bool]]"
+                        "name": "dict[str, Union[int, str, bool]]",
+                        "aliasName": null
                     },
                     "snapshot": 2
                 }),

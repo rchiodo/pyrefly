@@ -24,7 +24,8 @@ fn test_get_diagnostics_params_serialization() {
     let params = tsp::GetDiagnosticsParams { uri: "file:///test.py".to_owned(), snapshot: 1 };
 
     let serialized = serde_json::to_string(&params).expect("Failed to serialize params");
-    let expected = r#"{"uri":"file:///test.py","snapshot":1}"#;
+    // Field order may now be snapshot then uri (serde preserves struct field declaration order)
+    let expected = r#"{"snapshot":1,"uri":"file:///test.py"}"#;
     assert_eq!(serialized, expected);
 
     let deserialized: tsp::GetDiagnosticsParams =

@@ -111,11 +111,10 @@ x = 10
                     "synthesizedTypes": [{
                         "category": 1,
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 4,
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": null,
-                        "name": "(param: int) -> str"
+                        "name": "(param: int) -> str",
+                        "aliasName": null
                     }]
                 })),
                 error: None,
@@ -208,11 +207,10 @@ fn test_tsp_get_symbol_interaction_with_name() {
                     "synthesizedTypes": [{
                         "category": 0,
                         "categoryFlags": 0,
-                        "decl": null,
                         "flags": 8,
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": null,
-                        "name": "Literal['test']"
+                        "name": "Literal['test']",
+                        "aliasName": null
                     }]
                 })),
                 error: None,
