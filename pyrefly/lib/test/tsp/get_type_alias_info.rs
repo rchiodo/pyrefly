@@ -10,13 +10,7 @@
 
 use super::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp::GetTypeAliasInfoParams;
-use crate::tsp::ModuleName;
-use crate::tsp::Type;
-use crate::tsp::TypeAliasInfo;
-use crate::tsp::TypeCategory;
-use crate::tsp::TypeFlags;
-use crate::tsp::TypeHandle;
+use tsp_types::{GetTypeAliasInfoParams, ModuleName, Type, TypeAliasInfo, TypeCategory, TypeFlags, TypeHandle};
 use crate::tsp::requests::get_type_alias_info::get_type_alias_info;
 
 #[test]

@@ -14,8 +14,8 @@
 // Use protocol Position/Range instead of lsp_types
 
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp;
 use crate::tsp::requests::get_docstring::get_docstring_at_position;
+use tsp_types::{Node, Position, Range};
 
 #[test]
 fn test_get_docstring_at_position_with_function_docstring() {
@@ -38,14 +38,14 @@ fn test_get_docstring_at_position_with_function_docstring() {
     let handle = handles.get("test.py").unwrap();
 
     // Create a node that points to the function name
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 4,
             }, // Points to 'calculate_area'
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 18,
             },
@@ -88,14 +88,14 @@ fn test_get_docstring_at_position_with_class_docstring() {
     let handle = handles.get("test.py").unwrap();
 
     // Create a node that points to the class name
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 6,
             }, // Points to 'DataProcessor'
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 19,
             },
@@ -129,14 +129,14 @@ class SimpleClass:
     let handle = handles.get("test.py").unwrap();
 
     // Create a node that points to a function without docstring
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 4,
             }, // Points to 'simple_function'
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 19,
             },
@@ -176,14 +176,14 @@ fn test_get_docstring_at_position_method_docstring() {
     let handle = handles.get("test.py").unwrap();
 
     // Create a node that points to the 'add' method
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 1,
                 character: 8,
             }, // Points to 'add' method
-            end: tsp::Position {
+            end: Position {
                 line: 1,
                 character: 11,
             },

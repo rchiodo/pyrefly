@@ -9,12 +9,7 @@
 
 use serde_json;
 
-use crate::tsp::GetTypeAttributesParams;
-use crate::tsp::ModuleName;
-use crate::tsp::Type;
-use crate::tsp::TypeCategory;
-use crate::tsp::TypeFlags;
-use crate::tsp::TypeHandle;
+use tsp_types::{GetTypeAttributesParams, ModuleName, Type, TypeCategory, TypeFlags, TypeHandle};
 
 #[test]
 fn test_get_type_attributes_params_construction() {

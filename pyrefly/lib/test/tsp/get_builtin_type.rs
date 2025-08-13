@@ -19,9 +19,7 @@ use lsp_server::ResponseError;
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp;
-use crate::tsp::protocol::Position;
-use crate::tsp::protocol::Range;
+use tsp_types::{GetBuiltinTypeParams, Node, Position, Range, Type};
 
 #[test]
 fn test_simple_get_builtin_type_verification() {
@@ -41,8 +39,8 @@ fn test_get_builtin_type_params_construction() {
         character: 0,
     };
 
-    let params = tsp::GetBuiltinTypeParams {
-        scoping_node: tsp::Node {
+    let params = GetBuiltinTypeParams {
+        scoping_node: Node {
             uri: uri_str.clone(),
             range: Range {
                 start: position.clone(),
@@ -63,8 +61,8 @@ fn test_get_builtin_type_params_construction() {
 fn call_tsp_get_builtin_type_handler(
     transaction: &crate::state::state::Transaction<'_>,
     handles: &HashMap<&str, crate::state::handle::Handle>,
-    params: tsp::GetBuiltinTypeParams,
-) -> Result<Option<tsp::Type>, ResponseError> {
+    params: GetBuiltinTypeParams,
+) -> Result<Option<Type>, ResponseError> {
     // This simulates the TSP get_builtin_type handler logic:
 
     // 1. Convert Node to URI (simplified - we'll map to our test files)
@@ -184,8 +182,8 @@ z = [1, 2, 3]
     let uri = "file:///builtin_test.py".to_owned();
 
     // Test int builtin type
-    let params = tsp::GetBuiltinTypeParams {
-        scoping_node: tsp::Node {
+    let params = GetBuiltinTypeParams {
+        scoping_node: Node {
             uri: uri.clone(),
             range: Range {
                 start: Position {
@@ -260,8 +258,8 @@ x = 42
 
     for (type_name, description) in test_builtin_types {
         // Create TSP GetBuiltinTypeParams for this type
-        let params = tsp::GetBuiltinTypeParams {
-            scoping_node: tsp::Node {
+        let params = GetBuiltinTypeParams {
+            scoping_node: Node {
                 uri: uri.clone(),
                 range: Range {
                     start: Position {

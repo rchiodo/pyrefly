@@ -9,11 +9,11 @@
 
 use serde_json;
 
-use crate::tsp;
+use tsp_types::GetDiagnosticsParams;
 
 #[test]
 fn test_get_diagnostics_params_construction() {
-    let params = tsp::GetDiagnosticsParams {
+    let params = GetDiagnosticsParams {
         uri: "file:///test.py".to_owned(),
         snapshot: 1,
     };
@@ -24,7 +24,7 @@ fn test_get_diagnostics_params_construction() {
 
 #[test]
 fn test_get_diagnostics_params_serialization() {
-    let params = tsp::GetDiagnosticsParams {
+    let params = GetDiagnosticsParams {
         uri: "file:///test.py".to_owned(),
         snapshot: 1,
     };
@@ -34,7 +34,7 @@ fn test_get_diagnostics_params_serialization() {
     let expected = r#"{"snapshot":1,"uri":"file:///test.py"}"#;
     assert_eq!(serialized, expected);
 
-    let deserialized: tsp::GetDiagnosticsParams =
+    let deserialized: GetDiagnosticsParams =
         serde_json::from_str(&serialized).expect("Failed to deserialize params");
     assert_eq!(deserialized.uri, params.uri);
     assert_eq!(deserialized.snapshot, params.snapshot);

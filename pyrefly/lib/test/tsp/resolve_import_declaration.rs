@@ -12,31 +12,34 @@
  */
 
 use crate::test::tsp::util::build_tsp_test_server;
-use crate::tsp;
+use tsp_types::{
+    Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, ModuleName, Node,
+    Position, Range, ResolveImportDeclarationParams, ResolveImportOptions,
+};
 
 #[test]
 fn test_resolve_import_declaration_params_construction() {
     let (_handle, uri, _state) = build_tsp_test_server();
 
     // Test basic parameter construction
-    let declaration = tsp::Declaration {
-        handle: tsp::DeclarationHandle::String("test_handle".to_owned()),
-        category: tsp::DeclarationCategory::Import,
-        flags: tsp::DeclarationFlags::new(),
-        node: Some(tsp::Node {
+    let declaration = Declaration {
+        handle: DeclarationHandle::String("test_handle".to_owned()),
+        category: DeclarationCategory::Import,
+        flags: DeclarationFlags::new(),
+        node: Some(Node {
             uri: uri.to_string(),
-            range: tsp::Range {
-                start: tsp::Position {
+            range: Range {
+                start: Position {
                     line: 0,
                     character: 0,
                 },
-                end: tsp::Position {
+                end: Position {
                     line: 0,
                     character: 10,
                 },
             },
         }),
-        module_name: tsp::ModuleName {
+        module_name: ModuleName {
             leading_dots: 0,
             name_parts: vec!["test_module".to_owned()],
         },
@@ -44,13 +47,13 @@ fn test_resolve_import_declaration_params_construction() {
         uri: uri.to_string(),
     };
 
-    let options = tsp::ResolveImportOptions {
+    let options = ResolveImportOptions {
         resolve_local_names: Some(true),
         allow_externally_hidden_access: Some(false),
         skip_file_needed_check: Some(true),
     };
 
-    let params = tsp::ResolveImportDeclarationParams {
+    let params = ResolveImportDeclarationParams {
         decl: declaration,
         options,
         snapshot: 42,
@@ -58,7 +61,7 @@ fn test_resolve_import_declaration_params_construction() {
 
     // Verify parameter construction
     assert_eq!(params.snapshot, 42);
-    assert_eq!(params.decl.category, tsp::DeclarationCategory::Import);
+    assert_eq!(params.decl.category, DeclarationCategory::Import);
     assert_eq!(params.decl.name, "imported_symbol");
     assert_eq!(params.decl.module_name.name_parts, vec!["test_module"]);
     assert_eq!(params.options.resolve_local_names, Some(true));
@@ -71,18 +74,18 @@ fn test_resolve_import_declaration_default_options() {
     let (_handle, uri, _state) = build_tsp_test_server();
 
     // Test default options construction
-    let default_options = tsp::ResolveImportOptions::default();
+    let default_options = ResolveImportOptions::default();
 
     assert_eq!(default_options.resolve_local_names, Some(false));
     assert_eq!(default_options.allow_externally_hidden_access, Some(false));
     assert_eq!(default_options.skip_file_needed_check, Some(false));
 
-    let declaration = tsp::Declaration {
-        handle: tsp::DeclarationHandle::String("test_handle".to_owned()),
-        category: tsp::DeclarationCategory::Function,
-        flags: tsp::DeclarationFlags::new(),
+    let declaration = Declaration {
+        handle: DeclarationHandle::String("test_handle".to_owned()),
+        category: DeclarationCategory::Function,
+        flags: DeclarationFlags::new(),
         node: None,
-        module_name: tsp::ModuleName {
+        module_name: ModuleName {
             leading_dots: 0,
             name_parts: vec!["test_module".to_owned()],
         },
@@ -90,14 +93,14 @@ fn test_resolve_import_declaration_default_options() {
         uri: uri.to_string(),
     };
 
-    let params = tsp::ResolveImportDeclarationParams {
+    let params = ResolveImportDeclarationParams {
         decl: declaration,
         options: default_options,
         snapshot: 1,
     };
 
     // Non-import declaration should be handled differently
-    assert_eq!(params.decl.category, tsp::DeclarationCategory::Function);
+    assert_eq!(params.decl.category, DeclarationCategory::Function);
 }
 
 #[test]
@@ -106,33 +109,33 @@ fn test_resolve_import_declaration_different_categories() {
 
     // Test different declaration categories
     let categories = vec![
-        (tsp::DeclarationCategory::Import, "import_symbol"),
-        (tsp::DeclarationCategory::Function, "function_symbol"),
-        (tsp::DeclarationCategory::Class, "class_symbol"),
-        (tsp::DeclarationCategory::Variable, "variable_symbol"),
-        (tsp::DeclarationCategory::Param, "param_symbol"),
+        (DeclarationCategory::Import, "import_symbol"),
+        (DeclarationCategory::Function, "function_symbol"),
+        (DeclarationCategory::Class, "class_symbol"),
+        (DeclarationCategory::Variable, "variable_symbol"),
+        (DeclarationCategory::Param, "param_symbol"),
     ];
 
     for (category, name) in categories {
         let category = category.clone();
-        let declaration = tsp::Declaration {
-            handle: tsp::DeclarationHandle::String(format!("handle_{name}")),
+        let declaration = Declaration {
+            handle: DeclarationHandle::String(format!("handle_{name}")),
             category: category.clone(),
-            flags: tsp::DeclarationFlags::new(),
-            node: Some(tsp::Node {
+            flags: DeclarationFlags::new(),
+            node: Some(Node {
                 uri: uri.to_string(),
-                range: tsp::Range {
-                    start: tsp::Position {
+                range: Range {
+                    start: Position {
                         line: 0,
                         character: 0,
                     },
-                    end: tsp::Position {
+                    end: Position {
                         line: 0,
                         character: name.len() as u32,
                     },
                 },
             }),
-            module_name: tsp::ModuleName {
+            module_name: ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["test_module".to_owned()],
             },
@@ -140,9 +143,9 @@ fn test_resolve_import_declaration_different_categories() {
             uri: uri.to_string(),
         };
 
-        let params = tsp::ResolveImportDeclarationParams {
+        let params = ResolveImportDeclarationParams {
             decl: declaration.clone(),
-            options: tsp::ResolveImportOptions::default(),
+            options: ResolveImportOptions::default(),
             snapshot: 1,
         };
 
@@ -159,7 +162,7 @@ fn test_resolve_import_declaration_module_name_variants() {
     let module_patterns = vec![
         // Simple module
         (
-            tsp::ModuleName {
+            ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["os".to_owned()],
             },
@@ -167,7 +170,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         ),
         // Nested module
         (
-            tsp::ModuleName {
+            ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["os".to_owned(), "path".to_owned()],
             },
@@ -175,7 +178,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         ),
         // Relative import with single dot
         (
-            tsp::ModuleName {
+            ModuleName {
                 leading_dots: 1,
                 name_parts: vec!["utils".to_owned()],
             },
@@ -183,7 +186,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         ),
         // Relative import with multiple dots
         (
-            tsp::ModuleName {
+            ModuleName {
                 leading_dots: 2,
                 name_parts: vec!["shared".to_owned(), "helpers".to_owned()],
             },
@@ -191,7 +194,7 @@ fn test_resolve_import_declaration_module_name_variants() {
         ),
         // Current package import
         (
-            tsp::ModuleName {
+            ModuleName {
                 leading_dots: 1,
                 name_parts: vec![],
             },
@@ -200,22 +203,22 @@ fn test_resolve_import_declaration_module_name_variants() {
     ];
 
     for (module_name, description) in module_patterns {
-        let declaration = tsp::Declaration {
-            handle: tsp::DeclarationHandle::String(format!(
+        let declaration = Declaration {
+            handle: DeclarationHandle::String(format!(
                 "handle_{}",
                 description.replace(' ', "_")
             )),
-            category: tsp::DeclarationCategory::Import,
-            flags: tsp::DeclarationFlags::new(),
+            category: DeclarationCategory::Import,
+            flags: DeclarationFlags::new(),
             node: None,
             module_name: module_name.clone(),
             name: "imported_item".to_owned(),
             uri: uri.to_string(),
         };
 
-        let params = tsp::ResolveImportDeclarationParams {
+        let params = ResolveImportDeclarationParams {
             decl: declaration,
-            options: tsp::ResolveImportOptions::default(),
+            options: ResolveImportOptions::default(),
             snapshot: 1,
         };
 
@@ -233,14 +236,14 @@ fn test_resolve_import_declaration_flags_handling() {
 
     // Test different declaration flags
     let flag_variants = vec![
-        (tsp::DeclarationFlags::new(), "basic"),
-        (tsp::DeclarationFlags::new().with_constant(), "constant"),
+        (DeclarationFlags::new(), "basic"),
+        (DeclarationFlags::new().with_constant(), "constant"),
         (
-            tsp::DeclarationFlags::new().with_unresolved_import(),
+            DeclarationFlags::new().with_unresolved_import(),
             "unresolved",
         ),
         (
-            tsp::DeclarationFlags::new()
+            DeclarationFlags::new()
                 .with_constant()
                 .with_unresolved_import(),
             "constant_unresolved",
@@ -248,12 +251,12 @@ fn test_resolve_import_declaration_flags_handling() {
     ];
 
     for (flags, description) in flag_variants {
-        let declaration = tsp::Declaration {
-            handle: tsp::DeclarationHandle::String(format!("handle_{description}")),
-            category: tsp::DeclarationCategory::Import,
+        let declaration = Declaration {
+            handle: DeclarationHandle::String(format!("handle_{description}")),
+            category: DeclarationCategory::Import,
             flags,
             node: None,
-            module_name: tsp::ModuleName {
+            module_name: ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["test".to_owned()],
             },
@@ -261,16 +264,16 @@ fn test_resolve_import_declaration_flags_handling() {
             uri: uri.to_string(),
         };
 
-        let params = tsp::ResolveImportDeclarationParams {
+        let params = ResolveImportDeclarationParams {
             decl: declaration.clone(),
-            options: tsp::ResolveImportOptions::default(),
+            options: ResolveImportOptions::default(),
             snapshot: 1,
         };
 
         // Basic validation that the flags are preserved
         // (flags comparison requires specific trait impls)
         assert_eq!(params.decl.name, "symbol");
-        assert_eq!(params.decl.category, tsp::DeclarationCategory::Import);
+        assert_eq!(params.decl.category, DeclarationCategory::Import);
     }
 }
 
@@ -286,24 +289,24 @@ fn test_resolve_import_declaration_uri_handling() {
     ];
 
     for test_uri in uri_variants {
-        let declaration = tsp::Declaration {
-            handle: tsp::DeclarationHandle::String("test_handle".to_owned()),
-            category: tsp::DeclarationCategory::Import,
-            flags: tsp::DeclarationFlags::new(),
-            node: Some(tsp::Node {
+        let declaration = Declaration {
+            handle: DeclarationHandle::String("test_handle".to_owned()),
+            category: DeclarationCategory::Import,
+            flags: DeclarationFlags::new(),
+            node: Some(Node {
                 uri: test_uri.clone(),
-                range: tsp::Range {
-                    start: tsp::Position {
+                range: Range {
+                    start: Position {
                         line: 0,
                         character: 0,
                     },
-                    end: tsp::Position {
+                    end: Position {
                         line: 0,
                         character: 10,
                     },
                 },
             }),
-            module_name: tsp::ModuleName {
+            module_name: ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["test".to_owned()],
             },
@@ -311,9 +314,9 @@ fn test_resolve_import_declaration_uri_handling() {
             uri: test_uri.clone(),
         };
 
-        let params = tsp::ResolveImportDeclarationParams {
+        let params = ResolveImportDeclarationParams {
             decl: declaration,
-            options: tsp::ResolveImportOptions::default(),
+            options: ResolveImportOptions::default(),
             snapshot: 1,
         };
 
@@ -327,24 +330,24 @@ fn test_resolve_import_declaration_node_handling() {
     let (_handle, uri, _state) = build_tsp_test_server();
 
     // Test with node present
-    let with_node = tsp::Declaration {
-        handle: tsp::DeclarationHandle::String("with_node".to_owned()),
-        category: tsp::DeclarationCategory::Import,
-        flags: tsp::DeclarationFlags::new(),
-        node: Some(tsp::Node {
+    let with_node = Declaration {
+        handle: DeclarationHandle::String("with_node".to_owned()),
+        category: DeclarationCategory::Import,
+        flags: DeclarationFlags::new(),
+        node: Some(Node {
             uri: uri.to_string(),
-            range: tsp::Range {
-                start: tsp::Position {
+            range: Range {
+                start: Position {
                     line: 5,
                     character: 10,
                 },
-                end: tsp::Position {
+                end: Position {
                     line: 5,
                     character: 20,
                 },
             },
         }),
-        module_name: tsp::ModuleName {
+        module_name: ModuleName {
             leading_dots: 0,
             name_parts: vec!["test".to_owned()],
         },
@@ -353,12 +356,12 @@ fn test_resolve_import_declaration_node_handling() {
     };
 
     // Test with node absent
-    let without_node = tsp::Declaration {
-        handle: tsp::DeclarationHandle::String("without_node".to_owned()),
-        category: tsp::DeclarationCategory::Import,
-        flags: tsp::DeclarationFlags::new(),
+    let without_node = Declaration {
+        handle: DeclarationHandle::String("without_node".to_owned()),
+        category: DeclarationCategory::Import,
+        flags: DeclarationFlags::new(),
         node: None,
-        module_name: tsp::ModuleName {
+        module_name: ModuleName {
             leading_dots: 0,
             name_parts: vec!["test".to_owned()],
         },
@@ -366,15 +369,15 @@ fn test_resolve_import_declaration_node_handling() {
         uri: uri.to_string(),
     };
 
-    let params_with_node = tsp::ResolveImportDeclarationParams {
+    let params_with_node = ResolveImportDeclarationParams {
         decl: with_node,
-        options: tsp::ResolveImportOptions::default(),
+        options: ResolveImportOptions::default(),
         snapshot: 1,
     };
 
-    let params_without_node = tsp::ResolveImportDeclarationParams {
+    let params_without_node = ResolveImportDeclarationParams {
         decl: without_node,
-        options: tsp::ResolveImportOptions::default(),
+        options: ResolveImportOptions::default(),
         snapshot: 1,
     };
 

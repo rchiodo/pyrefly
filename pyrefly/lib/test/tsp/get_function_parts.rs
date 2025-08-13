@@ -13,8 +13,7 @@ use tsp_types::TypeCategory;
 use tsp_types::TypeFlags;
 
 use super::util::build_tsp_test_server;
-use crate::tsp::protocol::TypeHandle;
-use crate::tsp::protocol::TypeReprFlags;
+use tsp_types::{TypeHandle, TypeReprFlags};
 
 #[test]
 fn test_get_function_parts_params_construction() {

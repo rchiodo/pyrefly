@@ -1,13 +1,8 @@
 //! Smoke test to exercise all flag constants and builder helpers so they aren't optimized away.
-use crate::tsp;
-use crate::tsp::protocol::AttributeAccessFlags;
-use crate::tsp::protocol::AttributeFlags;
-use crate::tsp::protocol::ClassFlags;
-use crate::tsp::protocol::DeclarationFlags;
-use crate::tsp::protocol::FunctionFlags;
-use crate::tsp::protocol::TypeFlags;
-use crate::tsp::protocol::TypeReprFlags;
-use crate::tsp::protocol::TypeVarFlags;
+use tsp_types::{
+    AttributeAccessFlags, AttributeFlags, ClassFlags, DeclarationFlags, FunctionFlags,
+    TypeFlags, TypeReprFlags, TypeVarFlags, INVALID_HANDLE,
+};
 
 #[test]
 fn test_tsp_all_flag_builders_and_constants() {
@@ -91,10 +86,10 @@ fn test_tsp_all_flag_builders_and_constants() {
     assert!(trf.contains(TypeReprFlags::CONVERT_TO_INSTANCE_TYPE));
 
     // Touch INVALID_HANDLE constant so it is considered used.
-    let invalid = tsp::INVALID_HANDLE;
+    let invalid = INVALID_HANDLE;
     assert_eq!(invalid, -1);
 
     // Exercise error_response to mark it used.
     let _resp =
-        crate::tsp::common::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
+        tsp_types::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
 }

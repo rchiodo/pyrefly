@@ -1,8 +1,8 @@
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::tsp::util::extract_cursor_location;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp;
 use crate::tsp::requests::get_symbol::extract_symbol_name;
+use tsp_types::{GetSymbolParams, Node, Position, Range};
 
 #[test]
 fn test_get_symbol_params_construction() {
@@ -19,15 +19,15 @@ my_function()
 
     let position = extract_cursor_location(content, &uri);
 
-    let params = tsp::GetSymbolParams {
-        node: tsp::Node {
+    let params = GetSymbolParams {
+        node: Node {
             uri: uri.to_string(),
-            range: tsp::Range {
-                start: tsp::Position {
+            range: Range {
+                start: Position {
                     line: position.line,
                     character: position.character,
                 },
-                end: tsp::Position {
+                end: Position {
                     line: position.line,
                     character: position.character,
                 },
@@ -60,14 +60,14 @@ fn test_extract_symbol_name_with_provided_name() {
     let transaction = state.transaction();
     let module_info = transaction.get_module_info(handle).unwrap();
 
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 4,
             },
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 15,
             },
@@ -93,14 +93,14 @@ fn test_extract_symbol_name_from_node_range() {
     let transaction = state.transaction();
     let module_info = transaction.get_module_info(handle).unwrap();
 
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 4,
             }, // Start of "my_function"
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 15,
             }, // End of "my_function"
@@ -126,14 +126,14 @@ y = "hello"
     let transaction = state.transaction();
     let module_info = transaction.get_module_info(handle).unwrap();
 
-    let node = tsp::Node {
+    let node = Node {
         uri: "file:///test.py".to_string(),
-        range: tsp::Range {
-            start: tsp::Position {
+        range: Range {
+            start: Position {
                 line: 0,
                 character: 0,
             }, // Start of "x"
-            end: tsp::Position {
+            end: Position {
                 line: 0,
                 character: 1,
             }, // End of "x"
