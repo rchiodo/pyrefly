@@ -74,7 +74,10 @@ fn test_get_type_attributes_params_serialization() {
     assert_eq!(deserialized.type_.name, original_params.type_.name);
     assert_eq!(deserialized.type_.category, original_params.type_.category);
     // Note: handle, flags, and module_name comparisons skipped as they don't implement PartialEq
-    assert_eq!(deserialized.type_.category_flags, original_params.type_.category_flags);
+    assert_eq!(
+        deserialized.type_.category_flags,
+        original_params.type_.category_flags
+    );
 }
 
 #[test]

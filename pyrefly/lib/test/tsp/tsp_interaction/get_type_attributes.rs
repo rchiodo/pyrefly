@@ -189,13 +189,13 @@ average_calculator: Callable[[List[float]], float] = calculate_average
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-            "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
-            "category": "$$CAPTURE_TYPE_CATEGORY$$",
-            "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-            "flags": "$$CAPTURE_TYPE_FLAGS$$",
-            "handle": "$$CAPTURE_TYPE_HANDLE$$",
-            "name": "$$CAPTURE_TYPE_NAME$$"
-                })),
+                "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
+                "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                "name": "$$CAPTURE_TYPE_NAME$$"
+                    })),
                 error: None,
             }),
             // Type attributes response - should contain parameters and return type
@@ -314,13 +314,13 @@ number_filter: Callable[[List[int]], List[int]] = lambda nums: [x for x in nums 
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-            "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
-            "category": "$$CAPTURE_TYPE_CATEGORY$$",
-            "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-            "flags": "$$CAPTURE_TYPE_FLAGS$$",
-            "handle": "$$CAPTURE_TYPE_HANDLE$$",
-            "name": "$$CAPTURE_TYPE_NAME$$"
-                })),
+                "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
+                "category": "$$CAPTURE_TYPE_CATEGORY$$",
+                "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+                "flags": "$$CAPTURE_TYPE_FLAGS$$",
+                "handle": "$$CAPTURE_TYPE_HANDLE$$",
+                "name": "$$CAPTURE_TYPE_NAME$$"
+                    })),
                 error: None,
             }),
             // Type attributes response - should contain Callable parameters and return type

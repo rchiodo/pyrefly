@@ -63,8 +63,14 @@ fn test_extract_symbol_name_with_provided_name() {
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 4 },
-            end: tsp::Position { line: 0, character: 15 },
+            start: tsp::Position {
+                line: 0,
+                character: 4,
+            },
+            end: tsp::Position {
+                line: 0,
+                character: 15,
+            },
         },
     };
 
@@ -90,8 +96,14 @@ fn test_extract_symbol_name_from_node_range() {
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 4 }, // Start of "my_function"
-            end: tsp::Position { line: 0, character: 15 }, // End of "my_function"
+            start: tsp::Position {
+                line: 0,
+                character: 4,
+            }, // Start of "my_function"
+            end: tsp::Position {
+                line: 0,
+                character: 15,
+            }, // End of "my_function"
         },
     };
 
@@ -117,8 +129,14 @@ y = "hello"
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 0 }, // Start of "x"
-            end: tsp::Position { line: 0, character: 1 },   // End of "x"
+            start: tsp::Position {
+                line: 0,
+                character: 0,
+            }, // Start of "x"
+            end: tsp::Position {
+                line: 0,
+                character: 1,
+            }, // End of "x"
         },
     };
 

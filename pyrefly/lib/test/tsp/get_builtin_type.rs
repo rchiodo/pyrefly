@@ -16,11 +16,12 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
-use crate::tsp::protocol::{Position, Range};
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp;
+use crate::tsp::protocol::Position;
+use crate::tsp::protocol::Range;
 
 #[test]
 fn test_simple_get_builtin_type_verification() {
@@ -41,7 +42,13 @@ fn test_get_builtin_type_params_construction() {
     };
 
     let params = tsp::GetBuiltinTypeParams {
-        scoping_node: tsp::Node { uri: uri_str.clone(), range: Range { start: position.clone(), end: position } },
+        scoping_node: tsp::Node {
+            uri: uri_str.clone(),
+            range: Range {
+                start: position.clone(),
+                end: position,
+            },
+        },
         name: "int".to_owned(),
         snapshot: 1,
     };
@@ -180,7 +187,16 @@ z = [1, 2, 3]
     let params = tsp::GetBuiltinTypeParams {
         scoping_node: tsp::Node {
             uri: uri.clone(),
-            range: Range { start: Position { line: 1, character: 0 }, end: Position { line: 1, character: 1 } },
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 0,
+                },
+                end: Position {
+                    line: 1,
+                    character: 1,
+                },
+            },
         },
         name: "int".to_owned(),
         snapshot: 1, // Use a dummy snapshot number
@@ -247,7 +263,16 @@ x = 42
         let params = tsp::GetBuiltinTypeParams {
             scoping_node: tsp::Node {
                 uri: uri.clone(),
-                range: Range { start: Position { line: 2, character: 0 }, end: Position { line: 2, character: 1 } },
+                range: Range {
+                    start: Position {
+                        line: 2,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: 2,
+                        character: 1,
+                    },
+                },
             },
             name: type_name.to_owned(),
             snapshot: 1,

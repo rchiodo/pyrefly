@@ -16,11 +16,12 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
-use crate::tsp::protocol::{Position, Range};
 
 use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp;
+use crate::tsp::protocol::Position;
+use crate::tsp::protocol::Range;
 
 #[test]
 fn test_simple_get_type_verification() {
@@ -40,7 +41,16 @@ fn test_get_type_params_construction() {
         character: 0,
     };
 
-    let params = tsp::GetTypeParams { node: tsp::Node { uri: uri_str.clone(), range: Range { start: position.clone(), end: position } }, snapshot: 1 };
+    let params = tsp::GetTypeParams {
+        node: tsp::Node {
+            uri: uri_str.clone(),
+            range: Range {
+                start: position.clone(),
+                end: position,
+            },
+        },
+        snapshot: 1,
+    };
 
     // Just test that we can construct the parameters correctly
     assert_eq!(params.snapshot, 1);
@@ -113,7 +123,16 @@ z = [1, 2, 3]
     let params = tsp::GetTypeParams {
         node: tsp::Node {
             uri: uri.clone(),
-            range: Range { start: Position { line: 1, character: 0 }, end: Position { line: 1, character: 1 } },
+            range: Range {
+                start: Position {
+                    line: 1,
+                    character: 0,
+                },
+                end: Position {
+                    line: 1,
+                    character: 1,
+                },
+            },
         },
         snapshot: 1, // Use a dummy snapshot number
     };
@@ -194,7 +213,13 @@ dict_var = {"key": "value"}
         let params = tsp::GetTypeParams {
             node: tsp::Node {
                 uri: uri.clone(),
-                range: Range { start: pos, end: Position { line, character: character + 1 } },
+                range: Range {
+                    start: pos,
+                    end: Position {
+                        line,
+                        character: character + 1,
+                    },
+                },
             },
             snapshot: 1,
         };

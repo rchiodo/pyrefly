@@ -116,11 +116,17 @@ pub mod legacy_type_flags {
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
     #[inline]
-    pub fn has_expand_type_aliases(&self) -> bool { self.contains(tsp::TypeReprFlags::EXPAND_TYPE_ALIASES) }
+    pub fn has_expand_type_aliases(&self) -> bool {
+        self.contains(tsp::TypeReprFlags::EXPAND_TYPE_ALIASES)
+    }
     #[inline]
-    pub fn has_print_type_var_variance(&self) -> bool { self.contains(tsp::TypeReprFlags::PRINT_TYPE_VAR_VARIANCE) }
+    pub fn has_print_type_var_variance(&self) -> bool {
+        self.contains(tsp::TypeReprFlags::PRINT_TYPE_VAR_VARIANCE)
+    }
     #[inline]
-    pub fn has_convert_to_instance_type(&self) -> bool { self.contains(tsp::TypeReprFlags::CONVERT_TO_INSTANCE_TYPE) }
+    pub fn has_convert_to_instance_type(&self) -> bool {
+        self.contains(tsp::TypeReprFlags::CONVERT_TO_INSTANCE_TYPE)
+    }
 }
 
 /// Provide a Default implementation shim for ResolveImportOptions (all None)
@@ -185,6 +191,7 @@ where
 }
 
 /// Helper to build a JSON-RPC error response for TSP handlers
+#[allow(dead_code)]
 pub fn error_response(
     id: lsp_server::RequestId,
     code: i32,
@@ -237,11 +244,11 @@ pub fn create_default_type_for_declaration(decl: &tsp::Declaration) -> tsp::Type
         tsp::DeclarationCategory::Function => {
             (tsp::TypeCategory::Function, tsp::TypeFlags::CALLABLE)
         }
-    tsp::DeclarationCategory::Class => (tsp::TypeCategory::Class, tsp::TypeFlags::INSTANTIABLE),
-    tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::NONE),
-    tsp::DeclarationCategory::TypeAlias => (tsp::TypeCategory::Any, tsp::TypeFlags::FROM_ALIAS),
-    tsp::DeclarationCategory::TypeParam => (tsp::TypeCategory::TypeVar, tsp::TypeFlags::NONE),
-    _ => (tsp::TypeCategory::Any, tsp::TypeFlags::NONE),
+        tsp::DeclarationCategory::Class => (tsp::TypeCategory::Class, tsp::TypeFlags::INSTANTIABLE),
+        tsp::DeclarationCategory::Import => (tsp::TypeCategory::Module, tsp::TypeFlags::NONE),
+        tsp::DeclarationCategory::TypeAlias => (tsp::TypeCategory::Any, tsp::TypeFlags::FROM_ALIAS),
+        tsp::DeclarationCategory::TypeParam => (tsp::TypeCategory::TypeVar, tsp::TypeFlags::NONE),
+        _ => (tsp::TypeCategory::Any, tsp::TypeFlags::NONE),
     };
 
     // Convert the declaration handle into a type handle. We just mirror the
@@ -293,12 +300,12 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> tsp::Type {
 pub fn calculate_type_flags(py_type: &crate::types::types::Type) -> tsp::TypeFlags {
     use crate::types::types::Type as PyType;
     match py_type {
-    PyType::ClassDef(_) => tsp::TypeFlags::INSTANTIABLE,
-    PyType::ClassType(_) => tsp::TypeFlags::INSTANCE,
-    PyType::Function(_) | PyType::Callable(_) => tsp::TypeFlags::CALLABLE,
+        PyType::ClassDef(_) => tsp::TypeFlags::INSTANTIABLE,
+        PyType::ClassType(_) => tsp::TypeFlags::INSTANCE,
+        PyType::Function(_) | PyType::Callable(_) => tsp::TypeFlags::CALLABLE,
         PyType::Literal(_) => tsp::TypeFlags::LITERAL,
-    PyType::TypeAlias(_) => tsp::TypeFlags::FROM_ALIAS,
-    _ => tsp::TypeFlags::NONE,
+        PyType::TypeAlias(_) => tsp::TypeFlags::FROM_ALIAS,
+        _ => tsp::TypeFlags::NONE,
     }
 }
 

@@ -90,7 +90,7 @@ fn test_search_for_type_attribute_different_start_types() {
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["utils".to_owned() ],
+            name_parts: vec!["utils".to_owned()],
         }),
         name: "helper_function".to_owned(),
         category_flags: 0,
@@ -131,11 +131,11 @@ fn test_search_for_type_attribute_different_start_types() {
     assert_eq!(params_class.start_type.category, tsp::TypeCategory::Class);
     assert_eq!(
         params_function.start_type.category,
-    tsp::TypeCategory::Function
+        tsp::TypeCategory::Function
     );
     assert_eq!(
-    params_overloaded.start_type.category,
-    tsp::TypeCategory::Overloaded
+        params_overloaded.start_type.category,
+        tsp::TypeCategory::Overloaded
     );
 }
 
@@ -301,8 +301,14 @@ fn test_search_for_type_attribute_optional_parameters() {
     let expression_node = tsp::Node {
         uri: test_uri.clone(),
         range: tsp::Range {
-            start: tsp::Position { line: 10, character: 5 },
-            end: tsp::Position { line: 10, character: 15 },
+            start: tsp::Position {
+                line: 10,
+                character: 5,
+            },
+            end: tsp::Position {
+                line: 10,
+                character: 15,
+            },
         },
     };
 
@@ -430,10 +436,10 @@ fn test_search_for_type_attribute_type_handle_variants() {
         _ => panic!("Expected String handle"),
     }
 
-        match &params_integer.start_type.handle {
-            tsp::TypeHandle::Int(i) => assert_eq!(*i, 789),
-            _ => panic!("Expected Integer handle"),
-        }
+    match &params_integer.start_type.handle {
+        tsp::TypeHandle::Int(i) => assert_eq!(*i, 789),
+        _ => panic!("Expected Integer handle"),
+    }
     // Int handle already validated above
 }
 
@@ -630,8 +636,14 @@ fn test_search_for_type_attribute_serialization_deserialization() {
         expression_node: Some(tsp::Node {
             uri: test_uri.clone(),
             range: tsp::Range {
-                start: tsp::Position { line: 5, character: 10 },
-                end: tsp::Position { line: 5, character: 25 },
+                start: tsp::Position {
+                    line: 5,
+                    character: 10,
+                },
+                end: tsp::Position {
+                    line: 5,
+                    character: 25,
+                },
             },
         }),
         instance_type: Some(tsp::Type {

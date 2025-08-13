@@ -41,8 +41,14 @@ fn test_get_docstring_at_position_with_function_docstring() {
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 4 }, // Points to 'calculate_area'
-            end: tsp::Position { line: 0, character: 18 },
+            start: tsp::Position {
+                line: 0,
+                character: 4,
+            }, // Points to 'calculate_area'
+            end: tsp::Position {
+                line: 0,
+                character: 18,
+            },
         },
     };
 
@@ -85,8 +91,14 @@ fn test_get_docstring_at_position_with_class_docstring() {
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 6 }, // Points to 'DataProcessor'
-            end: tsp::Position { line: 0, character: 19 },
+            start: tsp::Position {
+                line: 0,
+                character: 6,
+            }, // Points to 'DataProcessor'
+            end: tsp::Position {
+                line: 0,
+                character: 19,
+            },
         },
     };
 
@@ -120,8 +132,14 @@ class SimpleClass:
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 0, character: 4 }, // Points to 'simple_function'
-            end: tsp::Position { line: 0, character: 19 },
+            start: tsp::Position {
+                line: 0,
+                character: 4,
+            }, // Points to 'simple_function'
+            end: tsp::Position {
+                line: 0,
+                character: 19,
+            },
         },
     };
 
@@ -161,8 +179,14 @@ fn test_get_docstring_at_position_method_docstring() {
     let node = tsp::Node {
         uri: "file:///test.py".to_string(),
         range: tsp::Range {
-            start: tsp::Position { line: 1, character: 8 }, // Points to 'add' method
-            end: tsp::Position { line: 1, character: 11 },
+            start: tsp::Position {
+                line: 1,
+                character: 8,
+            }, // Points to 'add' method
+            end: tsp::Position {
+                line: 1,
+                character: 11,
+            },
         },
     };
 

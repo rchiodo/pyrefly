@@ -8,9 +8,12 @@
 //! Tests for TSP getFunctionParts request parameter construction
 
 use super::util::build_tsp_test_server;
-use crate::tsp::protocol::{
-    GetFunctionPartsParams, Type, TypeCategory, TypeFlags, TypeHandle, TypeReprFlags,
-};
+use crate::tsp::protocol::GetFunctionPartsParams;
+use crate::tsp::protocol::Type;
+use crate::tsp::protocol::TypeCategory;
+use crate::tsp::protocol::TypeFlags;
+use crate::tsp::protocol::TypeHandle;
+use crate::tsp::protocol::TypeReprFlags;
 
 #[test]
 fn test_get_function_parts_params_construction() {

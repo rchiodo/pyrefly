@@ -13,7 +13,7 @@ import os
 import shutil
 import subprocess
 import re
-from typing import Dict, Any, Iterable
+from typing import Dict, Any, Iterable, Optional
 
 # Import the lsprotocol generator modules
 import generator.model as model
@@ -253,41 +253,35 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
     if generated_lib.exists():
         print(f"Copying generated lib.rs to protocol.rs...")
         content = generated_lib.read_text(encoding='utf-8')
-        
-        # Update the header comment to reflect that this is for Type Server Protocol
+
+        # Update the header comment
         content = content.replace(
             "Language Server Protocol types for Rust generated from LSP specification.",
             "Type Server Protocol types for Rust generated from TSP specification."
         ).replace(
             "// Steps to generate:\n// 1. Checkout https://github.com/microsoft/lsprotocol\n// 2. Install nox: `python -m pip install nox`\n// 3. Run command: `python -m nox --session build_lsp`",
             "// Steps to generate:\n// 1. Create tsp.json and tsp.schema.json from typeServerProtocol.ts\n// 2. Install lsprotocol generator: `pip install git+https://github.com/microsoft/lsprotocol.git`\n// 3. Run: `python generate_protocol.py`"
-        ).replace(
-            "LSPRequestMethods", "TSPRequestMethods"
-        ).replace(
-            "LSPNotificationMethods", "TSPNotificationMethods"
-        ).replace(
-            "LSPAny", "serde_json::Value"
-        ).replace(
-            "use std::collections::HashMap;\nuse url::Url;\nuse rust_decimal::Decimal;", ""
-        ).replace(
-            "GetDocString", "GetDocstring"
-        )
-        
+        ).replace("LSPRequestMethods", "TSPRequestMethods")
+        content = content.replace("LSPNotificationMethods", "TSPNotificationMethods")
+        content = content.replace("LSPAny", "serde_json::Value")
+        content = content.replace("use std::collections::HashMap;\nuse url::Url;\nuse rust_decimal::Decimal;", "")
+        content = content.replace("GetDocString", "GetDocstring")
+
         shutil.rmtree(output_path / "lsprotocol")
-        
-        # Add constants from tsp.json if they exist
+
+        # Append constants if present
         constants_rust = generate_constants_rust(tsp_json)
         if constants_rust:
-            content = content + "\n\n" + constants_rust
+            content += "\n\n" + constants_rust
 
-        # Turn off clippy warnings on generated code.
-        content = "#![allow(clippy::all)]\n\n" + content
+        # Add crate-level allows
+        content = "#![allow(clippy::all)]\n#![allow(dead_code)]\n\n" + content
 
-        # --- Idiomatic flag generation (UPPER_SNAKE constants + snake_case builder methods) ---
-        def replace_flag_enum(name: str, mapping: dict[str, int]):
+        # Helper to replace enum flags with newtype bitflag style
+        def replace_flag_enum(name: str, mapping: Dict[str, int]):
             nonlocal content
 
-            def find_block_end(idx: int) -> int | None:
+            def find_block_end(idx: int) -> Optional[int]:
                 if idx < 0:
                     return None
                 depth = 0
@@ -328,7 +322,7 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             if de_end is None:
                 return
 
-            # Capture doc comments
+            # Capture doc comments preceding enum
             doc_start = enum_start
             line_start = content.rfind('\n', 0, enum_start) + 1
             while line_start >= 0:
@@ -353,23 +347,18 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             lines.append(f"#[derive(PartialEq, Eq, Clone, Copy, Debug)]")
             lines.append(f"pub struct {name}(pub i32);")
             lines.append(f"impl {name} {{")
-            # Upper snake constants
             for const_name, val in mapping.items():
                 upper = camel_to_upper_snake(const_name)
                 lines.append(f"    pub const {upper}: {name} = {name}({val});")
-            # new()
             lines.append("    #[inline] pub fn new() -> Self { Self::NONE }")
-            # Snake_case builders for non-zero flags
             for const_name, val in mapping.items():
                 if val == 0:
                     continue
                 snake = camel_to_snake(const_name)
                 upper = camel_to_upper_snake(const_name)
                 lines.append(f"    #[inline] pub fn with_{snake}(self) -> Self {{ {name}(self.0 | {name}::{upper}.0) }}")
-            # contains helpers
             lines.append("    #[inline] pub fn contains(self, other: Self) -> bool { (self.0 & other.0) == other.0 }")
             lines.append("}")
-            # serde + bit ops
             lines.append(f"impl Serialize for {name} {{ fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error> where S: serde::Serializer {{ s.serialize_i32(self.0) }} }}")
             lines.append(f"impl<'de> Deserialize<'de> for {name} {{ fn deserialize<D>(d: D) -> Result<Self, D::Error> where D: serde::Deserializer<'de> {{ let v = i32::deserialize(d)?; Ok({name}(v)) }} }}")
             lines.append(f"impl std::ops::BitOr for {name} {{ type Output = {name}; fn bitor(self, rhs: {name}) -> {name} {{ {name}(self.0 | rhs.0) }} }}")
@@ -378,7 +367,7 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             replacement = "\n" + "\n".join(lines) + "\n"
             content = content[:doc_start] + replacement + content[de_end:]
 
-        flag_mappings = {
+        for enum_name, mapping in {
             "TypeFlags": {"None": 0, "Instantiable": 1, "Instance": 2, "Callable": 4, "Literal": 8, "Interface": 16, "Generic": 32, "FromAlias": 64},
             "AttributeFlags": {"None": 0, "IsArgsList": 1, "IsKwargsDict": 2},
             "DeclarationFlags": {"None": 0, "ClassMember": 1, "Constant": 2, "Final": 4, "IsDefinedBySlots": 8, "UsesLocalName": 16, "UnresolvedImport": 32},
@@ -387,14 +376,11 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
             "FunctionFlags": {"None": 0, "Async": 1, "Generator": 2, "Abstract": 4, "Static": 8},
             "ClassFlags": {"None": 0, "Enum": 1, "TypedDict": 2},
             "TypeVarFlags": {"None": 0, "IsParamSpec": 1},
-        }
-        for enum_name, mapping in flag_mappings.items():
+        }.items():
             replace_flag_enum(enum_name, mapping)
 
         target_protocol.write_text(content, encoding='utf-8')
         print(f"Successfully generated: {target_protocol}")
-
-        # Format the file 
         subprocess.run(["cargo", "fmt", "--", str(target_protocol)], check=False)
     else:
         print(f"Warning: Generated lib.rs not found at {generated_lib}")

@@ -26,8 +26,14 @@ fn test_resolve_import_declaration_params_construction() {
         node: Some(tsp::Node {
             uri: uri.to_string(),
             range: tsp::Range {
-                start: tsp::Position { line: 0, character: 0 },
-                end: tsp::Position { line: 0, character: 10 },
+                start: tsp::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: tsp::Position {
+                    line: 0,
+                    character: 10,
+                },
             },
         }),
         module_name: tsp::ModuleName {
@@ -116,8 +122,14 @@ fn test_resolve_import_declaration_different_categories() {
             node: Some(tsp::Node {
                 uri: uri.to_string(),
                 range: tsp::Range {
-                    start: tsp::Position { line: 0, character: 0 },
-                    end: tsp::Position { line: 0, character: name.len() as u32 },
+                    start: tsp::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: tsp::Position {
+                        line: 0,
+                        character: name.len() as u32,
+                    },
                 },
             }),
             module_name: tsp::ModuleName {
@@ -189,7 +201,10 @@ fn test_resolve_import_declaration_module_name_variants() {
 
     for (module_name, description) in module_patterns {
         let declaration = tsp::Declaration {
-            handle: tsp::DeclarationHandle::String(format!("handle_{}", description.replace(' ', "_"))),
+            handle: tsp::DeclarationHandle::String(format!(
+                "handle_{}",
+                description.replace(' ', "_")
+            )),
             category: tsp::DeclarationCategory::Import,
             flags: tsp::DeclarationFlags::new(),
             node: None,
@@ -255,7 +270,7 @@ fn test_resolve_import_declaration_flags_handling() {
         // Basic validation that the flags are preserved
         // (flags comparison requires specific trait impls)
         assert_eq!(params.decl.name, "symbol");
-    assert_eq!(params.decl.category, tsp::DeclarationCategory::Import);
+        assert_eq!(params.decl.category, tsp::DeclarationCategory::Import);
     }
 }
 
@@ -278,8 +293,14 @@ fn test_resolve_import_declaration_uri_handling() {
             node: Some(tsp::Node {
                 uri: test_uri.clone(),
                 range: tsp::Range {
-                    start: tsp::Position { line: 0, character: 0 },
-                    end: tsp::Position { line: 0, character: 10 },
+                    start: tsp::Position {
+                        line: 0,
+                        character: 0,
+                    },
+                    end: tsp::Position {
+                        line: 0,
+                        character: 10,
+                    },
                 },
             }),
             module_name: tsp::ModuleName {
@@ -313,8 +334,14 @@ fn test_resolve_import_declaration_node_handling() {
         node: Some(tsp::Node {
             uri: uri.to_string(),
             range: tsp::Range {
-                start: tsp::Position { line: 5, character: 10 },
-                end: tsp::Position { line: 5, character: 20 },
+                start: tsp::Position {
+                    line: 5,
+                    character: 10,
+                },
+                end: tsp::Position {
+                    line: 5,
+                    character: 20,
+                },
             },
         }),
         module_name: tsp::ModuleName {

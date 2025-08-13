@@ -11,8 +11,14 @@ fn test_basic_get_matching_overloads() {
         call_node: tsp::Node {
             uri: uri.to_string(),
             range: tsp::Range {
-                start: tsp::Position { line: 0, character: 0 },
-                end: tsp::Position { line: 0, character: 1 },
+                start: tsp::Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: tsp::Position {
+                    line: 0,
+                    character: 1,
+                },
             },
         },
         snapshot: 1,
