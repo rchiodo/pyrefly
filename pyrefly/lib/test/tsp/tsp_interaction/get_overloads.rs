@@ -68,12 +68,11 @@ y = simple_func(42)
                 method: "typeServer/getOverloads".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -91,12 +90,11 @@ y = simple_func(42)
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",  // Capture this handle for next request
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,

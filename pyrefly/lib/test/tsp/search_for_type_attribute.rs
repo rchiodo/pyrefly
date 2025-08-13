@@ -15,19 +15,15 @@
  * and edge cases without requiring full TSP message protocol flows.
  */
 
-use lsp_types::Position;
-use lsp_types::Range;
-use lsp_types::Url;
-use serde_json;
-
 use crate::tsp;
 
 #[test]
 fn test_search_for_type_attribute_params_construction() {
     // Test basic parameter construction
     let start_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("test_class_type".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -35,10 +31,7 @@ fn test_search_for_type_attribute_params_construction() {
         }),
         name: "MyClass".to_owned(),
         category_flags: 0,
-        decl: Some(serde_json::json!({
-            "kind": "class",
-            "name": "MyClass"
-        })),
+        decl: None,
     };
 
     let params = tsp::SearchForTypeAttributeParams {
@@ -54,7 +47,7 @@ fn test_search_for_type_attribute_params_construction() {
     assert_eq!(params.snapshot, 42);
     assert_eq!(params.attribute_name, "my_method");
     assert_eq!(params.start_type.name, "MyClass");
-    assert_eq!(params.start_type.category, tsp::TypeCategory::CLASS);
+    assert_eq!(params.start_type.category, tsp::TypeCategory::Class);
     match &params.start_type.handle {
         tsp::TypeHandle::String(s) => assert_eq!(s, "test_class_type"),
         _ => panic!("Expected String handle"),
@@ -67,8 +60,9 @@ fn test_search_for_type_attribute_params_construction() {
 fn test_search_for_type_attribute_different_start_types() {
     // Test with CLASS category (expected case)
     let class_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("class_handle".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -90,12 +84,13 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Test with FUNCTION category (should not have attributes typically)
     let function_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("function_handle".to_owned()),
-        category: tsp::TypeCategory::FUNCTION,
+        category: tsp::TypeCategory::Function,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
-            name_parts: vec!["utils".to_owned()],
+            name_parts: vec!["utils".to_owned() ],
         }),
         name: "helper_function".to_owned(),
         category_flags: 0,
@@ -113,8 +108,9 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Test with OVERLOADED category
     let overloaded_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("overloaded_handle".to_owned()),
-        category: tsp::TypeCategory::OVERLOADED,
+        category: tsp::TypeCategory::Overloaded,
         flags: tsp::TypeFlags::new(),
         module_name: None,
         name: "overloaded_func".to_owned(),
@@ -132,22 +128,23 @@ fn test_search_for_type_attribute_different_start_types() {
     };
 
     // Verify different categories
-    assert_eq!(params_class.start_type.category, tsp::TypeCategory::CLASS);
+    assert_eq!(params_class.start_type.category, tsp::TypeCategory::Class);
     assert_eq!(
         params_function.start_type.category,
-        tsp::TypeCategory::FUNCTION
+    tsp::TypeCategory::Function
     );
     assert_eq!(
-        params_overloaded.start_type.category,
-        tsp::TypeCategory::OVERLOADED
+    params_overloaded.start_type.category,
+    tsp::TypeCategory::Overloaded
     );
 }
 
 #[test]
 fn test_search_for_type_attribute_attribute_name_variants() {
     let base_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("test_type".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -219,8 +216,9 @@ fn test_search_for_type_attribute_attribute_name_variants() {
 #[test]
 fn test_search_for_type_attribute_access_flags() {
     let base_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("test_type".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -285,8 +283,9 @@ fn test_search_for_type_attribute_access_flags() {
 #[test]
 fn test_search_for_type_attribute_optional_parameters() {
     let base_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("test_type".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -298,18 +297,12 @@ fn test_search_for_type_attribute_optional_parameters() {
     };
 
     // Test with expression_node provided
-    let test_uri = Url::parse("file:///test.py").unwrap();
+    let test_uri = "file:///test.py".to_string();
     let expression_node = tsp::Node {
         uri: test_uri.clone(),
-        range: Range {
-            start: Position {
-                line: 10,
-                character: 5,
-            },
-            end: Position {
-                line: 10,
-                character: 15,
-            },
+        range: tsp::Range {
+            start: tsp::Position { line: 10, character: 5 },
+            end: tsp::Position { line: 10, character: 15 },
         },
     };
 
@@ -324,8 +317,9 @@ fn test_search_for_type_attribute_optional_parameters() {
 
     // Test with instance_type provided
     let instance_type = tsp::Type {
-        handle: tsp::TypeHandle::Integer(123),
-        category: tsp::TypeCategory::CLASS,
+        alias_name: None,
+        handle: tsp::TypeHandle::Int(123),
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new().with_instance(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -375,7 +369,7 @@ fn test_search_for_type_attribute_optional_parameters() {
     let instance = params_with_instance.instance_type.as_ref().unwrap();
     assert_eq!(instance.name, "TestClassInstance");
     match &instance.handle {
-        tsp::TypeHandle::Integer(i) => assert_eq!(*i, 123),
+        tsp::TypeHandle::Int(i) => assert_eq!(*i, 123),
         _ => panic!("Expected Integer handle"),
     }
 }
@@ -384,8 +378,9 @@ fn test_search_for_type_attribute_optional_parameters() {
 fn test_search_for_type_attribute_type_handle_variants() {
     // Test with String handle
     let string_handle_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("string_handle_class".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -407,8 +402,9 @@ fn test_search_for_type_attribute_type_handle_variants() {
 
     // Test with Integer handle
     let integer_handle_type = tsp::Type {
-        handle: tsp::TypeHandle::Integer(789),
-        category: tsp::TypeCategory::CLASS,
+        alias_name: None,
+        handle: tsp::TypeHandle::Int(789),
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -434,10 +430,11 @@ fn test_search_for_type_attribute_type_handle_variants() {
         _ => panic!("Expected String handle"),
     }
 
-    match &params_integer.start_type.handle {
-        tsp::TypeHandle::Integer(i) => assert_eq!(*i, 789),
-        _ => panic!("Expected Integer handle"),
-    }
+        match &params_integer.start_type.handle {
+            tsp::TypeHandle::Int(i) => assert_eq!(*i, 789),
+            _ => panic!("Expected Integer handle"),
+        }
+    // Int handle already validated above
 }
 
 #[test]
@@ -462,8 +459,9 @@ fn test_search_for_type_attribute_module_name_variants() {
 
     // Test with no module name (None)
     let type_no_module = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("no_module".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: None,
         name: "BuiltinClass".to_owned(),
@@ -472,8 +470,9 @@ fn test_search_for_type_attribute_module_name_variants() {
     };
 
     let type_simple = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("simple".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(simple_module.clone()),
         name: "SimpleClass".to_owned(),
@@ -482,8 +481,9 @@ fn test_search_for_type_attribute_module_name_variants() {
     };
 
     let type_nested = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("nested".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(nested_module.clone()),
         name: "NestedClass".to_owned(),
@@ -492,8 +492,9 @@ fn test_search_for_type_attribute_module_name_variants() {
     };
 
     let type_relative = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("relative".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(relative_module.clone()),
         name: "RelativeClass".to_owned(),
@@ -557,8 +558,9 @@ fn test_search_for_type_attribute_module_name_variants() {
 #[test]
 fn test_search_for_type_attribute_snapshot_validation() {
     let base_type = tsp::Type {
+        alias_name: None,
         handle: tsp::TypeHandle::String("snapshot_test".to_owned()),
-        category: tsp::TypeCategory::CLASS,
+        category: tsp::TypeCategory::Class,
         flags: tsp::TypeFlags::new(),
         module_name: Some(tsp::ModuleName {
             leading_dots: 0,
@@ -608,11 +610,12 @@ fn test_search_for_type_attribute_snapshot_validation() {
 #[test]
 fn test_search_for_type_attribute_serialization_deserialization() {
     // Test that parameters can be properly serialized and deserialized
-    let test_uri = Url::parse("file:///test_serialization.py").unwrap();
+    let test_uri = "file:///test_serialization.py".to_string();
     let original_params = tsp::SearchForTypeAttributeParams {
         start_type: tsp::Type {
+            alias_name: None,
             handle: tsp::TypeHandle::String("serialization_test".to_owned()),
-            category: tsp::TypeCategory::CLASS,
+            category: tsp::TypeCategory::Class,
             flags: tsp::TypeFlags::new().with_instantiable(),
             module_name: Some(tsp::ModuleName {
                 leading_dots: 1,
@@ -620,30 +623,21 @@ fn test_search_for_type_attribute_serialization_deserialization() {
             }),
             name: "SerializableClass".to_owned(),
             category_flags: 2,
-            decl: Some(serde_json::json!({
-                "kind": "class",
-                "name": "SerializableClass",
-                "methods": ["__init__", "serialize", "deserialize"]
-            })),
+            decl: None,
         },
         attribute_name: "serialize_method".to_owned(),
         access_flags: tsp::AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES,
         expression_node: Some(tsp::Node {
             uri: test_uri.clone(),
-            range: Range {
-                start: Position {
-                    line: 5,
-                    character: 10,
-                },
-                end: Position {
-                    line: 5,
-                    character: 25,
-                },
+            range: tsp::Range {
+                start: tsp::Position { line: 5, character: 10 },
+                end: tsp::Position { line: 5, character: 25 },
             },
         }),
         instance_type: Some(tsp::Type {
-            handle: tsp::TypeHandle::Integer(456),
-            category: tsp::TypeCategory::CLASS,
+            alias_name: None,
+            handle: tsp::TypeHandle::Int(456),
+            category: tsp::TypeCategory::Class,
             flags: tsp::TypeFlags::new().with_instance(),
             module_name: Some(tsp::ModuleName {
                 leading_dots: 0,

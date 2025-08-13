@@ -67,12 +67,11 @@ z = [1, 2, 3]
                 method: "typeServer/getRepr".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "flags": 0,
@@ -91,12 +90,11 @@ z = [1, 2, 3]
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -155,12 +153,11 @@ fn test_tsp_get_repr_interaction_with_flags() {
                 method: "typeServer/getRepr".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "flags": 1,  // EXPAND_TYPE_ALIASES flag
@@ -179,12 +176,11 @@ fn test_tsp_get_repr_interaction_with_flags() {
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,

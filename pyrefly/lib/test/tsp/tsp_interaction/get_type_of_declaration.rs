@@ -95,16 +95,16 @@ inferred_dict = {"key1": "value1", "key2": "value2"}
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 3,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 2,
-                    "handle": "$$MATCH_EVERYTHING$$",
-                    "moduleName": {
-                        "leadingDots": 0,
-                        "nameParts": ["builtins"]
-                    },
-                    "name": "str"
+                        "aliasName": null,
+                        "category": 3,
+                        "categoryFlags": 0,
+                        "flags": 2,
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "moduleName": {
+                            "leadingDots": 0,
+                            "nameParts": ["builtins"]
+                        },
+                        "name": "str"
                 })),
                 error: None,
             }),
@@ -197,13 +197,12 @@ def lambda_function():
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": 1,
-                    "categoryFlags": 0,
-                    "decl": null,
-                    "flags": 4,
-                    "handle": "$$MATCH_EVERYTHING$$",
-                    "moduleName": null,
-                    "name": "$$MATCH_EVERYTHING$$"
+                        "aliasName": null,
+                        "category": 1,
+                        "categoryFlags": 0,
+                        "flags": 4,
+                        "handle": "$$MATCH_EVERYTHING$$",
+                        "name": "$$MATCH_EVERYTHING$$"
                 })),
                 error: None,
             }),
@@ -301,9 +300,9 @@ class Config:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": null,
                     "category": 3,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 1,
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": {
@@ -406,12 +405,11 @@ class Calculator:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": null,
                     "category": 0,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 0,
                     "handle": "$$MATCH_EVERYTHING$$",
-                    "moduleName": null,
                     "name": "Unknown"
                 })),
                 error: None,

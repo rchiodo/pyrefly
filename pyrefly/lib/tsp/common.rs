@@ -114,10 +114,12 @@ impl tsp::TypeReprFlags {
 /// Provide a Default implementation shim for ResolveImportOptions (all None)
 impl Default for tsp::ResolveImportOptions {
     fn default() -> Self {
+        // Historical default behavior used explicit false values. Tests assert these are Some(false)
+        // to ensure stable wire format and avoid Option omission during serialization.
         tsp::ResolveImportOptions {
-            allow_externally_hidden_access: None,
-            resolve_local_names: None,
-            skip_file_needed_check: None,
+            allow_externally_hidden_access: Some(false),
+            resolve_local_names: Some(false),
+            skip_file_needed_check: Some(false),
         }
     }
 }

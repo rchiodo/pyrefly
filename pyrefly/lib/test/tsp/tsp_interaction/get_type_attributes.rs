@@ -167,12 +167,11 @@ average_calculator: Callable[[List[float]], float] = calculate_average
                 method: "typeServer/getTypeAttributes".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -190,13 +189,12 @@ average_calculator: Callable[[List[float]], float] = calculate_average
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
-                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
-                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
-                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
-                    "name": "$$CAPTURE_TYPE_NAME$$"
+            "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
+            "category": "$$CAPTURE_TYPE_CATEGORY$$",
+            "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+            "flags": "$$CAPTURE_TYPE_FLAGS$$",
+            "handle": "$$CAPTURE_TYPE_HANDLE$$",
+            "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -205,42 +203,39 @@ average_calculator: Callable[[List[float]], float] = calculate_average
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
                     {
-                        "flags": 4, // PARAMETER flag
+                        "flags": "$$MATCH_EVERYTHING$$", // PARAMETER flag (value may vary)
                         "name": "data",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "$$MATCH_EVERYTHING$$"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "$$MATCH_EVERYTHING$$"
                         }
                     },
                     {
-                        "flags": 4, // PARAMETER flag
+                        "flags": "$$MATCH_EVERYTHING$$", // PARAMETER flag (value may vary)
                         "name": "multiplier",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "int"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "int"
                         }
                     },
                     {
-                        "flags": 8, // RETURN_TYPE flag
+                        "flags": "$$MATCH_EVERYTHING$$", // RETURN_TYPE flag (value may vary)
                         "name": "$$MATCH_EVERYTHING$$",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "int"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "int"
                         }
                     }
                 ])),
@@ -297,12 +292,11 @@ number_filter: Callable[[List[int]], List[int]] = lambda nums: [x for x in nums 
                 method: "typeServer/getTypeAttributes".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -320,13 +314,12 @@ number_filter: Callable[[List[int]], List[int]] = lambda nums: [x for x in nums 
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
-                    "category": "$$CAPTURE_TYPE_CATEGORY$$",
-                    "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
-                    "flags": "$$CAPTURE_TYPE_FLAGS$$",
-                    "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
-                    "name": "$$CAPTURE_TYPE_NAME$$"
+            "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
+            "category": "$$CAPTURE_TYPE_CATEGORY$$",
+            "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
+            "flags": "$$CAPTURE_TYPE_FLAGS$$",
+            "handle": "$$CAPTURE_TYPE_HANDLE$$",
+            "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
             }),
@@ -335,42 +328,39 @@ number_filter: Callable[[List[int]], List[int]] = lambda nums: [x for x in nums 
                 id: RequestId::from(4),
                 result: Some(serde_json::json!([
                     {
-                        "flags": 4, // PARAMETER flag
+                        "flags": "$$MATCH_EVERYTHING$$", // PARAMETER flag (value may vary)
                         "name": "$$MATCH_EVERYTHING$$",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "str"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "str"
                         }
                     },
                     {
-                        "flags": 4, // PARAMETER flag
+                        "flags": "$$MATCH_EVERYTHING$$", // PARAMETER flag (value may vary)
                         "name": "$$MATCH_EVERYTHING$$",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "int"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "int"
                         }
                     },
                     {
-                        "flags": 8, // RETURN_TYPE flag
+                        "flags": "$$MATCH_EVERYTHING$$", // RETURN_TYPE flag (value may vary)
                         "name": "$$MATCH_EVERYTHING$$",
                         "type": {
-                            "category": "$$MATCH_EVERYTHING$$",
-                            "categoryFlags": "$$MATCH_EVERYTHING$$",
-                            "decl": "$$MATCH_EVERYTHING$$",
-                            "flags": "$$MATCH_EVERYTHING$$",
-                            "handle": "$$MATCH_EVERYTHING$$",
-                            "moduleName": "$$MATCH_EVERYTHING$$",
-                            "name": "str"
+                "aliasName": "$$MATCH_EVERYTHING$$",
+                "category": "$$MATCH_EVERYTHING$$",
+                "categoryFlags": "$$MATCH_EVERYTHING$$",
+                "flags": "$$MATCH_EVERYTHING$$",
+                "handle": "$$MATCH_EVERYTHING$$",
+                "name": "str"
                         }
                     }
                 ])),

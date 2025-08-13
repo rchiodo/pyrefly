@@ -1,25 +1,15 @@
 /*
-* TSP interaction tests for get_type_args request handler
-*
-* These tests verify the full TSP message protocol for get_type_ar            // Type args response - should contain union type arguments: [int, None]
-           Message::Response(Response {
-               id: RequestId::from(4),
-               result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"])), // Array with wildcards for union types
-               error: None,
-           }),y:
-* 1. Following the LSP interaction test pattern using run            // Type args response - should contain Type objects for key and value types
-           Message::Response(Response {
-               id: RequestId::from(4),
-               result: Some(serde_json::json!(["$$MATCH_EVERYTHING$$", "$$MATCH_EVERYTHING$$"])), // Array with wildcards for [str, int]
-               error: None,
-           }),
-* 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getTypeArgs
-* 3. Validating proper snapshot management and protocol sequencing
-* 4. Using real file operations and message passing to simulate end-to-end TSP interactions
-*
-* The get_type_args request requires a type handle (obtained from get_type) and returns
-* the type arguments for generic types like List[int], Dict[str, float], etc.
-*/
+ * TSP interaction tests for get_type_args request handler
+ *
+ * These tests verify the full TSP message protocol for get_type_args:
+ * 1. Following the LSP interaction test pattern using run_test_tsp_with_capture
+ * 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getTypeArgs
+ * 3. Validating proper snapshot management and protocol sequencing
+ * 4. Using real file operations and message passing to simulate end-to-end TSP interactions
+ *
+ * The get_type_args request requires a type handle (obtained from get_type) and returns
+ * the type arguments for generic types like List[int], Dict[str, float], Optional[T], etc.
+ */
 
 use lsp_server::Message;
 use lsp_server::Request;
@@ -85,12 +75,11 @@ def process_names(data: List[str]) -> str:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -108,12 +97,11 @@ def process_names(data: List[str]) -> str:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -124,7 +112,6 @@ def process_names(data: List[str]) -> str:
                 result: Some(serde_json::json!([{
                     "category": "$$MATCH_EVERYTHING$$",
                     "categoryFlags": "$$MATCH_EVERYTHING$$",
-                    "decl": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": "$$MATCH_EVERYTHING$$",
@@ -189,12 +176,11 @@ def calculate_average(scores: Dict[str, float]) -> float:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -212,12 +198,11 @@ def calculate_average(scores: Dict[str, float]) -> float:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -229,7 +214,6 @@ def calculate_average(scores: Dict[str, float]) -> float:
                     {
                         "category": "$$MATCH_EVERYTHING$$",
                         "categoryFlags": "$$MATCH_EVERYTHING$$",
-                        "decl": "$$MATCH_EVERYTHING$$",
                         "flags": "$$MATCH_EVERYTHING$$",
                         "handle": "$$MATCH_EVERYTHING$$",
                         "moduleName": "$$MATCH_EVERYTHING$$",
@@ -238,7 +222,6 @@ def calculate_average(scores: Dict[str, float]) -> float:
                     {
                         "category": "$$MATCH_EVERYTHING$$",
                         "categoryFlags": "$$MATCH_EVERYTHING$$",
-                        "decl": "$$MATCH_EVERYTHING$$",
                         "flags": "$$MATCH_EVERYTHING$$",
                         "handle": "$$MATCH_EVERYTHING$$",
                         "moduleName": "$$MATCH_EVERYTHING$$",
@@ -306,12 +289,11 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -329,12 +311,11 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -346,19 +327,15 @@ def get_default(value: Optional[str], default: str = "unknown") -> str:
                     {
                         "category": "$$MATCH_EVERYTHING$$",
                         "categoryFlags": "$$MATCH_EVERYTHING$$",
-                        "decl": "$$MATCH_EVERYTHING$$",
                         "flags": "$$MATCH_EVERYTHING$$",
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": "$$MATCH_EVERYTHING$$",
                         "name": "int"
                     },
                     {
                         "category": "$$MATCH_EVERYTHING$$",
                         "categoryFlags": "$$MATCH_EVERYTHING$$",
-                        "decl": "$$MATCH_EVERYTHING$$",
                         "flags": "$$MATCH_EVERYTHING$$",
                         "handle": "$$MATCH_EVERYTHING$$",
-                        "moduleName": "$$MATCH_EVERYTHING$$",
                         "name": "None"
                     }
                 ])),
@@ -420,12 +397,11 @@ class SimpleClass:
                 method: "typeServer/getTypeArgs".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -443,12 +419,11 @@ class SimpleClass:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,

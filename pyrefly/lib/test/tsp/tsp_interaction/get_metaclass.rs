@@ -1,57 +1,16 @@
 /*
-* TSP interaction tests for get_metaclass request handler
-*
-* These tests verify the full TSP message protocol for get_metaclass requests by:
-* 1. Following the LSP intera            // Get type of the instance variable
-           Message::from(Request {
-               id: RequestId::from(3)            // Get type of the instance variable
-           Message::from(Request {
-               id: RequestId::from(3),
-               method: "typeServer/getType".to_owned(),
-               params: serde_json::json!({
-                   "node": {
-                       "uri": file_uri.to_string(),
-                       "range": {
-                           "start": { "line": 17, "character": 0 },
-                           "end": { "line": 17, "character": 8 }
-                       }
-                   },
-                   "snapshot": 2
-               }),
-           }),    method: "typeServer/getType".to_owned(),
-               params: serde_json::json!({
-                   "node": {
-                       "uri": file_uri.to_string(),
-                       "range": {
-                           "start": { "line": 17, "character": 0 },
-                           "end": { "line": 17, "character": 8 }
-                       }
-                   },
-                   "snapshot": 2
-               }),
-           }),ern using run_test_tsp_with_capture
-* 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getMetaclass
-* 3. Validating proper snapshot management and protocol sequencing
-* 4. Using real file operations and            // Get type of the instance variable
-           Message::from(Request {
-               id: RequestId::from(3),
-               method: "typeServer/getType".to_owned(),
-               params: serde_json::json!({
-                   "node": {
-                       "uri": file_uri.to_string(),
-                       "range": {
-                           "start": { "line": 10, "character": 0 },
-                           "end": { "line": 10, "character": 8 }
-                       }
-                   },
-                   "snapshot": 2
-               }),
-           }),g to simulate end-to-end TSP interactions
-*
-* The get_metaclass request requires a type handle (obtained from get_type) and returns
-* the metaclass of a given class type. For most classes, this returns `type` (the default metaclass),
-* but for classes with custom metaclasses, it returns the specific metaclass.
-*/
+ * TSP interaction tests for get_metaclass request handler
+ *
+ * These tests verify the full TSP message protocol for get_metaclass requests by:
+ * 1. Following the LSP interaction test pattern using run_test_tsp_with_capture
+ * 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getMetaclass
+ * 3. Validating proper snapshot management and protocol sequencing
+ * 4. Using real file operations and message passing to simulate end-to-end TSP interactions
+ *
+ * The get_metaclass request requires a type handle (obtained from get_type) and returns
+ * the metaclass of a given class type. For most classes, this returns `type` (the default metaclass),
+ * but for classes with custom metaclasses, it returns the specific metaclass.
+ */
 
 use lsp_server::ErrorCode;
 use lsp_server::Message;
@@ -118,12 +77,11 @@ instance = RegularClass("test")
                 method: "typeServer/getMetaclass".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -141,12 +99,11 @@ instance = RegularClass("test")
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -157,7 +114,6 @@ instance = RegularClass("test")
                 result: Some(serde_json::json!({
                     "category": "$$MATCH_EVERYTHING$$",
                     "categoryFlags": "$$MATCH_EVERYTHING$$",
-                    "decl": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": {
@@ -232,12 +188,11 @@ instance = CustomClass(42)
                 method: "typeServer/getMetaclass".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -255,12 +210,11 @@ instance = CustomClass(42)
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -271,7 +225,6 @@ instance = CustomClass(42)
                 result: Some(serde_json::json!({
                     "category": "$$MATCH_EVERYTHING$$",
                     "categoryFlags": "$$MATCH_EVERYTHING$$",
-                    "decl": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": "$$MATCH_EVERYTHING$$",
@@ -344,12 +297,11 @@ instance = DerivedClass("test")
                 method: "typeServer/getMetaclass".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -367,12 +319,11 @@ instance = DerivedClass("test")
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -383,7 +334,6 @@ instance = DerivedClass("test")
                 result: Some(serde_json::json!({
                     "category": "$$MATCH_EVERYTHING$$",
                     "categoryFlags": "$$MATCH_EVERYTHING$$",
-                    "decl": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "handle": "$$MATCH_EVERYTHING$$",
                     "moduleName": "$$MATCH_EVERYTHING$$",
@@ -445,12 +395,11 @@ def some_function() -> str:
                 method: "typeServer/getMetaclass".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 2
@@ -468,12 +417,11 @@ def some_function() -> str:
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -532,12 +480,11 @@ fn test_tsp_get_metaclass_interaction_invalid_snapshot() {
                 method: "typeServer/getMetaclass".to_owned(),
                 params: serde_json::json!({
                     "type": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "snapshot": 1  // Outdated snapshot
@@ -555,12 +502,11 @@ fn test_tsp_get_metaclass_interaction_invalid_snapshot() {
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,

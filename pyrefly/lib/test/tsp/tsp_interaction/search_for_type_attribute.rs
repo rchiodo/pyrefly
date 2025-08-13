@@ -80,12 +80,11 @@ instance = MyClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "get_value",
@@ -101,12 +100,11 @@ instance = MyClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "nonexistent_method",
@@ -128,12 +126,11 @@ instance = MyClass()
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -144,8 +141,6 @@ instance = MyClass()
                 result: Some(serde_json::json!({
                     "name": "get_value",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -157,8 +152,6 @@ instance = MyClass()
                 result: Some(serde_json::json!({
                     "name": "nonexistent_method",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -227,12 +220,11 @@ test_instance = TestClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "class_var",
@@ -248,12 +240,11 @@ test_instance = TestClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "class_var",
@@ -275,12 +266,11 @@ test_instance = TestClass()
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -292,7 +282,6 @@ test_instance = TestClass()
                     "name": "class_var",
                     "type": "$$MATCH_EVERYTHING$$",
                     "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -305,7 +294,6 @@ test_instance = TestClass()
                     "name": "class_var",
                     "type": "$$MATCH_EVERYTHING$$",
                     "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -369,12 +357,11 @@ dunder_instance = DunderClass(42)
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "__init__",
@@ -390,12 +377,11 @@ dunder_instance = DunderClass(42)
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "__str__",
@@ -417,12 +403,11 @@ dunder_instance = DunderClass(42)
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -433,8 +418,6 @@ dunder_instance = DunderClass(42)
                 result: Some(serde_json::json!({
                     "name": "__init__",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -446,8 +429,6 @@ dunder_instance = DunderClass(42)
                 result: Some(serde_json::json!({
                     "name": "__str__",
                     "type": "$$MATCH_EVERYTHING$$",
-                    "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -516,12 +497,11 @@ derived_instance = DerivedClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "base_method",
@@ -537,12 +517,11 @@ derived_instance = DerivedClass()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "derived_method",
@@ -564,12 +543,11 @@ derived_instance = DerivedClass()
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -581,7 +559,6 @@ derived_instance = DerivedClass()
                     "name": "base_method",
                     "type": "$$MATCH_EVERYTHING$$",
                     "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -594,7 +571,6 @@ derived_instance = DerivedClass()
                     "name": "derived_method",
                     "type": "$$MATCH_EVERYTHING$$",
                     "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),
@@ -656,12 +632,11 @@ result = context_instance.get_value()
                 method: "typeServer/searchForTypeAttribute".to_owned(),
                 params: serde_json::json!({
                     "startType": {
+                        "aliasName": "$$TYPE_ALIAS_NAME$$",
                         "category": "$$TYPE_CATEGORY$$",
                         "categoryFlags": "$$TYPE_CATEGORY_FLAGS$$",
-                        "decl": "$$TYPE_DECL$$",
                         "flags": "$$TYPE_FLAGS$$",
                         "handle": "$$TYPE_HANDLE$$",
-                        "moduleName": "$$TYPE_MODULE_NAME$$",
                         "name": "$$TYPE_NAME$$"
                     },
                     "attributeName": "get_value",
@@ -689,12 +664,11 @@ result = context_instance.get_value()
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": "$$CAPTURE_TYPE_ALIAS_NAME$$",
                     "category": "$$CAPTURE_TYPE_CATEGORY$$",
                     "categoryFlags": "$$CAPTURE_TYPE_CATEGORY_FLAGS$$",
-                    "decl": "$$CAPTURE_TYPE_DECL$$",
                     "flags": "$$CAPTURE_TYPE_FLAGS$$",
                     "handle": "$$CAPTURE_TYPE_HANDLE$$",
-                    "moduleName": "$$CAPTURE_TYPE_MODULE_NAME$$",
                     "name": "$$CAPTURE_TYPE_NAME$$"
                 })),
                 error: None,
@@ -706,7 +680,6 @@ result = context_instance.get_value()
                     "name": "get_value",
                     "type": "$$MATCH_EVERYTHING$$",
                     "owner": "$$MATCH_EVERYTHING$$",
-                    "boundType": "$$MATCH_EVERYTHING$$",
                     "flags": "$$MATCH_EVERYTHING$$",
                     "decls": "$$MATCH_EVERYTHING$$"
                 })),

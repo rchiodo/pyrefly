@@ -80,12 +80,11 @@ fn test_tsp_get_type_interaction_basic() {
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": null,
                     "category": 0,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 8,
                     "handle": "$$MATCH_EVERYTHING$$",  // Handle can vary, so use wildcard
-                    "moduleName": null,
                     "name": "Literal[3]"
                 })),
                 error: None,
@@ -153,12 +152,11 @@ z = True
             Message::Response(Response {
                 id: RequestId::from(3),
                 result: Some(serde_json::json!({
+                    "aliasName": null,
                     "category": 0,
                     "categoryFlags": 0,
-                    "decl": null,
                     "flags": 8,
                     "handle": "$$MATCH_EVERYTHING$$",
-                    "moduleName": null,
                     "name": "$$MATCH_EVERYTHING$$"  // Accept any type name for variable
                 })),
                 error: None,
