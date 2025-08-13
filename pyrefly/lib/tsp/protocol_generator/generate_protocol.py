@@ -222,6 +222,102 @@ def generate_constants_rust(tsp_json: Dict[str, Any]) -> str:
         rust_code += f"pub const {name}: {rust_type} = {rust_value};\n"
     return rust_code + "\n"
 
+def fixup_request_response_in_content(content: str, request: model.Request) -> str:
+    # Find the location in the content where the request response is defined
+    response_name = request.typeName.replace("Request", "Response")
+    offset = content.find(f"pub struct {response_name}")
+
+    # Above this should be two # macros. Find those too
+    if offset != -1:
+        offset = content.rfind("#", None, offset)
+        offset = content.rfind('#', None, offset)
+        end_offset = content.find('}', offset)
+
+        if end_offset == -1 or offset == -1:
+            print(f"Warning: Could not find end of struct for {request.typeName}, skipping")
+            return content
+
+        if offset > end_offset:
+            print(f"Warning: Offset {offset} is after end_offset {end_offset} for {request.typeName}, skipping")
+            return content
+        
+        # The result type should be in the response struct
+        result_offset = content.find("pub result: ", offset)
+        if result_offset == -1 or result_offset > end_offset:
+            print(f"Warning: Could not find result field in {response_name}, skipping")
+            return content
+        
+        # Extract the result type
+        result_end = content.find(',', result_offset)
+
+        if result_end == -1 or result_end > end_offset:
+            print(f"Warning: Could not find end of result field in {response_name}, skipping")
+
+        # Rewrite the response struct to match the expected format
+        result_type = content[result_offset + len("pub result: "):result_end].strip()
+
+        # Remove the Option<> wrapper if it exists
+        if result_type.startswith("Option<") and result_type.endswith(">"):
+            result_type = result_type[7:-1].strip()
+
+        # Create an alias for the result type that matches the response name
+        new_str = f"pub type {response_name} = {result_type};\n\n"
+
+        # Return the new content
+        return content[:offset] + new_str + content[end_offset+1:]
+
+def fixup_request_in_content(content: str, request: model.Request) -> str:
+    # Find the location in the content where the request is defined
+    offset = content.find(f"pub struct {request.typeName}")
+
+    # Above this should be two # macros. Find those too
+    if offset != -1:
+        offset = content.rfind("#", None, offset)
+        offset = content.rfind('#', None, offset)
+        end_offset = content.find('}', offset)
+
+        if end_offset == -1 or offset == -1:
+            print(f"Warning: Could not find end of struct for {request.typeName}, skipping")
+            return content
+
+        if offset > end_offset:
+            print(f"Warning: Offset {offset} is after end_offset {end_offset} for {request.typeName}, skipping")
+            return content
+
+        # Compute the result type. It might be an 'or' type
+        result_type = f"Option<{request.typeName.replace("Request", "Response")}>" if request.result.kind == 'or' else request.result.name
+
+        # Fixup some common names
+        if result_type == "Any":
+            result_type = "serde_json::Value"
+        elif result_type == "integer":
+            result_type = "i32"
+        elif result_type == "string":
+            result_type = "String"
+
+        # Compute the params type
+        request_params = request.params.name if request.params else None
+        if request_params is None:
+            # This should be the case for requests that have no parameters
+            request_params = "Option<LSPNull>"
+
+        # Replace the whole thing with something that looks like so:
+        # #[derive(Debug)]
+        # pub enum DocumentDiagnosticRequest {}
+        #
+        # impl Request for DocumentDiagnosticRequest {
+        #    type Params = DocumentDiagnosticParams;
+        #    type Result = DocumentDiagnosticReportResult;
+        #    const METHOD: &'static str = "textDocument/diagnostic";
+        #}
+        new_str = f"#[derive(Debug)]\npub enum {request.typeName} {{}}\n\n" + \
+            f"impl Request for {request.typeName} {{\n" + \
+            f"    type Params = {request_params if request.params else '()'};\n" + \
+            f"    type Result = {result_type};\n" + \
+            f"    const METHOD: &'static str = \"{request.method}\";\n}}"
+        
+        # Return the new content
+        return content[:offset] + new_str + content[end_offset+1:]
 
 def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
     """Generate the Rust protocol.rs file from TSP JSON."""
@@ -251,10 +347,16 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
     target_protocol = output_path / "protocol.rs"
     
     if generated_lib.exists():
-        print(f"Copying generated lib.rs to protocol.rs...")
+        print(f"Fixing up generated protocol.rs...")
         content = generated_lib.read_text(encoding='utf-8')
 
-        # Update the header comment
+        # For each of the request methods, change to match how lsp requests are defined. Meaning dont use
+        # the structure generated by lsprotocol, but rather the enum style
+        for request in lsp_model.requests:
+            content = fixup_request_response_in_content(content, request)
+            content = fixup_request_in_content(content, request)
+                   
+        # Update the header comment and other identifiers
         content = content.replace(
             "Language Server Protocol types for Rust generated from LSP specification.",
             "Type Server Protocol types for Rust generated from TSP specification."
@@ -267,6 +369,7 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         content = content.replace("use std::collections::HashMap;\nuse url::Url;\nuse rust_decimal::Decimal;", "")
         content = content.replace("GetDocString", "GetDocstring")
 
+        # Cleanup the default output
         shutil.rmtree(output_path / "lsprotocol")
 
         # Append constants if present
@@ -276,6 +379,13 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
 
         # Add crate-level allows
         content = "#![allow(clippy::all)]\n#![allow(dead_code)]\n\n" + content
+
+        # After the serde imports, add the lsp_types import
+        lsp_import = "use lsp_types::request::Request;"
+        use_serde_offset = content.find("use serde")
+        use_serde_end_offset = content.find("\n", use_serde_offset) if use_serde_offset > 0 else -1
+        if use_serde_offset != -1:
+            content = content[:use_serde_end_offset] + "\n" + lsp_import + "\n" + content[use_serde_end_offset:]
 
         # Helper to replace enum flags with newtype bitflag style
         def replace_flag_enum(name: str, mapping: Dict[str, int]):

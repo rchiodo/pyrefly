@@ -10,6 +10,7 @@
 // 2. Install lsprotocol generator: `pip install git+https://github.com/microsoft/lsprotocol.git`
 // 3. Run: `python generate_protocol.py`
 
+use lsp_types::request::Request;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -1384,7 +1385,7 @@ pub struct SnapshotChangedNotification {
     /// The method to be invoked.
     pub method: TSPNotificationMethods,
 
-    pub params: Option<serde_json::Value>,
+    pub params: SnapshotChangedParams,
 }
 
 /// Notification sent by the server to indicate that diagnostics have changed and the client should re-request diagnostics for the file.
@@ -1397,7 +1398,7 @@ pub struct DiagnosticsChangedNotification {
     /// The method to be invoked.
     pub method: TSPNotificationMethods,
 
-    pub params: Option<serde_json::Value>,
+    pub params: DiagnosticsChangedParams,
 }
 
 /// An identifier to denote a specific request.
@@ -1418,794 +1419,316 @@ pub enum LSPIdOptional {
 }
 
 /// Request from client to get the current snapshot of the type server. A snapshot is a point-in-time representation of the type server's state, including all loaded files and their types.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSnapshotRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetSnapshotRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<LSPNull>,
+impl Request for GetSnapshotRequest {
+    type Params = ();
+    type Result = i32;
+    const METHOD: &'static str = "typeServer/getSnapshot";
 }
 
 /// Response to the [GetSnapshotRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSnapshotResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    pub result: i32,
-}
+pub type GetSnapshotResponse = i32;
 
 /// Request to get the version of the protocol the type server supports. Returns a string representation of the protocol version (should be semver format).
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSupportedProtocolVersionRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetSupportedProtocolVersionRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<LSPNull>,
+impl Request for GetSupportedProtocolVersionRequest {
+    type Params = ();
+    type Result = String;
+    const METHOD: &'static str = "typeServer/getSupportedProtocolVersion";
 }
 
 /// Response to the [GetSupportedProtocolVersionRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSupportedProtocolVersionResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    pub result: String,
-}
+pub type GetSupportedProtocolVersionResponse = String;
 
 /// Request to get diagnostics for a specific file.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDiagnosticsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetDiagnosticsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetDiagnosticsParams,
+impl Request for GetDiagnosticsRequest {
+    type Params = GetDiagnosticsParams;
+    type Result = Option<GetDiagnosticsResponse>;
+    const METHOD: &'static str = "typeServer/getDiagnostics";
 }
 
 /// Response to the [GetDiagnosticsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDiagnosticsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<Diagnostic>>,
-}
+pub type GetDiagnosticsResponse = Vec<Diagnostic>;
 
 /// Request to get the version of diagnostics for a specific file.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDiagnosticsVersionRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetDiagnosticsVersionRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetDiagnosticsVersionParams,
+impl Request for GetDiagnosticsVersionRequest {
+    type Params = GetDiagnosticsVersionParams;
+    type Result = Option<GetDiagnosticsVersionResponse>;
+    const METHOD: &'static str = "typeServer/getDiagnosticsVersion";
 }
 
 /// Response to the [GetDiagnosticsVersionRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDiagnosticsVersionResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<i32>,
-}
+pub type GetDiagnosticsVersionResponse = i32;
 
 /// Request to get the type information for a specific node.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetTypeRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetTypeParams,
+impl Request for GetTypeRequest {
+    type Params = GetTypeParams;
+    type Result = Option<GetTypeResponse>;
+    const METHOD: &'static str = "typeServer/getType";
 }
 
 /// Response to the [GetTypeRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type GetTypeResponse = Type;
 
 /// Request to get the type information for a specific builtin type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetBuiltinTypeRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetBuiltinTypeRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetBuiltinTypeParams,
+impl Request for GetBuiltinTypeRequest {
+    type Params = GetBuiltinTypeParams;
+    type Result = Option<GetBuiltinTypeResponse>;
+    const METHOD: &'static str = "typeServer/getBuiltinType";
 }
 
 /// Response to the [GetBuiltinTypeRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetBuiltinTypeResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type GetBuiltinTypeResponse = Type;
 
 /// Request to get the collection of subtypes that make up a union type or the types that makes up a generic type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeArgsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetTypeArgsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetTypeArgsParams,
+impl Request for GetTypeArgsRequest {
+    type Params = GetTypeArgsParams;
+    type Result = Option<GetTypeArgsResponse>;
+    const METHOD: &'static str = "typeServer/getTypeArgs";
 }
 
 /// Response to the [GetTypeArgsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeArgsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<Type>>,
-}
+pub type GetTypeArgsResponse = Vec<Type>;
 
 /// Request to find an attribute of a class.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SearchForTypeAttributeRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum SearchForTypeAttributeRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: SearchForTypeAttributeParams,
+impl Request for SearchForTypeAttributeRequest {
+    type Params = SearchForTypeAttributeParams;
+    type Result = Option<SearchForTypeAttributeResponse>;
+    const METHOD: &'static str = "typeServer/searchForTypeAttribute";
 }
 
 /// Response to the [SearchForTypeAttributeRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SearchForTypeAttributeResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Attribute>,
-}
+pub type SearchForTypeAttributeResponse = Attribute;
 
 /// Request to get the attributes of a specific class or the parameters and return value of a specific function.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeAttributesRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetTypeAttributesRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetTypeAttributesParams,
+impl Request for GetTypeAttributesRequest {
+    type Params = GetTypeAttributesParams;
+    type Result = Option<GetTypeAttributesResponse>;
+    const METHOD: &'static str = "typeServer/getTypeAttributes";
 }
 
 /// Response to the [GetTypeAttributesRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeAttributesResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<Attribute>>,
-}
+pub type GetTypeAttributesResponse = Vec<Attribute>;
 
 /// Request to get all overloads of a function or method. The returned value doesn't include the implementation signature.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetOverloadsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetOverloadsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetOverloadsRequest {
+    type Params = GetOverloadsParams;
+    type Result = Option<GetOverloadsResponse>;
+    const METHOD: &'static str = "typeServer/getOverloads";
 }
 
 /// Response to the [GetOverloadsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetOverloadsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<Type>>,
-}
+pub type GetOverloadsResponse = Vec<Type>;
 
 /// Request to get the overloads that a call node matches.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetMatchingOverloadsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetMatchingOverloadsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetMatchingOverloadsRequest {
+    type Params = GetMatchingOverloadsParams;
+    type Result = Option<GetMatchingOverloadsResponse>;
+    const METHOD: &'static str = "typeServer/getMatchingOverloads";
 }
 
 /// Response to the [GetMatchingOverloadsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetMatchingOverloadsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<Type>>,
-}
+pub type GetMatchingOverloadsResponse = Vec<Type>;
 
 /// Request to get the meta class of a type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetMetaclassRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetMetaclassRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetMetaclassRequest {
+    type Params = GetMetaclassParams;
+    type Result = Option<GetMetaclassResponse>;
+    const METHOD: &'static str = "typeServer/getMetaclass";
 }
 
 /// Response to the [GetMetaclassRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetMetaclassResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type GetMetaclassResponse = Type;
 
 /// Request to get the type of a declaration.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeOfDeclarationRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetTypeOfDeclarationRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetTypeOfDeclarationRequest {
+    type Params = GetTypeOfDeclarationParams;
+    type Result = Option<GetTypeOfDeclarationResponse>;
+    const METHOD: &'static str = "typeServer/getTypeOfDeclaration";
 }
 
 /// Response to the [GetTypeOfDeclarationRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeOfDeclarationResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type GetTypeOfDeclarationResponse = Type;
 
 /// Request to get symbol declaration information for a node.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSymbolRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetSymbolRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: GetSymbolParams,
+impl Request for GetSymbolRequest {
+    type Params = GetSymbolParams;
+    type Result = Option<GetSymbolResponse>;
+    const METHOD: &'static str = "typeServer/getSymbol";
 }
 
 /// Response to the [GetSymbolRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSymbolResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Symbol>,
-}
+pub type GetSymbolResponse = Symbol;
 
 /// Request to get all symbols for a file. This is used to get all symbols in a file.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSymbolsForFileRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetSymbolsForFileRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetSymbolsForFileRequest {
+    type Params = GetSymbolsForFileParams;
+    type Result = Option<GetSymbolsForFileResponse>;
+    const METHOD: &'static str = "typeServer/getSymbolsForFile";
 }
 
 /// Response to the [GetSymbolsForFileRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetSymbolsForFileResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<FileSymbolInfo>,
-}
+pub type GetSymbolsForFileResponse = FileSymbolInfo;
 
 /// Request to get the string representation of a function's parts, meaning its parameters and return type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetFunctionPartsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetFunctionPartsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetFunctionPartsRequest {
+    type Params = GetFunctionPartsParams;
+    type Result = Option<GetFunctionPartsResponse>;
+    const METHOD: &'static str = "typeServer/getFunctionParts";
 }
 
 /// Response to the [GetFunctionPartsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetFunctionPartsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<FunctionParts>,
-}
+pub type GetFunctionPartsResponse = FunctionParts;
 
 /// Request to get the string representation of a type in a human-readable format. This may or may not be the same as the type's "name".
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetReprRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetReprRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetReprRequest {
+    type Params = GetReprParams;
+    type Result = Option<GetReprResponse>;
+    const METHOD: &'static str = "typeServer/getRepr";
 }
 
 /// Response to the [GetReprRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetReprResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
-}
+pub type GetReprResponse = String;
 
 /// Request to get the docstring for a specific declaration.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDocstringRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetDocstringRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetDocstringRequest {
+    type Params = GetDocstringParams;
+    type Result = Option<GetDocstringResponse>;
+    const METHOD: &'static str = "typeServer/getDocString";
 }
 
 /// Response to the [GetDocstringRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetDocstringResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
-}
+pub type GetDocstringResponse = String;
 
 /// Request to resolve an import declaration.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ResolveImportDeclarationRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum ResolveImportDeclarationRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for ResolveImportDeclarationRequest {
+    type Params = ResolveImportDeclarationParams;
+    type Result = Option<ResolveImportDeclarationResponse>;
+    const METHOD: &'static str = "typeServer/resolveImportDeclaration";
 }
 
 /// Response to the [ResolveImportDeclarationRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ResolveImportDeclarationResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Declaration>,
-}
+pub type ResolveImportDeclarationResponse = Declaration;
 
 /// Request to resolve an import. This is used to resolve the import name to its location in the file system.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ResolveImportRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum ResolveImportRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: ResolveImportParams,
+impl Request for ResolveImportRequest {
+    type Params = ResolveImportParams;
+    type Result = Option<ResolveImportResponse>;
+    const METHOD: &'static str = "typeServer/resolveImport";
 }
 
 /// Response to the [ResolveImportRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ResolveImportResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<String>,
-}
+pub type ResolveImportResponse = String;
 
 /// Get information about a type alias.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeAliasInfoRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetTypeAliasInfoRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetTypeAliasInfoRequest {
+    type Params = GetTypeAliasInfoParams;
+    type Result = Option<GetTypeAliasInfoResponse>;
+    const METHOD: &'static str = "typeServer/getTypeAliasInfo";
 }
 
 /// Response to the [GetTypeAliasInfoRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetTypeAliasInfoResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<TypeAliasInfo>,
-}
+pub type GetTypeAliasInfoResponse = TypeAliasInfo;
 
 /// Request to combine types. This is used to combine multiple types into a single type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CombineTypesRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum CombineTypesRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for CombineTypesRequest {
+    type Params = CombineTypesParams;
+    type Result = Option<CombineTypesResponse>;
+    const METHOD: &'static str = "typeServer/combineTypes";
 }
 
 /// Response to the [CombineTypesRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CombineTypesResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type CombineTypesResponse = Type;
 
 /// Request to generate an instance type representation for the provided type.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CreateInstanceTypeRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum CreateInstanceTypeRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for CreateInstanceTypeRequest {
+    type Params = CreateInstanceTypeParams;
+    type Result = Option<CreateInstanceTypeResponse>;
+    const METHOD: &'static str = "typeServer/createInstanceType";
 }
 
 /// Response to the [CreateInstanceTypeRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CreateInstanceTypeResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Type>,
-}
+pub type CreateInstanceTypeResponse = Type;
 
 /// Request to get the search paths that the type server uses for Python modules.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetPythonSearchPathsRequest {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
+#[derive(Debug)]
+pub enum GetPythonSearchPathsRequest {}
 
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPId,
-
-    pub params: Option<serde_json::Value>,
+impl Request for GetPythonSearchPathsRequest {
+    type Params = GetPythonSearchPathsParams;
+    type Result = Option<GetPythonSearchPathsResponse>;
+    const METHOD: &'static str = "typeServer/getPythonSearchPaths";
 }
 
 /// Response to the [GetPythonSearchPathsRequest].
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetPythonSearchPathsResponse {
-    /// The version of the JSON RPC protocol.
-    pub jsonrpc: String,
-
-    /// The method to be invoked.
-    pub method: TSPRequestMethods,
-
-    /// The request id.
-    pub id: LSPIdOptional,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<Vec<String>>,
-}
+pub type GetPythonSearchPathsResponse = Vec<String>;
 
 // Type Server Protocol Constants (idiomatic Rust)
 

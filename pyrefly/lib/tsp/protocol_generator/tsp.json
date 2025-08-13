@@ -214,27 +214,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to get overloads for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetOverloadsParams"
             },
             "documentation": "Request to get all overloads of a function or method. The returned value doesn't include the implementation signature."
         },
@@ -259,27 +240,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "callNode",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Node"
-                            },
-                            "documentation": "The call node to get matching overloads for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetMatchingOverloadsParams"
             },
             "documentation": "Request to get the overloads that a call node matches."
         },
@@ -301,27 +263,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to get metaclass for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetMetaclassParams"
             },
             "documentation": "Request to get the meta class of a type."
         },
@@ -343,27 +286,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "decl",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Declaration"
-                            },
-                            "documentation": "The declaration to get type for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetTypeOfDeclarationParams"
             },
             "documentation": "Request to get the type of a declaration."
         },
@@ -408,27 +332,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "uri",
-                            "type": {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            "documentation": "The URI of the file"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetSymbolsForFileParams"
             },
             "documentation": "Request to get all symbols for a file. This is used to get all symbols in a file."
         },
@@ -450,35 +355,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The function type"
-                        },
-                        {
-                            "name": "flags",
-                            "type": {
-                                "kind": "reference",
-                                "name": "TypeReprFlags"
-                            },
-                            "documentation": "Formatting flags"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetFunctionPartsParams"
             },
             "documentation": "Request to get the string representation of a function's parts, meaning its parameters and return type."
         },
@@ -500,35 +378,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to get representation for"
-                        },
-                        {
-                            "name": "flags",
-                            "type": {
-                                "kind": "reference",
-                                "name": "TypeReprFlags"
-                            },
-                            "documentation": "Formatting flags"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetReprParams"
             },
             "documentation": "Request to get the string representation of a type in a human-readable format. This may or may not be the same as the type's \"name\"."
         },
@@ -550,63 +401,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "or",
-                                "items": [
-                                    {
-                                        "kind": "reference",
-                                        "name": "Type"
-                                    },
-                                    {
-                                        "kind": "base",
-                                        "name": "null"
-                                    }
-                                ]
-                            },
-                            "optional": true,
-                            "documentation": "The type context"
-                        },
-                        {
-                            "name": "decl",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Declaration"
-                            },
-                            "documentation": "The declaration to get documentation for"
-                        },
-                        {
-                            "name": "boundObjectOrClass",
-                            "type": {
-                                "kind": "or",
-                                "items": [
-                                    {
-                                        "kind": "reference",
-                                        "name": "Type"
-                                    },
-                                    {
-                                        "kind": "base",
-                                        "name": "null"
-                                    }
-                                ]
-                            },
-                            "optional": true,
-                            "documentation": "The bound object or class type"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetDocStringParams"
             },
             "documentation": "Request to get the docstring for a specific declaration."
         },
@@ -628,35 +424,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "decl",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Declaration"
-                            },
-                            "documentation": "The import declaration to resolve"
-                        },
-                        {
-                            "name": "options",
-                            "type": {
-                                "kind": "reference",
-                                "name": "ResolveImportOptions"
-                            },
-                            "documentation": "Resolution options"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "ResolveImportDeclarationParams"
             },
             "documentation": "Request to resolve an import declaration."
         },
@@ -701,27 +470,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to get alias info for"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetTypeAliasInfoParams"
             },
             "documentation": "Get information about a type alias."
         },
@@ -743,30 +493,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "types",
-                            "type": {
-                                "kind": "array",
-                                "element": {
-                                    "kind": "reference",
-                                    "name": "Type"
-                                }
-                            },
-                            "documentation": "The types to combine"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "CombineTypesParams"
             },
             "documentation": "Request to combine types. This is used to combine multiple types into a single type."
         },
@@ -788,27 +516,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "type",
-                            "type": {
-                                "kind": "reference",
-                                "name": "Type"
-                            },
-                            "documentation": "The type to create instance from"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "CreateInstanceTypeParams"
             },
             "documentation": "Request to generate an instance type representation for the provided type."
         },
@@ -833,27 +542,8 @@
             },
             "messageDirection": "clientToServer",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "fromUri",
-                            "type": {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            "documentation": "The URI to get search paths from"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "GetPythonSearchPathsParams"
             },
             "documentation": "Request to get the search paths that the type server uses for Python modules."
         }
@@ -864,27 +554,8 @@
             "typeName": "SnapshotChangedNotification",
             "messageDirection": "serverToClient",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "old",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The old snapshot version"
-                        },
-                        {
-                            "name": "new",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The new snapshot version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "SnapshotChangedParams"
             },
             "documentation": "Notification sent by the server to indicate any outstanding snapshots are invalid."
         },
@@ -893,35 +564,8 @@
             "typeName": "DiagnosticsChangedNotification",
             "messageDirection": "serverToClient",
             "params": {
-                "kind": "literal",
-                "value": {
-                    "properties": [
-                        {
-                            "name": "uri",
-                            "type": {
-                                "kind": "base",
-                                "name": "string"
-                            },
-                            "documentation": "The URI of the file with changed diagnostics"
-                        },
-                        {
-                            "name": "snapshot",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The snapshot version"
-                        },
-                        {
-                            "name": "version",
-                            "type": {
-                                "kind": "base",
-                                "name": "integer"
-                            },
-                            "documentation": "The diagnostics version"
-                        }
-                    ]
-                }
+                "kind": "reference",
+                "name": "DiagnosticsChangedParams"
             },
             "documentation": "Notification sent by the server to indicate that diagnostics have changed and the client should re-request diagnostics for the file."
         }
