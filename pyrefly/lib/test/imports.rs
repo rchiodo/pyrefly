@@ -5,6 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
+use pyrefly_util::fs_anyhow;
+
+use crate::state::handle::Handle;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -762,4 +767,202 @@ testcase!(
     r#"
 from . import foo  # E: Could not find import of `.`
     "#,
+);
+
+#[test]
+fn test_interface_has_more() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut env = TestEnv::new();
+    let foo_py = temp.path().join("foo.py");
+    let foo_pyi = temp.path().join("foo.pyi");
+
+    fs_anyhow::write(&foo_py, "import foo as X\nX.Extra").unwrap();
+    fs_anyhow::write(&foo_pyi, "class Extra: pass").unwrap();
+    env.add_real_path("foo", foo_py);
+    env.add_real_path("foo", foo_pyi);
+    let _ = env.to_state();
+}
+
+#[test]
+fn test_interface_disagree() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut env = TestEnv::new();
+    let foo_py = temp.path().join("foo.py");
+    let foo_pyi = temp.path().join("foo.pyi");
+
+    fs_anyhow::write(
+        &foo_py,
+        "class Foo:\n  def method(self): pass\nFoo().method()",
+    )
+    .unwrap();
+    fs_anyhow::write(&foo_pyi, "").unwrap();
+    env.add_real_path("foo", foo_py.clone());
+    env.add_real_path("foo", foo_pyi);
+    let h_py = Handle::new(
+        ModuleName::from_str("foo"),
+        ModulePath::filesystem(foo_py),
+        env.sys_info(),
+    );
+    let (state, _) = env.to_state();
+    let errs = state
+        .transaction()
+        .get_errors([&h_py])
+        .collect_errors()
+        .shown;
+    assert_eq!(errs.len(), 0);
+}
+
+fn env_class_x_deprecated() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from warnings import deprecated
+@deprecated("Don't use this")
+class X: ...
+x: X = X()
+"#,
+    )
+}
+
+testcase!(
+    test_import_deprecated_class_warn,
+    env_class_x_deprecated(),
+    r#"
+from foo import X # E: `X` is deprecated
+
+x = X()
+"#,
+);
+
+testcase!(
+    test_import_star_deprecated_class_warn,
+    env_class_x_deprecated(),
+    r#"
+from foo import * # E: `X` is deprecated
+
+x = X()
+"#,
+);
+
+fn env_func_x_deprecated() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from warnings import deprecated
+@deprecated("Don't use this")
+def x(): ...
+"#,
+    )
+}
+
+testcase!(
+    test_import_deprecated_func_warn,
+    env_func_x_deprecated(),
+    r#"
+from foo import x # E: `x` is deprecated
+
+x()  # E: Call to deprecated function `foo.x`
+"#,
+);
+
+testcase!(
+    test_import_as_deprecated_func_warn,
+    env_func_x_deprecated(),
+    r#"
+from foo import x as y # E: `x` is deprecated
+
+y()  # E: Call to deprecated function `foo.x`
+"#,
+);
+
+testcase!(
+    test_import_star_deprecated_func_warn,
+    env_func_x_deprecated(),
+    r#"
+from foo import * # E: `x` is deprecated
+
+x()  # E: Call to deprecated function `foo.x`
+"#,
+);
+
+fn env_func_x_deprecated_conditionally() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from warnings import deprecated
+import sys
+
+if sys.version_info >= (3, 10):
+    @deprecated("Don't use this")
+    def x(): ...
+else:
+    def x(): ...
+"#,
+    )
+}
+
+fn env_func_x_deprecated_conditionally_no_deprecation() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from warnings import deprecated
+import sys
+
+if sys.version_info < (3, 10):
+    @deprecated("Don't use this")
+    def x(): ...
+else:
+    def x(): ...
+"#,
+    )
+}
+
+testcase!(
+    test_import_conditionally_deprecated_func_warn,
+    env_func_x_deprecated_conditionally(),
+    r#"
+from foo import x # E: `x` is deprecated
+
+x()  # E: Call to deprecated function `foo.x`
+"#,
+);
+
+testcase!(
+    test_import_conditionally_deprecated_func_no_warn,
+    env_func_x_deprecated_conditionally_no_deprecation(),
+    r#"
+from foo import x
+# No warning for import, since the function is not deprecated in this context
+
+x()
+"#,
+);
+
+fn env_func_x_deprecated_overload_only() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from warnings import deprecated
+from typing import Any, overload
+@overload
+def x(y: int) -> int: ...
+
+@deprecated("Don't use this")
+@overload
+def x(y: str) -> str: ...
+
+def x(y: Any) -> Any: ...
+"#,
+    )
+}
+
+testcase!(
+    test_import_deprecated_overload_no_warn,
+    env_func_x_deprecated_overload_only(),
+    r#"
+from foo import x
+# No warning for import, since only the overload is deprecated
+
+x("hello")  # E: Call to deprecated overload `foo.x`
+"#,
 );

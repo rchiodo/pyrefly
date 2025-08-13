@@ -31,7 +31,9 @@ use ruff_python_ast::UnaryOp;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::small_map::Entry;
 use starlark_map::small_map::SmallMap;
+use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
 
 use crate::binding::bindings::BindingsBuilder;
@@ -290,8 +292,30 @@ impl NarrowOps {
     }
 
     pub fn or_all(&mut self, other: Self) {
+        let mut seen = SmallSet::new();
         for (name, (op, range)) in other.0 {
+            seen.insert(name.clone());
             self.or(name, op, range);
+        }
+        // For names present in `self` but not `other`, `Or` their narrows with a placeholder
+        let unmerged_names: Vec<_> = self
+            .0
+            .keys()
+            .filter_map(|name| {
+                if seen.contains(name) {
+                    None
+                } else {
+                    Some(name.clone())
+                }
+            })
+            .collect();
+        for name in unmerged_names {
+            if let Entry::Occupied(mut entry) = self.0.entry(name) {
+                entry
+                    .get_mut()
+                    .0
+                    .or(NarrowOp::Atomic(None, AtomicNarrowOp::Placeholder));
+            }
         }
     }
 
@@ -459,6 +483,30 @@ impl NarrowOps {
                     AtomicNarrowOp::Call(Box::new((**func).clone()), args.clone()),
                     *range,
                 )
+            }
+            Some(Expr::Named(named)) => {
+                let mut target_narrow = Self::from_single_narrow_op(
+                    &named.target,
+                    AtomicNarrowOp::IsTruthy,
+                    named.target.range(),
+                );
+                let value_narrow = Self::from_expr(builder, Some(*named.value.clone()).as_ref());
+                // Merge the entries from the two `NarrowOps`
+                // We don't use `and_all` because it always generates placeholders when the entry is not present.
+                // This causes `Or` ops to be generated when the narrowing is negated, which is correct for
+                // unrelated narrows but undesirable here because we know these two narrows are either both true or both false.
+                for (name, (op, range)) in value_narrow.0 {
+                    let existing_entry = target_narrow.0.entry(name);
+                    match existing_entry {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().0.and(op.clone());
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert((op, range));
+                        }
+                    };
+                }
+                target_narrow
             }
             Some(e) => Self::from_single_narrow_op(e, AtomicNarrowOp::IsTruthy, e.range()),
             None => Self::new(),

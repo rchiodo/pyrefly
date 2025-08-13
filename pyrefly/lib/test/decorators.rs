@@ -198,10 +198,31 @@ testcase!(
     test_final,
     r#"
 from typing import final, reveal_type
-@final
+@final  # E: `@final` can only be used on methods
 def f(x: int) -> int:
     return x
 reveal_type(f)  # E: revealed type: (x: int) -> int
+    "#,
+);
+
+testcase!(
+    test_invalid_top_level_function_decorators,
+    r#"
+from typing import *
+from abc import abstractstaticmethod, abstractmethod # E: `abstractstaticmethod` is deprecated
+from enum import member, nonmember
+
+@member  # E: can only be used on methods
+@nonmember  # E: can only be used on methods
+@abstractmethod  # E: can only be used on methods
+@staticmethod  # E: can only be used on methods
+@classmethod  # E: can only be used on methods
+@abstractstaticmethod  # E: can only be used on methods
+@property  # E: can only be used on methods
+@final  # E: can only be used on methods
+@override  # E: can only be used on methods
+def f(x: int) -> int:
+    return x
     "#,
 );
 
@@ -476,13 +497,13 @@ testcase!(
     r#"
 from typing import overload, Any
 @overload
-def foo(a: int) -> int: ...  
+def foo(a: int) -> int: ...
 @overload
 def foo(a: str) -> str:
     """Docstring"""
 def foo(*args, **kwargs) -> Any:
     pass
-    
+
     "#,
 );
 
@@ -491,14 +512,14 @@ testcase!(
     r#"
 from typing import overload, Any
 @overload
-def foo(a: int) -> int: ...  
+def foo(a: int) -> int: ...
 @overload
-def foo(a: str) -> str: 
+def foo(a: str) -> str:
     """Docstring"""
     return 123             # E: Returned type `Literal[123]` is not assignable to declared return type `str`
 def foo(*args, **kwargs) -> Any:
     pass
-    
+
     "#,
 );
 

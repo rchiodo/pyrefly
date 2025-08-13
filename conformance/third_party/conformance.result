@@ -30,7 +30,6 @@
   ],
   "aliases_type_statement.py": [
     "Line 26: Expected 1 errors",
-    "Line 56: Expected 1 errors",
     "Line 82: Expected 1 errors",
     "Line 84: Expected 1 errors",
     "Lines 51, 52: Expected error (tag 'TA14')",
@@ -90,8 +89,7 @@
     "Line 157: Unexpected errors ['`Proto7` is not assignable to `Proto6`']"
   ],
   "callables_kwargs.py": [
-    "Line 111: Expected 1 errors",
-    "Line 122: Expected 1 errors"
+    "Line 111: Expected 1 errors"
   ],
   "callables_protocol.py": [],
   "callables_subtyping.py": [],
@@ -145,7 +143,6 @@
   "directives_assert_type.py": [],
   "directives_cast.py": [],
   "directives_deprecated.py": [
-    "Line 18: Expected 1 errors",
     "Line 25: Expected 1 errors"
   ],
   "directives_no_type_check.py": [],
@@ -407,8 +404,7 @@
     "Line 133: Unexpected errors ['Unexpected keyword argument `x` in function `N.__new__`', 'Unexpected keyword argument `y` in function `N.__new__`']"
   ],
   "qualifiers_final_decorator.py": [
-    "Lines 84, 85, 86: Expected error (tag 'Derived3-2')",
-    "Lines 125, 126: Expected error (tag 'func')"
+    "Lines 84, 85, 86: Expected error (tag 'Derived3-2')"
   ],
   "specialtypes_any.py": [],
   "specialtypes_never.py": [
@@ -447,7 +443,6 @@
   "typeddicts_readonly_kwargs.py": [],
   "typeddicts_readonly_update.py": [],
   "typeddicts_required.py": [
-    "Line 62: Expected 1 errors",
     "Line 74: Unexpected errors [\"Expected a type form, got instance of `Literal['RecursiveMovie']`\"]"
   ],
   "typeddicts_type_consistency.py": [],

@@ -3,7 +3,7 @@
   "pass": 79,
   "fail": 57,
   "pass_rate": 0.58,
-  "differences": 259,
+  "differences": 254,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -88,19 +88,19 @@
   "failing": {
     "aliases_implicit.py": 5,
     "aliases_recursive.py": 17,
-    "aliases_type_statement.py": 6,
+    "aliases_type_statement.py": 5,
     "aliases_typealiastype.py": 26,
     "aliases_variance.py": 4,
     "annotations_forward_refs.py": 7,
     "annotations_generators.py": 1,
     "callables_annotation.py": 2,
-    "callables_kwargs.py": 2,
+    "callables_kwargs.py": 1,
     "constructors_call_init.py": 1,
     "constructors_call_type.py": 4,
     "constructors_callable.py": 11,
     "dataclasses_final.py": 1,
     "dataclasses_slots.py": 2,
-    "directives_deprecated.py": 2,
+    "directives_deprecated.py": 1,
     "enums_behaviors.py": 3,
     "enums_members.py": 3,
     "exceptions_context_managers.py": 2,
@@ -137,12 +137,12 @@
     "protocols_variance.py": 7,
     "qualifiers_annotated.py": 6,
     "qualifiers_final_annotation.py": 10,
-    "qualifiers_final_decorator.py": 2,
+    "qualifiers_final_decorator.py": 1,
     "specialtypes_never.py": 1,
     "specialtypes_type.py": 8,
     "typeddicts_inheritance.py": 1,
     "typeddicts_readonly_inheritance.py": 4,
-    "typeddicts_required.py": 2
+    "typeddicts_required.py": 1
   },
   "comment": "@generated"
 }

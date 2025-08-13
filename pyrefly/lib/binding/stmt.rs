@@ -41,8 +41,11 @@ use crate::binding::expr::Usage;
 use crate::binding::narrow::NarrowOps;
 use crate::binding::scope::FlowStyle;
 use crate::binding::scope::LoopExit;
+use crate::binding::scope::ScopeKind;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
+use crate::export::exports::Export;
+use crate::export::exports::ExportLocation;
 use crate::export::special::SpecialExport;
 use crate::graph::index::Idx;
 use crate::state::loader::FindError;
@@ -581,6 +584,16 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Stmt::TypeAlias(mut x) => {
+                if !matches!(
+                    self.scopes.current().kind,
+                    ScopeKind::Module | ScopeKind::Class(_)
+                ) {
+                    self.error(
+                        x.range,
+                        ErrorInfo::Kind(ErrorKind::InvalidSyntax),
+                        "`type` statement is not allowed in this context".to_owned(),
+                    );
+                }
                 if let Expr::Name(name) = *x.name {
                     if let Some(params) = &mut x.type_params {
                         self.type_params(params);
@@ -901,6 +914,18 @@ impl<'a> BindingsBuilder<'a> {
                                 if &x.name == "*" {
                                     for name in module_exports.wildcard(self.lookup).iter_hashed() {
                                         let key = Key::Import(name.into_key().clone(), x.range);
+                                        if let Some(ExportLocation::ThisModule(Export {
+                                            is_deprecated,
+                                            ..
+                                        })) = exported.get_hashed(name)
+                                            && *is_deprecated
+                                        {
+                                            self.error(
+                                                x.range,
+                                                ErrorInfo::Kind(ErrorKind::Deprecated),
+                                                format!("`{name}` is deprecated"),
+                                            );
+                                        }
                                         let val = if exported.contains_key_hashed(name) {
                                             Binding::Import(m, name.into_key().clone(), None)
                                         } else {
@@ -936,6 +961,18 @@ impl<'a> BindingsBuilder<'a> {
                                     let val = if (self.module_info.name() != m)
                                         && exported.contains_key(&x.name.id)
                                     {
+                                        if let Some(ExportLocation::ThisModule(Export {
+                                            is_deprecated,
+                                            ..
+                                        })) = exported.get(&x.name.id)
+                                            && *is_deprecated
+                                        {
+                                            self.error(
+                                                x.range,
+                                                ErrorInfo::Kind(ErrorKind::Deprecated),
+                                                format!("`{}` is deprecated", x.name),
+                                            );
+                                        }
                                         Binding::Import(m, x.name.id.clone(), original_name_range)
                                     } else {
                                         let x_as_module_name = m.append(&x.name.id);

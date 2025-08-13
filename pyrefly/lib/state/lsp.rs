@@ -670,42 +670,42 @@ impl<'a> Transaction<'a> {
                 identifier: _,
                 context: IdentifierContext::FunctionDef { docstring_range: _ },
             }) => {
-                // TODO(grievejia): Handle defintions of functions
+                // TODO(grievejia): Handle definitions of functions
                 None
             }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::ClassDef { docstring_range: _ },
             }) => {
-                // TODO(grievejia): Handle defintions of classes
+                // TODO(grievejia): Handle definitions of classes
                 None
             }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::Parameter,
             }) => {
-                // TODO(grievejia): Handle defintions of params
+                // TODO(grievejia): Handle definitions of params
                 None
             }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::TypeParameter,
             }) => {
-                // TODO(grievejia): Handle defintions of type params
+                // TODO(grievejia): Handle definitions of type params
                 None
             }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::ExceptionHandler,
             }) => {
-                // TODO(grievejia): Handle defintions of exception names
+                // TODO(grievejia): Handle definitions of exception names
                 None
             }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::PatternMatch(_),
             }) => {
-                // TODO(grievejia): Handle defintions of pattern-introduced names
+                // TODO(grievejia): Handle definitions of pattern-introduced names
                 None
             }
             Some(IdentifierWithContext {
@@ -915,6 +915,7 @@ impl<'a> Transaction<'a> {
                         location: TextRange::default(),
                         symbol_kind: Some(SymbolKind::Module),
                         docstring_range,
+                        is_deprecated: false,
                     },
                 ))
             }
@@ -952,11 +953,29 @@ impl<'a> Transaction<'a> {
     ) -> Option<(Handle, Export)> {
         let bindings = self.get_bindings(handle)?;
         let intermediate_definition = key_to_intermediate_definition(&bindings, key)?;
-        self.resolve_intermediate_definition(
+        let (definition_handle, mut export) = self.resolve_intermediate_definition(
             handle,
             intermediate_definition,
             jump_through_renamed_import,
-        )
+        )?;
+        if let Export {
+            symbol_kind: Some(symbol_kind),
+            ..
+        } = &export
+            && *symbol_kind == SymbolKind::Variable
+            && let Some(type_) = self.get_type(handle, key)
+        {
+            let symbol_kind = match type_ {
+                Type::Callable(_) | Type::Function(_) => SymbolKind::Function,
+                Type::BoundMethod(_) => SymbolKind::Method,
+                Type::ClassDef(_) | Type::Type(_) => SymbolKind::Class,
+                Type::Module(_) => SymbolKind::Module,
+                Type::TypeAlias(_) => SymbolKind::TypeAlias,
+                _ => *symbol_kind,
+            };
+            export.symbol_kind = Some(symbol_kind);
+        }
+        Some((definition_handle, export))
     }
 
     // This is for cases where we are 100% certain that `identifier` points to a "real" name
@@ -992,6 +1011,7 @@ impl<'a> Transaction<'a> {
                 location,
                 symbol_kind,
                 docstring_range,
+                ..
             },
         ) = self.key_to_export(handle, &def_key, jump_through_renamed_import)?;
         let module_info = self.get_module_info(&handle)?;
@@ -1020,6 +1040,7 @@ impl<'a> Transaction<'a> {
                 location,
                 symbol_kind,
                 docstring_range,
+                ..
             },
         ) = self.key_to_export(handle, &use_key, jump_through_renamed_import)?;
         Some(FindDefinitionItemWithDocstring {
@@ -2146,7 +2167,7 @@ impl<'a> Transaction<'a> {
                 builder.process_key(&key, definition_handle.module(), symbol_kind)
             }
         }
-        builder.process_ast(&ast);
+        builder.process_ast(&ast, &|range| self.get_type_trace(handle, range));
         Some(
             legends
                 .convert_tokens_into_lsp_semantic_tokens(&builder.all_tokens_sorted(), module_info),
@@ -2322,16 +2343,16 @@ impl<'a> CancellableTransaction<'a> {
                 // file systems don't contain in-memory files.
                 ModulePathDetails::Memory(path_buf)
                     // Why do exclude the case of finding references within the same in-memory file?
-                    // If we are finding references within the same in-memory file, 
+                    // If we are finding references within the same in-memory file,
                     // then there is no problem for us to use the in-memory definition location.
                     if handle.path() != definition.module.path() =>
                 {
                     // Below, we try to patch the definition location to be at the same offset, but
                     // making the path to be filesystem path instead. In this way, in the happy case
                     // where the in-memory content is exactly the same as the filesystem content,
-                    // we can successfully find all the references. However, if the content diverge, 
+                    // we can successfully find all the references. However, if the content diverge,
                     // then we will miss definitions from other files.
-                    // 
+                    //
                     // In general, other than checking the reverse dependency against the in-memory
                     // content, there is not much we can do: the in-memory content can diverge from
                     // the filesystem content in arbitrary ways.

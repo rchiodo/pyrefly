@@ -8,14 +8,26 @@
 //! Query interface for pyrefly. Just experimenting for the moment - not intended for external use.
 
 use std::io::Cursor;
+use std::iter;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dupe::Dupe;
+use itertools::Itertools;
 use pyrefly_python::ast::Ast;
+use pyrefly_python::dunder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_python::sys_info::SysInfo;
+use pyrefly_types::callable::FuncMetadata;
+use pyrefly_types::callable::Function;
+use pyrefly_types::callable::FunctionKind;
+use pyrefly_types::class::Class;
+use pyrefly_types::qname::QName;
+use pyrefly_types::types::BoundMethodType;
+use pyrefly_types::types::Forallable;
+use pyrefly_types::types::Type;
 use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::lined_buffer::DisplayRange;
 use pyrefly_util::lock::Mutex;
@@ -25,16 +37,23 @@ use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprAttribute;
 use ruff_python_ast::ModModule;
+use ruff_python_ast::Stmt;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
+use ruff_text_size::TextSize;
 use starlark_map::small_set::SmallSet;
 
 use crate::alt::answers::Answers;
+use crate::alt::answers_solver::AnswersSolver;
 use crate::config::finder::ConfigFinder;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
+use crate::state::lsp::DefinitionMetadata;
 use crate::state::require::Require;
 use crate::state::state::State;
+use crate::state::state::Transaction;
+use crate::state::state::TransactionHandle;
 use crate::types::display::TypeDisplayContext;
 
 pub struct Query {
@@ -44,6 +63,23 @@ pub struct Query {
     sys_info: SysInfo,
     /// The files that have been used with `add_files`, used when files change.
     files: Mutex<SmallSet<(ModuleName, ModulePath)>>,
+}
+
+const CALLEE_KIND_FUNCTION: &str = "function";
+const CALLEE_KIND_METHOD: &str = "method";
+const CALLEE_KIND_CLASSMETHOD: &str = "classmethod";
+const CALLEE_KIND_STATICMETHOD: &str = "staticmethod";
+
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct Callee {
+    pub kind: String,
+    pub target: String,
+    pub class_name: Option<String>,
+}
+
+pub struct Attribute {
+    pub name: String,
+    pub kind: Option<String>,
 }
 
 impl Query {
@@ -105,6 +141,322 @@ impl Query {
         })
     }
 
+    pub fn get_attributes(
+        &self,
+        name: ModuleName,
+        path: ModulePath,
+        class_name: &str,
+    ) -> Option<Vec<Attribute>> {
+        let transaction = self.state.transaction();
+        let handle = self.make_handle(name, path);
+        let ast = transaction.get_ast(&handle)?;
+        // find last declaration of class with specified name in file
+        let cls = ast
+            .body
+            .iter()
+            .filter_map(|e| {
+                if let Stmt::ClassDef(cls) = e {
+                    if cls.name.id.as_str() == class_name {
+                        Some(cls)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .last()?;
+        let class_ty = transaction.get_type_at(&handle, cls.name.start());
+        if let Some(Type::ClassDef(cd)) = &class_ty {
+            let res = cd
+                .fields()
+                .filter_map(|n| {
+                    let range = cd.field_decl_range(n)?;
+                    let field_ty = transaction.get_type_at(&handle, range.start())?;
+                    let kind = if let Type::Function(f) = &field_ty
+                        && f.metadata.flags.is_property_getter
+                    {
+                        Some(String::from("property"))
+                    } else {
+                        None
+                    };
+                    Some(Attribute {
+                        name: n.to_string(),
+                        kind,
+                    })
+                })
+                .collect_vec();
+            Some(res)
+        } else {
+            None
+        }
+    }
+
+    // fetches information about callees of a callable in a module
+    pub fn get_callees_with_location(
+        &self,
+        name: ModuleName,
+        path: ModulePath,
+    ) -> Option<Vec<(DisplayRange, Callee)>> {
+        let transaction = self.state.transaction();
+        let handle = self.make_handle(name, path);
+        let module_info = transaction.get_module_info(&handle)?;
+        let ast = transaction.get_ast(&handle)?;
+        let answers = transaction.get_answers(&handle)?;
+
+        fn qname_to_string(n: &QName) -> String {
+            format!("{}.{}", n.module_name(), n.id())
+        }
+        fn class_name_from_def_kind(kind: &FunctionKind) -> String {
+            if let FunctionKind::Def(f) = kind
+                && let Some(class_name) = &f.cls
+            {
+                format!("{}.{}", f.module, class_name)
+            } else {
+                panic!("class_name_from_def_kind - unsupported function kind: {kind:?}");
+            }
+        }
+        fn target_from_def_kind(kind: &FunctionKind) -> String {
+            match kind {
+                FunctionKind::Def(f) => match &f.cls {
+                    Some(class_name) => {
+                        format!("{}.{}.{}", f.module, class_name, f.func)
+                    }
+                    None => {
+                        format!("{}.{}", f.module, f.func)
+                    }
+                },
+                FunctionKind::IsInstance => String::from("isinstance"),
+                FunctionKind::IsSubclass => String::from("issubclass"),
+                // should never see this in expression context
+                FunctionKind::Dataclass => String::from("dataclasses.dataclass"),
+                FunctionKind::DataclassField => String::from("dataclasses.field"),
+                FunctionKind::CallbackProtocol(cls) => {
+                    format!("{}.__call__", qname_to_string(cls.qname()))
+                }
+                _ => panic!("target_from_def_kind - unsupported function kind: {kind:?}"),
+            }
+        }
+
+        fn target_from_function(f: &Function) -> String {
+            target_from_def_kind(&f.metadata.kind)
+        }
+        fn callee_from_function(f: &Function) -> Callee {
+            if f.metadata.flags.is_staticmethod {
+                Callee {
+                    kind: String::from(CALLEE_KIND_STATICMETHOD),
+                    target: target_from_function(f),
+                    class_name: Some(class_name_from_def_kind(&f.metadata.kind)),
+                }
+            } else if f.metadata.flags.is_classmethod {
+                Callee {
+                    kind: String::from(CALLEE_KIND_CLASSMETHOD),
+                    target: target_from_function(f),
+                    // TODO: use type of receiver
+                    class_name: Some(class_name_from_def_kind(&f.metadata.kind)),
+                }
+            } else {
+                Callee {
+                    kind: String::from(CALLEE_KIND_FUNCTION),
+                    target: target_from_function(f),
+                    class_name: None,
+                }
+            }
+        }
+
+        fn target_from_bound_method_type(m: &BoundMethodType) -> String {
+            match m {
+                BoundMethodType::Function(f) => target_from_function(f),
+                BoundMethodType::Forall(f) => target_from_function(&f.body),
+                BoundMethodType::Overload(f) => target_from_def_kind(&f.metadata.kind),
+            }
+        }
+        fn callee_method_kind_from_function_metadata(m: &FuncMetadata) -> String {
+            if m.flags.is_staticmethod {
+                String::from(CALLEE_KIND_STATICMETHOD)
+            } else if m.flags.is_classmethod {
+                String::from(CALLEE_KIND_CLASSMETHOD)
+            } else {
+                String::from(CALLEE_KIND_METHOD)
+            }
+        }
+
+        fn callee_method_kind_from_bound_method_type(m: &BoundMethodType) -> String {
+            match m {
+                BoundMethodType::Function(f) => {
+                    callee_method_kind_from_function_metadata(&f.metadata)
+                }
+                BoundMethodType::Forall(f) => {
+                    callee_method_kind_from_function_metadata(&f.body.metadata)
+                }
+                BoundMethodType::Overload(f) => {
+                    callee_method_kind_from_function_metadata(&f.metadata)
+                }
+            }
+        }
+        fn type_to_string(ty: &Type) -> String {
+            match ty {
+                Type::ClassType(c) => qname_to_string(c.qname()),
+                Type::ClassDef(c) => qname_to_string(c.qname()),
+                _ => panic!("unexpected type: {ty:?}"),
+            }
+        }
+        fn callee_in_mro<F: Fn(&AnswersSolver<TransactionHandle>, &Class) -> Option<String>>(
+            c: &Class,
+            transaction: &Transaction<'_>,
+            handle: &Handle,
+            name: &str,
+            f: F,
+        ) -> Vec<Callee> {
+            let call_target = transaction.ad_hoc_solve(handle, |solver| {
+                let mro = solver.get_mro_for_class(c);
+                iter::once(c)
+                    .chain(mro.ancestors(solver.stdlib).map(|x| x.class_object()))
+                    .find_map(|c| f(&solver, c))
+            });
+            let class_name = qname_to_string(c.qname());
+            let target = if let Some(Some(t)) = call_target {
+                t
+            } else {
+                format!("{class_name}.{name}")
+            };
+            vec![Callee {
+                kind: String::from(CALLEE_KIND_METHOD),
+                target,
+                class_name: Some(class_name),
+            }]
+        }
+        fn callee_for_type(
+            ty: &Type,
+            callee_range: TextRange,
+            module_info: &ModuleInfo,
+            transaction: &Transaction<'_>,
+            handle: &Handle,
+        ) -> Vec<Callee> {
+            match ty {
+                Type::Union(tys) => {
+                    // get callee for each type
+                    tys.iter()
+                        .flat_map(|t| {
+                            callee_for_type(t, callee_range, module_info, transaction, handle)
+                        })
+                        .unique()
+                        // return sorted by target
+                        .sorted_by(|a, b| a.target.cmp(&b.target))
+                        .collect_vec()
+                }
+                Type::BoundMethod(m) => vec![Callee {
+                    kind: callee_method_kind_from_bound_method_type(&m.func),
+                    target: target_from_bound_method_type(&m.func),
+                    class_name: Some(type_to_string(&m.obj)),
+                }],
+                Type::Function(f) => vec![callee_from_function(f)],
+                Type::Overload(f) => vec![Callee {
+                    // assuming that overload represents function and method overloads
+                    // are handled by BoundMethod case
+                    kind: String::from(CALLEE_KIND_FUNCTION),
+                    target: target_from_def_kind(&f.metadata.kind),
+                    class_name: None,
+                }],
+                Type::Callable(_) => {
+                    // a bit unfortunate that we have to rely on LSP functionality to get the target
+                    let defs = transaction.find_definition(
+                        handle,
+                        // take location of last included character in range (which should work for identifiers and attributes)
+                        callee_range.end().checked_sub(TextSize::from(1)).unwrap(),
+                        true,
+                    );
+                    if defs.len() == 1 {
+                        // TODO: decide what do to with multiple definitions
+                        if let DefinitionMetadata::Variable(_) = defs[0].metadata {
+                            let name = module_info.code_at(defs[0].definition_range);
+                            vec![Callee {
+                                kind: String::from(CALLEE_KIND_FUNCTION),
+                                target: format!("$parameter${name}"),
+                                class_name: None,
+                            }]
+                        } else {
+                            panic!(
+                                "callable ty - unexpected metadata kind, {:?}",
+                                defs[0].metadata
+                            )
+                        }
+                    } else {
+                        panic!("callable ty not supported yet, {defs:?}")
+                    }
+                }
+                Type::ClassDef(cls) => {
+                    callee_in_mro(cls, transaction, handle, "__init__", |solver, c| {
+                        // find first class that has __init__ or __new__
+                        let class_metadata = solver.get_metadata_for_class(c);
+                        if c.contains(&dunder::INIT)
+                            || class_metadata.dataclass_metadata().is_some()
+                        {
+                            // treat dataclasses as always having __init__
+                            Some(format!("{}.{}.__init__", c.module_name(), c.name()))
+                        } else if c.contains(&dunder::NEW) {
+                            Some(format!("{}.{}.__new__", c.module_name(), c.name()))
+                        } else {
+                            None
+                        }
+                    })
+                }
+                Type::Forall(v) => {
+                    if let Forallable::Function(func) = &v.body {
+                        vec![callee_from_function(func)]
+                    } else {
+                        panic!("unsupported forallable type")
+                    }
+                }
+                Type::ClassType(c) => callee_in_mro(
+                    c.class_object(),
+                    transaction,
+                    handle,
+                    "__call__",
+                    |_solver, c| {
+                        if c.contains(&dunder::CALL) {
+                            Some(format!("{}.{}.__call__", c.module_name(), c.name()))
+                        } else {
+                            None
+                        }
+                    },
+                ),
+                Type::Any(_) => vec![],
+                _ => panic!("unexpected type: {ty:?}"),
+            }
+        }
+
+        let mut res = Vec::new();
+        fn f<'a>(
+            x: &Expr,
+            module_info: &ModuleInfo,
+            answers: &Answers,
+            transaction: &Transaction<'a>,
+            handle: &Handle,
+            res: &mut Vec<(DisplayRange, Callee)>,
+        ) {
+            let (callee_ty, callee_range) = if let Expr::Attribute(attr) = x {
+                (answers.try_get_getter_for_range(attr.range()), attr.range())
+            } else if let Expr::Call(call) = x {
+                (answers.get_type_trace(call.func.range()), call.func.range())
+            } else {
+                (None, x.range())
+            };
+            if let Some(func_ty) = callee_ty {
+                callee_for_type(&func_ty, callee_range, module_info, transaction, handle)
+                    .into_iter()
+                    .for_each(|callee| {
+                        res.push((module_info.display_range(callee_range), callee));
+                    });
+            }
+
+            x.recurse(&mut |x| f(x, module_info, answers, transaction, handle, res));
+        }
+
+        ast.visit(&mut |x| f(x, &module_info, &answers, &transaction, &handle, &mut res));
+        Some(res)
+    }
+
     pub fn get_types_in_file(
         &self,
         name: ModuleName,
@@ -118,25 +470,39 @@ impl Query {
         let answers = transaction.get_answers(&handle)?;
 
         let mut res = Vec::new();
+        fn add_type(
+            ty: &Type,
+            range: TextRange,
+            module_info: &ModuleInfo,
+            res: &mut Vec<(DisplayRange, String)>,
+        ) {
+            let mut ctx = TypeDisplayContext::new(&[ty]);
+            ctx.always_display_module_name();
+            res.push((
+                module_info.display_range(range),
+                ctx.display(ty).to_string(),
+            ));
+        }
         fn f(
             x: &Expr,
             module_info: &ModuleInfo,
             answers: &Answers,
+            transaction: &Transaction<'_>,
+            handle: &Handle,
             res: &mut Vec<(DisplayRange, String)>,
         ) {
             let range = x.range();
             if let Some(ty) = answers.get_type_trace(range) {
-                let mut ctx = TypeDisplayContext::new(&[&ty]);
-                ctx.always_display_module_name();
-                res.push((
-                    module_info.display_range(range),
-                    ctx.display(&ty).to_string(),
-                ));
+                add_type(&ty, range, module_info, res);
+            } else if let Some(ty) = transaction.get_type_at(handle, range.start()) {
+                // this branch is needed to cover cases when type is not available in answers
+                // which happens for local variables
+                add_type(&ty, range, module_info, res);
             }
-            x.recurse(&mut |x| f(x, module_info, answers, res));
+            x.recurse(&mut |x| f(x, module_info, answers, transaction, handle, res));
         }
 
-        ast.visit(&mut |x| f(x, &module_info, &answers, &mut res));
+        ast.visit(&mut |x| f(x, &module_info, &answers, &transaction, &handle, &mut res));
         Some(res)
     }
 
@@ -178,32 +544,56 @@ impl Query {
         lt: &str,
         gt: &str,
     ) -> Result<bool, String> {
-        let types = format!("type pyrefly_lt = ({lt})\ntype pyrefly_gt = ({gt})\n");
-        let imported = Self::find_imports(&Ast::parse(&types).0);
-        let imports = imported.map(|x| format!("import {x}\n")).join("");
-        let check = "def pyrefly_func(x: pyrefly_lt) -> pyrefly_gt:\n    return x";
+        fn do_check(
+            t: &mut Transaction<'_>,
+            h: Handle,
+            path: &Path,
+            lt: &str,
+            gt: &str,
+            types: String,
+            check: &'static str,
+        ) -> Result<bool, String> {
+            let imported = Query::find_imports(&Ast::parse(&types).0);
+            let imports = imported.map(|x| format!("import {x}\n")).join("");
 
-        let before = format!("{imports}\n{types}\n");
-        let after = format!("{imports}\n{types}\n{check}");
+            let before = format!("{imports}\n{types}\n");
+            let after = format!("{imports}\n{types}\n{check}");
+
+            t.set_memory(vec![(path.to_owned(), Some(Arc::new(before.clone())))]);
+            t.run(&[(h.dupe(), Require::Everything)]);
+            let errors = t.get_errors([&h]).collect_errors();
+            if !errors.shown.is_empty() {
+                let mut res = Vec::new();
+                for e in errors.shown {
+                    e.write_line(&mut Cursor::new(&mut res), true).unwrap();
+                }
+                return Err(format!(
+                    "Errors from is_subtype `{lt}` <: `{gt}`\n{}\n\nSource code:\n{before}",
+                    str::from_utf8(&res).unwrap_or("UTF8 error")
+                ));
+            }
+            t.set_memory(vec![(path.to_owned(), Some(Arc::new(after)))]);
+            t.run(&[(h.dupe(), Require::Everything)]);
+            let errors = t.get_errors([&h]).collect_errors();
+            Ok(errors.shown.is_empty())
+        }
 
         let mut t = self.state.transaction();
         let h = self.make_handle(name, ModulePath::memory(path.clone()));
-        t.set_memory(vec![(path.clone(), Some(Arc::new(before.clone())))]);
-        t.run(&[(h.dupe(), Require::Everything)]);
-        let errors = t.get_errors([&h]).collect_errors();
-        if !errors.shown.is_empty() {
-            let mut res = Vec::new();
-            for e in errors.shown {
-                e.write_line(&mut Cursor::new(&mut res), true).unwrap();
-            }
-            return Err(format!(
-                "Errors from is_subtype `{lt}` <: `{gt}`\n{}\n\nSource code:\n{before}",
-                str::from_utf8(&res).unwrap_or("UTF8 error")
-            ));
+
+        // py2hack uses pyre1 fake type order for typed dicts
+        if gt == "TypedDictionary" || gt == "NonTotalTypedDictionary" {
+            let types = format!("type pyrefly_lt = ({lt})");
+            // check if type has attributes specific to TypedDict
+            let check =
+                "pyrefly_lt.__required_keys__, pyrefly_lt.__optional_keys__, pyrefly_lt.__total__";
+
+            do_check(&mut t, h, &path, lt, gt, types, check)
+        } else {
+            let types = format!("type pyrefly_lt = ({lt})\ntype pyrefly_gt = ({gt})\n");
+            let check = "def pyrefly_func(x: pyrefly_lt) -> pyrefly_gt:\n    return x";
+
+            do_check(&mut t, h, &path, lt, gt, types, check)
         }
-        t.set_memory(vec![(path.clone(), Some(Arc::new(after)))]);
-        t.run(&[(h.dupe(), Require::Everything)]);
-        let errors = t.get_errors([&h]).collect_errors();
-        Ok(errors.shown.is_empty())
     }
 }

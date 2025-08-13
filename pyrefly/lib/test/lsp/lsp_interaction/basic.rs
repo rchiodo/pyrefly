@@ -10,86 +10,86 @@ use lsp_server::Notification;
 use lsp_server::Request;
 use lsp_server::RequestId;
 use lsp_server::Response;
+use lsp_server::ResponseError;
 use lsp_types::ConfigurationItem;
 use lsp_types::ConfigurationParams;
 use lsp_types::Url;
-use lsp_types::notification::Exit;
-use lsp_types::notification::Notification as _;
 use lsp_types::request::Request as _;
-use lsp_types::request::Shutdown;
 use lsp_types::request::WorkspaceConfiguration;
 
+use crate::test::lsp::lsp_interaction::object_model::LspInteraction;
 use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::get_test_files_root;
 use crate::test::lsp::lsp_interaction::util::run_test_lsp;
 
 #[test]
 fn test_initialize_basic() {
-    run_test_lsp(TestCase::default());
+    let interaction = LspInteraction::new();
+
+    interaction
+        .server
+        .send_initialize(interaction.server.get_initialize_params(None, false, false));
+    interaction
+        .client
+        .expect_message(Message::Response(Response {
+            id: RequestId::from(1),
+            result: Some(serde_json::json!({"capabilities": {
+                "positionEncoding": "utf-16",
+                "textDocumentSync": 2,
+                "definitionProvider": true,
+                "codeActionProvider": {
+                    "codeActionKinds": ["quickfix"]
+                },
+                "completionProvider": {
+                    "triggerCharacters": ["."]
+                },
+                "documentHighlightProvider": true,
+                "signatureHelpProvider": {
+                    "triggerCharacters": ["(", ","]
+                },
+                "hoverProvider": true,
+                "inlayHintProvider": true,
+                "documentSymbolProvider": true,
+                "workspaceSymbolProvider": true,
+                "workspace": {
+                    "workspaceFolders": {
+                        "supported": true,
+                        "changeNotifications": true
+                    }
+                }
+            }})),
+            error: None,
+        }));
+    interaction.server.send_initialized();
+    interaction.shutdown();
 }
 
 #[test]
-// #[should_panic]
 fn test_shutdown() {
-    if true {
-        // Temporarily disabled because it wasn't really shutting down properly, but was assuming
-        // that queues got deallocated in certain orders.
-        return;
-    }
+    let interaction = LspInteraction::new();
+    interaction.initialize();
 
-    run_test_lsp(TestCase {
-        messages_from_language_client: vec![
-            Message::Request(Request {
-                id: RequestId::from(2),
-                method: Shutdown::METHOD.to_owned(),
-                params: serde_json::json!(null),
-            }),
-            Message::Notification(Notification {
-                method: Exit::METHOD.to_owned(),
-                params: serde_json::json!(null),
-            }),
-            // This second request should never be received by the server since it has already shut down.
-            // `run_test_lsp` panics if any request does not get handled.
-            Message::Request(Request {
-                id: RequestId::from(3),
-                method: "should not get here".to_owned(),
-                params: serde_json::json!(null),
-            }),
-        ],
-        expected_messages_from_language_server: vec![Message::Response(Response {
+    interaction.server.send_shutdown(RequestId::from(2));
+
+    interaction
+        .client
+        .expect_message(Message::Response(Response {
             id: RequestId::from(2),
             result: Some(serde_json::json!(null)),
             error: None,
-        })],
-        ..Default::default()
-    });
+        }));
+
+    interaction.server.send_exit();
+    interaction.server.expect_stop();
 }
 
 #[test]
-// #[should_panic]
 fn test_exit_without_shutdown() {
-    if true {
-        // Temporarily disabled because it wasn't really shutting down properly, but was assuming
-        // that queues got deallocated in certain orders.
-        return;
-    }
+    let interaction = LspInteraction::new();
+    interaction.initialize();
 
-    run_test_lsp(TestCase {
-        messages_from_language_client: vec![
-            Message::Notification(Notification {
-                method: Exit::METHOD.to_owned(),
-                params: serde_json::json!(null),
-            }),
-            // This second request should never be received by the server since it has already shut down.
-            // `run_test_lsp` panics if any request does not get handled.
-            Message::Request(Request {
-                id: RequestId::from(3),
-                method: "should not get here".to_owned(),
-                params: serde_json::json!(null),
-            }),
-        ],
-        ..Default::default()
-    });
+    interaction.server.send_exit();
+    interaction.server.expect_stop();
 }
 
 #[test]
@@ -176,4 +176,26 @@ fn test_nonexistent_file() {
         })],
         ..Default::default()
     });
+}
+
+#[test]
+fn test_unknown_request() {
+    let interaction = LspInteraction::new();
+    interaction.initialize();
+    interaction.server.send_message(Message::Request(Request {
+        id: RequestId::from(1),
+        method: "fake-method".to_owned(),
+        params: serde_json::json!(null),
+    }));
+    interaction
+        .client
+        .expect_message(Message::Response(Response {
+            id: RequestId::from(1),
+            result: None,
+            error: Some(ResponseError {
+                code: -32601,
+                message: "Unknown request: fake-method".to_owned(),
+                data: None,
+            }),
+        }));
 }

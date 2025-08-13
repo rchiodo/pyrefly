@@ -1210,6 +1210,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             AttributeInner::Simple(ty, Visibility::ReadWrite)
             | AttributeInner::Simple(ty, Visibility::ReadOnly(_)) => Ok(ty),
             AttributeInner::Property(getter, ..) => {
+                self.record_property_getter(range, &getter);
                 Ok(self.call_property_getter(getter, range, errors, context))
             }
             AttributeInner::ModuleFallback(_, name, ty) => {
@@ -1721,6 +1722,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Type::Any(style) => Some(AttributeBase::Any(style)),
             Type::TypeAlias(ta) => self.as_attribute_base_no_union(ta.as_value(self.stdlib)),
+            Type::Type(box Type::Tuple(_)) => Some(AttributeBase::ClassObject(
+                self.stdlib.tuple_object().dupe(),
+            )),
             Type::Type(box Type::ClassType(class)) => {
                 Some(AttributeBase::ClassObject(class.class_object().dupe()))
             }
@@ -1784,7 +1788,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if let Some(_guard) = self.recurser.recurse(v) {
                     self.as_attribute_base_no_union(self.solver().force_var(v))
                 } else {
-                    None
+                    Some(AttributeBase::Any(AnyStyle::Implicit))
                 }
             }
             Type::SuperInstance(box (cls, obj)) => Some(AttributeBase::SuperInstance(cls, obj)),

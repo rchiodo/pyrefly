@@ -746,11 +746,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ctor_targs: Option<&mut TArgs>,
     ) -> (Type, Callable) {
         // There may be Expr values in args and keywords.
-        // If we infer them for each overload, we may end up infering them multiple times.
+        // If we infer them for each overload, we may end up inferring them multiple times.
         // If those overloads contain nested overloads, then we can easily end up with O(2^n) perf.
         // Therefore, flatten all TypeOrExpr's into Type before we start
         let call = CallWithTypes::new();
-        let method_name = metadata.kind.as_func_id().func;
         let args = call.vec_call_arg(args, self, errors);
         let keywords = call.vec_call_keyword(keywords, self, errors);
 
@@ -807,7 +806,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         errors,
                         range,
                         ErrorInfo::new(ErrorKind::Deprecated, context),
-                        format!("Call to deprecated overload `{method_name}`"),
+                        format!(
+                            "Call to deprecated overload `{}`",
+                            callable
+                                .1
+                                .metadata
+                                .kind
+                                .as_func_id()
+                                .format(self.module().name())
+                        ),
                     );
                 }
                 if let Some(targs) = ctor_targs {

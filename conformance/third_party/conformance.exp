@@ -841,6 +841,16 @@
     },
     {
       "code": -2,
+      "column": 5,
+      "concise_description": "`type` statement is not allowed in this context",
+      "description": "`type` statement is not allowed in this context",
+      "line": 56,
+      "name": "invalid-syntax",
+      "stop_column": 30,
+      "stop_line": 56
+    },
+    {
+      "code": -2,
       "column": 15,
       "concise_description": "Type parameters used in `TA1` but not declared",
       "description": "Type parameters used in `TA1` but not declared",
@@ -1330,8 +1340,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from a generator of type `Generator[A, None, None]` because it does not match the declared return type `Iterator[B]`",
-      "description": "Cannot yield from a generator of type `Generator[A, None, None]` because it does not match the declared return type `Iterator[B]`",
+      "concise_description": "Cannot yield from a generator of type `Generator[A, None, None]` because it does not match the declared return type `Generator[B, None, Unknown]`",
+      "description": "Cannot yield from a generator of type `Generator[A, None, None]` because it does not match the declared return type `Generator[B, None, Unknown]`",
       "line": 118,
       "name": "invalid-yield",
       "stop_column": 29,
@@ -1340,8 +1350,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from a generator of type `Generator[int, None, None]` because it does not match the declared return type `Iterator[B]`",
-      "description": "Cannot yield from a generator of type `Generator[int, None, None]` because it does not match the declared return type `Iterator[B]`",
+      "concise_description": "Cannot yield from a generator of type `Generator[int, None, None]` because it does not match the declared return type `Generator[B, None, Unknown]`",
+      "description": "Cannot yield from a generator of type `Generator[int, None, None]` because it does not match the declared return type `Generator[B, None, Unknown]`",
       "line": 119,
       "name": "invalid-yield",
       "stop_column": 19,
@@ -1350,8 +1360,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from a generator of type `Generator[None, int, None]` because it does not match the declared return type `Generator[None, str, None]`",
-      "description": "Cannot yield from a generator of type `Generator[None, int, None]` because it does not match the declared return type `Generator[None, str, None]`",
+      "concise_description": "Cannot yield from a generator of type `Generator[None, int, None]` because it does not match the declared return type `Generator[None, str, Unknown]`",
+      "description": "Cannot yield from a generator of type `Generator[None, int, None]` because it does not match the declared return type `Generator[None, str, Unknown]`",
       "line": 135,
       "name": "invalid-yield",
       "stop_column": 29,
@@ -1904,6 +1914,16 @@
       "name": "bad-assignment",
       "stop_column": 24,
       "stop_line": 103
+    },
+    {
+      "code": -2,
+      "column": 21,
+      "concise_description": "`Unpack` in **kwargs annotation must be used only with a `TypedDict`",
+      "description": "`Unpack` in **kwargs annotation must be used only with a `TypedDict`",
+      "line": 122,
+      "name": "invalid-annotation",
+      "stop_column": 30,
+      "stop_line": 122
     },
     {
       "code": -2,
@@ -3941,6 +3961,16 @@
   "directives_deprecated.py": [
     {
       "code": -2,
+      "column": 44,
+      "concise_description": "`Ham` is deprecated",
+      "description": "`Ham` is deprecated",
+      "line": 18,
+      "name": "deprecated",
+      "stop_column": 47,
+      "stop_line": 18
+    },
+    {
+      "code": -2,
       "column": 23,
       "concise_description": "Call to deprecated function `_directives_deprecated_library.norwegian_blue`",
       "description": "Call to deprecated function `_directives_deprecated_library.norwegian_blue`",
@@ -3952,8 +3982,8 @@
     {
       "code": -2,
       "column": 12,
-      "concise_description": "Call to deprecated overload `foo`",
-      "description": "Call to deprecated overload `foo`",
+      "concise_description": "Call to deprecated overload `_directives_deprecated_library.foo`",
+      "description": "Call to deprecated overload `_directives_deprecated_library.foo`",
       "line": 30,
       "name": "deprecated",
       "stop_column": 15,
@@ -6400,10 +6430,10 @@
     {
       "code": -2,
       "column": 7,
-      "concise_description": "There cannot be more than one TypeVarTuple type parameter",
-      "description": "There cannot be more than one TypeVarTuple type parameter",
+      "concise_description": "Type parameters for class may not have more than one TypeVarTuple",
+      "description": "Type parameters for class may not have more than one TypeVarTuple",
       "line": 106,
-      "name": "invalid-inheritance",
+      "name": "invalid-type-var-tuple",
       "stop_column": 13,
       "stop_line": 106
     }
@@ -9128,6 +9158,16 @@
       "name": "bad-override",
       "stop_column": 15,
       "stop_line": 118
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Decorator `@final` can only be used on methods.",
+      "description": "Decorator `@final` can only be used on methods.",
+      "line": 125,
+      "name": "invalid-decorator",
+      "stop_column": 7,
+      "stop_line": 125
     }
   ],
   "specialtypes_any.py": [],
@@ -10344,6 +10384,16 @@
       "name": "invalid-annotation",
       "stop_column": 24,
       "stop_line": 19
+    },
+    {
+      "code": -2,
+      "column": 8,
+      "concise_description": "Duplicate qualifier `Required`",
+      "description": "Duplicate qualifier `Required`",
+      "line": 62,
+      "name": "invalid-annotation",
+      "stop_column": 31,
+      "stop_line": 62
     },
     {
       "code": -2,

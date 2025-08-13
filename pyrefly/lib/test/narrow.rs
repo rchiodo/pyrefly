@@ -229,6 +229,32 @@ def f(x: bool | None):
 );
 
 testcase!(
+    test_or_multiple_vars,
+    r#"
+from typing import assert_type
+def f(x: int | None, y: int | None) -> None:
+    if x is None or y is None:
+        assert_type(y, int | None)
+        assert_type(x, int | None)
+    else:
+        assert_type(y, int)
+        assert_type(x, int)
+    "#,
+);
+
+testcase!(
+    test_or_walrus_multiple_vars,
+    r#"
+from typing import assert_type
+def f(x: None | int, y: None | int) -> None:
+    if (z := x is None) or y is None:
+        assert_type(x, None | int)
+        assert_type(y, None | int)
+        assert_type(z, bool)
+    "#,
+);
+
+testcase!(
     test_elif,
     r#"
 from typing import assert_type
@@ -418,6 +444,20 @@ def f() -> str | None:
     pass
 if x := f():
     assert_type(x, str)
+    "#,
+);
+
+testcase!(
+    test_walrus_with_rhs_narrowing,
+    r#"
+from typing import assert_type, Literal
+def f(x: None | int) -> int:
+    # this is: y := (x is None)
+    # `y` being truthy means `x is None` is also true
+    if y := x is None:
+        assert_type(y, Literal[True])
+        x = 1
+    return x
     "#,
 );
 
@@ -1585,4 +1625,21 @@ class C:
     def is_int_static(x: str) -> TypeIs[int]: # E: Return type `int` must be assignable to the first argument type `str`
         return isinstance(x, int)
 "#,
+);
+
+testcase!(
+    test_while_try_except,
+    r#"
+from typing import assert_type
+class Test:
+    x: dict[str, str] | None
+    def test(self) -> None:
+        assert self.x is not None
+        while True:
+            try:
+                assert_type(self.x, dict[str, str])
+                x = self.x.get("asdf")
+            except:
+                pass
+    "#,
 );

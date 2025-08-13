@@ -251,7 +251,7 @@ impl Cycle {
         cycle
     }
 
-    /// Do a pre-calculation check, to handle progress recurively traversing
+    /// Do a pre-calculation check, to handle progress recursively traversing
     /// the cycle until we reach the second instance of `break_at`.
     ///
     /// For each cycle participant we encounter, we move it from the
@@ -548,16 +548,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let answer = K::solve(self, binding, self.base_errors);
         let (v, rec) = calculation.record_value(answer);
         // If this was the first write to a Calculation that had a recursive placeholder,
-        // we need to record the placeholder => final answer correspondance.
+        // we need to record the placeholder => final answer correspondence.
         if let Some(r) = rec {
             let k = self.bindings().idx_to_key(idx).range();
             // Always force recursive Vars as soon as we produce the final answer. This limits
             // nondeterminism by ensuring that nothing downstream of the cycle can pin the type
             // once the cycle has finished (although there can still be data races where the
-            // Var excapes the cycle in another thread before it has finished computing).
+            // Var escapes the cycle in another thread before it has finished computing).
             //
             // `Var::ZERO` is just a dummy value used by a few of the `K: Solve`
-            // implementations that doen't actually use the Var, so we have to skip it.
+            // implementations that doesn't actually use the Var, so we have to skip it.
             K::record_recursive(self, k, &v, r, self.base_errors);
             if r != Var::ZERO {
                 self.solver().force_var(r);
@@ -615,7 +615,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
         SolutionsTable: TableKeyed<K, Value = SolutionsEntry<K>>,
     {
-        if module == self.module().name() && path.is_none_or(|path| path == self.module().path()) {
+        if module == self.module().name() && path == Some(self.module().path()) {
             // We are working in our own module, so don't have to go back to the `LookupAnswer` trait.
             // But even though we are looking at our own module, we might be using our own type via an import
             // from a mutually recursive module, so have to deal with key_to_idx finding nothing due to incremental.

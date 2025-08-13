@@ -906,7 +906,7 @@ pub struct BindingFunction {
     pub def: StmtFunctionDef,
     pub stub_or_impl: FunctionStubOrImpl,
     pub class_key: Option<Idx<KeyClass>>,
-    pub decorators: Box<[Idx<Key>]>,
+    pub decorators: Box<[(Idx<Key>, TextRange)]>,
     pub legacy_tparams: Box<[Idx<KeyLegacyTypeParam>]>,
     pub successor: Option<Idx<KeyFunction>>,
     pub docstring_range: Option<TextRange>,
@@ -1881,8 +1881,7 @@ pub struct BindingClassMetadata {
     /// for some synthesized classes, which have no actual class body and therefore usually have no
     /// base class expressions, but may have a known base class for the synthesized class.
     pub special_base: Option<Box<BaseClass>>,
-    #[allow(dead_code)]
-    pub pydantic_metadata: Option<PydanticMetadataBinding>,
+    pub pydantic_metadata: PydanticMetadataBinding,
 }
 
 impl DisplayWith<Bindings> for BindingClassMetadata {
@@ -1941,14 +1940,14 @@ impl DisplayWith<Bindings> for BindingYield {
 
 #[derive(Clone, Debug)]
 pub enum BindingYieldFrom {
-    YieldFrom(Option<Idx<KeyAnnotation>>, ExprYieldFrom),
+    YieldFrom(Option<Idx<KeyAnnotation>>, IsAsync, ExprYieldFrom),
     Invalid(ExprYieldFrom),
 }
 
 impl BindingYieldFrom {
     fn expr(&self) -> &ExprYieldFrom {
         match self {
-            Self::YieldFrom(_, x) => x,
+            Self::YieldFrom(_, _, x) => x,
             Self::Invalid(x) => x,
         }
     }

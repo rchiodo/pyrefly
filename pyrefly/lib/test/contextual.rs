@@ -255,6 +255,38 @@ ys: list[A] = takes_int("") if False else [B()] # E: Argument `Literal['']` is n
 );
 
 testcase!(
+    test_context_boolop,
+    r#"
+class A: ...
+class B(A): ...
+
+x1: list[A] = False or [B()]
+x2: list[A] = True and [B()]
+"#,
+);
+
+testcase!(
+    bug = "x or y or ... fails due to union hints, see test_contextual_typing_against_unions",
+    test_context_boolop_soft,
+    r#"
+from typing import TypedDict, assert_type
+class A: ...
+class B(A): ...
+class C: ...
+class D(C): ...
+class TD(TypedDict):
+    x: int
+def test(x: list[A] | None, y: list[C] | None, z: TD | None) -> None:
+    assert_type(x or [B()], list[A])
+    assert_type(x or [0], list[A] | list[int])
+    assert_type(x or y or [B()], list[A] | list[C])
+    assert_type(x or y or [D()], list[A] | list[C]) # TODO # E: assert_type(list[A] | list[C] | list[D], list[A] | list[C]) failed
+    assert_type(z or {"x": 0}, TD)
+    assert_type(z or {"x": ""}, TD | dict[str, str])
+"#,
+);
+
+testcase!(
     test_context_yield,
     r#"
 from typing import Generator, Iterator
@@ -320,6 +352,19 @@ reveal_type(x2) # E: revealed type: (x: int, y: str) -> None
 );
 
 testcase!(
+    bug = "We should contextually type *args and **kwargs here based on the paramspec",
+    test_context_lambda_paramspec_args_kwargs,
+    r#"
+from typing import Callable, assert_type
+def f[**P, R](f: Callable[P, R], g: Callable[P, R]) -> Callable[P, R]: ...
+def g1(x: int, *args: int): ...
+def g2(x: int, **kwargs: str): ...
+x1 = f(g1, lambda x, *args: assert_type(args, tuple[int, ...])) # E: assert_type(Any, tuple[int, ...]) failed
+x2 = f(g2, lambda x, **kwargs: assert_type(kwargs, dict[str, str])) # E: assert_type(Any, dict[str, str]) failed
+    "#,
+);
+
+testcase!(
     test_context_return,
     r#"
 class A: ...
@@ -335,15 +380,47 @@ z: list[A] = y # E: `list[B]` is not assignable to `list[A]`
 );
 
 testcase!(
+    bug = "Propagating the hint should still allow for a narrower inferred type",
+    test_context_return_narrow,
+    r#"
+from typing import assert_type
+
+def f[T](x: T) -> T:
+    return x
+
+def test(x: int | str):
+    x = f(0)
+    assert_type(x, int) # E: assert_type(int | str, int) failed
+"#,
+);
+
+testcase!(
     test_context_ctor_return,
     r#"
 class A: ...
 class B(A): ...
 
 class C[T]:
+    x: T
     def __init__(self, x: T) -> None: ...
 
 x: C[list[A]] = C([B()])
+"#,
+);
+
+testcase!(
+    bug = "Propagating the hint should still allow for a narrower inferred type",
+    test_context_ctor_return_narrow,
+    r#"
+from typing import assert_type
+
+class C[T]:
+    x: T
+    def __init__(self, x: T) -> None: ...
+
+def test(x: C[int | str]):
+    x = C(0)
+    assert_type(x, C[int]) # E: assert_type(C[int | str], C[int]) failed
 "#,
 );
 
@@ -359,6 +436,21 @@ class TD[T](TypedDict):
     x: list[T]
 
 x: TD[A] = TD(x = [B()])
+"#,
+);
+
+testcase!(
+    bug = "Propagating the hint should still allow for a narrower inferred type",
+    test_context_typeddict_ctor_return_narrow,
+    r#"
+from typing import assert_type, TypedDict
+
+class TD[T](TypedDict):
+    x: T
+
+def test(x: TD[int | str]):
+    x = TD(x = 0)
+    assert_type(x, TD[int]) # E: assert_type(TypedDict[TD[int | str]], TypedDict[TD[int]]) failed
 "#,
 );
 
@@ -494,6 +586,18 @@ class Identity(Protocol):
     def __call__[T](self, x: T) -> T:
         return x
 x: Identity = lambda x: x  # E: `(x: Unknown) -> Unknown` is not assignable to `Identity`
+    "#,
+);
+
+testcase!(
+    bug = "We should contextually type *args and **kwargs here based on the Protocol",
+    test_context_lambda_args_kwargs_protocol,
+    r#"
+from typing import Protocol, assert_type, Any
+class Identity(Protocol):
+    def __call__(self, *args: int, **kwargs: int) -> Any: ...
+x: Identity = lambda *args, **kwargs: assert_type(args, tuple[int, ...]) # E: assert_type(Any, tuple[int, ...]) failed
+y: Identity = lambda *args, **kwargs: assert_type(kwargs, dict[str, int]) # E: assert_type(Any, dict[str, int]) failed
     "#,
 );
 

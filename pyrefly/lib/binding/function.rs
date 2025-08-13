@@ -60,7 +60,7 @@ struct Decorators {
     has_no_type_check: bool,
     is_overload: bool,
     is_abstract_method: bool,
-    decorators: Box<[Idx<Key>]>,
+    decorators: Box<[(Idx<Key>, TextRange)]>,
 }
 
 pub struct SelfAssignments {
@@ -287,7 +287,7 @@ impl<'a> BindingsBuilder<'a> {
             .push_function_scope(range, func_name, class_key.is_some());
         self.parameters(parameters, class_key);
         self.scopes.pop();
-        // If we are in a class, use a simple visiter to find `self.<attr>` assignments.
+        // If we are in a class, use a simple visitor to find `self.<attr>` assignments.
         if class_key.is_some() {
             SelfAttrNames::find(func_name, parameters, body)
         } else {
@@ -324,7 +324,7 @@ impl<'a> BindingsBuilder<'a> {
         return_ann_with_range: Option<(TextRange, Idx<KeyAnnotation>)>,
         implicit_return_if_inferring_return_type: Option<Idx<Key>>,
         stub_or_impl: FunctionStubOrImpl,
-        decorators: Box<[Idx<Key>]>,
+        decorators: Box<[(Idx<Key>, TextRange)]>,
     ) {
         let is_generator =
             !(yields_and_returns.yields.is_empty() && yields_and_returns.yield_froms.is_empty());
@@ -354,7 +354,10 @@ impl<'a> BindingsBuilder<'a> {
         let yield_from_keys = yields_and_returns
             .yield_froms
             .into_map(|(idx, x)| {
-                self.insert_binding_idx(idx, BindingYieldFrom::YieldFrom(return_ann, x))
+                self.insert_binding_idx(
+                    idx,
+                    BindingYieldFrom::YieldFrom(return_ann, IsAsync::new(is_async), x),
+                )
             })
             .into_boxed_slice();
 
@@ -369,7 +372,7 @@ impl<'a> BindingsBuilder<'a> {
                         range,
                         annotation,
                         stub_or_impl,
-                        decorators,
+                        decorators: decorators.into_iter().map(|x| x.0).collect(),
                         implicit_return,
                         is_generator: !(yield_keys.is_empty() && yield_from_keys.is_empty()),
                         has_explicit_return: !return_keys.is_empty(),
