@@ -59,7 +59,6 @@ macro_rules! tsp_debug {
 }
 pub use tsp_debug;
 
-
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
     #[inline]
