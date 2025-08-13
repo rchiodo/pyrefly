@@ -184,7 +184,7 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
-use crate::tsp; // bring generated TSP protocol module into scope for *Params usage
+use crate::tsp::*; // bring generated TSP protocol module into scope for *Params usage
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
@@ -432,21 +432,6 @@ pub fn lsp_loop(
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
-    // Helper for TSP requests: if the JSON-RPC method matches, attempt to
-    // deserialize the params Value directly into the provided Params type.
-    // This bypasses the generated *Request wrapper structs so we can pass
-    // strongly typed *Params directly to handlers.
-    fn tsp_params<P: DeserializeOwned>(
-        x: &lsp_server::Request,
-        method: &str,
-    ) -> Option<Result<P, serde_json::Error>> {
-        if x.method == method {
-            Some(serde_json::from_value(x.params.clone()))
-        } else {
-            None
-        }
-    }
-
     fn extract_request_params_or_send_err_response<T>(
         &self,
         params: Result<T::Params, serde_json::Error>,
@@ -455,27 +440,6 @@ impl Server {
     where
         T: lsp_types::request::Request,
         T::Params: DeserializeOwned,
-    {
-        match params {
-            Ok(params) => Some(params),
-            Err(err) => {
-                self.send_response(Response::new_err(
-                    id.clone(),
-                    ErrorCode::InvalidParams as i32,
-                    err.to_string(),
-                ));
-                None
-            }
-        }
-    }
-
-    fn extract_request_params_or_send_err_response_tsp<T>(
-        &self,
-        params: Result<T, serde_json::Error>,
-        id: &RequestId,
-    ) -> Option<T>
-    where
-        T: DeserializeOwned,
     {
         match params {
             Ok(params) => Some(params),
@@ -801,169 +765,339 @@ impl Server {
                         ));
                         ide_transaction_manager.save(transaction);
                     }
-                } else if let Some(params) = Server::tsp_params::<tsp::GetPythonSearchPathsParams>(&x, "typeServer/getPythonSearchPaths")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetPythonSearchPathsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response(x.id, Ok(self.get_python_search_paths(&transaction, params))));
-                    ide_transaction_manager.save(transaction);
-                } else if x.method == "typeServer/getSnapshot" {
-                    // No params for this request
-                    self.send_response(new_response(x.id, Ok(self.current_snapshot())));
-                } else if x.method == "typeServer/getSupportedProtocolVersion" {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    // No params for this request
-                    self.send_response(new_response(x.id, Ok(self.get_supported_protocol_version(&transaction))));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeParams>(&x, "typeServer/getType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_type(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetSymbolParams>(&x, "typeServer/getSymbol")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetSymbolParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_symbol(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::ResolveImportDeclarationParams>(&x, "typeServer/resolveImportDeclaration")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::ResolveImportDeclarationParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeOfDeclarationParams>(&x, "typeServer/getTypeOfDeclaration")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeOfDeclarationParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_type_of_declaration(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetReprParams>(&x, "typeServer/getRepr")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetReprParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_repr(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetDocstringParams>(&x, "typeServer/getDocString")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDocstringParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_docstring(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::SearchForTypeAttributeParams>(&x, "typeServer/searchForTypeAttribute")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::SearchForTypeAttributeParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetFunctionPartsParams>(&x, "typeServer/getFunctionParts")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetFunctionPartsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_function_parts(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetDiagnosticsVersionParams>(&x, "typeServer/getDiagnosticsVersion")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDiagnosticsVersionParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::ResolveImportParams>(&x, "typeServer/resolveImport")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::ResolveImportParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.resolve_import(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeArgsParams>(&x, "typeServer/getTypeArgs")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeArgsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_type_args(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetOverloadsParams>(&x, "typeServer/getOverloads")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetOverloadsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_overloads(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetMatchingOverloadsParams>(&x, "typeServer/getMatchingOverloads")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetMatchingOverloadsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_matching_overloads(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetDiagnosticsParams>(&x, "typeServer/getDiagnostics")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetDiagnosticsParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_diagnostics(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetBuiltinTypeParams>(&x, "typeServer/getBuiltinType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetBuiltinTypeParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_builtin_type(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeAttributesParams>(&x, "typeServer/getTypeAttributes")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeAttributesParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_type_attributes(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetSymbolsForFileParams>(&x, "typeServer/getSymbolsForFile")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetSymbolsForFileParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_symbols_for_file(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetMetaclassParams>(&x, "typeServer/getMetaclass")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetMetaclassParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_metaclass(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::GetTypeAliasInfoParams>(&x, "typeServer/getTypeAliasInfo")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::GetTypeAliasInfoParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.get_type_alias_info(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::CombineTypesParams>(&x, "typeServer/combineTypes")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::CombineTypesParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.combine_types(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
-                } else if let Some(params) = Server::tsp_params::<tsp::CreateInstanceTypeParams>(&x, "typeServer/createInstanceType")
-                    && let Some(params) = self.extract_request_params_or_send_err_response_tsp::<tsp::CreateInstanceTypeParams>(params, &x.id)
-                {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.state);
-                    self.send_response(new_response_with_error_code(x.id, self.create_instance_type(&transaction, params)));
-                    ide_transaction_manager.save(transaction);
+                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetPythonSearchPathsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response(
+                            x.id,
+                            Ok(self.get_python_search_paths(&transaction, params)),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetSnapshotRequest>(&x) {
+                    // GetSnapshotRequest has no parameters - just handle the Ok case or ignore params errors
+                    match params {
+                        Ok(_) => {
+                            self.send_response(new_response(x.id, Ok(self.current_snapshot())));
+                        }
+                        Err(_) => {
+                            // For unit parameter requests, ignore deserialization errors and proceed
+                            self.send_response(new_response(x.id, Ok(self.current_snapshot())));
+                        }
+                    }
+                } else if let Some(params) = as_request::<GetSupportedProtocolVersionRequest>(&x) {
+                    // GetSupportedProtocolVersionRequest has no parameters - just handle the Ok case or ignore params errors
+                    match params {
+                        Ok(_) => {
+                            let transaction =
+                                ide_transaction_manager.non_commitable_transaction(&self.state);
+                            self.send_response(new_response(
+                                x.id,
+                                Ok(self.get_supported_protocol_version(&transaction)),
+                            ));
+                            ide_transaction_manager.save(transaction);
+                        }
+                        Err(_) => {
+                            // For unit parameter requests, ignore deserialization errors and proceed
+                            let transaction =
+                                ide_transaction_manager.non_commitable_transaction(&self.state);
+                            self.send_response(new_response(
+                                x.id,
+                                Ok(self.get_supported_protocol_version(&transaction)),
+                            ));
+                            ide_transaction_manager.save(transaction);
+                        }
+                    }
+                } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetTypeRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_type(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetSymbolRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_symbol(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<ResolveImportDeclarationRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetTypeOfDeclarationRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_type_of_declaration(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetReprRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetReprRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_repr(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetDocstringRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_docstring(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<SearchForTypeAttributeRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetFunctionPartsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetFunctionPartsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_function_parts(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetDiagnosticsVersionRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<ResolveImportRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<ResolveImportRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.resolve_import(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetTypeArgsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_type_args(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetOverloadsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_overloads(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetMatchingOverloadsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_matching_overloads(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetDiagnosticsRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetDiagnosticsRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_diagnostics(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetBuiltinTypeRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetBuiltinTypeRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_builtin_type(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetTypeAttributesRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetTypeAttributesRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_type_attributes(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetSymbolsForFileRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetSymbolsForFileRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_symbols_for_file(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetMetaclassRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetMetaclassRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_metaclass(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<GetTypeAliasInfoRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<GetTypeAliasInfoRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.get_type_alias_info(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<CombineTypesRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<CombineTypesRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.combine_types(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
+                } else if let Some(params) = as_request::<CreateInstanceTypeRequest>(&x) {
+                    if let Some(params) = self
+                        .extract_request_params_or_send_err_response::<CreateInstanceTypeRequest>(
+                            params, &x.id,
+                        )
+                    {
+                        let transaction =
+                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                        self.send_response(new_response_with_error_code(
+                            x.id,
+                            self.create_instance_type(&transaction, params),
+                        ));
+                        ide_transaction_manager.save(transaction);
+                    }
                 } else {
                     self.send_response(Response::new_err(
                         x.id.clone(),
