@@ -1,9 +1,13 @@
 //! Smoke test to exercise all flag constants and builder helpers so they aren't optimized away.
-use crate::tsp::protocol::{
-    TypeFlags, FunctionFlags, ClassFlags, TypeVarFlags, AttributeFlags, AttributeAccessFlags,
-    DeclarationFlags, TypeReprFlags,
-};
 use crate::tsp;
+use crate::tsp::protocol::AttributeAccessFlags;
+use crate::tsp::protocol::AttributeFlags;
+use crate::tsp::protocol::ClassFlags;
+use crate::tsp::protocol::DeclarationFlags;
+use crate::tsp::protocol::FunctionFlags;
+use crate::tsp::protocol::TypeFlags;
+use crate::tsp::protocol::TypeReprFlags;
+use crate::tsp::protocol::TypeVarFlags;
 
 #[test]
 fn test_tsp_all_flag_builders_and_constants() {
@@ -45,7 +49,9 @@ fn test_tsp_all_flag_builders_and_constants() {
     assert!(tvf.contains(TypeVarFlags::IS_PARAM_SPEC));
 
     // AttributeFlags
-    let af = AttributeFlags::new().with_is_args_list().with_is_kwargs_dict();
+    let af = AttributeFlags::new()
+        .with_is_args_list()
+        .with_is_kwargs_dict();
     assert!(af.contains(AttributeFlags::IS_ARGS_LIST));
     assert!(af.contains(AttributeFlags::IS_KWARGS_DICT));
 
@@ -89,5 +95,6 @@ fn test_tsp_all_flag_builders_and_constants() {
     assert_eq!(invalid, -1);
 
     // Exercise error_response to mark it used.
-    let _resp = crate::tsp::common::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
+    let _resp =
+        crate::tsp::common::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
 }

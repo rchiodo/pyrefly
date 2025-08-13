@@ -25,7 +25,7 @@ pub fn create_unresolved_import_declaration(original_decl: &tsp::Declaration) ->
     tsp::Declaration {
         handle: original_decl.handle.clone(),
         category: original_decl.category.clone(),
-        flags: original_decl.flags.clone().with_unresolved_import(),
+        flags: original_decl.flags.with_unresolved_import(),
         node: original_decl.node.clone(),
         module_name: original_decl.module_name.clone(),
         name: original_decl.name.clone(),

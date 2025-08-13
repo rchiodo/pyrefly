@@ -116,15 +116,15 @@ pub mod legacy_type_flags {
 /// Add the query helper methods that legacy code expected on TypeReprFlags
 impl tsp::TypeReprFlags {
     #[inline]
-    pub fn has_expand_type_aliases(&self) -> bool {
+    pub fn has_expand_type_aliases(self) -> bool {
         self.contains(tsp::TypeReprFlags::EXPAND_TYPE_ALIASES)
     }
     #[inline]
-    pub fn has_print_type_var_variance(&self) -> bool {
+    pub fn has_print_type_var_variance(self) -> bool {
         self.contains(tsp::TypeReprFlags::PRINT_TYPE_VAR_VARIANCE)
     }
     #[inline]
-    pub fn has_convert_to_instance_type(&self) -> bool {
+    pub fn has_convert_to_instance_type(self) -> bool {
         self.contains(tsp::TypeReprFlags::CONVERT_TO_INSTANCE_TYPE)
     }
 }
