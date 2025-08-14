@@ -7,7 +7,12 @@
 
 //! Tests for GetSymbolsForFileParams, FileSymbolInfo, and Symbol type construction and serialization
 
-use tsp_types::{FileSymbolInfo, GetSymbolsForFileParams, Node, Position, Range, Symbol};
+use tsp_types::FileSymbolInfo;
+use tsp_types::GetSymbolsForFileParams;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::Symbol;
 
 #[test]
 fn test_get_symbols_for_file_params_construction() {

@@ -2,7 +2,12 @@
  * Unit tests for TSP GetReprParams type construction and serialization
  */
 
-use tsp_types::{GetReprParams, Type, TypeCategory, TypeFlags, TypeHandle, TypeReprFlags};
+use tsp_types::GetReprParams;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
+use tsp_types::TypeReprFlags;
 
 #[test]
 fn test_basic_get_repr_params_construction() {
@@ -80,13 +85,14 @@ fn test_get_repr_params_serialization() {
 
     // Test serialization round-trip
     let json_str = serde_json::to_string(&params).expect("Failed to serialize");
-    let deserialized: GetReprParams = serde_json::from_str(&json_str).expect("Failed to deserialize");
+    let deserialized: GetReprParams =
+        serde_json::from_str(&json_str).expect("Failed to deserialize");
 
     // Verify round-trip
     assert_eq!(deserialized.snapshot, params.snapshot);
     assert_eq!(deserialized.type_.name, params.type_.name);
     assert_eq!(deserialized.type_.category, params.type_.category);
-    
+
     match (&deserialized.type_.handle, &params.type_.handle) {
         (TypeHandle::String(d), TypeHandle::String(o)) => assert_eq!(d, o),
         _ => panic!("Handle type mismatch"),

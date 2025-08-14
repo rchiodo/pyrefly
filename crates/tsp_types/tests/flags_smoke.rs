@@ -1,8 +1,13 @@
 //! Smoke test to exercise all flag constants and builder helpers so they aren't optimized away.
-use tsp_types::{
-    AttributeAccessFlags, AttributeFlags, ClassFlags, DeclarationFlags, FunctionFlags,
-    TypeFlags, TypeReprFlags, TypeVarFlags, INVALID_HANDLE,
-};
+use tsp_types::AttributeAccessFlags;
+use tsp_types::AttributeFlags;
+use tsp_types::ClassFlags;
+use tsp_types::DeclarationFlags;
+use tsp_types::FunctionFlags;
+use tsp_types::INVALID_HANDLE;
+use tsp_types::TypeFlags;
+use tsp_types::TypeReprFlags;
+use tsp_types::TypeVarFlags;
 
 #[test]
 fn test_tsp_all_flag_builders_and_constants() {
@@ -90,6 +95,5 @@ fn test_tsp_all_flag_builders_and_constants() {
     assert_eq!(invalid, -1);
 
     // Exercise error_response to mark it used.
-    let _resp =
-        tsp_types::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
+    let _resp = tsp_types::error_response(lsp_server::RequestId::from(0), 42, "msg".to_owned());
 }

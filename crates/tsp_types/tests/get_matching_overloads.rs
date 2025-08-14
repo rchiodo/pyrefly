@@ -7,7 +7,10 @@
 
 //! Tests for GetMatchingOverloadsParams type construction and serialization
 
-use tsp_types::{GetMatchingOverloadsParams, Node, Position, Range};
+use tsp_types::GetMatchingOverloadsParams;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
 
 #[test]
 fn test_get_matching_overloads_params_construction() {
@@ -84,9 +87,36 @@ fn test_get_matching_overloads_params_serialization() {
 #[test]
 fn test_get_matching_overloads_params_different_positions() {
     let test_cases = vec![
-        (Position { line: 0, character: 0 }, Position { line: 0, character: 5 }),
-        (Position { line: 10, character: 15 }, Position { line: 10, character: 25 }),
-        (Position { line: 100, character: 0 }, Position { line: 105, character: 0 }),
+        (
+            Position {
+                line: 0,
+                character: 0,
+            },
+            Position {
+                line: 0,
+                character: 5,
+            },
+        ),
+        (
+            Position {
+                line: 10,
+                character: 15,
+            },
+            Position {
+                line: 10,
+                character: 25,
+            },
+        ),
+        (
+            Position {
+                line: 100,
+                character: 0,
+            },
+            Position {
+                line: 105,
+                character: 0,
+            },
+        ),
     ];
 
     for (i, (start_pos, end_pos)) in test_cases.into_iter().enumerate() {

@@ -2,9 +2,13 @@
  * Unit tests for GetTypeAliasInfoParams and TypeAliasInfo type construction and serialization
  */
 
-use tsp_types::{
-    GetTypeAliasInfoParams, ModuleName, Type, TypeAliasInfo, TypeCategory, TypeFlags, TypeHandle,
-};
+use tsp_types::GetTypeAliasInfoParams;
+use tsp_types::ModuleName;
+use tsp_types::Type;
+use tsp_types::TypeAliasInfo;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
 
 #[test]
 fn test_get_type_alias_info_params_construction() {

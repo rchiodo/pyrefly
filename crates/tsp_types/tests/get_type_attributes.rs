@@ -8,7 +8,12 @@
 //! Unit tests for GetTypeAttributesParams type construction and serialization
 
 use serde_json;
-use tsp_types::{GetTypeAttributesParams, ModuleName, Type, TypeCategory, TypeFlags, TypeHandle};
+use tsp_types::GetTypeAttributesParams;
+use tsp_types::ModuleName;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
 
 #[test]
 fn test_get_type_attributes_params_construction() {

@@ -7,9 +7,12 @@
 
 //! Tests for TSP GetFunctionPartsParams type construction and serialization
 
-use tsp_types::{
-    GetFunctionPartsParams, Type, TypeCategory, TypeFlags, TypeHandle, TypeReprFlags,
-};
+use tsp_types::GetFunctionPartsParams;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
+use tsp_types::TypeReprFlags;
 
 #[test]
 fn test_get_function_parts_params_construction() {

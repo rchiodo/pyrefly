@@ -16,9 +16,13 @@ use std::collections::HashMap;
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
+use tsp_types::GetBuiltinTypeParams;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::Type;
 
 use crate::test::util::mk_multi_file_state_assert_no_errors;
-use tsp_types::{GetBuiltinTypeParams, Node, Position, Range, Type};
 
 #[test]
 fn test_simple_get_builtin_type_verification() {

@@ -11,10 +11,19 @@
  * 7. Testing serialization/deserialization round-trips
  */
 
-use tsp_types::{
-    Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, GetOverloadsParams,
-    ModuleName, Node, Position, Range, Type, TypeCategory, TypeFlags, TypeHandle,
-};
+use tsp_types::Declaration;
+use tsp_types::DeclarationCategory;
+use tsp_types::DeclarationFlags;
+use tsp_types::DeclarationHandle;
+use tsp_types::GetOverloadsParams;
+use tsp_types::ModuleName;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
 
 #[test]
 fn test_get_overloads_params_construction() {

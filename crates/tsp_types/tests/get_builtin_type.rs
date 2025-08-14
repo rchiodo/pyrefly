@@ -7,7 +7,10 @@
 
 //! Tests for GetBuiltinTypeParams type construction and serialization
 
-use tsp_types::{GetBuiltinTypeParams, Node, Position, Range};
+use tsp_types::GetBuiltinTypeParams;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
 
 #[test]
 fn test_get_builtin_type_params_construction() {
@@ -40,7 +43,9 @@ fn test_get_builtin_type_params_construction() {
 
 #[test]
 fn test_get_builtin_type_params_with_different_types() {
-    let builtin_types = vec!["int", "str", "float", "bool", "list", "dict", "set", "tuple"];
+    let builtin_types = vec![
+        "int", "str", "float", "bool", "list", "dict", "set", "tuple",
+    ];
 
     for type_name in builtin_types {
         let params = GetBuiltinTypeParams {

@@ -7,10 +7,16 @@
 
 //! Tests for ResolveImportDeclarationParams, Declaration, and related types construction and serialization
 
-use tsp_types::{
-    Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, ModuleName, Node,
-    Position, Range, ResolveImportDeclarationParams, ResolveImportOptions,
-};
+use tsp_types::Declaration;
+use tsp_types::DeclarationCategory;
+use tsp_types::DeclarationFlags;
+use tsp_types::DeclarationHandle;
+use tsp_types::ModuleName;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::ResolveImportDeclarationParams;
+use tsp_types::ResolveImportOptions;
 
 #[test]
 fn test_resolve_import_declaration_params_construction() {
@@ -191,10 +197,7 @@ fn test_resolve_import_declaration_module_name_variants() {
 
     for (module_name, description) in module_patterns {
         let declaration = Declaration {
-            handle: DeclarationHandle::String(format!(
-                "handle_{}",
-                description.replace(' ', "_")
-            )),
+            handle: DeclarationHandle::String(format!("handle_{}", description.replace(' ', "_"))),
             category: DeclarationCategory::Import,
             flags: DeclarationFlags::new(),
             node: None,

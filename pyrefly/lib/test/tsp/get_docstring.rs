@@ -13,9 +13,12 @@
 
 // Use protocol Position/Range instead of lsp_types
 
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use crate::tsp::requests::get_docstring::get_docstring_at_position;
-use tsp_types::{Node, Position, Range};
 
 #[test]
 fn test_get_docstring_at_position_with_function_docstring() {

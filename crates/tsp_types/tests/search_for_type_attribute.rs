@@ -7,10 +7,16 @@
 
 //! Tests for SearchForTypeAttributeParams and related types construction and serialization
 
-use tsp_types::{
-    AttributeAccessFlags, ModuleName, Node, Position, Range, SearchForTypeAttributeParams, Type,
-    TypeCategory, TypeFlags, TypeHandle,
-};
+use tsp_types::AttributeAccessFlags;
+use tsp_types::ModuleName;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
+use tsp_types::SearchForTypeAttributeParams;
+use tsp_types::Type;
+use tsp_types::TypeCategory;
+use tsp_types::TypeFlags;
+use tsp_types::TypeHandle;
 
 #[test]
 fn test_search_for_type_attribute_params_construction() {
@@ -124,10 +130,7 @@ fn test_search_for_type_attribute_different_start_types() {
 
     // Verify different categories
     assert_eq!(params_class.start_type.category, TypeCategory::Class);
-    assert_eq!(
-        params_function.start_type.category,
-        TypeCategory::Function
-    );
+    assert_eq!(params_function.start_type.category, TypeCategory::Function);
     assert_eq!(
         params_overloaded.start_type.category,
         TypeCategory::Overloaded

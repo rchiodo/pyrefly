@@ -2,7 +2,10 @@
  * Unit tests for TSP GetSymbolParams type construction and serialization
  */
 
-use tsp_types::{GetSymbolParams, Node, Position, Range};
+use tsp_types::GetSymbolParams;
+use tsp_types::Node;
+use tsp_types::Position;
+use tsp_types::Range;
 
 #[test]
 fn test_get_symbol_params_construction() {
@@ -87,15 +90,28 @@ fn test_get_symbol_params_serialization() {
 
     // Test serialization round-trip
     let json_str = serde_json::to_string(&params).expect("Failed to serialize");
-    let deserialized: GetSymbolParams = serde_json::from_str(&json_str).expect("Failed to deserialize");
+    let deserialized: GetSymbolParams =
+        serde_json::from_str(&json_str).expect("Failed to deserialize");
 
     // Verify round-trip
     assert_eq!(deserialized.snapshot, params.snapshot);
-    assert_eq!(deserialized.skip_unreachable_code, params.skip_unreachable_code);
+    assert_eq!(
+        deserialized.skip_unreachable_code,
+        params.skip_unreachable_code
+    );
     assert_eq!(deserialized.name, params.name);
     assert_eq!(deserialized.node.uri, params.node.uri);
-    assert_eq!(deserialized.node.range.start.line, params.node.range.start.line);
-    assert_eq!(deserialized.node.range.start.character, params.node.range.start.character);
+    assert_eq!(
+        deserialized.node.range.start.line,
+        params.node.range.start.line
+    );
+    assert_eq!(
+        deserialized.node.range.start.character,
+        params.node.range.start.character
+    );
     assert_eq!(deserialized.node.range.end.line, params.node.range.end.line);
-    assert_eq!(deserialized.node.range.end.character, params.node.range.end.character);
+    assert_eq!(
+        deserialized.node.range.end.character,
+        params.node.range.end.character
+    );
 }
