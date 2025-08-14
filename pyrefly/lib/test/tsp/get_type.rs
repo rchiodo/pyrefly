@@ -20,40 +20,12 @@ use tsp_types as tsp;
 use tsp_types::Position;
 use tsp_types::Range;
 
-use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 
 #[test]
 fn test_simple_get_type_verification() {
     // Simple test to verify our test module is working
     assert_eq!(1 + 1, 2);
-}
-
-#[test]
-fn test_get_type_params_construction() {
-    // Test TSP GetType parameter construction like other TSP tests
-    let (_handle, uri, state) = build_tsp_test_server();
-    let uri_str = uri.to_string();
-    let _transaction = state.transaction();
-
-    let position = Position {
-        line: 0,
-        character: 0,
-    };
-
-    let params = tsp::GetTypeParams {
-        node: tsp::Node {
-            uri: uri_str.clone(),
-            range: Range {
-                start: position.clone(),
-                end: position,
-            },
-        },
-        snapshot: 1,
-    };
-
-    // Just test that we can construct the parameters correctly
-    assert_eq!(params.snapshot, 1);
 }
 
 // Helper function that implements the core TSP get_type logic

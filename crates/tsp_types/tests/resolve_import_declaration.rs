@@ -1,17 +1,12 @@
 /*
- * Unit tests for resolve_import_declaration request handler
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
- * These tests verify the resolve_import_declaration TSP request by:
- * 1. Testing parameter construction and validation
- * 2. Testing different declaration categories and resolution scenarios
- * 3. Validating proper handling of import/non-import declarations
- * 4. Testing edge cases and error conditions
- *
- * The resolve_import_declaration request takes a Declaration and resolves import declarations
- * to their actual definitions in target modules, while passing through non-import declarations unchanged.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
 
-use crate::test::tsp::util::build_tsp_test_server;
+//! Tests for ResolveImportDeclarationParams, Declaration, and related types construction and serialization
+
 use tsp_types::{
     Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, ModuleName, Node,
     Position, Range, ResolveImportDeclarationParams, ResolveImportOptions,
@@ -19,15 +14,13 @@ use tsp_types::{
 
 #[test]
 fn test_resolve_import_declaration_params_construction() {
-    let (_handle, uri, _state) = build_tsp_test_server();
-
     // Test basic parameter construction
     let declaration = Declaration {
         handle: DeclarationHandle::String("test_handle".to_owned()),
         category: DeclarationCategory::Import,
         flags: DeclarationFlags::new(),
         node: Some(Node {
-            uri: uri.to_string(),
+            uri: "file:///test.py".to_string(),
             range: Range {
                 start: Position {
                     line: 0,
@@ -44,7 +37,7 @@ fn test_resolve_import_declaration_params_construction() {
             name_parts: vec!["test_module".to_owned()],
         },
         name: "imported_symbol".to_owned(),
-        uri: uri.to_string(),
+        uri: "file:///test.py".to_string(),
     };
 
     let options = ResolveImportOptions {
@@ -71,8 +64,6 @@ fn test_resolve_import_declaration_params_construction() {
 
 #[test]
 fn test_resolve_import_declaration_default_options() {
-    let (_handle, uri, _state) = build_tsp_test_server();
-
     // Test default options construction
     let default_options = ResolveImportOptions::default();
 
@@ -90,7 +81,7 @@ fn test_resolve_import_declaration_default_options() {
             name_parts: vec!["test_module".to_owned()],
         },
         name: "my_function".to_owned(),
-        uri: uri.to_string(),
+        uri: "file:///test.py".to_string(),
     };
 
     let params = ResolveImportDeclarationParams {
@@ -105,8 +96,6 @@ fn test_resolve_import_declaration_default_options() {
 
 #[test]
 fn test_resolve_import_declaration_different_categories() {
-    let (_handle, uri, _state) = build_tsp_test_server();
-
     // Test different declaration categories
     let categories = vec![
         (DeclarationCategory::Import, "import_symbol"),
@@ -123,7 +112,7 @@ fn test_resolve_import_declaration_different_categories() {
             category: category.clone(),
             flags: DeclarationFlags::new(),
             node: Some(Node {
-                uri: uri.to_string(),
+                uri: "file:///test.py".to_string(),
                 range: Range {
                     start: Position {
                         line: 0,
@@ -140,7 +129,7 @@ fn test_resolve_import_declaration_different_categories() {
                 name_parts: vec!["test_module".to_owned()],
             },
             name: name.to_owned(),
-            uri: uri.to_string(),
+            uri: "file:///test.py".to_string(),
         };
 
         let params = ResolveImportDeclarationParams {
@@ -156,8 +145,6 @@ fn test_resolve_import_declaration_different_categories() {
 
 #[test]
 fn test_resolve_import_declaration_module_name_variants() {
-    let (_handle, uri, _state) = build_tsp_test_server();
-
     // Test different module name patterns
     let module_patterns = vec![
         // Simple module
@@ -213,7 +200,7 @@ fn test_resolve_import_declaration_module_name_variants() {
             node: None,
             module_name: module_name.clone(),
             name: "imported_item".to_owned(),
-            uri: uri.to_string(),
+            uri: "file:///test.py".to_string(),
         };
 
         let params = ResolveImportDeclarationParams {
@@ -231,37 +218,97 @@ fn test_resolve_import_declaration_module_name_variants() {
 }
 
 #[test]
-fn test_resolve_import_declaration_flags_handling() {
-    let (_handle, uri, _state) = build_tsp_test_server();
+fn test_resolve_import_declaration_serialization() {
+    let declaration = Declaration {
+        handle: DeclarationHandle::String("test_handle".to_owned()),
+        category: DeclarationCategory::Import,
+        flags: DeclarationFlags::new(),
+        node: Some(Node {
+            uri: "file:///example.py".to_string(),
+            range: Range {
+                start: Position {
+                    line: 2,
+                    character: 5,
+                },
+                end: Position {
+                    line: 2,
+                    character: 15,
+                },
+            },
+        }),
+        module_name: ModuleName {
+            leading_dots: 1,
+            name_parts: vec!["utils".to_owned(), "helpers".to_owned()],
+        },
+        name: "helper_function".to_owned(),
+        uri: "file:///example.py".to_string(),
+    };
 
-    // Test different declaration flags
-    let flag_variants = vec![
-        (DeclarationFlags::new(), "basic"),
-        (DeclarationFlags::new().with_constant(), "constant"),
+    let options = ResolveImportOptions {
+        resolve_local_names: Some(true),
+        allow_externally_hidden_access: Some(false),
+        skip_file_needed_check: Some(true),
+    };
+
+    let params = ResolveImportDeclarationParams {
+        decl: declaration,
+        options,
+        snapshot: 99,
+    };
+
+    // Test serialization round-trip
+    let serialized = serde_json::to_string(&params).expect("Should serialize");
+    let deserialized: ResolveImportDeclarationParams =
+        serde_json::from_str(&serialized).expect("Should deserialize");
+
+    assert_eq!(deserialized.snapshot, params.snapshot);
+    assert_eq!(deserialized.decl.name, params.decl.name);
+    assert_eq!(deserialized.decl.category, params.decl.category);
+    assert_eq!(
+        deserialized.decl.module_name.leading_dots,
+        params.decl.module_name.leading_dots
+    );
+    assert_eq!(
+        deserialized.decl.module_name.name_parts,
+        params.decl.module_name.name_parts
+    );
+    assert_eq!(
+        deserialized.options.resolve_local_names,
+        params.options.resolve_local_names
+    );
+    assert_eq!(
+        deserialized.options.allow_externally_hidden_access,
+        params.options.allow_externally_hidden_access
+    );
+    assert_eq!(
+        deserialized.options.skip_file_needed_check,
+        params.options.skip_file_needed_check
+    );
+}
+
+#[test]
+fn test_declaration_handle_variants() {
+    // Test different declaration handle variants
+    let handle_variants = vec![
         (
-            DeclarationFlags::new().with_unresolved_import(),
-            "unresolved",
+            DeclarationHandle::String("string_handle".to_owned()),
+            "string handle",
         ),
-        (
-            DeclarationFlags::new()
-                .with_constant()
-                .with_unresolved_import(),
-            "constant_unresolved",
-        ),
+        (DeclarationHandle::Int(42), "int handle"),
     ];
 
-    for (flags, description) in flag_variants {
+    for (handle, description) in handle_variants {
         let declaration = Declaration {
-            handle: DeclarationHandle::String(format!("handle_{description}")),
-            category: DeclarationCategory::Import,
-            flags,
+            handle,
+            category: DeclarationCategory::Function,
+            flags: DeclarationFlags::new(),
             node: None,
             module_name: ModuleName {
                 leading_dots: 0,
                 name_parts: vec!["test".to_owned()],
             },
-            name: "symbol".to_owned(),
-            uri: uri.to_string(),
+            name: format!("symbol_for_{}", description.replace(' ', "_")),
+            uri: "file:///test.py".to_string(),
         };
 
         let params = ResolveImportDeclarationParams {
@@ -270,72 +317,21 @@ fn test_resolve_import_declaration_flags_handling() {
             snapshot: 1,
         };
 
-        // Basic validation that the flags are preserved
-        // (flags comparison requires specific trait impls)
-        assert_eq!(params.decl.name, "symbol");
-        assert_eq!(params.decl.category, DeclarationCategory::Import);
+        // Verify the handle was preserved (basic check)
+        assert_eq!(params.decl.category, DeclarationCategory::Function);
+        assert!(params.decl.name.contains("symbol_for"));
     }
 }
 
 #[test]
-fn test_resolve_import_declaration_uri_handling() {
-    let (_handle, _uri, _state) = build_tsp_test_server();
-
-    // Test different URI formats
-    let uri_variants = vec![
-        "file:///home/user/project/main.py".to_string(),
-        "file:///C:/Users/user/project/main.py".to_string(),
-        "file:///tmp/test.py".to_string(),
-    ];
-
-    for test_uri in uri_variants {
-        let declaration = Declaration {
-            handle: DeclarationHandle::String("test_handle".to_owned()),
-            category: DeclarationCategory::Import,
-            flags: DeclarationFlags::new(),
-            node: Some(Node {
-                uri: test_uri.clone(),
-                range: Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: 0,
-                        character: 10,
-                    },
-                },
-            }),
-            module_name: ModuleName {
-                leading_dots: 0,
-                name_parts: vec!["test".to_owned()],
-            },
-            name: "symbol".to_owned(),
-            uri: test_uri.clone(),
-        };
-
-        let params = ResolveImportDeclarationParams {
-            decl: declaration,
-            options: ResolveImportOptions::default(),
-            snapshot: 1,
-        };
-
-        assert_eq!(params.decl.uri, test_uri);
-        assert_eq!(params.decl.node.as_ref().unwrap().uri, params.decl.uri);
-    }
-}
-
-#[test]
-fn test_resolve_import_declaration_node_handling() {
-    let (_handle, uri, _state) = build_tsp_test_server();
-
+fn test_declaration_node_handling() {
     // Test with node present
     let with_node = Declaration {
         handle: DeclarationHandle::String("with_node".to_owned()),
         category: DeclarationCategory::Import,
         flags: DeclarationFlags::new(),
         node: Some(Node {
-            uri: uri.to_string(),
+            uri: "file:///test.py".to_string(),
             range: Range {
                 start: Position {
                     line: 5,
@@ -352,7 +348,7 @@ fn test_resolve_import_declaration_node_handling() {
             name_parts: vec!["test".to_owned()],
         },
         name: "symbol".to_owned(),
-        uri: uri.to_string(),
+        uri: "file:///test.py".to_string(),
     };
 
     // Test with node absent
@@ -366,7 +362,7 @@ fn test_resolve_import_declaration_node_handling() {
             name_parts: vec!["test".to_owned()],
         },
         name: "symbol".to_owned(),
-        uri: uri.to_string(),
+        uri: "file:///test.py".to_string(),
     };
 
     let params_with_node = ResolveImportDeclarationParams {

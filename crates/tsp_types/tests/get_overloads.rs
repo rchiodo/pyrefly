@@ -1,35 +1,20 @@
 /*
- * Unit tests for TSP get_overloads request handler
+ * Unit tests for TSP GetOverloadsParams type construction and serialization
  *
- * These tests verify the get_overloads request parameter construction and validation by:
+ * These tests verify the GetOverloadsParams parameter construction and validation by:
  * 1. Testing TSP GetOverloadsParams construction with various parameter combinations
  * 2. Validating proper handling of different Type parameter variations
  * 3. Testing snapshot validation logic
  * 4. Testing TypeHandle variations (String and Integer handles)
  * 5. Testing different type categories and flags combinations
  * 6. Testing module name handling and edge cases
- *
- * These unit tests complement the integration tests by focusing on parameter validation
- * and edge cases without requiring full TSP message protocol flows.
+ * 7. Testing serialization/deserialization round-trips
  */
 
-use tsp_types as tsp;
-use tsp_types::Declaration;
-use tsp_types::DeclarationCategory;
-use tsp_types::DeclarationFlags;
-use tsp_types::DeclarationHandle;
-use tsp_types::GetOverloadsParams;
-use tsp_types::ModuleName;
-use tsp_types::Node;
-use tsp_types::Position;
-use tsp_types::Range;
-use tsp_types::Type;
-use tsp_types::TypeCategory;
-use tsp_types::TypeFlags;
-use tsp_types::TypeHandle;
-
-use crate::test::util::mk_multi_file_state_assert_no_errors;
-use crate::tsp::requests::get_overloads::extract_overloads_from_type;
+use tsp_types::{
+    Declaration, DeclarationCategory, DeclarationFlags, DeclarationHandle, GetOverloadsParams,
+    ModuleName, Node, Position, Range, Type, TypeCategory, TypeFlags, TypeHandle,
+};
 
 #[test]
 fn test_get_overloads_params_construction() {
@@ -196,19 +181,19 @@ fn test_get_overloads_type_handle_variants() {
 #[test]
 fn test_get_overloads_module_name_variants() {
     // Test with simple module name
-    let simple_module = tsp::ModuleName {
+    let simple_module = ModuleName {
         leading_dots: 0,
         name_parts: vec!["simple".to_owned()],
     };
 
     // Test with nested module name
-    let nested_module = tsp::ModuleName {
+    let nested_module = ModuleName {
         leading_dots: 0,
         name_parts: vec!["package".to_owned(), "submodule".to_owned()],
     };
 
     // Test with relative import (leading dots)
-    let relative_module = tsp::ModuleName {
+    let relative_module = ModuleName {
         leading_dots: 2,
         name_parts: vec!["relative".to_owned()],
     };
@@ -552,59 +537,4 @@ fn test_get_overloads_serialization_deserialization() {
     let deser_module = deserialized_params.type_.module_name.as_ref().unwrap();
     assert_eq!(deser_module.leading_dots, orig_module.leading_dots);
     assert_eq!(deser_module.name_parts, orig_module.name_parts);
-}
-
-// Standalone function tests for the core logic
-
-#[test]
-fn test_extract_overloads_from_type_non_overloaded() {
-    let (_handles, _state) = mk_multi_file_state_assert_no_errors(&[(
-        "test.py",
-        r#"def simple_func(x: int) -> str:
-    return str(x)
-"#,
-    )]);
-
-    // Test with a non-overloaded type (simple function type)
-    let function_type = crate::types::types::Type::never(); // Use a simple non-overloaded type
-
-    let result = extract_overloads_from_type(&function_type);
-
-    // Should return None for non-overloaded types
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_extract_overloads_from_type_simple_validation() {
-    let (_handles, _state) = mk_multi_file_state_assert_no_errors(&[(
-        "test.py",
-        r#"from typing import overload
-
-@overload
-def process(x: int) -> str: ...
-
-@overload  
-def process(x: str) -> int: ...
-
-def process(x):
-    if isinstance(x, int):
-        return str(x)
-    else:
-        return len(x)
-"#,
-    )]);
-
-    // For this test, we're mainly verifying that the function handles the extraction
-    // correctly without needing to construct complex overload types
-
-    // Test that the function exists and can be called with basic types
-    let simple_type = crate::types::types::Type::never();
-    let result = extract_overloads_from_type(&simple_type);
-
-    // This should return None since it's not an overloaded type
-    assert!(result.is_none());
-
-    // Test basic functionality - the specific type construction is complex,
-    // so we focus on the function's existence and basic behavior
-    // More detailed tests would require building actual overload types
 }

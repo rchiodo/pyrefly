@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 
-use crate::test::tsp::util::build_tsp_test_server;
 use crate::test::util::mk_multi_file_state_assert_no_errors;
 use tsp_types::{GetBuiltinTypeParams, Node, Position, Range, Type};
 
@@ -25,35 +24,6 @@ use tsp_types::{GetBuiltinTypeParams, Node, Position, Range, Type};
 fn test_simple_get_builtin_type_verification() {
     // Simple test to verify our test module is working
     assert_eq!(1 + 1, 2);
-}
-
-#[test]
-fn test_get_builtin_type_params_construction() {
-    // Test TSP GetBuiltinType parameter construction like other TSP tests
-    let (_handle, uri, state) = build_tsp_test_server();
-    let uri_str = uri.to_string();
-    let _transaction = state.transaction();
-
-    let position = Position {
-        line: 0,
-        character: 0,
-    };
-
-    let params = GetBuiltinTypeParams {
-        scoping_node: Node {
-            uri: uri_str.clone(),
-            range: Range {
-                start: position.clone(),
-                end: position,
-            },
-        },
-        name: "int".to_owned(),
-        snapshot: 1,
-    };
-
-    // Just test that we can construct the parameters correctly
-    assert_eq!(params.snapshot, 1);
-    assert_eq!(params.name, "int");
 }
 
 // Helper function that implements the core TSP get_builtin_type logic

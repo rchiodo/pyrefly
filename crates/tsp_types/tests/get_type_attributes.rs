@@ -5,10 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Unit tests for get_type_attributes TSP request handler
+//! Unit tests for GetTypeAttributesParams type construction and serialization
 
 use serde_json;
-
 use tsp_types::{GetTypeAttributesParams, ModuleName, Type, TypeCategory, TypeFlags, TypeHandle};
 
 #[test]

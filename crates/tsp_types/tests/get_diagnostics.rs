@@ -5,10 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Tests for the getDiagnostics TSP request handler
+//! Tests for TSP GetDiagnosticsParams type construction and serialization
 
 use serde_json;
-
 use tsp_types::GetDiagnosticsParams;
 
 #[test]

@@ -1,23 +1,13 @@
 /*
- * Unit tests for get_type_alias_info request handler
- *
- * These tests verify the get_type_alias_info functionality by:
- * 1. Testing parameter construction and validation
- * 2. Testing TypeAliasInfo struct creation
- * 3. Testing the standalone get_type_alias_info function directly
- * 4. Following the same pattern as other TSP request tests
+ * Unit tests for GetTypeAliasInfoParams and TypeAliasInfo type construction and serialization
  */
 
-use super::util::build_tsp_test_server;
-use crate::test::util::mk_multi_file_state_assert_no_errors;
-use tsp_types::{GetTypeAliasInfoParams, ModuleName, Type, TypeAliasInfo, TypeCategory, TypeFlags, TypeHandle};
-use crate::tsp::requests::get_type_alias_info::get_type_alias_info;
+use tsp_types::{
+    GetTypeAliasInfoParams, ModuleName, Type, TypeAliasInfo, TypeCategory, TypeFlags, TypeHandle,
+};
 
 #[test]
 fn test_get_type_alias_info_params_construction() {
-    // Build test server
-    let (_handle, _uri, _state) = build_tsp_test_server();
-
     // Test basic parameter construction
     let type_handle = TypeHandle::Int(42);
     let tsp_type = Type {
@@ -44,16 +34,12 @@ fn test_get_type_alias_info_params_construction() {
     }
     assert_eq!(params.snapshot, 123);
     assert_eq!(params.type_.name, "MyTypeAlias");
-
-    // Note: We can't directly test the FROM_ALIAS flag due to private fields,
-    // but we can verify the type was constructed correctly
     assert_eq!(params.type_.category, TypeCategory::Class);
 }
 
 #[test]
 fn test_get_type_alias_info_params_different_handles() {
     // Test with different handle types
-    let (_handle, _uri, _state) = build_tsp_test_server();
 
     // Test with string handle
     let string_type = Type {
@@ -160,8 +146,6 @@ fn test_type_alias_info_multiple_type_arguments() {
 #[test]
 fn test_params_serialization_structure() {
     // Test that the params structure matches expected JSON structure
-    let (_handle, _uri, _state) = build_tsp_test_server();
-
     let type_handle = TypeHandle::String("test_handle".to_owned());
     let tsp_type = Type {
         alias_name: None,
@@ -183,48 +167,12 @@ fn test_params_serialization_structure() {
     assert_eq!(params.snapshot, 789);
     assert_eq!(params.type_.name, "TestAlias");
 
-    // Test serialization doesn't panic
-    let _serialized = serde_json::to_string(&params).expect("Should serialize");
-}
+    // Test serialization/deserialization round-trip
+    let serialized = serde_json::to_string(&params).expect("Should serialize");
+    let deserialized: GetTypeAliasInfoParams =
+        serde_json::from_str(&serialized).expect("Should deserialize");
 
-#[test]
-fn test_get_type_alias_info_with_non_alias_type() {
-    // Test the standalone function with a non-alias type (should return None)
-    let (_handles, _state) = mk_multi_file_state_assert_no_errors(&[("test.py", "x = 42")]);
-
-    // Create a regular type (not a type alias) - use any_implicit as a simple example
-    let regular_type = crate::types::types::Type::any_implicit();
-
-    // Call the standalone function
-    let result = get_type_alias_info(&regular_type);
-
-    // Should return None since it's not a type alias
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_get_type_alias_info_with_type_alias() {
-    // Test the standalone function with different types
-    // Note: Creating actual TypeAlias instances is complex, so we test with other types
-    // to verify the function handles them correctly
-
-    let (_handles, _state) = mk_multi_file_state_assert_no_errors(&[(
-        "test.py",
-        r#"from typing import List
-MyList = List[str]"#,
-    )]);
-
-    // Test with various non-alias types to ensure they return None
-    let any_type = crate::types::types::Type::any_implicit();
-    let result = get_type_alias_info(&any_type);
-    assert!(result.is_none()); // Any is not a type alias
-
-    let never_type = crate::types::types::Type::never();
-    let result = get_type_alias_info(&never_type);
-    assert!(result.is_none()); // Never is not a type alias
-
-    // Test that the function doesn't panic with different input types
-    let tuple_type = crate::types::types::Type::tuple(vec![]);
-    let result = get_type_alias_info(&tuple_type);
-    assert!(result.is_none()); // Empty tuple is not a type alias
+    assert_eq!(deserialized.snapshot, params.snapshot);
+    assert_eq!(deserialized.type_.name, params.type_.name);
+    assert_eq!(deserialized.type_.category, params.type_.category);
 }

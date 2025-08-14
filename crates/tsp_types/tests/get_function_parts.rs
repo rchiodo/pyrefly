@@ -5,21 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Tests for TSP getFunctionParts request parameter construction
+//! Tests for TSP GetFunctionPartsParams type construction and serialization
 
-use tsp_types::GetFunctionPartsParams;
-use tsp_types::Type;
-use tsp_types::TypeCategory;
-use tsp_types::TypeFlags;
-
-use super::util::build_tsp_test_server;
-use tsp_types::{TypeHandle, TypeReprFlags};
+use tsp_types::{
+    GetFunctionPartsParams, Type, TypeCategory, TypeFlags, TypeHandle, TypeReprFlags,
+};
 
 #[test]
 fn test_get_function_parts_params_construction() {
-    // Build test server
-    let (_handle, _uri, _state) = build_tsp_test_server();
-
     // Test basic parameter construction
     let type_handle = TypeHandle::Int(42);
     let tsp_type = Type {
@@ -72,9 +65,6 @@ fn test_get_function_parts_params_construction() {
 
 #[test]
 fn test_get_function_parts_params_with_different_types() {
-    // Build test server
-    let (_handle, _uri, _state) = build_tsp_test_server();
-
     // Test parameter construction for different function types
     let type1 = Type {
         alias_name: None,

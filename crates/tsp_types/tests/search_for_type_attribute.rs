@@ -1,19 +1,11 @@
 /*
- * Unit tests for TSP search_for_type_attribute request handler
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
- * These tests verify the search_for_type_attribute request parameter construction and validation by:
- * 1. Testing TSP SearchForTypeAttributeParams construction with various parameter combinations
- * 2. Validating proper handling of different Type parameter variations (start_type)
- * 3. Testing attribute name handling and edge cases
- * 4. Testing access flags combinations (NONE, SKIP_INSTANCE_ATTRIBUTES, etc.)
- * 5. Testing optional parameters (expression_node, instance_type)
- * 6. Testing snapshot validation logic
- * 7. Testing TypeHandle variations and module name handling
- * 8. Testing serialization/deserialization for LSP protocol compliance
- *
- * These unit tests complement the integration tests by focusing on parameter validation
- * and edge cases without requiring full TSP message protocol flows.
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
  */
+
+//! Tests for SearchForTypeAttributeParams and related types construction and serialization
 
 use tsp_types::{
     AttributeAccessFlags, ModuleName, Node, Position, Range, SearchForTypeAttributeParams, Type,
