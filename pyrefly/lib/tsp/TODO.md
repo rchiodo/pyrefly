@@ -15,15 +15,16 @@ This document tracks TSP functionality that is not complete or may be waiting on
   - Match argument types against overload parameter signatures
 - **File**: `get_matching_overloads.rs:66` - TODO comment for argument matching
 
-### 2. @overload Decorator Support
-**Affected TSP Requests**: `getOverloads`, `getFunctionParts`
-- **Current State**: @overload decorator support not fully implemented
-- **Missing Feature**: Complete overload decorator analysis
-- **Impact**: Cannot properly detect or analyze overloaded functions/methods
+### 2. Decorator Support
+**Affected TSP Requests**: `getOverloads`, `getFunctionParts`, `getType`
+- **Current State**: decorator support not fully implemented
+- **Missing Feature**: Complete decorator analysis
+- **Impact**: Cannot properly detect or analyze decorated functions/methods
 - **Details**: 
   - Function overloads not properly detected
   - Method overloads not properly detected  
   - Overloaded function parts extraction not implemented
+  - Pytest fixture decorator type not computable
 - **Files**: 
   - `get_overloads.rs` tests marked as ignored
   - `get_function_parts.rs:169` - overloaded functions not implemented
