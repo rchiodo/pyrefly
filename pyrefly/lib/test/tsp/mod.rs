@@ -11,4 +11,3 @@ pub mod get_builtin_type;
 pub mod get_docstring;
 pub mod get_type;
 pub mod tsp_interaction;
-pub mod util;
