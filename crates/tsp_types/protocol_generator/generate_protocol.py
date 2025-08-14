@@ -342,9 +342,9 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
     rust_generate(lsp_model, str(output_path), "")
     
     # The generator creates a 'lsprotocol' subdirectory, let's copy the lib.rs
-    # to protocol.rs in our main directory
+    # to protocol.rs in our src directory
     generated_lib = output_path / "lsprotocol" / "src" / "lib.rs"
-    target_protocol = output_path / "protocol.rs"
+    target_protocol = output_path / "src" / "protocol.rs"
     
     if generated_lib.exists():
         print(f"Fixing up generated protocol.rs...")

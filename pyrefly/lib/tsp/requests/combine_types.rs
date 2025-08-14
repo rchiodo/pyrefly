@@ -8,7 +8,7 @@
 //! Implementation of the combineTypes TSP request
 //!
 //! This request combines multiple type handles into a union type.
-//! 
+//!
 //! Important: Type handles are tied to specific snapshots and are invalidated
 //! when the snapshot changes. The request will:
 //! 1. First validate that the provided snapshot is still current

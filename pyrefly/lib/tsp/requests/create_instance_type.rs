@@ -9,7 +9,7 @@
 //!
 //! This request creates an instance type from a class/type handle.
 //! For example: Type[int] -> int, Type[str] -> str
-//! 
+//!
 //! Important: Type handles are tied to specific snapshots and are invalidated
 //! when the snapshot changes. The request will:
 //! 1. First validate that the provided snapshot is still current
@@ -38,7 +38,9 @@ impl TspServer {
 
         // Use the handle mapping to get the actual pyrefly type
         let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
-            tsp_debug!("Warning: Could not resolve type handle for createInstanceType (likely due to snapshot invalidation)");
+            tsp_debug!(
+                "Warning: Could not resolve type handle for createInstanceType (likely due to snapshot invalidation)"
+            );
             return Ok(None);
         };
 
