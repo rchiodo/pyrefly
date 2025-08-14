@@ -10,11 +10,11 @@
 use lsp_types::Url;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_python_search_paths(
+impl TspServer {
+    pub fn get_python_search_paths(
         &self,
         _transaction: &Transaction<'_>,
         params: tsp::GetPythonSearchPathsParams,
@@ -32,7 +32,7 @@ impl Server {
         };
 
         // Check if language services are disabled for this workspace
-        let workspace_disabled = self.workspaces.get_with(path.clone(), |workspace| {
+        let workspace_disabled = self.inner.workspaces.get_with(path.clone(), |workspace| {
             workspace.disable_language_services
         });
 
@@ -43,17 +43,17 @@ impl Server {
         // Try to get configuration from config finder first
         let config_opt = if path.is_dir() {
             // For directories, use the directory method directly
-            self.state.config_finder().directory(&path)
+            self.inner.state.config_finder().directory(&path)
         } else {
             // For files, try to get config from python_file method
-            let module_path = if self.open_files.read().contains_key(&path) {
+            let module_path = if self.inner.open_files.read().contains_key(&path) {
                 pyrefly_python::module_path::ModulePath::memory(path.clone())
             } else {
                 pyrefly_python::module_path::ModulePath::filesystem(path.clone())
             };
 
             // python_file always returns a config, but check if it's synthetic
-            let config = self.state.config_finder().python_file(
+            let config = self.inner.state.config_finder().python_file(
                 pyrefly_python::module_name::ModuleName::unknown(),
                 &module_path,
             );
@@ -87,7 +87,7 @@ impl Server {
             search_paths
         } else {
             // No config file found, use workspace python_info as fallback
-            self.workspaces.get_with(path, |workspace| {
+            self.inner.workspaces.get_with(path, |workspace| {
                 let mut search_paths = Vec::new();
 
                 // Add workspace-specific search paths if available

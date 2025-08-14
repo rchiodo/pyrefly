@@ -11,11 +11,11 @@ use lsp_server::ResponseError;
 use tsp_types as tsp;
 use tsp_types::tsp_debug;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
 use crate::tsp::requests::common::node_start_position;
+use crate::tsp::server::TspServer;
 
-impl Server {
+impl TspServer {
     /// Get matching overloads for a function call site
     ///
     /// This function analyzes a call site and returns the overloads of the function
@@ -26,7 +26,7 @@ impl Server {
     /// 1. Parse the call arguments at the call site
     /// 2. Match argument types against each overload's parameter types
     /// 3. Return only the overloads that could accept the provided arguments
-    pub(crate) fn get_matching_overloads(
+    pub fn get_matching_overloads(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetMatchingOverloadsParams,

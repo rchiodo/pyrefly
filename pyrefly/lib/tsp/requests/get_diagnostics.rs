@@ -18,11 +18,11 @@ use tsp_types::{self as tsp};
 
 use crate::lsp::module_helpers::make_open_handle;
 use crate::lsp::module_helpers::to_real_path;
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_diagnostics(
+impl TspServer {
+    pub fn get_diagnostics(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetDiagnosticsParams,
@@ -52,17 +52,17 @@ impl Server {
         };
 
         // Check if workspace has language services enabled
-        let Some(_handle) = self.make_handle_if_enabled(&url) else {
+        let Some(_handle) = self.inner.make_handle_if_enabled(&url) else {
             tsp_debug!("Language services disabled for workspace");
             return Ok(Some(Vec::new()));
         };
 
         // Create handle for the file
-        let handle = make_open_handle(&self.state, &file_path);
+        let handle = make_open_handle(&self.inner.state, &file_path);
 
         // Collect errors for this file
         let mut diagnostics = Vec::new();
-        let open_files = self.open_files.read();
+        let open_files = self.inner.open_files.read();
 
         for error in transaction.get_errors(once(&handle)).collect_errors().shown {
             // Apply the same filtering logic as get_diag_if_shown
@@ -70,12 +70,14 @@ impl Server {
                 // When no file covers this, we'll get the default configured config which includes "everything"
                 // and excludes `.<file>`s.
                 let config = self
+                    .inner
                     .state
                     .config_finder()
                     .python_file(ModuleName::unknown(), error.path());
                 if open_files.contains_key(&path)
                     && !config.project_excludes.covers(&path)
                     && !self
+                        .inner
                         .workspaces
                         .get_with(path.to_path_buf(), |w| w.disable_type_errors)
                 {

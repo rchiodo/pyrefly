@@ -15,11 +15,11 @@ use tsp_types as tsp;
 use tsp_types::tsp_debug;
 
 use crate::lsp::module_helpers::to_real_path;
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn resolve_import(
+impl TspServer {
+    pub fn resolve_import(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::ResolveImportParams,
@@ -44,7 +44,7 @@ impl Server {
         // Validate language services enabled for workspace
         self.validate_language_services(&source_url)?;
         // After validation, make the handle
-        let Some(source_handle) = self.make_handle_if_enabled(&source_url) else {
+        let Some(source_handle) = self.inner.make_handle_if_enabled(&source_url) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled for this workspace".to_owned(),

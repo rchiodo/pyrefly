@@ -23,7 +23,6 @@ use lsp_server::Message;
 use lsp_server::Request;
 use lsp_server::RequestId;
 use lsp_server::Response;
-use lsp_server::ResponseError;
 use lsp_types::CodeAction;
 use lsp_types::CodeActionKind;
 use lsp_types::CodeActionOptions;
@@ -155,7 +154,6 @@ use pyrefly_util::thread_pool::ThreadPool;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use starlark_map::small_map::SmallMap;
-use tsp_types::*;
 
 use crate::commands::lsp::IndexingMode;
 use crate::config::config::ConfigFile;
@@ -217,19 +215,19 @@ impl ServerConnection {
     }
 }
 
-pub(crate) struct Server {
+pub struct Server {
     connection: ServerConnection,
     /// A thread pool of size one for heavy read operations on the State
     async_state_read_threads: ThreadPool,
     lsp_queue: LspQueue,
     initialize_params: InitializeParams,
     indexing_mode: IndexingMode,
-    pub(crate) state: Arc<State>,
-    pub(crate) open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
+    pub state: Arc<State>,
+    pub open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
     /// A set of configs where we have already indexed all the files within the config.
     indexed_configs: Mutex<HashSet<ArcId<ConfigFile>>>,
     cancellation_handles: Arc<Mutex<HashMap<RequestId, CancellationHandle>>>,
-    pub(crate) workspaces: Arc<Workspaces>,
+    pub workspaces: Arc<Workspaces>,
     outgoing_request_id: AtomicI32,
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: AtomicBool,
@@ -245,7 +243,7 @@ pub(crate) struct Server {
 /// - priority_events includes those that should be handled as soon as possible (e.g. know that a
 ///   request is cancelled)
 /// - queued_events includes most of the other events.
-fn dispatch_lsp_events(connection: &Connection, lsp_queue: LspQueue) {
+pub fn dispatch_lsp_events(connection: &Connection, lsp_queue: LspQueue) {
     for msg in &connection.receiver {
         match msg {
             Message::Request(x) => {
@@ -386,7 +384,7 @@ pub fn capabilities(
     }
 }
 
-enum ProcessEvent {
+pub enum ProcessEvent {
     Continue,
     Exit,
 }
@@ -432,7 +430,7 @@ pub fn lsp_loop(
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
-    fn extract_request_params_or_send_err_response<T>(
+    pub fn extract_request_params_or_send_err_response<T>(
         &self,
         params: Result<T::Params, serde_json::Error>,
         id: &RequestId,
@@ -455,7 +453,7 @@ impl Server {
     }
 
     /// Process the event and return next step.
-    fn process_event<'a>(
+    pub fn process_event<'a>(
         &'a self,
         ide_transaction_manager: &mut TransactionManager<'a>,
         canceled_requests: &mut HashSet<RequestId>,
@@ -765,339 +763,6 @@ impl Server {
                         ));
                         ide_transaction_manager.save(transaction);
                     }
-                } else if let Some(params) = as_request::<GetPythonSearchPathsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetPythonSearchPathsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.get_python_search_paths(&transaction, params)),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetSnapshotRequest>(&x) {
-                    // GetSnapshotRequest has no parameters - just handle the Ok case or ignore params errors
-                    match params {
-                        Ok(_) => {
-                            self.send_response(new_response(x.id, Ok(self.current_snapshot())));
-                        }
-                        Err(_) => {
-                            // For unit parameter requests, ignore deserialization errors and proceed
-                            self.send_response(new_response(x.id, Ok(self.current_snapshot())));
-                        }
-                    }
-                } else if let Some(params) = as_request::<GetSupportedProtocolVersionRequest>(&x) {
-                    // GetSupportedProtocolVersionRequest has no parameters - just handle the Ok case or ignore params errors
-                    match params {
-                        Ok(_) => {
-                            let transaction =
-                                ide_transaction_manager.non_commitable_transaction(&self.state);
-                            self.send_response(new_response(
-                                x.id,
-                                Ok(self.get_supported_protocol_version(&transaction)),
-                            ));
-                            ide_transaction_manager.save(transaction);
-                        }
-                        Err(_) => {
-                            // For unit parameter requests, ignore deserialization errors and proceed
-                            let transaction =
-                                ide_transaction_manager.non_commitable_transaction(&self.state);
-                            self.send_response(new_response(
-                                x.id,
-                                Ok(self.get_supported_protocol_version(&transaction)),
-                            ));
-                            ide_transaction_manager.save(transaction);
-                        }
-                    }
-                } else if let Some(params) = as_request::<GetTypeRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetTypeRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_type(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetSymbolRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetSymbolRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_symbol(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<ResolveImportDeclarationRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(x.id, self.resolve_import_declaration(&transaction, params)));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetTypeOfDeclarationRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_type_of_declaration(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetReprRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetReprRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_repr(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetDocstringRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetDocstringRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_docstring(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<SearchForTypeAttributeRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(x.id, self.search_for_type_attribute(&transaction, params)));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetFunctionPartsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetFunctionPartsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_function_parts(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetDiagnosticsVersionRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(x.id, self.get_diagnostics_version(&transaction, params)));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<ResolveImportRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<ResolveImportRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.resolve_import(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetTypeArgsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetTypeArgsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_type_args(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetOverloadsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetOverloadsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_overloads(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetMatchingOverloadsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_matching_overloads(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetDiagnosticsRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetDiagnosticsRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_diagnostics(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetBuiltinTypeRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetBuiltinTypeRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_builtin_type(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetTypeAttributesRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetTypeAttributesRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_type_attributes(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetSymbolsForFileRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetSymbolsForFileRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_symbols_for_file(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetMetaclassRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetMetaclassRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_metaclass(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<GetTypeAliasInfoRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<GetTypeAliasInfoRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.get_type_alias_info(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<CombineTypesRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<CombineTypesRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.combine_types(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
-                } else if let Some(params) = as_request::<CreateInstanceTypeRequest>(&x) {
-                    if let Some(params) = self
-                        .extract_request_params_or_send_err_response::<CreateInstanceTypeRequest>(
-                            params, &x.id,
-                        )
-                    {
-                        let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
-                        self.send_response(new_response_with_error_code(
-                            x.id,
-                            self.create_instance_type(&transaction, params),
-                        ));
-                        ide_transaction_manager.save(transaction);
-                    }
                 } else {
                     self.send_response(Response::new_err(
                         x.id.clone(),
@@ -1111,7 +776,7 @@ impl Server {
         Ok(ProcessEvent::Continue)
     }
 
-    fn new(
+    pub fn new(
         connection: Arc<Connection>,
         lsp_queue: LspQueue,
         initialize_params: InitializeParams,
@@ -1155,7 +820,7 @@ impl Server {
         s
     }
 
-    fn send_response(&self, x: Response) {
+    pub fn send_response(&self, x: Response) {
         self.connection.send(Message::Response(x))
     }
 
@@ -2084,23 +1749,5 @@ impl Server {
 
     fn invalidate_config(&self) {
         self.invalidate(|t| t.invalidate_config());
-    }
-}
-
-fn new_response_with_error_code<T>(id: RequestId, params: Result<T, ResponseError>) -> Response
-where
-    T: serde::Serialize,
-{
-    match params {
-        Ok(params) => Response {
-            id,
-            result: Some(serde_json::to_value(params).unwrap()),
-            error: None,
-        },
-        Err(error) => Response {
-            id,
-            result: None,
-            error: Some(error),
-        },
     }
 }

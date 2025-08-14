@@ -13,12 +13,12 @@ use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
 use crate::lsp::module_helpers::module_info_to_uri;
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::state::Transaction;
 use crate::tsp::requests::common::DeclarationBuilder;
 use crate::tsp::requests::common::node_start_position;
+use crate::tsp::server::TspServer;
 
 /// Extract symbol name from a node or use the provided name
 ///
@@ -57,7 +57,7 @@ pub fn create_declaration_from_definition(
     // Determine the category and flags based on definition metadata
     let (category, flags) = match definition_metadata {
         crate::state::lsp::DefinitionMetadata::Variable(Some(symbol_kind)) => {
-            Server::symbol_kind_to_tsp_category(*symbol_kind)
+            TspServer::symbol_kind_to_tsp_category(*symbol_kind)
         }
         crate::state::lsp::DefinitionMetadata::Module => {
             // For module imports, check if type info is available to determine if resolved
@@ -76,7 +76,7 @@ pub fn create_declaration_from_definition(
             )
         }
         crate::state::lsp::DefinitionMetadata::VariableOrAttribute(_, Some(symbol_kind)) => {
-            Server::symbol_kind_to_tsp_category_with_class_member(*symbol_kind)
+            TspServer::symbol_kind_to_tsp_category_with_class_member(*symbol_kind)
         }
         _ => (
             tsp::DeclarationCategory::Variable,
@@ -86,11 +86,11 @@ pub fn create_declaration_from_definition(
 
     // Extract module name from the definition's module (where the symbol is actually defined)
     let definition_module_name = definition_module.name();
-    let module_name = Server::create_tsp_module_name(definition_module_name.as_str());
+    let module_name = TspServer::create_tsp_module_name(definition_module_name.as_str());
 
     // Check if this is from builtins and update category/flags accordingly
     let (final_category, final_flags) =
-        Server::apply_builtins_category(category, flags, &module_name);
+        TspServer::apply_builtins_category(category, flags, &module_name);
 
     // Create the declaration node
     let declaration_node = tsp::Node {
@@ -270,8 +270,8 @@ pub fn extract_symbol_from_transaction(
     }
 }
 
-impl Server {
-    pub(crate) fn get_symbol(
+impl TspServer {
+    pub fn get_symbol(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolParams,

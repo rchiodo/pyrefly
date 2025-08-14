@@ -11,12 +11,12 @@ use lsp_server::ResponseError;
 use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 use crate::types::types::Type as PyType;
 
-impl Server {
-    pub(crate) fn create_instance_type(
+impl TspServer {
+    pub fn create_instance_type(
         &self,
         _transaction: &Transaction<'_>,
         params: tsp::CreateInstanceTypeParams,

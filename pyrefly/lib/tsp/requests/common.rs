@@ -13,14 +13,14 @@ use ruff_text_size::TextSize;
 use tsp_types as tsp;
 use tsp_types::snapshot_outdated_error;
 
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::require::Require;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 /// Common validation for snapshot
-impl Server {
-    pub(crate) fn validate_snapshot(&self, snapshot: i32) -> Result<(), ResponseError> {
+impl TspServer {
+    pub fn validate_snapshot(&self, snapshot: i32) -> Result<(), ResponseError> {
         if snapshot != self.current_snapshot() {
             return Err(snapshot_outdated_error());
         }
@@ -28,11 +28,8 @@ impl Server {
     }
 
     /// Common validation for language services enablement
-    pub(crate) fn validate_language_services(
-        &self,
-        uri: &lsp_types::Url,
-    ) -> Result<(), ResponseError> {
-        if self.make_handle_if_enabled(uri).is_none() {
+    pub fn validate_language_services(&self, uri: &lsp_types::Url) -> Result<(), ResponseError> {
+        if self.inner.make_handle_if_enabled(uri).is_none() {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_owned(),
@@ -43,7 +40,7 @@ impl Server {
     }
 
     /// Convert from pyrefly symbol kind to TSP declaration category and flags
-    pub(crate) fn symbol_kind_to_tsp_category(
+    pub fn symbol_kind_to_tsp_category(
         symbol_kind: pyrefly_python::symbol_kind::SymbolKind,
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         match symbol_kind {
@@ -87,7 +84,7 @@ impl Server {
     }
 
     /// Convert from pyrefly symbol kind to TSP declaration category and flags with class member flag
-    pub(crate) fn symbol_kind_to_tsp_category_with_class_member(
+    pub fn symbol_kind_to_tsp_category_with_class_member(
         symbol_kind: pyrefly_python::symbol_kind::SymbolKind,
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         let (category, mut flags) = Self::symbol_kind_to_tsp_category(symbol_kind);
@@ -104,7 +101,7 @@ impl Server {
     }
 
     /// Convert LSP SymbolKind to TSP DeclarationCategory and flags
-    pub(crate) fn lsp_symbol_kind_to_tsp_category(
+    pub fn lsp_symbol_kind_to_tsp_category(
         kind: lsp_types::SymbolKind,
     ) -> (tsp::DeclarationCategory, tsp::DeclarationFlags) {
         match kind {
@@ -157,7 +154,7 @@ impl Server {
     }
 
     /// Create a TSP ModuleName from a module name string
-    pub(crate) fn create_tsp_module_name(module_name_str: &str) -> tsp::ModuleName {
+    pub fn create_tsp_module_name(module_name_str: &str) -> tsp::ModuleName {
         let module_parts: Vec<String> = module_name_str.split('.').map(|s| s.to_owned()).collect();
         tsp::ModuleName {
             leading_dots: 0,
@@ -166,7 +163,7 @@ impl Server {
     }
 
     /// Check if a module is from builtins and update category accordingly
-    pub(crate) fn apply_builtins_category(
+    pub fn apply_builtins_category(
         category: tsp::DeclarationCategory,
         flags: tsp::DeclarationFlags,
         module_name: &tsp::ModuleName,
@@ -189,9 +186,9 @@ impl Server {
         }
     }
 
-    /// Get module info from the current transaction or load it at the required level.
+    /// Get or load module info from the current transaction or load it at the required level.
     /// Returns the ModuleInfo and, if a fresh transaction was needed, that Transaction.
-    pub(crate) fn get_or_load_module_info(
+    pub fn get_or_load_module_info(
         &self,
         transaction: &Transaction<'_>,
         handle: &Handle,
@@ -224,7 +221,7 @@ impl Server {
 
     /// Validate snapshot and language services, obtain Handle and ModuleInfo, and an optional
     /// fresh Transaction if the module needed loading. Encapsulates common handler boilerplate.
-    pub(crate) fn with_active_transaction(
+    pub fn with_active_transaction(
         &self,
         transaction: &Transaction<'_>,
         uri: &lsp_types::Url,
@@ -238,7 +235,7 @@ impl Server {
         self.validate_language_services(uri)?;
 
         // Create handle (after validation we expect it to be enabled)
-        let Some(handle) = self.make_handle_if_enabled(uri) else {
+        let Some(handle) = self.inner.make_handle_if_enabled(uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_owned(),
@@ -255,7 +252,7 @@ impl Server {
 
     /// Load a module in a fresh transaction if it's not available in the current transaction
     /// or if it doesn't meet the required level
-    pub(crate) fn load_module_if_needed(
+    pub fn load_module_if_needed(
         &self,
         transaction: &Transaction<'_>,
         handle: &crate::state::handle::Handle,
@@ -280,7 +277,7 @@ impl Server {
         }
 
         // Module not loaded or needs upgrade, create a fresh transaction and load it
-        let mut fresh_transaction = self.state.transaction();
+        let mut fresh_transaction = self.inner.state.transaction();
         fresh_transaction.run(&[(handle.clone(), required_level)]);
 
         // Verify the module was loaded successfully
@@ -291,20 +288,19 @@ impl Server {
         }
     }
 
-    pub(crate) fn current_snapshot(&self) -> i32 {
-        self.state.current_snapshot()
+    pub fn current_snapshot(&self) -> i32 {
+        self.inner.state.current_snapshot()
     }
 
     /// Converts a pyrefly type to TSP type and registers it in the lookup table
-    pub(crate) fn convert_and_register_type(
-        &self,
-        py_type: crate::types::types::Type,
-    ) -> tsp::Type {
+    pub fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
         let tsp_type = crate::tsp::common::convert_to_tsp_type(py_type.clone());
 
         // Register the type in the lookup table
         if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-            self.state.register_type_handle(handle_str.clone(), py_type);
+            self.inner
+                .state
+                .register_type_handle(handle_str.clone(), py_type);
         }
 
         tsp_type
@@ -315,16 +311,18 @@ impl Server {
         // For now, convert integer handle to string and use the existing lookup
         // In a more sophisticated implementation, we might have separate integer and string lookups
         let handle_str = format!("{id}");
-        self.state.lookup_type_from_handle(&handle_str)
+        self.inner.state.lookup_type_from_handle(&handle_str)
     }
 
     /// Looks up a pyrefly type from a TSP Type
-    pub(crate) fn lookup_type_from_tsp_type(
+    pub fn lookup_type_from_tsp_type(
         &self,
         tsp_type: &tsp::Type,
     ) -> Option<crate::types::types::Type> {
         match &tsp_type.handle {
-            tsp::TypeHandle::String(handle_str) => self.state.lookup_type_from_handle(handle_str),
+            tsp::TypeHandle::String(handle_str) => {
+                self.inner.state.lookup_type_from_handle(handle_str)
+            }
             tsp::TypeHandle::Int(id) => self.lookup_type_by_int_handle(*id),
         }
     }
@@ -405,7 +403,7 @@ impl DeclarationBuilder {
 }
 
 /// Helper to compute the start position of a TSP node in the given module.
-pub(crate) fn node_start_position(module_info: &ModuleInfo, node: &tsp::Node) -> TextSize {
+pub fn node_start_position(module_info: &ModuleInfo, node: &tsp::Node) -> TextSize {
     let pos = &node.range.start;
     module_info
         .lined_buffer()

@@ -12,10 +12,10 @@ use tsp_types::snapshot_outdated_error;
 use tsp_types::{self as tsp};
 
 use crate::lsp::module_helpers::module_info_to_uri;
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Create an unresolved import declaration
 ///
@@ -189,8 +189,8 @@ pub fn create_fallback_resolved_declaration(
     .build()
 }
 
-impl Server {
-    pub(crate) fn resolve_import_declaration(
+impl TspServer {
+    pub fn resolve_import_declaration(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::ResolveImportDeclarationParams,
@@ -218,7 +218,7 @@ impl Server {
         if importing_url.to_file_path().is_err() {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         }
-        let Some(source_handle) = self.make_handle_if_enabled(&importing_url) else {
+        let Some(source_handle) = self.inner.make_handle_if_enabled(&importing_url) else {
             return Ok(Some(create_unresolved_import_declaration(&params.decl)));
         };
 

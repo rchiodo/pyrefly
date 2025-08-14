@@ -11,8 +11,8 @@ use lsp_server::ResponseError;
 use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Extract overload signatures from an overloaded type
 ///
@@ -58,8 +58,8 @@ pub fn extract_overloads_from_type(
     }
 }
 
-impl Server {
-    pub(crate) fn get_overloads(
+impl TspServer {
+    pub fn get_overloads(
         &self,
         _transaction: &Transaction<'_>,
         params: tsp::GetOverloadsParams,

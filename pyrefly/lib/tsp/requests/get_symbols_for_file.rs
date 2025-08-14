@@ -11,11 +11,11 @@ use lsp_server::ResponseError;
 use pyrefly_python::module::Module;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_symbols_for_file(
+impl TspServer {
+    pub fn get_symbols_for_file(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetSymbolsForFileParams,

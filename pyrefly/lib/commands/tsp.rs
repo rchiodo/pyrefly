@@ -14,8 +14,8 @@ use lsp_types::InitializeParams;
 
 use crate::commands::lsp::IndexingMode;
 use crate::commands::util::CommandExitStatus;
-use crate::lsp::server::lsp_loop;
 use crate::tsp::server::tsp_capabilities;
+use crate::tsp::server::tsp_loop;
 
 /// Arguments for TSP server
 #[deny(clippy::missing_docs_in_private_items)]
@@ -34,7 +34,7 @@ pub fn run_tsp(connection: Arc<Connection>, args: TspArgs) -> anyhow::Result<()>
         }
     };
     // Reuse the existing lsp_loop but with TSP initialization
-    lsp_loop(connection, initialization_params, args.indexing_mode)?;
+    tsp_loop(connection, initialization_params, args.indexing_mode)?;
     Ok(())
 }
 
@@ -45,10 +45,11 @@ fn initialize_tsp_connection(
     let (request_id, initialization_params) = connection.initialize_start()?;
     let initialization_params: InitializeParams =
         serde_json::from_value(initialization_params).unwrap();
-    
+
     // Use TSP-specific capabilities
-    let server_capabilities = serde_json::to_value(tsp_capabilities(args.indexing_mode, &initialization_params)).unwrap();
-    
+    let server_capabilities =
+        serde_json::to_value(tsp_capabilities(args.indexing_mode, &initialization_params)).unwrap();
+
     let initialize_data = serde_json::json!({
         "capabilities": server_capabilities,
     });

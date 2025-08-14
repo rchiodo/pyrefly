@@ -11,10 +11,10 @@ use lsp_server::ResponseError;
 use tsp_types as tsp;
 use tsp_types::create_default_type_for_declaration;
 
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Extract type from declaration using transaction and module info
 ///
@@ -67,8 +67,8 @@ pub fn extract_type_from_resolved_import(
     transaction.get_type_at(&resolved_handle, resolved_position)
 }
 
-impl Server {
-    pub(crate) fn get_type_of_declaration(
+impl TspServer {
+    pub fn get_type_of_declaration(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetTypeOfDeclarationParams,
@@ -134,7 +134,7 @@ impl Server {
     }
 
     /// Try to get type information for an import declaration by resolving the import
-    pub(crate) fn get_type_for_import_declaration(
+    pub fn get_type_for_import_declaration(
         &self,
         transaction: &Transaction<'_>,
         params: &tsp::GetTypeOfDeclarationParams,
@@ -151,7 +151,7 @@ impl Server {
             // Use standalone function to extract type from resolved import
             if let Some(resolved_type) =
                 extract_type_from_resolved_import(transaction, &resolved_decl, |uri| {
-                    self.make_handle_if_enabled(uri)
+                    self.inner.make_handle_if_enabled(uri)
                 })
             {
                 return Ok(Some(self.convert_and_register_type(resolved_type)));
@@ -162,7 +162,7 @@ impl Server {
     }
 
     /// Try to get type information for an import declaration using a fresh transaction
-    pub(crate) fn get_type_for_import_declaration_with_fresh_transaction(
+    pub fn get_type_for_import_declaration_with_fresh_transaction(
         &self,
         fresh_transaction: &mut Transaction,
         params: &tsp::GetTypeOfDeclarationParams,
@@ -179,7 +179,7 @@ impl Server {
             // Make sure the resolved module is also loaded
             if let Some(resolved_node) = &resolved_decl.node
                 && let Ok(resolved_url) = lsp_types::Url::parse(&resolved_node.uri)
-                && let Some(resolved_handle) = self.make_handle_if_enabled(&resolved_url)
+                && let Some(resolved_handle) = self.inner.make_handle_if_enabled(&resolved_url)
             {
                 fresh_transaction.run(&[(
                     resolved_handle.clone(),
@@ -190,7 +190,7 @@ impl Server {
             // Use standalone function to extract type from resolved import
             if let Some(resolved_type) =
                 extract_type_from_resolved_import(fresh_transaction, &resolved_decl, |uri| {
-                    self.make_handle_if_enabled(uri)
+                    self.inner.make_handle_if_enabled(uri)
                 })
             {
                 return Ok(Some(self.convert_and_register_type(resolved_type)));

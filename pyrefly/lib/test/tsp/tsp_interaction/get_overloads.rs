@@ -2,7 +2,7 @@
  * TSP interaction tests for get_overloads request handler
  *
  * These tests verify the full TSP message protocol for get_overloads requests by:
- * 1. Following the LSP interaction test pattern using run_test_lsp
+ * 1. Following the LSP interaction test pattern using run_test_tsp
  * 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getOverloads
  * 3. Validating proper snapshot management and protocol sequencing
  * 4. Using real file operations and message passing to simulate end-to-end TSP interactions
@@ -18,8 +18,8 @@ use lsp_server::Response;
 use lsp_types::Url;
 use tempfile::TempDir;
 
-use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
 use crate::test::tsp::tsp_interaction::util::TspTestCase;
+use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
 use crate::test::tsp::tsp_interaction::util::run_test_tsp_with_capture;
 
 #[test]

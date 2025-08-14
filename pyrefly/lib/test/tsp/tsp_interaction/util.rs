@@ -25,13 +25,17 @@ use lsp_types::Url;
 use lsp_types::notification::DidOpenTextDocument;
 use lsp_types::notification::Exit;
 use lsp_types::notification::Notification as _;
+use pretty_assertions::assert_eq;
 use regex::Regex;
 
 use crate::commands::lsp::IndexingMode;
-use crate::commands::lsp::LspArgs;
-use crate::commands::lsp::run_lsp;
+use crate::commands::tsp::TspArgs;
+use crate::commands::tsp::run_tsp;
+// Re-export necessary types and functions for TSP tests
+pub use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::get_initialize_messages;
 use crate::test::lsp::lsp_interaction::util::get_initialize_responses;
+pub use crate::test::lsp::lsp_interaction::util::get_test_files_root;
 use crate::test::util::init_test;
 
 pub struct TspTestCase {
@@ -56,7 +60,7 @@ pub struct TspTestCase {
 pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
     init_test();
     let timeout = Duration::from_secs(25);
-    let args = LspArgs {
+    let args = TspArgs {
         indexing_mode: IndexingMode::LazyBlocking,
     };
 
@@ -78,7 +82,7 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
     thread::scope(|scope| {
         // Language server thread
         scope.spawn(move || {
-            run_lsp(Arc::new(connection), args)
+            run_tsp(Arc::new(connection), args)
                 .map(|_| ())
                 .map_err(|e| std::io::Error::other(e.to_string()))
         });
@@ -185,6 +189,167 @@ pub fn run_test_tsp_with_capture(test_case: TspTestCase) {
                                 }
                                 drop(captured_vars); // Release the lock
 
+                                client_request_received_sender.send(id.clone()).unwrap();
+                            }
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        panic!("Timeout waiting for response. Expected {responses:?}.");
+                    }
+                    Err(RecvTimeoutError::Disconnected) => {
+                        panic!("Channel disconnected. Expected {responses:?}.");
+                    }
+                }
+            }
+        });
+    });
+}
+
+/// Simple TSP test runner that follows the same pattern as LSP tests but uses TSP server
+pub fn run_test_tsp(test_case: TestCase) {
+    init_test();
+    let timeout = Duration::from_secs(25);
+    let args = TspArgs {
+        indexing_mode: test_case.indexing_mode,
+    };
+
+    let (language_client_sender, language_client_receiver) = bounded::<Message>(0);
+    let (language_server_sender, language_server_receiver) = bounded::<Message>(0);
+    let (server_response_received_sender, server_response_received_receiver) =
+        bounded::<RequestId>(0);
+    let (client_request_received_sender, client_request_received_receiver) =
+        bounded::<RequestId>(0);
+
+    let connection = Connection {
+        sender: language_client_sender,
+        receiver: language_server_receiver,
+    };
+
+    thread::scope(|scope| {
+        // TSP server thread
+        scope.spawn(move || {
+            run_tsp(Arc::new(connection), args)
+                .map(|_| ())
+                .map_err(|e| std::io::Error::other(e.to_string()))
+        });
+
+        // Client sender thread
+        scope.spawn(move || {
+            let exit_message = Message::Notification(Notification {
+                method: Exit::METHOD.to_owned(),
+                params: serde_json::json!(null),
+            });
+
+            for msg in get_initialize_messages(&test_case.workspace_folders, test_case.configuration, test_case.file_watch)
+                .into_iter()
+                .chain(test_case.messages_from_language_client)
+                .chain(std::iter::once(exit_message.clone()))
+            {
+                let stop_language_server = || {
+                    language_server_sender.send_timeout(exit_message.clone(), timeout).unwrap();
+                };
+
+                let send = || {
+                    eprintln!("client--->server {}", serde_json::to_string(&msg).unwrap());
+                    if let Err(err) = language_server_sender.send_timeout(msg.clone(), timeout) {
+                        panic!("Failed to send message to language server: {err:?}");
+                    }
+                };
+
+                match &msg {
+                    Message::Request(Request { id, .. }) => {
+                        send();
+                        if let Ok(response) = server_response_received_receiver.recv_timeout(timeout)
+                            && response == *id
+                        {
+                            // Continue to next message
+                        } else {
+                            stop_language_server();
+                            panic!("Did not receive response for request {id:?}");
+                        }
+                    }
+                    Message::Notification(_) => send(),
+                    Message::Response(lsp_server::Response { id: response_id, .. }) => {
+                        let request_id = client_request_received_receiver.recv_timeout(timeout).unwrap();
+                        if request_id == *response_id {
+                            send();
+                        } else {
+                            stop_language_server();
+                            panic!(
+                                "language client received request {request_id}, expecting to send response for {response_id}"
+                            );
+                        }
+                    }
+                }
+            }
+        });
+
+        // Server receiver thread
+        scope.spawn(move || {
+            let mut responses =
+                get_initialize_responses(test_case.indexing_mode != IndexingMode::None)
+                    .into_iter()
+                    .chain(test_case.expected_messages_from_language_server)
+                    .collect::<Vec<_>>();
+
+            loop {
+                if responses.is_empty() {
+                    break;
+                }
+                match language_client_receiver.recv_timeout(timeout) {
+                    Ok(msg) => {
+                        eprintln!("client<---server {}", serde_json::to_string(&msg).unwrap());
+
+                        match &msg {
+                            Message::Response(Response { id, .. }) => {
+                                let expected = responses.remove(0);
+                                let assert = |expected_response: String, response: String| {
+                                    if let Some(index) =
+                                        expected_response.find("$$MATCH_EVERYTHING$$")
+                                    {
+                                        assert_eq!(
+                                            response[..index].to_string(),
+                                            expected_response[..index].to_string(),
+                                            "Response mismatch"
+                                        );
+                                    } else {
+                                        assert_eq!(
+                                            response, expected_response,
+                                            "Response mismatch"
+                                        );
+                                    }
+                                };
+                                assert(
+                                    serde_json::to_string(&expected).unwrap(),
+                                    serde_json::to_string(&msg).unwrap(),
+                                );
+                                server_response_received_sender.send(id.clone()).unwrap();
+                            }
+                            Message::Notification(notification) => {
+                                eprintln!("Received notification: {notification:?}");
+                            }
+                            Message::Request(Request { id, .. }) => {
+                                let expected = responses.remove(0);
+                                let assert = |expected_response: String, response: String| {
+                                    if let Some(index) =
+                                        expected_response.find("$$MATCH_EVERYTHING$$")
+                                    {
+                                        assert_eq!(
+                                            response[..index].to_string(),
+                                            expected_response[..index].to_string(),
+                                            "Response mismatch"
+                                        );
+                                    } else {
+                                        assert_eq!(
+                                            response, expected_response,
+                                            "Response mismatch"
+                                        );
+                                    }
+                                };
+                                assert(
+                                    serde_json::to_string(&expected).unwrap(),
+                                    serde_json::to_string(&msg).unwrap(),
+                                );
                                 client_request_received_sender.send(id.clone()).unwrap();
                             }
                         }

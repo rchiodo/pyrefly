@@ -16,9 +16,9 @@ use ruff_python_ast::name::Name;
 use tsp_types::snapshot_outdated_error;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 use crate::types::class::ClassType;
 
 /// Standalone get_builtin_type function that can be used independently of the Server
@@ -87,8 +87,8 @@ pub fn get_builtin_type(
     }
 }
 
-impl Server {
-    pub(crate) fn get_builtin_type(
+impl TspServer {
+    pub fn get_builtin_type(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetBuiltinTypeParams,
@@ -106,7 +106,7 @@ impl Server {
         })?;
 
         // Check if workspace has language services enabled
-        let Some(scoping_handle) = self.make_handle_if_enabled(&uri) else {
+        let Some(scoping_handle) = self.inner.make_handle_if_enabled(&uri) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled".to_owned(),
@@ -123,7 +123,8 @@ impl Server {
 
             // Register the type in the lookup table for handle tracking
             if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-                self.state
+                self.inner
+                    .state
                     .register_type_handle(handle_str.clone(), pyrefly_type);
             }
 

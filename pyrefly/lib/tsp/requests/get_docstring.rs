@@ -11,8 +11,8 @@ use lsp_server::ResponseError;
 use pyrefly_python::docstring::Docstring;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Extract docstring from a transaction at a specific position
 ///
@@ -49,8 +49,8 @@ pub fn get_docstring_at_position(
     Some(docstring.resolve())
 }
 
-impl Server {
-    pub(crate) fn get_docstring(
+impl TspServer {
+    pub fn get_docstring(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetDocstringParams,

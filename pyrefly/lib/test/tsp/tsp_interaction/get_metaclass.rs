@@ -20,8 +20,8 @@ use lsp_server::Response;
 use lsp_types::Url;
 use tempfile::TempDir;
 
-use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
 use crate::test::tsp::tsp_interaction::util::TspTestCase;
+use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
 use crate::test::tsp::tsp_interaction::util::run_test_tsp_with_capture;
 
 #[test]

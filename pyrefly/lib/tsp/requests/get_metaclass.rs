@@ -14,12 +14,12 @@ use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
 use crate::binding::binding::KeyClassMetadata;
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 use crate::types::types::Type as PyType;
 
-impl Server {
-    pub(crate) fn get_metaclass(
+impl TspServer {
+    pub fn get_metaclass(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetMetaclassParams,
@@ -51,6 +51,7 @@ impl Server {
         let module_name = class_type.class_object().module_name();
         let module_path = class_type.class_object().module_path();
         let config = self
+            .inner
             .state
             .config_finder()
             .python_file(module_name, module_path);

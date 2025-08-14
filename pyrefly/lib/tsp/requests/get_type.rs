@@ -11,12 +11,12 @@
 use lsp_server::ResponseError;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 // use crate::tsp::common::lsp_debug; // removed unused import
 use crate::tsp::requests::common::node_start_position;
+use crate::tsp::server::TspServer;
 
 /// Standalone get_type function that can be used independently of the Server
 /// This follows the same pattern as the hover feature
@@ -37,8 +37,8 @@ pub fn get_type(
     Some(crate::tsp::common::convert_to_tsp_type(type_info))
 }
 
-impl Server {
-    pub(crate) fn get_type(
+impl TspServer {
+    pub fn get_type(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetTypeParams,

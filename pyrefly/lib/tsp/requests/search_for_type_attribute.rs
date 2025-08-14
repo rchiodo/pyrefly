@@ -12,10 +12,10 @@ use tsp_types::snapshot_outdated_error;
 use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Search for an attribute in a class type using the solver
 ///
@@ -83,8 +83,8 @@ pub fn create_tsp_attribute_from_type(
     }
 }
 
-impl Server {
-    pub(crate) fn search_for_type_attribute(
+impl TspServer {
+    pub fn search_for_type_attribute(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::SearchForTypeAttributeParams,
@@ -158,6 +158,7 @@ impl Server {
         let module_path = module_info.path().clone();
         let module_name = module_info.name();
         let config = self
+            .inner
             .state
             .config_finder()
             .python_file(module_name, &module_path);

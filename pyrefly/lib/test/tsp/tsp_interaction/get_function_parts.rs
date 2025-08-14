@@ -2,7 +2,7 @@
  * TSP interaction tests for get_function_parts request handler
  *
  * These tests verify the full TSP message protocol for get_function_parts requests by:
- * 1. Following the LSP interaction test pattern using run_test_lsp
+ * 1. Following the LSP interaction test pattern using run_test_tsp
  * 2. Testing complete request/response flows including typeServer/getSnapshot, typeServer/getType, and typeServer/getFunctionParts
  * 3. Validating proper snapshot management and protocol sequencing
  * 4. Using real file operations and message passing to simulate end-to-end TSP interactions

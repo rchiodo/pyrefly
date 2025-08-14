@@ -10,8 +10,8 @@
 use lsp_server::ResponseError;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 use crate::types::types::Type as PyType;
 
 /// Standalone get_type_alias_info function that can be used independently of the Server
@@ -62,8 +62,8 @@ pub fn extract_type_arguments(py_type: &PyType) -> Option<Vec<tsp::Type>> {
     }
 }
 
-impl Server {
-    pub(crate) fn get_type_alias_info(
+impl TspServer {
+    pub fn get_type_alias_info(
         &self,
         _transaction: &Transaction<'_>,
         params: tsp::GetTypeAliasInfoParams,

@@ -51,9 +51,9 @@ use lsp_types::Url;
 use tempfile::TempDir;
 
 use crate::commands::lsp::IndexingMode;
-use crate::test::lsp::lsp_interaction::util::TestCase;
-use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::run_test_lsp;
+use crate::test::tsp::tsp_interaction::util::TestCase;
+use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
+use crate::test::tsp::tsp_interaction::util::run_test_tsp;
 
 #[test]
 fn test_tsp_resolve_import_declaration_interaction_basic() {
@@ -85,7 +85,7 @@ CONSTANT = 42
     std::fs::write(&utils_file_path, utils_content).unwrap();
     let _utils_uri = Url::from_file_path(&utils_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open both files
             Message::from(build_did_open_notification(main_file_path.clone())),
@@ -198,7 +198,7 @@ class Category:
     std::fs::write(&models_file_path, models_content).unwrap();
     let _models_uri = Url::from_file_path(&models_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open both files
             Message::from(build_did_open_notification(main_file_path.clone())),
@@ -297,7 +297,7 @@ CONSTANT = 42
     std::fs::write(&main_file_path, main_content).unwrap();
     let main_uri = Url::from_file_path(&main_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open the file
             Message::from(build_did_open_notification(main_file_path.clone())),
@@ -392,7 +392,7 @@ missing_symbol()
     std::fs::write(&main_file_path, main_content).unwrap();
     let main_uri = Url::from_file_path(&main_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open the file
             Message::from(build_did_open_notification(main_file_path.clone())),
@@ -498,7 +498,7 @@ FEATURE_FLAGS = {"new_ui": False}
     std::fs::write(&config_file_path, config_content).unwrap();
     let _config_uri = Url::from_file_path(&config_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open both files
             Message::from(build_did_open_notification(main_file_path.clone())),

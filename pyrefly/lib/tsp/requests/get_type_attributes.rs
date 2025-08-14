@@ -12,11 +12,11 @@ use tsp_types::snapshot_outdated_error;
 use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp::common::convert_to_tsp_type;
+use crate::tsp::server::TspServer;
 use crate::types::types::Type;
 
 /// Helper function to extract parameter name from a Param
@@ -331,8 +331,8 @@ pub fn extract_type_attributes(
     Ok(attributes)
 }
 
-impl Server {
-    pub(crate) fn get_type_attributes(
+impl TspServer {
+    pub fn get_type_attributes(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetTypeAttributesParams,
@@ -358,6 +358,7 @@ impl Server {
             let module_path = module_info.path().clone();
             let module_name = module_info.name();
             let config = self
+                .inner
                 .state
                 .config_finder()
                 .python_file(module_name, &module_path);

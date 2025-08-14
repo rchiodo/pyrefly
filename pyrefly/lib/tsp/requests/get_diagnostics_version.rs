@@ -11,11 +11,11 @@ use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
 use tsp_types as tsp;
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_diagnostics_version(
+impl TspServer {
+    pub fn get_diagnostics_version(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetDiagnosticsVersionParams,
@@ -39,7 +39,7 @@ impl Server {
 
         // Validate language services; then create handle
         self.validate_language_services(&url)?;
-        let Some(handle) = self.make_handle_if_enabled(&url) else {
+        let Some(handle) = self.inner.make_handle_if_enabled(&url) else {
             return Err(ResponseError {
                 code: ErrorCode::RequestFailed as i32,
                 message: "Language services disabled for this workspace".to_owned(),

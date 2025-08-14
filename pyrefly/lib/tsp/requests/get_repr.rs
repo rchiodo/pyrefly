@@ -14,11 +14,11 @@ use tsp_types::tsp_debug;
 
 // Import shared type formatting utilities
 use super::type_formatting;
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_repr(
+impl TspServer {
+    pub fn get_repr(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetReprParams,

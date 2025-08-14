@@ -12,11 +12,11 @@ use tsp_types::snapshot_outdated_error;
 use tsp_types::tsp_debug;
 use tsp_types::{self as tsp};
 
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
-impl Server {
-    pub(crate) fn get_type_args(
+impl TspServer {
+    pub fn get_type_args(
         &self,
         _transaction: &Transaction<'_>,
         params: tsp::GetTypeArgsParams,

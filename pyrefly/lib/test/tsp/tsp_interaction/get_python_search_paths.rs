@@ -2,7 +2,7 @@
  * TSP interaction tests for get_python_search_paths request handler
  *
  * These tests verify the full TSP message protocol for get_python_search_paths requests by:
- * 1. Following the LSP interaction test pattern using run_test_lsp
+ * 1. Following the LSP interaction test pattern using run_test_tsp
  * 2. Testing complete request/response flows including typeServer/getSnapshot and typeServer/getPythonSearchPaths
  * 3. Validating proper snapshot management and protocol sequencing
  * 4. Using real file operations and message passing to simulate end-to-end TSP interactions
@@ -19,9 +19,9 @@ use lsp_types::Url;
 use tempfile::TempDir;
 
 use crate::commands::lsp::IndexingMode;
-use crate::test::lsp::lsp_interaction::util::TestCase;
-use crate::test::lsp::lsp_interaction::util::build_did_open_notification;
-use crate::test::lsp::lsp_interaction::util::run_test_lsp;
+use crate::test::tsp::tsp_interaction::util::TestCase;
+use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
+use crate::test::tsp::tsp_interaction::util::run_test_tsp;
 
 #[test]
 fn test_tsp_get_python_search_paths_interaction() {
@@ -49,7 +49,7 @@ if __name__ == "__main__":
 
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),
@@ -104,7 +104,7 @@ pass
 
     let file_uri = Url::from_file_path(&test_file_path).unwrap();
 
-    run_test_lsp(TestCase {
+    run_test_tsp(TestCase {
         messages_from_language_client: vec![
             // Open the test file
             Message::from(build_did_open_notification(test_file_path.clone())),

@@ -14,8 +14,8 @@ use tsp_types::{self as tsp};
 
 // Import shared type formatting utilities
 use super::type_formatting;
-use crate::lsp::server::Server;
 use crate::state::state::Transaction;
+use crate::tsp::server::TspServer;
 
 /// Extract function parts from a function type
 ///
@@ -132,8 +132,8 @@ pub fn format_param_for_display(
 }
 
 /// Format a type for display
-impl Server {
-    pub(crate) fn get_function_parts(
+impl TspServer {
+    pub fn get_function_parts(
         &self,
         transaction: &Transaction<'_>,
         params: tsp::GetFunctionPartsParams,
