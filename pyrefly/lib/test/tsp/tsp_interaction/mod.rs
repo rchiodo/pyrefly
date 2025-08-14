@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+pub mod combine_types;
+pub mod create_instance_type;
 pub mod get_builtin_type;
 pub mod get_diagnostics;
 pub mod get_docstring;
