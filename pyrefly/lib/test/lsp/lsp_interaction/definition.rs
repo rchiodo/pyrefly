@@ -8,7 +8,6 @@
 use std::env;
 use std::iter::once;
 
-use lsp_server::ErrorCode;
 use lsp_server::Message;
 use lsp_server::Request;
 use lsp_server::RequestId;
@@ -210,7 +209,7 @@ fn malformed_missing_position() {
             id: RequestId::from(2),
             result: None,
             error: Some(ResponseError {
-                code: ErrorCode::InvalidParams as i32,
+                code: -32602,
                 message: "missing field `position`".to_owned(),
                 data: None,
             }),

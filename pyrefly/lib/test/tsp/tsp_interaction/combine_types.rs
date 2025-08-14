@@ -35,7 +35,7 @@ fn test_tsp_combine_types_interaction_basic() {
 
     let root = get_test_files_root();
     let request_file_name = root.path().join("bar.py"); // Use existing test file
-    let _file_uri = Url::from_file_path(&request_file_name).unwrap();
+    let file_uri = Url::from_file_path(&request_file_name).unwrap();
 
     run_test_tsp(TestCase {
         messages_from_language_client: vec![
@@ -53,7 +53,7 @@ fn test_tsp_combine_types_interaction_basic() {
                 method: "typeServer/getBuiltinType".to_owned(),
                 params: serde_json::json!({
                     "scopingNode": {
-                        "uri": "file:///C:/Users/rchiodo/AppData/Local/Temp/.tmpzRjJHY/bar.py",
+                        "uri": file_uri.to_string(),
                         "range": {
                             "start": {"line": 0, "character": 0},
                             "end": {"line": 0, "character": 1}
@@ -68,7 +68,7 @@ fn test_tsp_combine_types_interaction_basic() {
                 method: "typeServer/getBuiltinType".to_owned(),
                 params: serde_json::json!({
                     "scopingNode": {
-                        "uri": "file:///C:/Users/rchiodo/AppData/Local/Temp/.tmpzRjJHY/bar.py",
+                        "uri": file_uri.to_string(),
                         "range": {
                             "start": {"line": 0, "character": 0},
                             "end": {"line": 0, "character": 1}
