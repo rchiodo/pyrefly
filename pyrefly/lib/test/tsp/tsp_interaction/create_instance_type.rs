@@ -102,9 +102,9 @@ fn test_tsp_create_instance_type_interaction_class_type() {
                 })),
                 error: None,
             }),
-            // Then expect response to createInstanceType - returns null since handle won't resolve
-            // (This is a limitation of the current test approach - the handle from getBuiltinType
-            // won't be properly registered in the type lookup for createInstanceType to use)
+            // Then expect response to createInstanceType - returns null since handle is invalidated
+            // (This is expected behavior - the handle from getBuiltinType is cleared when the snapshot
+            // changes, so createInstanceType correctly finds no valid handle to resolve)
             Message::Response(Response {
                 id: RequestId::from(4),
                 result: Some(serde_json::json!(null)),

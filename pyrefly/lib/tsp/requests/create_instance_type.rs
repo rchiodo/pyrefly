@@ -6,6 +6,16 @@
  */
 
 //! Implementation of the createInstanceType TSP request
+//!
+//! This request creates an instance type from a class/type handle.
+//! For example: Type[int] -> int, Type[str] -> str
+//! 
+//! Important: Type handles are tied to specific snapshots and are invalidated
+//! when the snapshot changes. The request will:
+//! 1. First validate that the provided snapshot is still current
+//! 2. Attempt to resolve the provided type handle
+//! 3. Return None if the handle can't be resolved (likely due to snapshot changes)
+//! 4. Transform the resolved type to its instance type
 
 use lsp_server::ResponseError;
 use tsp_types::tsp_debug;
@@ -28,7 +38,7 @@ impl TspServer {
 
         // Use the handle mapping to get the actual pyrefly type
         let Some(py_type) = self.lookup_type_from_tsp_type(&params.type_) else {
-            tsp_debug!("Warning: Could not resolve type handle for createInstanceType");
+            tsp_debug!("Warning: Could not resolve type handle for createInstanceType (likely due to snapshot invalidation)");
             return Ok(None);
         };
 

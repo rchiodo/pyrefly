@@ -6,6 +6,15 @@
  */
 
 //! Implementation of the combineTypes TSP request
+//!
+//! This request combines multiple type handles into a union type.
+//! 
+//! Important: Type handles are tied to specific snapshots and are invalidated
+//! when the snapshot changes. The request will:
+//! 1. First validate that the provided snapshot is still current
+//! 2. Attempt to resolve all provided type handles
+//! 3. Skip any handles that can't be resolved (likely due to snapshot changes)
+//! 4. Combine the remaining valid types into a union
 
 use lsp_server::ErrorCode;
 use lsp_server::ResponseError;
@@ -52,7 +61,7 @@ impl TspServer {
                     "Warning: Could not resolve type handle: {:?}",
                     tsp_type.handle
                 );
-                // Skip unresolvable types rather than failing completely
+                // Skip unresolvable types (likely due to snapshot invalidation) rather than failing completely
                 continue;
             };
             py_types.push(py_type);

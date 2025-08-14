@@ -142,9 +142,9 @@ fn test_tsp_combine_types_interaction_basic() {
                 })),
                 error: None,
             }),
-            // Then expect response to combineTypes - returns null since handles won't resolve
-            // (This is a limitation of the current test approach - the handles from getBuiltinType
-            // won't be properly registered in the type lookup for combineTypes to use)
+            // Then expect response to combineTypes - returns null since handles are invalidated
+            // (This is expected behavior - handles from getBuiltinType are cleared when the snapshot
+            // changes, so combineTypes correctly finds no valid handles to resolve)
             Message::Response(Response {
                 id: RequestId::from(5),
                 result: Some(serde_json::json!(null)),
