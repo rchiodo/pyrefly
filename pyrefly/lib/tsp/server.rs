@@ -80,6 +80,26 @@ impl TspServer {
         ide_transaction_manager: &mut TransactionManager<'a>,
         request: &Request,
     ) -> anyhow::Result<bool> {
+        // Change the request into a TSPRequests enum
+        let wrapper = serde_json::json!({
+            "method": request.method,
+            "id": request.id,           // RequestId implements Serialize
+            "params": request.params
+        });
+        if let Ok(msg) = serde_json::from_value::<TSPRequests>(wrapper) {
+            match msg {
+                TSPRequests::GetPythonSearchPathsRequest(params) => {
+                    let transaction =
+                        ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                self.inner.send_response(new_response(
+                    request.id.clone(),
+                    Ok(self.get_python_search_paths(&transaction, params)),
+                ));
+                ide_transaction_manager.save(transaction);
+                return Ok(true);
+                }
+            }
+        }
         // Handle all TSP-specific requests
         if let Some(params) = as_request::<GetPythonSearchPathsRequest>(request) {
             if let Some(params) = self

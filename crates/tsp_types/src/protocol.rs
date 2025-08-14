@@ -10,7 +10,6 @@
 // 2. Install lsprotocol generator: `pip install git+https://github.com/microsoft/lsprotocol.git`
 // 3. Run: `python generate_protocol.py`
 
-use lsp_types::request::Request;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -154,6 +153,58 @@ pub enum TSPRequestMethods {
     TypeServerCreateInstanceType,
     #[serde(rename = "typeServer/getPythonSearchPaths")]
     TypeServerGetPythonSearchPaths,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+pub enum TSPRequests {
+    #[serde(rename = "typeServer/getSnapshot")]
+    GetSnapshotRequest,
+    #[serde(rename = "typeServer/getSupportedProtocolVersion")]
+    GetSupportedProtocolVersionRequest,
+    #[serde(rename = "typeServer/getDiagnostics")]
+    GetDiagnosticsRequest(GetDiagnosticsParams),
+    #[serde(rename = "typeServer/getDiagnosticsVersion")]
+    GetDiagnosticsVersionRequest(GetDiagnosticsVersionParams),
+    #[serde(rename = "typeServer/getType")]
+    GetTypeRequest(GetTypeParams),
+    #[serde(rename = "typeServer/getBuiltinType")]
+    GetBuiltinTypeRequest(GetBuiltinTypeParams),
+    #[serde(rename = "typeServer/getTypeArgs")]
+    GetTypeArgsRequest(GetTypeArgsParams),
+    #[serde(rename = "typeServer/searchForTypeAttribute")]
+    SearchForTypeAttributeRequest(SearchForTypeAttributeParams),
+    #[serde(rename = "typeServer/getTypeAttributes")]
+    GetTypeAttributesRequest(GetTypeAttributesParams),
+    #[serde(rename = "typeServer/getOverloads")]
+    GetOverloadsRequest(GetOverloadsParams),
+    #[serde(rename = "typeServer/getMatchingOverloads")]
+    GetMatchingOverloadsRequest(GetMatchingOverloadsParams),
+    #[serde(rename = "typeServer/getMetaclass")]
+    GetMetaclassRequest(GetMetaclassParams),
+    #[serde(rename = "typeServer/getTypeOfDeclaration")]
+    GetTypeOfDeclarationRequest(GetTypeOfDeclarationParams),
+    #[serde(rename = "typeServer/getSymbol")]
+    GetSymbolRequest(GetSymbolParams),
+    #[serde(rename = "typeServer/getSymbolsForFile")]
+    GetSymbolsForFileRequest(GetSymbolsForFileParams),
+    #[serde(rename = "typeServer/getFunctionParts")]
+    GetFunctionPartsRequest(GetFunctionPartsParams),
+    #[serde(rename = "typeServer/getRepr")]
+    GetReprRequest(GetReprParams),
+    #[serde(rename = "typeServer/getDocString")]
+    GetDocstringRequest(GetDocstringParams),
+    #[serde(rename = "typeServer/resolveImportDeclaration")]
+    ResolveImportDeclarationRequest(ResolveImportDeclarationParams),
+    #[serde(rename = "typeServer/resolveImport")]
+    ResolveImportRequest(ResolveImportParams),
+    #[serde(rename = "typeServer/getTypeAliasInfo")]
+    GetTypeAliasInfoRequest(GetTypeAliasInfoParams),
+    #[serde(rename = "typeServer/combineTypes")]
+    CombineTypesRequest(CombineTypesParams),
+    #[serde(rename = "typeServer/createInstanceType")]
+    CreateInstanceTypeRequest(CreateInstanceTypeParams),
+    #[serde(rename = "typeServer/getPythonSearchPaths")]
+    GetPythonSearchPathsRequest(GetPythonSearchPathsParams),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
@@ -1419,312 +1470,384 @@ pub enum LSPIdOptional {
 }
 
 /// Request from client to get the current snapshot of the type server. A snapshot is a point-in-time representation of the type server's state, including all loaded files and their types.
-#[derive(Debug)]
-pub enum GetSnapshotRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSnapshotRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetSnapshotRequest {
-    type Params = ();
-    type Result = i32;
-    const METHOD: &'static str = "typeServer/getSnapshot";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: Option<LSPNull>,
 }
 
 /// Response to the [GetSnapshotRequest].
 pub type GetSnapshotResponse = i32;
 
 /// Request to get the version of the protocol the type server supports. Returns a string representation of the protocol version (should be semver format).
-#[derive(Debug)]
-pub enum GetSupportedProtocolVersionRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSupportedProtocolVersionRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetSupportedProtocolVersionRequest {
-    type Params = ();
-    type Result = String;
-    const METHOD: &'static str = "typeServer/getSupportedProtocolVersion";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: Option<LSPNull>,
 }
 
 /// Response to the [GetSupportedProtocolVersionRequest].
 pub type GetSupportedProtocolVersionResponse = String;
 
 /// Request to get diagnostics for a specific file.
-#[derive(Debug)]
-pub enum GetDiagnosticsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDiagnosticsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetDiagnosticsRequest {
-    type Params = GetDiagnosticsParams;
-    type Result = Option<GetDiagnosticsResponse>;
-    const METHOD: &'static str = "typeServer/getDiagnostics";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetDiagnosticsParams,
 }
 
 /// Response to the [GetDiagnosticsRequest].
 pub type GetDiagnosticsResponse = Vec<Diagnostic>;
 
 /// Request to get the version of diagnostics for a specific file.
-#[derive(Debug)]
-pub enum GetDiagnosticsVersionRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDiagnosticsVersionRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetDiagnosticsVersionRequest {
-    type Params = GetDiagnosticsVersionParams;
-    type Result = Option<GetDiagnosticsVersionResponse>;
-    const METHOD: &'static str = "typeServer/getDiagnosticsVersion";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetDiagnosticsVersionParams,
 }
 
 /// Response to the [GetDiagnosticsVersionRequest].
 pub type GetDiagnosticsVersionResponse = i32;
 
 /// Request to get the type information for a specific node.
-#[derive(Debug)]
-pub enum GetTypeRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetTypeRequest {
-    type Params = GetTypeParams;
-    type Result = Option<GetTypeResponse>;
-    const METHOD: &'static str = "typeServer/getType";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetTypeParams,
 }
 
 /// Response to the [GetTypeRequest].
 pub type GetTypeResponse = Type;
 
 /// Request to get the type information for a specific builtin type.
-#[derive(Debug)]
-pub enum GetBuiltinTypeRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetBuiltinTypeRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetBuiltinTypeRequest {
-    type Params = GetBuiltinTypeParams;
-    type Result = Option<GetBuiltinTypeResponse>;
-    const METHOD: &'static str = "typeServer/getBuiltinType";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetBuiltinTypeParams,
 }
 
 /// Response to the [GetBuiltinTypeRequest].
 pub type GetBuiltinTypeResponse = Type;
 
 /// Request to get the collection of subtypes that make up a union type or the types that makes up a generic type.
-#[derive(Debug)]
-pub enum GetTypeArgsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeArgsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetTypeArgsRequest {
-    type Params = GetTypeArgsParams;
-    type Result = Option<GetTypeArgsResponse>;
-    const METHOD: &'static str = "typeServer/getTypeArgs";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetTypeArgsParams,
 }
 
 /// Response to the [GetTypeArgsRequest].
 pub type GetTypeArgsResponse = Vec<Type>;
 
 /// Request to find an attribute of a class.
-#[derive(Debug)]
-pub enum SearchForTypeAttributeRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SearchForTypeAttributeRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for SearchForTypeAttributeRequest {
-    type Params = SearchForTypeAttributeParams;
-    type Result = Option<SearchForTypeAttributeResponse>;
-    const METHOD: &'static str = "typeServer/searchForTypeAttribute";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: SearchForTypeAttributeParams,
 }
 
 /// Response to the [SearchForTypeAttributeRequest].
 pub type SearchForTypeAttributeResponse = Attribute;
 
 /// Request to get the attributes of a specific class or the parameters and return value of a specific function.
-#[derive(Debug)]
-pub enum GetTypeAttributesRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeAttributesRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetTypeAttributesRequest {
-    type Params = GetTypeAttributesParams;
-    type Result = Option<GetTypeAttributesResponse>;
-    const METHOD: &'static str = "typeServer/getTypeAttributes";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetTypeAttributesParams,
 }
 
 /// Response to the [GetTypeAttributesRequest].
 pub type GetTypeAttributesResponse = Vec<Attribute>;
 
 /// Request to get all overloads of a function or method. The returned value doesn't include the implementation signature.
-#[derive(Debug)]
-pub enum GetOverloadsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetOverloadsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetOverloadsRequest {
-    type Params = GetOverloadsParams;
-    type Result = Option<GetOverloadsResponse>;
-    const METHOD: &'static str = "typeServer/getOverloads";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetOverloadsParams,
 }
 
 /// Response to the [GetOverloadsRequest].
 pub type GetOverloadsResponse = Vec<Type>;
 
 /// Request to get the overloads that a call node matches.
-#[derive(Debug)]
-pub enum GetMatchingOverloadsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetMatchingOverloadsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetMatchingOverloadsRequest {
-    type Params = GetMatchingOverloadsParams;
-    type Result = Option<GetMatchingOverloadsResponse>;
-    const METHOD: &'static str = "typeServer/getMatchingOverloads";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetMatchingOverloadsParams,
 }
 
 /// Response to the [GetMatchingOverloadsRequest].
 pub type GetMatchingOverloadsResponse = Vec<Type>;
 
 /// Request to get the meta class of a type.
-#[derive(Debug)]
-pub enum GetMetaclassRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetMetaclassRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetMetaclassRequest {
-    type Params = GetMetaclassParams;
-    type Result = Option<GetMetaclassResponse>;
-    const METHOD: &'static str = "typeServer/getMetaclass";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetMetaclassParams,
 }
 
 /// Response to the [GetMetaclassRequest].
 pub type GetMetaclassResponse = Type;
 
 /// Request to get the type of a declaration.
-#[derive(Debug)]
-pub enum GetTypeOfDeclarationRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeOfDeclarationRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetTypeOfDeclarationRequest {
-    type Params = GetTypeOfDeclarationParams;
-    type Result = Option<GetTypeOfDeclarationResponse>;
-    const METHOD: &'static str = "typeServer/getTypeOfDeclaration";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetTypeOfDeclarationParams,
 }
 
 /// Response to the [GetTypeOfDeclarationRequest].
 pub type GetTypeOfDeclarationResponse = Type;
 
 /// Request to get symbol declaration information for a node.
-#[derive(Debug)]
-pub enum GetSymbolRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSymbolRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetSymbolRequest {
-    type Params = GetSymbolParams;
-    type Result = Option<GetSymbolResponse>;
-    const METHOD: &'static str = "typeServer/getSymbol";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetSymbolParams,
 }
 
 /// Response to the [GetSymbolRequest].
 pub type GetSymbolResponse = Symbol;
 
 /// Request to get all symbols for a file. This is used to get all symbols in a file.
-#[derive(Debug)]
-pub enum GetSymbolsForFileRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetSymbolsForFileRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetSymbolsForFileRequest {
-    type Params = GetSymbolsForFileParams;
-    type Result = Option<GetSymbolsForFileResponse>;
-    const METHOD: &'static str = "typeServer/getSymbolsForFile";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetSymbolsForFileParams,
 }
 
 /// Response to the [GetSymbolsForFileRequest].
 pub type GetSymbolsForFileResponse = FileSymbolInfo;
 
 /// Request to get the string representation of a function's parts, meaning its parameters and return type.
-#[derive(Debug)]
-pub enum GetFunctionPartsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetFunctionPartsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetFunctionPartsRequest {
-    type Params = GetFunctionPartsParams;
-    type Result = Option<GetFunctionPartsResponse>;
-    const METHOD: &'static str = "typeServer/getFunctionParts";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetFunctionPartsParams,
 }
 
 /// Response to the [GetFunctionPartsRequest].
 pub type GetFunctionPartsResponse = FunctionParts;
 
 /// Request to get the string representation of a type in a human-readable format. This may or may not be the same as the type's "name".
-#[derive(Debug)]
-pub enum GetReprRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetReprRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetReprRequest {
-    type Params = GetReprParams;
-    type Result = Option<GetReprResponse>;
-    const METHOD: &'static str = "typeServer/getRepr";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetReprParams,
 }
 
 /// Response to the [GetReprRequest].
 pub type GetReprResponse = String;
 
 /// Request to get the docstring for a specific declaration.
-#[derive(Debug)]
-pub enum GetDocstringRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetDocstringRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetDocstringRequest {
-    type Params = GetDocstringParams;
-    type Result = Option<GetDocstringResponse>;
-    const METHOD: &'static str = "typeServer/getDocString";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetDocstringParams,
 }
 
 /// Response to the [GetDocstringRequest].
 pub type GetDocstringResponse = String;
 
 /// Request to resolve an import declaration.
-#[derive(Debug)]
-pub enum ResolveImportDeclarationRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveImportDeclarationRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for ResolveImportDeclarationRequest {
-    type Params = ResolveImportDeclarationParams;
-    type Result = Option<ResolveImportDeclarationResponse>;
-    const METHOD: &'static str = "typeServer/resolveImportDeclaration";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: ResolveImportDeclarationParams,
 }
 
 /// Response to the [ResolveImportDeclarationRequest].
 pub type ResolveImportDeclarationResponse = Declaration;
 
 /// Request to resolve an import. This is used to resolve the import name to its location in the file system.
-#[derive(Debug)]
-pub enum ResolveImportRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResolveImportRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for ResolveImportRequest {
-    type Params = ResolveImportParams;
-    type Result = Option<ResolveImportResponse>;
-    const METHOD: &'static str = "typeServer/resolveImport";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: ResolveImportParams,
 }
 
 /// Response to the [ResolveImportRequest].
 pub type ResolveImportResponse = String;
 
 /// Get information about a type alias.
-#[derive(Debug)]
-pub enum GetTypeAliasInfoRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeAliasInfoRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetTypeAliasInfoRequest {
-    type Params = GetTypeAliasInfoParams;
-    type Result = Option<GetTypeAliasInfoResponse>;
-    const METHOD: &'static str = "typeServer/getTypeAliasInfo";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetTypeAliasInfoParams,
 }
 
 /// Response to the [GetTypeAliasInfoRequest].
 pub type GetTypeAliasInfoResponse = TypeAliasInfo;
 
 /// Request to combine types. This is used to combine multiple types into a single type.
-#[derive(Debug)]
-pub enum CombineTypesRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CombineTypesRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for CombineTypesRequest {
-    type Params = CombineTypesParams;
-    type Result = Option<CombineTypesResponse>;
-    const METHOD: &'static str = "typeServer/combineTypes";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: CombineTypesParams,
 }
 
 /// Response to the [CombineTypesRequest].
 pub type CombineTypesResponse = Type;
 
 /// Request to generate an instance type representation for the provided type.
-#[derive(Debug)]
-pub enum CreateInstanceTypeRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateInstanceTypeRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for CreateInstanceTypeRequest {
-    type Params = CreateInstanceTypeParams;
-    type Result = Option<CreateInstanceTypeResponse>;
-    const METHOD: &'static str = "typeServer/createInstanceType";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: CreateInstanceTypeParams,
 }
 
 /// Response to the [CreateInstanceTypeRequest].
 pub type CreateInstanceTypeResponse = Type;
 
 /// Request to get the search paths that the type server uses for Python modules.
-#[derive(Debug)]
-pub enum GetPythonSearchPathsRequest {}
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetPythonSearchPathsRequest {
+    /// The method to be invoked.
+    pub method: TSPRequestMethods,
 
-impl Request for GetPythonSearchPathsRequest {
-    type Params = GetPythonSearchPathsParams;
-    type Result = Option<GetPythonSearchPathsResponse>;
-    const METHOD: &'static str = "typeServer/getPythonSearchPaths";
+    /// The request id.
+    pub id: LSPId,
+
+    pub params: GetPythonSearchPathsParams,
 }
 
 /// Response to the [GetPythonSearchPathsRequest].
