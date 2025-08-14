@@ -19,7 +19,6 @@ use lsp_types::ServerCapabilities;
 use tsp_types::*;
 
 use crate::commands::lsp::IndexingMode;
-use crate::lsp::lsp::as_request;
 use crate::lsp::lsp::new_response;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
@@ -80,35 +79,20 @@ impl TspServer {
         ide_transaction_manager: &mut TransactionManager<'a>,
         request: &Request,
     ) -> anyhow::Result<bool> {
-        // Change the request into a TSPRequests enum
+        // Convert the request into a TSPRequests enum
         let wrapper = serde_json::json!({
             "method": request.method,
-            "id": request.id,           // RequestId implements Serialize
+            "id": request.id,
             "params": request.params
         });
-        if let Ok(msg) = serde_json::from_value::<TSPRequests>(wrapper) {
-            match msg {
-                TSPRequests::GetPythonSearchPathsRequest(params) => {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.inner.state);
-                self.inner.send_response(new_response(
-                    request.id.clone(),
-                    Ok(self.get_python_search_paths(&transaction, params)),
-                ));
-                ide_transaction_manager.save(transaction);
-                return Ok(true);
-                }
-            }
-        }
-        // Handle all TSP-specific requests
-        if let Some(params) = as_request::<GetPythonSearchPathsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetPythonSearchPathsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+
+        let Ok(msg) = serde_json::from_value::<TSPRequests>(wrapper) else {
+            // Not a TSP request
+            return Ok(false);
+        };
+
+        match msg {
+            TSPRequests::GetPythonSearchPathsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response(
@@ -117,50 +101,22 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetSnapshotRequest>(request) {
-            match params {
-                Ok(_) => {
-                    self.inner.send_response(new_response(
-                        request.id.clone(),
-                        Ok(self.current_snapshot()),
-                    ));
-                }
-                Err(_) => {
-                    self.inner.send_response(new_response(
-                        request.id.clone(),
-                        Ok(self.current_snapshot()),
-                    ));
-                }
+            TSPRequests::GetSnapshotRequest => {
+                self.inner.send_response(new_response(
+                    request.id.clone(),
+                    Ok(self.current_snapshot()),
+                ));
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetSupportedProtocolVersionRequest>(request) {
-            match params {
-                Ok(_) => {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.inner.state);
-                    self.inner.send_response(new_response(
-                        request.id.clone(),
-                        Ok(self.get_supported_protocol_version(&transaction)),
-                    ));
-                    ide_transaction_manager.save(transaction);
-                }
-                Err(_) => {
-                    let transaction =
-                        ide_transaction_manager.non_commitable_transaction(&self.inner.state);
-                    self.inner.send_response(new_response(
-                        request.id.clone(),
-                        Ok(self.get_supported_protocol_version(&transaction)),
-                    ));
-                    ide_transaction_manager.save(transaction);
-                }
+            TSPRequests::GetSupportedProtocolVersionRequest => {
+                let transaction =
+                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                self.inner.send_response(new_response(
+                    request.id.clone(),
+                    Ok(self.get_supported_protocol_version(&transaction)),
+                ));
+                ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetTypeRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetTypeRequest>(params, &request.id)
-            {
+            TSPRequests::GetTypeRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -169,15 +125,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetSymbolRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetSymbolRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetSymbolRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -186,15 +134,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<ResolveImportDeclarationRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<ResolveImportDeclarationRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::ResolveImportDeclarationRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -203,15 +143,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetTypeOfDeclarationRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetTypeOfDeclarationRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetTypeOfDeclarationRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -220,12 +152,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetReprRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetReprRequest>(params, &request.id)
-            {
+            TSPRequests::GetReprRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -234,15 +161,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetDocstringRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetDocstringRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetDocstringRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -251,15 +170,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<SearchForTypeAttributeRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<SearchForTypeAttributeRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::SearchForTypeAttributeRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -268,15 +179,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetFunctionPartsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetFunctionPartsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetFunctionPartsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -285,15 +188,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetDiagnosticsVersionRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetDiagnosticsVersionRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetDiagnosticsVersionRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -302,15 +197,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<ResolveImportRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<ResolveImportRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::ResolveImportRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -319,15 +206,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetTypeArgsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetTypeArgsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetTypeArgsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -336,15 +215,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetOverloadsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetOverloadsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetOverloadsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -353,15 +224,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetMatchingOverloadsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetMatchingOverloadsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetMatchingOverloadsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -370,15 +233,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetDiagnosticsRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetDiagnosticsRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetDiagnosticsRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -387,15 +242,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetBuiltinTypeRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetBuiltinTypeRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetBuiltinTypeRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -404,15 +251,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetTypeAttributesRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetTypeAttributesRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetTypeAttributesRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -421,15 +260,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetSymbolsForFileRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetSymbolsForFileRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetSymbolsForFileRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -438,15 +269,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetMetaclassRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetMetaclassRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetMetaclassRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -455,15 +278,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<GetTypeAliasInfoRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<GetTypeAliasInfoRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::GetTypeAliasInfoRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -472,15 +287,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<CombineTypesRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<CombineTypesRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::CombineTypesRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -489,15 +296,7 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
-        } else if let Some(params) = as_request::<CreateInstanceTypeRequest>(request) {
-            if let Some(params) = self
-                .inner
-                .extract_request_params_or_send_err_response::<CreateInstanceTypeRequest>(
-                    params,
-                    &request.id,
-                )
-            {
+            TSPRequests::CreateInstanceTypeRequest(params) => {
                 let transaction =
                     ide_transaction_manager.non_commitable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
@@ -506,11 +305,9 @@ impl TspServer {
                 ));
                 ide_transaction_manager.save(transaction);
             }
-            return Ok(true);
         }
 
-        // Not a TSP request
-        Ok(false)
+        Ok(true)
     }
 }
 
