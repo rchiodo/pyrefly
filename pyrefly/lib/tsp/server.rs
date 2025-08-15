@@ -94,7 +94,7 @@ impl TspServer {
         match msg {
             TSPRequests::GetPythonSearchPathsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response(
                     request.id.clone(),
                     Ok(self.get_python_search_paths(&transaction, params)),
@@ -109,7 +109,7 @@ impl TspServer {
             }
             TSPRequests::GetSupportedProtocolVersionRequest { .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response(
                     request.id.clone(),
                     Ok(self.get_supported_protocol_version(&transaction)),
@@ -118,7 +118,7 @@ impl TspServer {
             }
             TSPRequests::GetTypeRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_type(&transaction, params),
@@ -127,7 +127,7 @@ impl TspServer {
             }
             TSPRequests::GetSymbolRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_symbol(&transaction, params),
@@ -136,7 +136,7 @@ impl TspServer {
             }
             TSPRequests::ResolveImportDeclarationRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.resolve_import_declaration(&transaction, params),
@@ -145,7 +145,7 @@ impl TspServer {
             }
             TSPRequests::GetTypeOfDeclarationRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_type_of_declaration(&transaction, params),
@@ -154,7 +154,7 @@ impl TspServer {
             }
             TSPRequests::GetReprRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_repr(&transaction, params),
@@ -163,7 +163,7 @@ impl TspServer {
             }
             TSPRequests::GetDocstringRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_docstring(&transaction, params),
@@ -172,7 +172,7 @@ impl TspServer {
             }
             TSPRequests::SearchForTypeAttributeRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.search_for_type_attribute(&transaction, params),
@@ -181,7 +181,7 @@ impl TspServer {
             }
             TSPRequests::GetFunctionPartsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_function_parts(&transaction, params),
@@ -190,7 +190,7 @@ impl TspServer {
             }
             TSPRequests::GetDiagnosticsVersionRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_diagnostics_version(&transaction, params),
@@ -199,7 +199,7 @@ impl TspServer {
             }
             TSPRequests::ResolveImportRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.resolve_import(&transaction, params),
@@ -208,7 +208,7 @@ impl TspServer {
             }
             TSPRequests::GetTypeArgsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_type_args(&transaction, params),
@@ -217,7 +217,7 @@ impl TspServer {
             }
             TSPRequests::GetOverloadsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_overloads(&transaction, params),
@@ -226,7 +226,7 @@ impl TspServer {
             }
             TSPRequests::GetMatchingOverloadsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_matching_overloads(&transaction, params),
@@ -235,7 +235,7 @@ impl TspServer {
             }
             TSPRequests::GetDiagnosticsRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_diagnostics(&transaction, params),
@@ -244,7 +244,7 @@ impl TspServer {
             }
             TSPRequests::GetBuiltinTypeRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_builtin_type(&transaction, params),
@@ -253,7 +253,7 @@ impl TspServer {
             }
             TSPRequests::GetTypeAttributesRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_type_attributes(&transaction, params),
@@ -262,7 +262,7 @@ impl TspServer {
             }
             TSPRequests::GetSymbolsForFileRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_symbols_for_file(&transaction, params),
@@ -271,7 +271,7 @@ impl TspServer {
             }
             TSPRequests::GetMetaclassRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_metaclass(&transaction, params),
@@ -280,7 +280,7 @@ impl TspServer {
             }
             TSPRequests::GetTypeAliasInfoRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.get_type_alias_info(&transaction, params),
@@ -289,7 +289,7 @@ impl TspServer {
             }
             TSPRequests::CombineTypesRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.combine_types(&transaction, params),
@@ -298,7 +298,7 @@ impl TspServer {
             }
             TSPRequests::CreateInstanceTypeRequest { params, .. } => {
                 let transaction =
-                    ide_transaction_manager.non_commitable_transaction(&self.inner.state);
+                    ide_transaction_manager.non_committable_transaction(&self.inner.state);
                 self.inner.send_response(new_response_with_error_code(
                     request.id.clone(),
                     self.create_instance_type(&transaction, params),
