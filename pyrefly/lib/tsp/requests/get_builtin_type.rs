@@ -121,7 +121,8 @@ impl TspServer {
         if let Some(pyrefly_type) = builtin_type {
             // Register the type and get a stable handle, then create TSP type
             let handle_str = self.inner.state.register_type_handle(pyrefly_type.clone());
-            let tsp_type = crate::tsp::common::convert_to_tsp_type_with_handle(pyrefly_type, handle_str);
+            let tsp_type =
+                crate::tsp::common::convert_to_tsp_type_with_handle(pyrefly_type, handle_str);
 
             Ok(Some(tsp_type))
         } else {

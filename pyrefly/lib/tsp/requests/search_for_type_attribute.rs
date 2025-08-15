@@ -1,9 +1,33 @@
 /*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
+* Copyright (c) Meta Platforms, Inc. and affiliates.
+*
+* This source code is licensed under the M                                let attr_type = solver.type_of_attr_get(
+                       &base_type,
+                       &attr_name,
+                       ruff_text_size::TextRange::default(),
+                       &crate::error::collector::ErrorCollector::new(
+                           module_info.clone(),
+                           crate::error::style::ErrorStyle::Never,
+                       ),
+                       None,
+                       "search_for_type_attribute",
+                   );
+
+                   attr_type attr_type = solver.type_of_attr_get(
+                       &base_type,
+                       &attr_name,
+                       ruff_text_size::TextRange::default(),
+                       &crate::error::collector::ErrorCollector::new(
+                           module_info.clone(),
+                           crate::error::style::ErrorStyle::Never,
+                       ),
+                       None,
+                       "search_for_type_attribute",
+                   );
+
+                   attr_typefound in the
+* LICENSE file in the root directory of this source tree.
+*/
 
 //! TSP search for type attribute request implementation
 
@@ -84,10 +108,12 @@ impl TspServer {
                 // Use ad_hoc_solve to access the solver and get the attribute
                 let maybe_attribute_type = transaction.ad_hoc_solve(&handle, |solver| {
                     use tsp_types::AttributeAccessFlags;
-                    
+
                     // Check if SKIP_INSTANCE_ATTRIBUTES flag is set
-                    let skip_instance_attrs = params.access_flags.contains(AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES);
-                    
+                    let skip_instance_attrs = params
+                        .access_flags
+                        .contains(AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES);
+
                     // Choose the appropriate base type for attribute lookup:
                     // - ClassType (instance) includes both instance and class attributes
                     // - ClassDef (class definition) includes only class attributes
@@ -98,8 +124,8 @@ impl TspServer {
                         // When including instance attributes, use ClassType to find both
                         crate::types::types::Type::ClassType(class_type.clone())
                     };
-                    
-                    let attr_type = solver.type_of_attr_get(
+
+                    solver.type_of_attr_get(
                         &base_type,
                         &attr_name,
                         ruff_text_size::TextRange::default(),
@@ -109,15 +135,15 @@ impl TspServer {
                         ),
                         None,
                         "search_for_type_attribute",
-                    );
-
-                    attr_type
+                    )
                 });
 
                 match maybe_attribute_type {
                     Some(attr_type) => {
                         match &attr_type {
-                            crate::types::types::Type::Any(crate::types::types::AnyStyle::Error) => {
+                            crate::types::types::Type::Any(
+                                crate::types::types::AnyStyle::Error,
+                            ) => {
                                 tsp_debug!(
                                     "Attribute '{}' not found in class type (got error type)",
                                     params.attribute_name

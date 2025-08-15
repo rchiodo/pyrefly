@@ -296,7 +296,7 @@ impl TspServer {
     pub fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
         // First register the type to get a stable handle
         let handle_str = self.inner.state.register_type_handle(py_type.clone());
-        
+
         // Create TSP type with the stable handle
         crate::tsp::common::convert_to_tsp_type_with_handle(py_type, handle_str)
     }

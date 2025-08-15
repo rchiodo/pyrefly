@@ -43,6 +43,7 @@ pub fn extract_symbol_name(
 ///
 /// This is the core logic for creating TSP declarations that can be used independently
 /// of the Server implementation for unit testing.
+#[allow(dead_code)] // Kept for unit tests, main code uses create_declaration_from_definition_with_state
 pub fn create_declaration_from_definition(
     definition: &FindDefinitionItemWithDocstring,
     position: ruff_text_size::TextSize,
@@ -50,6 +51,24 @@ pub fn create_declaration_from_definition(
     node_range: lsp_types::Range,
     node_uri: &lsp_types::Url,
     type_info: Option<&crate::types::types::Type>,
+) -> tsp::Declaration {
+    create_declaration_from_definition_with_state(
+        definition, position, name, node_range, node_uri, type_info, None,
+    )
+}
+
+/// Create a declaration from definition metadata with optional state for stable handles
+///
+/// This version allows using the declaration handle registry for stable handles when
+/// state is provided, or falls back to memory address-based handles for tests.
+pub fn create_declaration_from_definition_with_state(
+    definition: &FindDefinitionItemWithDocstring,
+    position: ruff_text_size::TextSize,
+    name: &str,
+    node_range: lsp_types::Range,
+    node_uri: &lsp_types::Url,
+    type_info: Option<&crate::types::types::Type>,
+    state: Option<&crate::state::state::State>,
 ) -> tsp::Declaration {
     let definition_metadata = &definition.metadata;
     let definition_module = &definition.module;
@@ -98,12 +117,30 @@ pub fn create_declaration_from_definition(
         range: tsp_types::from_lsp_range(node_range),
     };
 
-    DeclarationBuilder::new(name.to_owned(), module_name, node_uri.clone())
-        .handle_str(format!(
+    // Generate handle - use registry if state is provided, otherwise fallback to memory address
+    let handle = if let Some(state) = state {
+        // Use the declaration handle registry for stable handles
+        let declaration_data = crate::state::state::DeclarationData {
+            definition_metadata: definition.metadata.clone(),
+            position,
+            name: name.to_owned(),
+            node_range,
+            node_uri: node_uri.clone(),
+            type_info: type_info.cloned(),
+            definition_module_name,
+        };
+        state.register_declaration_handle(declaration_data)
+    } else {
+        // Fallback to memory address-based handles for unit tests
+        format!(
             "decl_{:p}_{}",
             definition_metadata as *const _,
             u32::from(position)
-        ))
+        )
+    };
+
+    DeclarationBuilder::new(name.to_owned(), module_name, node_uri.clone())
+        .handle_str(handle)
         .category(final_category)
         .flags(final_flags)
         .node(declaration_node)
@@ -208,13 +245,14 @@ pub fn extract_symbol_from_transaction(
         );
 
         // Create the declaration
-        let declaration = create_declaration_from_definition(
+        let declaration = create_declaration_from_definition_with_state(
             &first_definition,
             position,
             &name,
             node_range,
             &node_uri,
             type_info.as_ref(),
+            Some(transaction.state()),
         );
 
         // Validate that the declaration node's text matches the expected name
