@@ -34,6 +34,31 @@ pub fn convert_to_tsp_type(py_type: crate::types::types::Type) -> Type {
     }
 }
 
+/// Convert a pyrefly Type to a TSP Type with a specific handle
+pub fn convert_to_tsp_type_with_handle(py_type: crate::types::types::Type, handle: String) -> Type {
+    use crate::types::types::Type as PyType;
+
+    Type {
+        handle: TypeHandle::String(handle),
+        category: match &py_type {
+            PyType::Any(_) => TypeCategory::Any,
+            PyType::Function(_) | PyType::Callable(_) => TypeCategory::Function,
+            PyType::Overload(_) => TypeCategory::Overloaded,
+            PyType::ClassType(_) | PyType::ClassDef(_) => TypeCategory::Class,
+            PyType::Module(_) => TypeCategory::Module,
+            PyType::Union(_) => TypeCategory::Union,
+            PyType::TypeVar(_) => TypeCategory::TypeVar,
+            _ => TypeCategory::Any,
+        },
+        flags: calculate_type_flags(&py_type),
+        module_name: extract_module_name(&py_type),
+        name: py_type.to_string(),
+        category_flags: 0,
+        decl: None,
+        alias_name: None,
+    }
+}
+
 /// Calculate type flags for a pyrefly Type
 pub fn calculate_type_flags(py_type: &crate::types::types::Type) -> TypeFlags {
     use crate::types::types::Type as PyType;

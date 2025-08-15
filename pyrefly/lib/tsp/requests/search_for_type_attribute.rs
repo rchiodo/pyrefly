@@ -7,6 +7,7 @@
 
 //! TSP search for type attribute request implementation
 
+use dupe::Dupe;
 use lsp_server::ResponseError;
 use tsp_types::snapshot_outdated_error;
 use tsp_types::tsp_debug;
@@ -16,49 +17,6 @@ use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
 use crate::state::state::Transaction;
 use crate::tsp::server::TspServer;
-
-/// Search for an attribute in a class type using the solver
-///
-/// This is the core logic for searching attributes that can be used independently
-/// of the Server implementation for unit testing.
-pub fn search_attribute_in_class_type(
-    transaction: &Transaction<'_>,
-    class_type: &crate::types::class::ClassType,
-    attribute_name: &str,
-    handle_factory: impl Fn(&ModuleInfo) -> Handle,
-) -> Option<crate::types::types::Type> {
-    // Convert string attribute name to ruff_python_ast::name::Name
-    use ruff_python_ast::name::Name;
-    let attr_name = Name::new(attribute_name);
-
-    // Get the module info from the class type
-    let class_qname = class_type.class_object().qname();
-    let module_info = class_qname.module();
-
-    // Create a handle for the module containing the class
-    let handle = handle_factory(module_info);
-
-    // Use ad_hoc_solve to access the solver and get the attribute type
-    let result = transaction.ad_hoc_solve(&handle, |solver| {
-        // Use type_of_attr_get to get the resolved type
-        let class_instance_type = crate::types::types::Type::ClassType(class_type.clone());
-        let attribute_type = solver.type_of_attr_get(
-            &class_instance_type,
-            &attr_name,
-            ruff_text_size::TextRange::default(), // Use a default range
-            &crate::error::collector::ErrorCollector::new(
-                module_info.clone(),
-                crate::error::style::ErrorStyle::Never,
-            ), // Create a temporary error collector
-            None,                                 // No context
-            "search_for_type_attribute",          // Context description
-        );
-
-        attribute_type
-    });
-
-    result
-}
 
 /// Convert a pyrefly Type to TSP Attribute format
 ///
@@ -112,44 +70,83 @@ impl TspServer {
         // Only work on class types - this method is specifically for class attribute lookup
         match &internal_type {
             crate::types::types::Type::ClassType(class_type) => {
-                // Use standalone function to search for attribute
-                let attribute_type = search_attribute_in_class_type(
-                    transaction,
-                    class_type,
-                    &params.attribute_name,
-                    |module_info| self.create_handle_for_module(module_info),
-                );
+                // Convert string attribute name to ruff_python_ast::name::Name
+                use ruff_python_ast::name::Name;
+                let attr_name = Name::new(&params.attribute_name);
 
-                match attribute_type {
+                // Get the module info from the class type
+                let class_qname = class_type.class_object().qname();
+                let module_info = class_qname.module();
+
+                // Create a handle for the module containing the class
+                let handle = self.create_handle_for_module(module_info);
+
+                // Use ad_hoc_solve to access the solver and get the attribute
+                let maybe_attribute_type = transaction.ad_hoc_solve(&handle, |solver| {
+                    use tsp_types::AttributeAccessFlags;
+                    
+                    // Check if SKIP_INSTANCE_ATTRIBUTES flag is set
+                    let skip_instance_attrs = params.access_flags.contains(AttributeAccessFlags::SKIP_INSTANCE_ATTRIBUTES);
+                    
+                    // Choose the appropriate base type for attribute lookup:
+                    // - ClassType (instance) includes both instance and class attributes
+                    // - ClassDef (class definition) includes only class attributes
+                    let base_type = if skip_instance_attrs {
+                        // When skipping instance attributes, use ClassDef to only find class attributes
+                        crate::types::types::Type::ClassDef(class_type.class_object().dupe())
+                    } else {
+                        // When including instance attributes, use ClassType to find both
+                        crate::types::types::Type::ClassType(class_type.clone())
+                    };
+                    
+                    let attr_type = solver.type_of_attr_get(
+                        &base_type,
+                        &attr_name,
+                        ruff_text_size::TextRange::default(),
+                        &crate::error::collector::ErrorCollector::new(
+                            module_info.clone(),
+                            crate::error::style::ErrorStyle::Never,
+                        ),
+                        None,
+                        "search_for_type_attribute",
+                    );
+
+                    attr_type
+                });
+
+                match maybe_attribute_type {
                     Some(attr_type) => {
-                        tsp_debug!(
-                            "Found attribute '{}' in class type with type: {:?}",
-                            params.attribute_name,
-                            attr_type
-                        );
+                        match &attr_type {
+                            crate::types::types::Type::Any(crate::types::types::AnyStyle::Error) => {
+                                tsp_debug!(
+                                    "Attribute '{}' not found in class type (got error type)",
+                                    params.attribute_name
+                                );
+                                Ok(None)
+                            }
+                            _ => {
+                                tsp_debug!(
+                                    "Found attribute '{}' in class type with type: {:?}",
+                                    params.attribute_name,
+                                    attr_type
+                                );
 
-                        // Convert to TSP attribute using standalone function
-                        let tsp_attribute = create_tsp_attribute_from_type(
-                            attr_type,
-                            &params.attribute_name,
-                            |attr_type| self.convert_and_register_type(attr_type),
-                        );
-                        Ok(Some(tsp_attribute))
+                                // Convert to TSP attribute using standalone function
+                                let tsp_attribute = create_tsp_attribute_from_type(
+                                    attr_type,
+                                    &params.attribute_name,
+                                    |attr_type| self.convert_and_register_type(attr_type),
+                                );
+                                Ok(Some(tsp_attribute))
+                            }
+                        }
                     }
                     None => {
                         tsp_debug!(
-                            "Could not resolve attribute '{}' in class type due to ad_hoc_solve failure",
+                            "Attribute '{}' not found in class type",
                             params.attribute_name
                         );
-                        
-                        // Still return an attribute with Unknown type instead of None
-                        let unknown_type = crate::types::types::Type::Any(crate::types::types::AnyStyle::Implicit);
-                        let tsp_attribute = create_tsp_attribute_from_type(
-                            unknown_type,
-                            &params.attribute_name,
-                            |attr_type| self.convert_and_register_type(attr_type),
-                        );
-                        Ok(Some(tsp_attribute))
+                        Ok(None)
                     }
                 }
             }
@@ -158,15 +155,7 @@ impl TspServer {
                     "search_for_type_attribute only works on class types, got: {:?}",
                     internal_type
                 );
-                
-                // Return an attribute with Unknown type instead of None for non-class types
-                let unknown_type = crate::types::types::Type::Any(crate::types::types::AnyStyle::Implicit);
-                let tsp_attribute = create_tsp_attribute_from_type(
-                    unknown_type,
-                    &params.attribute_name,
-                    |attr_type| self.convert_and_register_type(attr_type),
-                );
-                Ok(Some(tsp_attribute))
+                Ok(None)
             }
         }
     }

@@ -146,15 +146,10 @@ instance = MyClass()
                 })),
                 error: None,
             }),
-            // Search response for non-existent method - returns Unknown type attribute
+            // Search response for non-existent method - should return null
             Message::Response(Response {
                 id: RequestId::from(5),
-                result: Some(serde_json::json!({
-                    "name": "nonexistent_method",
-                    "type": "$$MATCH_EVERYTHING$$",
-                    "flags": "$$MATCH_EVERYTHING$$",
-                    "decls": "$$MATCH_EVERYTHING$$"
-                })),
+                result: None,
                 error: None,
             }),
         ],

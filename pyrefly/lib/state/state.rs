@@ -1610,9 +1610,10 @@ pub struct State {
     snapshot_counter: AtomicI32,
     /// Counter for tracking load data versions (diagnostics versioning)
     load_version_counter: AtomicU32,
-    /// Lookup table from TSP type handles to internal pyrefly types
+    /// Type registry for TSP type handles using index-based storage
     /// This is cleared whenever the snapshot increments
-    type_handle_lookup: RwLock<(i32, HashMap<String, crate::types::types::Type>)>,
+    /// Format: (snapshot_id, type_storage, next_index)
+    type_handle_registry: RwLock<(i32, Vec<Option<crate::types::types::Type>>, usize)>,
 }
 
 impl State {
@@ -1626,7 +1627,7 @@ impl State {
             committing_transaction_lock: Mutex::new(()),
             snapshot_counter: AtomicI32::new(1),     // Start at 1
             load_version_counter: AtomicU32::new(1), // Start at 1
-            type_handle_lookup: RwLock::new((0, HashMap::new())),
+            type_handle_registry: RwLock::new((0, Vec::new(), 0)),
         }
     }
 
@@ -1640,10 +1641,11 @@ impl State {
 
     pub fn increment_snapshot(&self) -> i32 {
         let result = self.snapshot_counter.fetch_add(1, Ordering::AcqRel) + 1;
-        // Clear the lookup table when incrementing the snapshot
-        let mut lookup = self.type_handle_lookup.write();
-        lookup.0 = result;
-        lookup.1.clear();
+        // Clear the type registry when incrementing the snapshot
+        let mut registry = self.type_handle_registry.write();
+        registry.0 = result;
+        registry.1.clear();
+        registry.2 = 0;
         result
     }
 
@@ -1652,33 +1654,64 @@ impl State {
         self.load_version_counter.fetch_add(1, Ordering::AcqRel) + 1
     }
 
-    /// Registers a type handle in the lookup table, clearing old entries if snapshot changed
-    pub fn register_type_handle(&self, handle: String, py_type: crate::types::types::Type) {
+    /// Registers a type in the registry and returns an index-based handle
+    /// The returned handle is stable within a snapshot and can be used multiple times
+    pub fn register_type_handle(&self, py_type: crate::types::types::Type) -> String {
         let current_snapshot = self.current_snapshot();
-        let mut lookup = self.type_handle_lookup.write();
+        let mut registry = self.type_handle_registry.write();
 
-        // Clear the lookup table if snapshot has changed
-        if lookup.0 != current_snapshot {
-            lookup.1.clear();
-            lookup.0 = current_snapshot;
+        // Clear the registry if snapshot has changed
+        if registry.0 != current_snapshot {
+            registry.1.clear();
+            registry.2 = 0;
+            registry.0 = current_snapshot;
         }
 
-        lookup.1.insert(handle, py_type);
+        // Find the next available index
+        let index = registry.2;
+        registry.2 += 1;
+
+        // Ensure the vector is large enough
+        if registry.1.len() <= index {
+            registry.1.resize(index + 1, None);
+        }
+
+        // Store the type at this index
+        registry.1[index] = Some(py_type);
+
+        // Return the index as a string handle
+        format!("{}:{}", current_snapshot, index)
     }
 
-    /// Looks up a pyrefly type from a TSP type handle
+    /// Looks up a pyrefly type from a TSP type handle (format: "snapshot:index")
     pub fn lookup_type_from_handle(&self, handle: &str) -> Option<crate::types::types::Type> {
-        let current_snapshot = self.current_snapshot();
-        let mut lookup = self.type_handle_lookup.write();
-
-        // Clear the lookup table if snapshot has changed
-        if lookup.0 != current_snapshot {
-            lookup.1.clear();
-            lookup.0 = current_snapshot;
+        // Parse the handle format "snapshot:index"
+        let parts: Vec<&str> = handle.split(':').collect();
+        if parts.len() != 2 {
             return None;
         }
 
-        lookup.1.get(handle).cloned()
+        let handle_snapshot: i32 = parts[0].parse().ok()?;
+        let index: usize = parts[1].parse().ok()?;
+
+        let current_snapshot = self.current_snapshot();
+        let mut registry = self.type_handle_registry.write();
+
+        // Clear the registry if snapshot has changed
+        if registry.0 != current_snapshot {
+            registry.1.clear();
+            registry.2 = 0;
+            registry.0 = current_snapshot;
+            return None;
+        }
+
+        // Check if the handle is from the current snapshot
+        if handle_snapshot != current_snapshot {
+            return None;
+        }
+
+        // Look up the type by index
+        registry.1.get(index)?.as_ref().cloned()
     }
 
     fn get_config(&self, name: ModuleName, path: &ModulePath) -> ArcId<ConfigFile> {

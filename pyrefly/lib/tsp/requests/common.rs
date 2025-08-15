@@ -294,16 +294,11 @@ impl TspServer {
 
     /// Converts a pyrefly type to TSP type and registers it in the lookup table
     pub fn convert_and_register_type(&self, py_type: crate::types::types::Type) -> tsp::Type {
-        let tsp_type = crate::tsp::common::convert_to_tsp_type(py_type.clone());
-
-        // Register the type in the lookup table
-        if let tsp::TypeHandle::String(handle_str) = &tsp_type.handle {
-            self.inner
-                .state
-                .register_type_handle(handle_str.clone(), py_type);
-        }
-
-        tsp_type
+        // First register the type to get a stable handle
+        let handle_str = self.inner.state.register_type_handle(py_type.clone());
+        
+        // Create TSP type with the stable handle
+        crate::tsp::common::convert_to_tsp_type_with_handle(py_type, handle_str)
     }
 
     /// Looks up a pyrefly type from an integer TSP type handle
