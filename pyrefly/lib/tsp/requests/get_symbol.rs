@@ -15,6 +15,7 @@ use tsp_types::{self as tsp};
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::module::module_info::ModuleInfo;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
+use crate::state::lsp::FindPreference;
 use crate::state::state::Transaction;
 use crate::tsp::requests::common::DeclarationBuilder;
 use crate::tsp::requests::common::node_start_position;
@@ -200,7 +201,7 @@ pub fn extract_symbol_from_transaction(
 
     // Try to find definition at the position
     if let Some(first_definition) = transaction
-        .find_definition(handle, position, true)
+        .find_definition(handle, position, &FindPreference::default())
         .into_iter()
         .next()
     {

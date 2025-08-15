@@ -14,6 +14,7 @@ use tsp_types::{self as tsp};
 use crate::lsp::module_helpers::module_info_to_uri;
 use crate::module::module_info::ModuleInfo;
 use crate::state::handle::Handle;
+use crate::state::lsp::FindPreference;
 use crate::state::state::Transaction;
 use crate::tsp::server::TspServer;
 
@@ -249,7 +250,7 @@ impl TspServer {
         if let Some(pos) = find_symbol_definition_position(module_content, import_name) {
             let text_pos = ruff_text_size::TextSize::new(pos as u32);
             if let Some(first_definition) = active_transaction
-                .find_definition(&target_handle, text_pos, true)
+                .find_definition(&target_handle, text_pos, &FindPreference::default())
                 .into_iter()
                 .next()
             {

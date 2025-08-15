@@ -11,6 +11,7 @@ use lsp_server::ResponseError;
 use pyrefly_python::docstring::Docstring;
 use tsp_types as tsp;
 
+use crate::state::lsp::FindPreference;
 use crate::state::state::Transaction;
 use crate::tsp::server::TspServer;
 
@@ -33,7 +34,7 @@ pub fn get_docstring_at_position(
 
     // Try to find definition at the position - this is the same logic as hover
     let first_definition = transaction
-        .find_definition(handle, position, true)
+        .find_definition(handle, position, &FindPreference::default())
         .into_iter()
         .next()?;
 
