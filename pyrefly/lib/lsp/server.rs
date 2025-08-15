@@ -181,7 +181,7 @@ use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
-use crate::state::state::Transaction; // bring generated TSP protocol module into scope for *Params usage
+use crate::state::state::Transaction;
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
