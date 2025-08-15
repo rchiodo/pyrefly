@@ -54,13 +54,10 @@ pub fn search_attribute_in_class_type(
             "search_for_type_attribute",          // Context description
         );
 
-        Some(attribute_type)
+        attribute_type
     });
 
-    match result {
-        Some(Some(attribute_type)) => Some(attribute_type),
-        Some(None) | None => None,
-    }
+    result
 }
 
 /// Convert a pyrefly Type to TSP Attribute format
@@ -116,31 +113,44 @@ impl TspServer {
         match &internal_type {
             crate::types::types::Type::ClassType(class_type) => {
                 // Use standalone function to search for attribute
-                if let Some(attribute_type) = search_attribute_in_class_type(
+                let attribute_type = search_attribute_in_class_type(
                     transaction,
                     class_type,
                     &params.attribute_name,
                     |module_info| self.create_handle_for_module(module_info),
-                ) {
-                    tsp_debug!(
-                        "Found attribute '{}' in class type with type: {:?}",
-                        params.attribute_name,
-                        attribute_type
-                    );
+                );
 
-                    // Convert to TSP attribute using standalone function
-                    let tsp_attribute = create_tsp_attribute_from_type(
-                        attribute_type,
-                        &params.attribute_name,
-                        |attr_type| self.convert_and_register_type(attr_type),
-                    );
-                    Ok(Some(tsp_attribute))
-                } else {
-                    tsp_debug!(
-                        "Attribute '{}' not found in class type",
-                        params.attribute_name
-                    );
-                    Ok(None)
+                match attribute_type {
+                    Some(attr_type) => {
+                        tsp_debug!(
+                            "Found attribute '{}' in class type with type: {:?}",
+                            params.attribute_name,
+                            attr_type
+                        );
+
+                        // Convert to TSP attribute using standalone function
+                        let tsp_attribute = create_tsp_attribute_from_type(
+                            attr_type,
+                            &params.attribute_name,
+                            |attr_type| self.convert_and_register_type(attr_type),
+                        );
+                        Ok(Some(tsp_attribute))
+                    }
+                    None => {
+                        tsp_debug!(
+                            "Could not resolve attribute '{}' in class type due to ad_hoc_solve failure",
+                            params.attribute_name
+                        );
+                        
+                        // Still return an attribute with Unknown type instead of None
+                        let unknown_type = crate::types::types::Type::Any(crate::types::types::AnyStyle::Implicit);
+                        let tsp_attribute = create_tsp_attribute_from_type(
+                            unknown_type,
+                            &params.attribute_name,
+                            |attr_type| self.convert_and_register_type(attr_type),
+                        );
+                        Ok(Some(tsp_attribute))
+                    }
                 }
             }
             _ => {
@@ -148,7 +158,15 @@ impl TspServer {
                     "search_for_type_attribute only works on class types, got: {:?}",
                     internal_type
                 );
-                Ok(None)
+                
+                // Return an attribute with Unknown type instead of None for non-class types
+                let unknown_type = crate::types::types::Type::Any(crate::types::types::AnyStyle::Implicit);
+                let tsp_attribute = create_tsp_attribute_from_type(
+                    unknown_type,
+                    &params.attribute_name,
+                    |attr_type| self.convert_and_register_type(attr_type),
+                );
+                Ok(Some(tsp_attribute))
             }
         }
     }
