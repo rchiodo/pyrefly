@@ -44,7 +44,7 @@ use crate::types::types::Var;
 /// Error message when a variable has leaked from one module to another.
 ///
 /// We have a rule that `Var`'s should not leak from one module to another, but it has happened.
-/// The easiest debugging technique is to look at the `Solutions` and see if there is a `Var(Unique`
+/// The easiest debugging technique is to look at the `Solutions` and see if there is a `Var(Unique)`
 /// in the output. The usual cause is that we failed to visit all the necessary `Type` fields.
 const VAR_LEAK: &str = "Internal error: a variable has leaked from one module to another.";
 
@@ -633,7 +633,7 @@ impl Solver {
     }
 }
 
-/// A helper to implement subset erogonomically.
+/// A helper to implement subset ergonomically.
 /// Should only be used within `crate::subset`, which implements part of it.
 pub struct Subset<'a, Ans: LookupAnswer> {
     solver: &'a Solver,
@@ -672,32 +672,27 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::Var(v1), Type::Var(v2)) => {
                 let mut variables = self.solver.variables.write();
                 match (
-                    variables.get(v1).expect(VAR_LEAK).clone(),
-                    variables.get(v2).expect(VAR_LEAK).clone(),
+                    variables.get(v1).expect(VAR_LEAK),
+                    variables.get(v2).expect(VAR_LEAK),
                 ) {
                     (Variable::Answer(t1), Variable::Answer(t2)) => {
+                        let t1 = t1.clone();
+                        let t2 = t2.clone();
                         drop(variables);
                         self.is_subset_eq(&t1, &t2)
                     }
-                    (var_type, Variable::Answer(t2)) if should_force(&var_type) => {
-                        if *got != t2 {
-                            variables.insert(*v1, Variable::Answer(t2.clone()));
-                        }
-                        true
+                    (_, Variable::Answer(t2)) => {
+                        let t2 = t2.clone();
+                        drop(variables);
+                        self.is_subset_eq(got, &t2)
                     }
-                    (Variable::Answer(t1), var_type) if should_force(&var_type) => {
-                        if t1 != *want {
-                            // Note that we promote the type when the var is on the RHS, but not when it's on the
-                            // LHS, so that we infer more general types but leave user-specified types alone.
-                            variables.insert(
-                                *v2,
-                                Variable::Answer(var_type.promote(t1, self.type_order)),
-                            );
-                        }
-                        true
+                    (Variable::Answer(t1), _) => {
+                        let t1 = t1.clone();
+                        drop(variables);
+                        self.is_subset_eq(&t1, want)
                     }
                     (var_type1, var_type2)
-                        if should_force(&var_type1) && should_force(&var_type2) =>
+                        if should_force(var_type1) && should_force(var_type2) =>
                     {
                         // Tie the variables together. Doesn't matter which way round we do it.
                         variables.insert(*v1, Variable::Answer(Type::Var(*v2)));
@@ -708,12 +703,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             (Type::Var(v1), t2) => {
                 let mut variables = self.solver.variables.write();
-                match variables.get(v1).expect(VAR_LEAK).clone() {
+                match variables.get(v1).expect(VAR_LEAK) {
                     Variable::Answer(t1) => {
+                        let t1 = t1.clone();
                         drop(variables);
                         self.is_subset_eq(&t1, t2)
                     }
-                    var_type if should_force(&var_type) => {
+                    var_type if should_force(var_type) => {
                         variables.insert(*v1, Variable::Answer(t2.clone()));
                         true
                     }
@@ -722,18 +718,17 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             (t1, Type::Var(v2)) => {
                 let mut variables = self.solver.variables.write();
-                match variables.get(v2).expect(VAR_LEAK).clone() {
+                match variables.get(v2).expect(VAR_LEAK) {
                     Variable::Answer(t2) => {
+                        let t2 = t2.clone();
                         drop(variables);
                         self.is_subset_eq(t1, &t2)
                     }
-                    var_type if should_force(&var_type) => {
+                    var_type if should_force(var_type) => {
                         // Note that we promote the type when the var is on the RHS, but not when it's on the
                         // LHS, so that we infer more general types but leave user-specified types alone.
-                        variables.insert(
-                            *v2,
-                            Variable::Answer(var_type.promote(t1.clone(), self.type_order)),
-                        );
+                        let t1 = var_type.promote(t1.clone(), self.type_order);
+                        variables.insert(*v2, Variable::Answer(t1));
                         true
                     }
                     _ => false,

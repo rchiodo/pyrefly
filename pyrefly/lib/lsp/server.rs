@@ -176,7 +176,6 @@ use crate::lsp::transaction_manager::TransactionManager;
 use crate::lsp::workspace::LspAnalysisConfig;
 use crate::lsp::workspace::Workspace;
 use crate::lsp::workspace::Workspaces;
-use crate::module::from_path::module_from_path;
 use crate::state::handle::Handle;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::require::Require;
@@ -234,7 +233,7 @@ pub struct Server {
     version_info: Mutex<HashMap<PathBuf, i32>>,
 }
 
-/// At the time when we are ready to handle a new LSP event, it will help if we know the a list of
+/// At the time when we are ready to handle a new LSP event, it will help if we know the list of
 /// buffered requests and notifications ready to be processed, because we can potentially make smart
 /// decisions (e.g. not process cancelled requests).
 ///
@@ -477,7 +476,7 @@ impl Server {
                 canceled_requests.insert(id);
             }
             LspEvent::DidOpenTextDocument(params) => {
-                self.did_open(ide_transaction_manager, subsequent_mutation, params);
+                self.did_open(ide_transaction_manager, subsequent_mutation, params)?;
             }
             LspEvent::DidChangeTextDocument(params) => {
                 self.did_change(ide_transaction_manager, subsequent_mutation, params)?;
@@ -556,7 +555,7 @@ impl Server {
                     {
                         let default_response = GotoDefinitionResponse::Array(Vec::new());
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self
@@ -572,7 +571,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.code_action(&transaction, params).unwrap_or_default()),
@@ -584,7 +583,7 @@ impl Server {
                         .extract_request_params_or_send_err_response::<Completion>(params, &x.id)
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             self.completion(&transaction, params),
@@ -598,7 +597,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.document_highlight(&transaction, params)),
@@ -618,7 +617,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.prepare_rename(&transaction, params)),
@@ -638,7 +637,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.signature_help(&transaction, params)),
@@ -654,7 +653,7 @@ impl Server {
                             range: None,
                         };
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.hover(&transaction, params).unwrap_or(default_response)),
@@ -668,7 +667,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.inlay_hints(&transaction, params).unwrap_or_default()),
@@ -686,7 +685,7 @@ impl Server {
                             data: Vec::new(),
                         });
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self
@@ -706,7 +705,7 @@ impl Server {
                             data: Vec::new(),
                         });
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self
@@ -722,7 +721,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(DocumentSymbolResponse::Nested(
@@ -739,7 +738,7 @@ impl Server {
                         )
                     {
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(WorkspaceSymbolResponse::Flat(
@@ -756,7 +755,7 @@ impl Server {
                     {
                         self.validate_in_memory(ide_transaction_manager);
                         let transaction =
-                            ide_transaction_manager.non_commitable_transaction(&self.state);
+                            ide_transaction_manager.non_committable_transaction(&self.state);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.document_diagnostics(&transaction, params)),
@@ -995,7 +994,7 @@ impl Server {
     ) {
         let unknown = ModuleName::unknown();
 
-        eprintln!("Populating all files in the config ({:?}).", config.root);
+        eprintln!("Populating all files in the config ({:?}).", config.source);
         let mut transaction = state.new_committable_transaction(Require::Indexing, None);
 
         let project_path_blobs = config.get_filtered_globs(None);
@@ -1007,10 +1006,8 @@ impl Server {
             if config != path_config {
                 continue;
             }
-            let module_name = module_from_path(&path, path_config.search_path())
-                .unwrap_or_else(ModuleName::unknown);
             handles.push((
-                Handle::new(module_name, module_path, path_config.get_sys_info()),
+                handle_from_module_path(&state, module_path),
                 Require::Indexing,
             ));
         }
@@ -1035,8 +1032,13 @@ impl Server {
         ide_transaction_manager: &mut TransactionManager<'a>,
         subsequent_mutation: bool,
         params: DidOpenTextDocumentParams,
-    ) {
-        let uri = params.text_document.uri.to_file_path().unwrap();
+    ) -> anyhow::Result<()> {
+        let uri = params.text_document.uri.to_file_path().map_err(|_| {
+            anyhow::anyhow!(
+                "Could not convert uri to filepath: {}",
+                params.text_document.uri
+            )
+        })?;
         let config_to_populate_files = if self.indexing_mode != IndexingMode::None
             && let Some(directory) = uri.as_path().parent()
         {
@@ -1057,6 +1059,7 @@ impl Server {
         self.populate_project_files_if_necessary(config_to_populate_files);
         // rewatch files in case we loaded or dropped any configs
         self.setup_file_watcher_if_necessary();
+        Ok(())
     }
 
     fn did_change<'a>(
@@ -1072,7 +1075,7 @@ impl Server {
         let old_version = version_info.get(&file_path).unwrap_or(&0);
         if version < *old_version {
             return Err(anyhow::anyhow!(
-                "Unexpected version in didChange notification: {version:?} is less than {old_version:?}"
+                "new_version < old_version in `textDocument/didChange` notification: new_version={version:?} old_version={old_version:?} text_document.uri={uri:?}"
             ));
         }
         version_info.insert(file_path.clone(), version);
@@ -1326,7 +1329,7 @@ impl Server {
         let Some(handle) = self.make_handle_if_enabled(uri) else {
             return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
         };
-        let transaction = ide_transaction_manager.non_commitable_transaction(&self.state);
+        let transaction = ide_transaction_manager.non_committable_transaction(&self.state);
         let Some(info) = transaction.get_module_info(&handle) else {
             ide_transaction_manager.save(transaction);
             return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));

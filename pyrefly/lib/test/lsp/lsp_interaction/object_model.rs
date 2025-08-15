@@ -8,6 +8,7 @@
 /// This file contains a new implementation of the lsp_interaction test suite. Soon it will replace the old one.
 use std::io;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread::JoinHandle;
 use std::thread::{self};
 use std::time::Duration;
@@ -31,20 +32,29 @@ use crate::commands::lsp::IndexingMode;
 use crate::commands::lsp::LspArgs;
 use crate::commands::lsp::run_lsp;
 use crate::test::util::init_test;
+#[derive(Default)]
+pub struct InitializeSettings {
+    pub workspace_folders: Option<Vec<(String, Url)>>,
+    pub configuration: bool,
+    pub file_watch: bool,
+}
 
 pub struct TestServer {
     sender: crossbeam_channel::Sender<Message>,
     timeout: Duration,
     /// Handle to the spawned server thread
     server_thread: Option<JoinHandle<Result<(), io::Error>>>,
+    /// Request ID for requests sent to the server
+    request_idx: Arc<Mutex<i32>>,
 }
 
 impl TestServer {
-    pub fn new(sender: crossbeam_channel::Sender<Message>) -> Self {
+    pub fn new(sender: crossbeam_channel::Sender<Message>, request_idx: Arc<Mutex<i32>>) -> Self {
         Self {
             sender,
             timeout: Duration::from_secs(25),
             server_thread: None,
+            request_idx,
         }
     }
 
@@ -70,9 +80,10 @@ impl TestServer {
             panic!("Failed to send message to language server: {err:?}");
         }
     }
-    pub fn send_initialize(&self, params: Value) {
+    pub fn send_initialize(&mut self, params: Value) {
+        let id = self.next_request_id();
         self.send_message(Message::Request(Request {
-            id: RequestId::from(1),
+            id,
             method: "initialize".to_owned(),
             params,
         }))
@@ -100,12 +111,7 @@ impl TestServer {
         }));
     }
 
-    pub fn get_initialize_params(
-        &self,
-        workspace_folders: Option<Vec<(String, Url)>>,
-        configuration: bool,
-        file_watch: bool,
-    ) -> Value {
+    pub fn get_initialize_params(&self, settings: InitializeSettings) -> Value {
         let mut params = serde_json::json!({
             "rootPath": "/",
             "processId": std::process::id(),
@@ -126,7 +132,7 @@ impl TestServer {
             },
         });
 
-        if let Some(folders) = workspace_folders {
+        if let Some(folders) = settings.workspace_folders {
             params["capabilities"]["workspace"]["workspaceFolders"] = serde_json::json!(true);
             params["workspaceFolders"] = serde_json::json!(
                 folders
@@ -135,33 +141,48 @@ impl TestServer {
                     .collect::<Vec<_>>()
             );
         }
-        if file_watch {
+        if settings.file_watch {
             params["capabilities"]["workspace"]["didChangeWatchedFiles"] =
                 serde_json::json!({"dynamicRegistration": true});
         }
-        if configuration {
+        if settings.configuration {
             params["capabilities"]["workspace"]["configuration"] = serde_json::json!(true);
         }
 
         params
+    }
+
+    fn next_request_id(&mut self) -> RequestId {
+        let mut idx = self.request_idx.lock().unwrap();
+        *idx += 1;
+        RequestId::from(*idx)
     }
 }
 
 pub struct TestClient {
     receiver: crossbeam_channel::Receiver<Message>,
     timeout: Duration,
+    _request_idx: Arc<Mutex<i32>>,
 }
 
 impl TestClient {
-    pub fn new(receiver: crossbeam_channel::Receiver<Message>) -> Self {
+    pub fn new(
+        receiver: crossbeam_channel::Receiver<Message>,
+        request_idx: Arc<Mutex<i32>>,
+    ) -> Self {
         Self {
             receiver,
             timeout: Duration::from_secs(25),
+            _request_idx: request_idx,
         }
     }
 
-    pub fn expect_message(&self, expected_message: Message) {
-        match self.receiver.recv_timeout(self.timeout) {
+    pub fn expect_message_helper(
+        &self,
+        message: Result<Message, RecvTimeoutError>,
+        expected_message: Message,
+    ) {
+        match message {
             Ok(msg) => {
                 eprintln!("client<---server {}", serde_json::to_string(&msg).unwrap());
 
@@ -181,6 +202,10 @@ impl TestClient {
                 panic!("Channel disconnected. Expected: {expected_message:?}");
             }
         }
+    }
+
+    pub fn expect_message(&self, expected_message: Message) {
+        self.expect_message_helper(self.receiver.recv_timeout(self.timeout), expected_message);
     }
 
     pub fn expect_any_message(&self) {
@@ -221,7 +246,9 @@ impl LspInteraction {
         let connection = Arc::new(connection);
         let args = args.clone();
 
-        let mut server = TestServer::new(language_server_sender);
+        let request_idx = Arc::new(Mutex::new(0));
+
+        let mut server = TestServer::new(language_server_sender, request_idx.clone());
 
         // Spawn the server thread and store its handle
         let thread_handle = thread::spawn(move || {
@@ -232,15 +259,14 @@ impl LspInteraction {
 
         server.server_thread = Some(thread_handle);
 
-        Self {
-            server,
-            client: TestClient::new(language_client_receiver),
-        }
+        let client = TestClient::new(language_client_receiver, request_idx.clone());
+
+        Self { server, client }
     }
 
-    pub fn initialize(&self) {
+    pub fn initialize(&mut self, settings: InitializeSettings) {
         self.server
-            .send_initialize(self.server.get_initialize_params(None, false, false));
+            .send_initialize(self.server.get_initialize_params(settings));
         self.client.expect_any_message();
         self.server.send_initialized();
     }

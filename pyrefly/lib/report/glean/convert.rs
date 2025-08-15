@@ -6,6 +6,7 @@
  */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::env::current_dir;
 use std::slice;
@@ -62,6 +63,14 @@ fn to_span(range: TextRange) -> src::ByteSpan {
     }
 }
 
+fn to_span_with_offset(range: TextRange, offset: Option<TextSize>) -> src::ByteSpan {
+    let start = range.start();
+    src::ByteSpan {
+        start: offset.map_or(start, |x| start - x).to_u32().into(),
+        length: range.len().to_u32().into(),
+    }
+}
+
 fn file_fact(module_info: &ModuleInfo) -> src::File {
     let file_path = module_info.path().as_path();
     let relative_path = file_path
@@ -90,6 +99,19 @@ fn gather_nonlocal_variables(body: &[Stmt]) -> (Arc<SmallSet<Name>>, Arc<SmallSe
 
     (Arc::new(globals), Arc::new(nonlocals))
 }
+
+fn create_sname(name: &str) -> python::SName {
+    let parts = name.split(".");
+    let mut parent = None;
+
+    for local_name in parts {
+        let local_name_fact = python::Name::new(local_name.to_owned());
+        let sname = python::SName::new(local_name_fact, parent);
+        parent = Some(sname);
+    }
+
+    parent.unwrap()
+}
 enum ScopeType {
     Global,
     Nonlocal,
@@ -100,7 +122,7 @@ struct DeclarationInfo {
     decl_span: src::ByteSpan,
     definition: Option<python::Definition>,
     def_span: Option<src::ByteSpan>,
-    top_level_decl: Option<python::Declaration>,
+    top_level_decl: python::Declaration,
     docstring_range: Option<TextRange>,
 }
 
@@ -117,6 +139,7 @@ struct Facts {
     xrefs_via_name: Vec<python::XRefViaName>,
     xrefs_by_target: HashMap<python::Name, Vec<src::ByteSpan>>,
     declaration_docstrings: Vec<python::DeclarationDocstring>,
+    name_to_sname: Vec<python::NameToSName>,
 }
 
 #[derive(Clone)]
@@ -133,7 +156,8 @@ struct GleanState<'a> {
     module: ModuleInfo,
     module_name: ModuleName,
     facts: Facts,
-    locations_fqnames: HashMap<TextSize, String>,
+    names: HashSet<Arc<String>>,
+    locations_fqnames: HashMap<TextSize, Arc<String>>,
 }
 
 impl Facts {
@@ -151,6 +175,7 @@ impl Facts {
             xrefs_via_name: vec![],
             xrefs_by_target: HashMap::new(),
             declaration_docstrings: vec![],
+            name_to_sname: vec![],
         }
     }
 }
@@ -167,6 +192,7 @@ impl GleanState<'_> {
                 file_fact(module_info),
                 python::Module::new(python::Name::new(module_info.name().to_string())),
             ),
+            names: HashSet::new(),
             locations_fqnames: HashMap::new(),
         }
     }
@@ -196,6 +222,7 @@ impl GleanState<'_> {
             let name = module.map_or(ModuleName::from_name(&component), |x: ModuleName| {
                 x.append(&component)
             });
+            self.record_name(name.to_string(), None);
             self.facts
                 .modules
                 .push(python::Module::new(python::Name::new(name.to_string())));
@@ -209,12 +236,11 @@ impl GleanState<'_> {
                 self.module_fact(),
             ))),
             def_span: Some(to_span(range)),
-            top_level_decl: None,
+            top_level_decl: python::Declaration::module(self.module_fact()),
             docstring_range: module_docstring_range,
         };
 
-        let top_level_decl = python::Declaration::module(self.module_fact());
-        self.declaration_facts(mod_decl_info, &top_level_decl);
+        self.declaration_facts(mod_decl_info);
     }
 
     fn file_lines_fact(&self) -> src::FileLines {
@@ -232,17 +258,11 @@ impl GleanState<'_> {
         )
     }
 
-    fn declaration_facts(
-        &mut self,
-        decl_info: DeclarationInfo,
-        default_top_level_decl: &python::Declaration,
-    ) {
+    fn declaration_facts(&mut self, decl_info: DeclarationInfo) {
         self.facts.containing_top_level_declarations.push(
             python::ContainingTopLevelDeclaration::new(
                 decl_info.declaration.clone(),
-                decl_info
-                    .top_level_decl
-                    .unwrap_or(default_top_level_decl.clone()),
+                decl_info.top_level_decl,
             ),
         );
 
@@ -287,6 +307,19 @@ impl GleanState<'_> {
         python::Name::new(fq_name)
     }
 
+    fn record_name(&mut self, name: String, position: Option<TextSize>) -> python::Name {
+        let arc_name = Arc::new(name.clone());
+        if self.names.insert(Arc::clone(&arc_name)) {
+            self.facts.name_to_sname.push(python::NameToSName::new(
+                python::Name::new(name.clone()),
+                create_sname(&name),
+            ));
+        }
+        position.map(|x| self.locations_fqnames.insert(x, Arc::clone(&arc_name)));
+
+        python::Name::new(name)
+    }
+
     fn make_fq_name_for_declaration(
         &mut self,
         name: &Identifier,
@@ -314,13 +347,7 @@ impl GleanState<'_> {
                 }
             }
         };
-
-        let fqname = scope.to_owned() + "." + name;
-
-        self.locations_fqnames
-            .insert(name.range.start(), fqname.clone());
-
-        python::Name::new(fqname)
+        self.record_name(scope.to_owned() + "." + name, Some(name.range.start()))
     }
 
     fn make_fq_names_for_expr(&self, expr: &Expr) -> Vec<python::Name> {
@@ -346,7 +373,7 @@ impl GleanState<'_> {
         } else if module_name == self.module_name {
             self.locations_fqnames
                 .get(&def_range.start())
-                .map_or(self.default_fq_name(name), |x| x.to_owned())
+                .map_or(self.default_fq_name(name), |x| (**x).clone())
         } else {
             let local_name = module.code_at(def_range);
             if local_name.is_empty() {
@@ -428,19 +455,25 @@ impl GleanState<'_> {
         }
     }
 
-    fn make_decorators(&self, decorators: &[Decorator]) -> Vec<String> {
+    fn make_decorators(&self, decorators: &[Decorator]) -> Option<Vec<String>> {
         let lined_buffer = self.module.lined_buffer();
-        decorators
+        let glean_decorators: Vec<String> = decorators
             .iter()
             .map(|x| lined_buffer.code_at(x.range()).to_owned())
-            .collect()
+            .collect();
+
+        if glean_decorators.is_empty() {
+            None
+        } else {
+            Some(glean_decorators)
+        }
     }
 
     fn class_facts(
         &mut self,
         cls: &StmtClassDef,
         cls_declaration: python::ClassDeclaration,
-        container: python::DeclarationContainer,
+        context: &NodeContext,
     ) -> DeclarationInfo {
         let bases = if let Some(arguments) = &cls.arguments {
             arguments
@@ -453,29 +486,25 @@ impl GleanState<'_> {
             vec![]
         };
 
-        let declaration = python::Declaration::cls(cls_declaration.clone());
-
-        let cls_docstring_range = Docstring::range_from_stmts(&cls.body);
-
         let cls_definition = python::ClassDefinition::new(
             cls_declaration.clone(),
             Some(bases),
             None,
-            Some(self.make_decorators(&cls.decorator_list)),
-            Some(container),
+            self.make_decorators(&cls.decorator_list),
+            Some((*context.container).clone()),
         );
 
         DeclarationInfo {
-            declaration,
+            declaration: python::Declaration::cls(cls_declaration),
             decl_span: to_span(range_without_decorators(cls.range, &cls.decorator_list)),
             definition: Some(python::Definition::cls(cls_definition)),
             def_span: Some(to_span(cls.range)),
-            top_level_decl: None,
-            docstring_range: cls_docstring_range,
+            top_level_decl: (*context.top_level_decl).clone(),
+            docstring_range: Docstring::range_from_stmts(&cls.body),
         }
     }
 
-    fn make_xrefs(&self, expr: &Expr) -> Vec<python::XRefViaName> {
+    fn make_xrefs(&self, expr: &Expr, offset: Option<TextSize>) -> Vec<python::XRefViaName> {
         let (names, range) = match expr {
             Expr::Attribute(attr) => {
                 let fq_names = if attr.ctx.is_load() {
@@ -501,7 +530,7 @@ impl GleanState<'_> {
             .into_iter()
             .map(|name| python::XRefViaName {
                 target: python::Name::new(name),
-                source: to_span(range),
+                source: to_span_with_offset(range, offset),
             })
             .collect()
     }
@@ -517,17 +546,24 @@ impl GleanState<'_> {
         self.facts.xrefs_via_name.push(xref);
     }
 
-    fn xrefs_for_type_info(&self, expr: &Expr, xrefs: &mut Vec<python::XRefViaName>) {
-        xrefs.extend(self.make_xrefs(expr));
+    fn xrefs_for_type_info(
+        &self,
+        expr: &Expr,
+        xrefs: &mut Vec<python::XRefViaName>,
+        offset: TextSize,
+    ) {
+        xrefs.extend(self.make_xrefs(expr, Some(offset)));
 
-        expr.recurse(&mut |x| self.xrefs_for_type_info(x, xrefs));
+        expr.recurse(&mut |x| self.xrefs_for_type_info(x, xrefs, offset));
     }
 
     fn type_info(&self, annotation: Option<&Expr>) -> Option<python::TypeInfo> {
         annotation.map(|type_annotation| {
             let lined_buffer = self.module.lined_buffer();
             let mut xrefs = vec![];
-            type_annotation.visit(&mut |expr| self.xrefs_for_type_info(expr, &mut xrefs));
+            let range = type_annotation.range();
+            type_annotation
+                .visit(&mut |expr| self.xrefs_for_type_info(expr, &mut xrefs, range.start()));
             python::TypeInfo {
                 displayType: python::Type::new(
                     lined_buffer.code_at(type_annotation.range()).to_owned(),
@@ -541,16 +577,15 @@ impl GleanState<'_> {
         &self,
         name: python::Name,
         range: TextRange,
-        container: Option<&python::DeclarationContainer>,
         type_info: Option<python::TypeInfo>,
-        top_level_decl: Option<python::Declaration>,
         docstring_range: Option<TextRange>,
+        ctx: &NodeContext,
     ) -> DeclarationInfo {
         let variable_declaration = python::VariableDeclaration::new(name);
         let variable_definition = python::VariableDefinition::new(
             variable_declaration.clone(),
             type_info,
-            container.cloned(),
+            Some((*ctx.container).clone()),
         );
 
         DeclarationInfo {
@@ -558,7 +593,7 @@ impl GleanState<'_> {
             decl_span: to_span(range),
             definition: Some(python::Definition::variable(variable_definition)),
             def_span: Some(to_span(range)),
-            top_level_decl,
+            top_level_decl: (*ctx.top_level_decl).clone(),
             docstring_range,
         }
     }
@@ -567,19 +602,18 @@ impl GleanState<'_> {
         &mut self,
         param: &Parameter,
         value: Option<String>,
-        container: &python::DeclarationContainer,
-        top_level_declaration: Option<&python::Declaration>,
+        context: &NodeContext,
         decl_infos: &mut Vec<DeclarationInfo>,
     ) -> python::Parameter {
         let type_info: Option<python::TypeInfo> = self.type_info(param.annotation());
-        let fqname = self.make_fq_name_for_declaration(&param.name, container, ScopeType::Local);
+        let fqname =
+            self.make_fq_name_for_declaration(&param.name, &context.container, ScopeType::Local);
         decl_infos.push(self.variable_info(
             fqname,
             param.range(),
-            None,
             type_info.clone(),
-            top_level_declaration.cloned(),
             None,
+            context,
         ));
         python::Parameter {
             name: python::Name::new(param.name().to_string()),
@@ -591,8 +625,7 @@ impl GleanState<'_> {
     fn parameter_with_default_info(
         &mut self,
         parameter_with_default: &ParameterWithDefault,
-        top_level_declaration: Option<&python::Declaration>,
-        container: &python::DeclarationContainer,
+        context: &NodeContext,
         decl_infos: &mut Vec<DeclarationInfo>,
     ) -> python::Parameter {
         let lined_buffer = self.module.lined_buffer();
@@ -603,8 +636,7 @@ impl GleanState<'_> {
         self.parameter_info(
             &parameter_with_default.parameter,
             value,
-            container,
-            top_level_declaration,
+            context,
             decl_infos,
         )
     }
@@ -613,74 +645,42 @@ impl GleanState<'_> {
         &mut self,
         func: &StmtFunctionDef,
         func_declaration: python::FunctionDeclaration,
-        container: &python::DeclarationContainer,
-        params_top_level_decl: Option<&python::Declaration>,
+        parent_ctx: &NodeContext,
+        func_ctx: &NodeContext,
     ) -> Vec<DeclarationInfo> {
-        let declaration = python::Declaration::func(func_declaration.clone());
         let params = &func.parameters;
 
         let mut decl_infos = vec![];
         let args = params
             .args
             .iter()
-            .map(|x| {
-                self.parameter_with_default_info(
-                    x,
-                    params_top_level_decl,
-                    container,
-                    &mut decl_infos,
-                )
-            })
+            .map(|x| self.parameter_with_default_info(x, func_ctx, &mut decl_infos))
             .collect();
 
         let pos_only_args = params
             .posonlyargs
             .iter()
-            .map(|x| {
-                self.parameter_with_default_info(
-                    x,
-                    params_top_level_decl,
-                    container,
-                    &mut decl_infos,
-                )
-            })
+            .map(|x| self.parameter_with_default_info(x, func_ctx, &mut decl_infos))
             .collect();
 
         let kwonly_args = params
             .kwonlyargs
             .iter()
-            .map(|x| {
-                self.parameter_with_default_info(
-                    x,
-                    params_top_level_decl,
-                    container,
-                    &mut decl_infos,
-                )
-            })
+            .map(|x| self.parameter_with_default_info(x, func_ctx, &mut decl_infos))
             .collect();
 
-        let star_arg = params.vararg.as_ref().map(|x| {
-            self.parameter_info(
-                x.as_ref(),
-                None,
-                container,
-                params_top_level_decl,
-                &mut decl_infos,
-            )
-        });
+        let star_arg = params
+            .vararg
+            .as_ref()
+            .map(|x| self.parameter_info(x.as_ref(), None, func_ctx, &mut decl_infos));
 
-        let star_kwarg = params.kwarg.as_ref().map(|x| {
-            self.parameter_info(
-                x.as_ref(),
-                None,
-                container,
-                params_top_level_decl,
-                &mut decl_infos,
-            )
-        });
+        let star_kwarg = params
+            .kwarg
+            .as_ref()
+            .map(|x| self.parameter_info(x.as_ref(), None, func_ctx, &mut decl_infos));
 
         let func_definition = python::FunctionDefinition::new(
-            func_declaration,
+            func_declaration.clone(),
             func.is_async,
             self.type_info(func.returns.as_ref().map(|x| x.as_ref())),
             args,
@@ -688,16 +688,16 @@ impl GleanState<'_> {
             Some(kwonly_args),
             star_arg,
             star_kwarg,
-            Some(self.make_decorators(&func.decorator_list)),
-            Some(container.clone()),
+            self.make_decorators(&func.decorator_list),
+            Some((*parent_ctx.container).clone()),
         );
 
         decl_infos.push(DeclarationInfo {
-            declaration,
+            declaration: python::Declaration::func(func_declaration),
             decl_span: to_span(range_without_decorators(func.range, &func.decorator_list)),
             definition: Some(python::Definition::func(func_definition)),
             def_span: Some(to_span(func.range)),
-            top_level_decl: None,
+            top_level_decl: (*parent_ctx.top_level_decl).clone(),
             docstring_range: Docstring::range_from_stmts(&func.body),
         });
 
@@ -729,10 +729,9 @@ impl GleanState<'_> {
             def_infos.push(self.variable_info(
                 fqname,
                 range,
-                Some(&ctx.container),
                 self.type_info(annotation),
-                None,
                 docstring_range,
+                ctx,
             ));
         }
         expr.recurse(&mut |expr| {
@@ -746,6 +745,7 @@ impl GleanState<'_> {
         range: TextRange,
         from_module_id: Option<&Identifier>,
         level: u32,
+        top_level_declaration: &python::Declaration,
     ) -> Vec<DeclarationInfo> {
         let from_module_name = from_module_id.map(|x| x.id());
         let from_module = if level > 0 {
@@ -785,10 +785,7 @@ impl GleanState<'_> {
                 let as_name = import.asname.as_ref().unwrap_or(from_name);
                 let from_name_fact =
                     self.make_fq_name_with_optional_module(from_name.id(), from_module.as_deref());
-
-                self.locations_fqnames
-                    .insert(as_name.range.start(), *from_name_fact.key.clone());
-
+                self.record_name((*from_name_fact.key).clone(), Some(as_name.range.start()));
                 self.add_xref(python::XRefViaName {
                     target: from_name_fact.clone(),
                     source: to_span(import.name.range()),
@@ -807,7 +804,7 @@ impl GleanState<'_> {
                     decl_span: to_span(import.name.range),
                     definition: None,
                     def_span: None,
-                    top_level_decl: None,
+                    top_level_decl: top_level_declaration.clone(),
                     docstring_range: None,
                 });
             }
@@ -877,7 +874,7 @@ impl GleanState<'_> {
                 self.callee_to_caller_facts(call, caller);
             }
         };
-        for xref in self.make_xrefs(expr) {
+        for xref in self.make_xrefs(expr, None) {
             self.add_xref(xref);
         }
         expr.recurse(&mut |s| self.generate_facts_from_exprs(s, container));
@@ -887,7 +884,8 @@ impl GleanState<'_> {
         node.visit(&mut |expr| self.generate_facts_from_exprs(expr, container));
     }
 
-    fn generate_facts(&mut self, ast: &Vec<Stmt>) {
+    fn generate_facts(&mut self, ast: &Vec<Stmt>, range: TextRange) {
+        self.module_facts(range);
         let mut nodes = VecDeque::new();
 
         let root_context = NodeContext {
@@ -916,7 +914,7 @@ impl GleanState<'_> {
         context: &NodeContext,
     ) -> NodeContext {
         let container = &context.container;
-        let top_level_decl = &context.top_level_decl;
+        let top_level_decl = &*context.top_level_decl;
 
         let mut this_ctx = context.clone();
 
@@ -926,12 +924,11 @@ impl GleanState<'_> {
                 let cls_fq_name =
                     self.make_fq_name_for_declaration(&cls.name, container, ScopeType::Local);
                 let cls_declaration = python::ClassDeclaration::new(cls_fq_name, None);
-                let decl_info =
-                    self.class_facts(cls, cls_declaration.clone(), (**container).clone());
+                let decl_info = self.class_facts(cls, cls_declaration.clone(), context);
                 self.visit_exprs(&cls.decorator_list, container);
                 self.visit_exprs(&cls.type_params, container);
                 self.visit_exprs(&cls.arguments, container);
-                if let python::Declaration::module(_) = **top_level_decl {
+                if let python::Declaration::module(_) = top_level_decl {
                     this_ctx.top_level_decl = Arc::new(decl_info.declaration.clone());
                 }
                 this_ctx.container = Arc::new(python::DeclarationContainer::cls(cls_declaration));
@@ -943,23 +940,20 @@ impl GleanState<'_> {
                 let func_fq_name =
                     self.make_fq_name_for_declaration(&func.name, container, ScopeType::Local);
                 let func_declaration = python::FunctionDeclaration::new(func_fq_name);
-                if let python::Declaration::module(_) = **top_level_decl {
+                if let python::Declaration::module(_) = top_level_decl {
                     this_ctx.top_level_decl =
                         Arc::new(python::Declaration::func(func_declaration.clone()));
                 }
-                let mut func_decl_infos = self.function_facts(
-                    func,
-                    func_declaration.clone(),
-                    container,
-                    Some(&this_ctx.top_level_decl),
-                );
+                this_ctx.container =
+                    Arc::new(python::DeclarationContainer::func(func_declaration.clone()));
+                (this_ctx.globals, this_ctx.nonlocals) = gather_nonlocal_variables(&func.body);
+                let mut func_decl_infos =
+                    self.function_facts(func, func_declaration, context, &this_ctx);
+
                 self.visit_exprs(&func.decorator_list, container);
                 self.visit_exprs(&func.type_params, container);
                 self.visit_exprs(&func.parameters, container);
                 self.visit_exprs(&func.returns, container);
-
-                this_ctx.container = Arc::new(python::DeclarationContainer::func(func_declaration));
-                (this_ctx.globals, this_ctx.nonlocals) = gather_nonlocal_variables(&func.body);
 
                 decl_infos.append(&mut func_decl_infos);
             }
@@ -1000,7 +994,8 @@ impl GleanState<'_> {
                 self.visit_exprs(&assign.value, container);
             }
             Stmt::Import(import) => {
-                let mut imp_decl_infos = self.import_facts(&import.names, import.range, None, 0);
+                let mut imp_decl_infos =
+                    self.import_facts(&import.names, import.range, None, 0, top_level_decl);
                 decl_infos.append(&mut imp_decl_infos);
             }
             Stmt::ImportFrom(import) => {
@@ -1009,6 +1004,7 @@ impl GleanState<'_> {
                     import.range,
                     import.module.as_ref(),
                     import.level,
+                    top_level_decl,
                 );
                 decl_infos.append(&mut imp_decl_infos);
             }
@@ -1056,13 +1052,28 @@ impl GleanState<'_> {
             }
             Stmt::Try(stmt_try) => {
                 stmt_try.handlers.iter().for_each(|x| match x {
-                    ExceptHandler::ExceptHandler(x) => self.visit_exprs(&x.type_, container),
+                    ExceptHandler::ExceptHandler(x) => {
+                        if let Some(name) = &x.name {
+                            let fq_name = self.make_fq_name_for_declaration(
+                                name,
+                                container,
+                                ScopeType::Local,
+                            );
+                            decl_infos.push(self.variable_info(
+                                fq_name,
+                                name.range(),
+                                None,
+                                None,
+                                context,
+                            ));
+                        }
+                    }
                 });
             }
             _ => self.visit_exprs(stmt, container),
         }
         for decl_info in decl_infos {
-            self.declaration_facts(decl_info, top_level_decl);
+            self.declaration_facts(decl_info);
         }
 
         this_ctx
@@ -1078,10 +1089,7 @@ impl Glean {
             src::FileLanguage::new(glean_state.file_fact(), src::Language::Python);
         let digest_fact = glean_state.digest_fact();
         let file_lines = glean_state.file_lines_fact();
-
-        glean_state.module_facts(ast.range);
-
-        glean_state.generate_facts(&ast.body);
+        glean_state.generate_facts(&ast.body, ast.range());
 
         let file_fact = glean_state.file_fact();
         let facts = glean_state.facts;
@@ -1165,9 +1173,11 @@ impl Glean {
                 predicate: python::DeclarationDocstring::GLEAN_name(),
                 facts: facts.declaration_docstrings.into_iter().map(json).collect(),
             },
+            GleanEntry::Predicate {
+                predicate: python::NameToSName::GLEAN_name(),
+                facts: facts.name_to_sname.into_iter().map(json).collect(),
+            },
         ];
-        // TODO(@rubmary) Add SName and NameToSName predicates
-
         Glean { entries }
     }
 }

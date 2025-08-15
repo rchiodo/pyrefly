@@ -236,7 +236,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     x.attr.id(),
                     x.attr.range,
                 );
-                self.attr_infer(&base, &x.attr.id, x.range, errors, None)
+                let attr_type = self.attr_infer(&base, &x.attr.id, x.range, errors, None);
+                if base.ty().is_literal_string() {
+                    match attr_type.ty() {
+                        Type::BoundMethod(method) => {
+                            return attr_type
+                                .clone()
+                                .with_ty(method.with_bound_object(base.ty().clone()).as_type());
+                        }
+                        _ => {}
+                    }
+                }
+                attr_type
             }
             Expr::Subscript(x) => {
                 // TODO: We don't deal properly with hint here, we should.
@@ -666,6 +677,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             let arg_ty = self.expr_infer(&x.arguments.args[0], errors);
                             self.type_of(arg_ty)
                         }
+                        // Decorators can be applied in two ways:
+                        //   - (common, idiomatic) via `@decorator`:
+                        //     @staticmethod
+                        //     def f(): ...
+                        //   - (uncommon, mostly seen in legacy code) via a function call:
+                        //     def f(): ...
+                        //     f = staticmethod(f)
+                        // Check if this call applies a decorator with known typing effects to a function.
+                        _ if let Some(ret) = self.maybe_apply_function_decorator(ty, &args, &kws, errors) => ret,
                         _ => {
                             let callable = self.as_call_target_or_error(
                                 ty.clone(),

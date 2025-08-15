@@ -156,7 +156,7 @@ enum PatternMatchParameterKind {
     // Name defined using `as`
     // ex: `x` in `case ... as x: ...`, or `x` in `case x: ...`
     AsName,
-    // Name defined using keyword argument partten
+    // Name defined using keyword argument pattern
     // ex: `x` in `case Foo(x=1): ...`
     KeywordArgName,
     // Name defined using `*` pattern
@@ -222,7 +222,7 @@ enum IdentifierContext {
     /// ex: `e` in `try ... except Exception as e: ...`
     ExceptionHandler,
     /// An identifier appeared as the name introduced via a `case` branch in a `match` statement.
-    /// See [`PatternMatchParaameterKind`] for examples.
+    /// See [`PatternMatchParameterKind`] for examples.
     #[expect(dead_code)]
     PatternMatch(PatternMatchParameterKind),
 }
@@ -625,9 +625,15 @@ impl<'a> Transaction<'a> {
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: id,
-                context: IdentifierContext::Expr(_),
+                context: IdentifierContext::Expr(expr_context),
             }) => {
-                let key = Key::BoundName(ShortIdentifier::new(&id));
+                let key = match expr_context {
+                    ExprContext::Store => Key::Definition(ShortIdentifier::new(&id)),
+                    ExprContext::Load | ExprContext::Del | ExprContext::Invalid => {
+                        Key::BoundName(ShortIdentifier::new(&id))
+                    }
+                };
+
                 if self.get_bindings(handle)?.is_valid_key(&key) {
                     if let Some(ExprCall {
                         node_index: _,
@@ -1765,7 +1771,6 @@ impl<'a> Transaction<'a> {
 
     fn completion_unsorted_opt(&self, handle: &Handle, position: TextSize) -> Vec<CompletionItem> {
         let mut result = Vec::new();
-        self.add_kwargs_completions(handle, position, &mut result);
 
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
@@ -1831,6 +1836,7 @@ impl<'a> Transaction<'a> {
                 }
             }
             Some(IdentifierWithContext { identifier, .. }) => {
+                self.add_kwargs_completions(handle, position, &mut result);
                 self.add_keyword_completions(handle, &mut result);
                 if !self.add_local_variable_completions(
                     handle,
@@ -1843,6 +1849,7 @@ impl<'a> Transaction<'a> {
                 self.add_builtins_autoimport_completions(handle, Some(&identifier), &mut result);
             }
             None => {
+                self.add_kwargs_completions(handle, position, &mut result);
                 if self.empty_line_at(handle, position) {
                     self.add_keyword_completions(handle, &mut result);
                     self.add_local_variable_completions(handle, None, position, &mut result);

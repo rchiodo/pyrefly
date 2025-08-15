@@ -1231,7 +1231,6 @@ C.x = 43  # E: This field is marked as Final
 );
 
 testcase!(
-    bug = "other.output type is too general. Also, there should be no errors.",
     test_attr_cast,
     r#"
 from typing import Self, cast, Any, assert_type
@@ -1241,20 +1240,19 @@ class C:
     def f(self, other):
         other = cast(Self, other)
         assert_type(other, Self)
-        assert_type(other.outputs, Any) # E: TODO: Expr::attr_infer_for_type
-        len(self.outputs) == len(other.outputs) # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: Self
+        assert_type(other.outputs, list[Any])
+        len(self.outputs) == len(other.outputs)
     "#,
 );
 
 testcase!(
-    bug = "There should be no errors here.",
     test_attr_tuple,
     r#"
 from typing import Any, Tuple
 
 def g(ann) -> None:
     if ann is Tuple: ...
-    ann.__module__ # E: TODO: Expr::attr_infer_for_type attribute base undefined for type: type[Tuple] | Unknown (trying to access __module__)
+    ann.__module__
     "#,
 );
 
@@ -1320,5 +1318,51 @@ class Singleton(Expr):
     def __init__(self, v: Expr):
         self.children = (v,)
 assert_type(Singleton(Expr()).children, tuple[Expr, ...])
+    "#,
+);
+
+testcase!(
+    test_mro_method,
+    r#"
+().mro()  # E: no attribute `mro`
+tuple.mro()
+type.mro()  # E: Missing argument `self`
+    "#,
+);
+
+// How special forms are represented in typing.py is an implementation detail, but in practice,
+// some of the representations are stable across Python versions. In particular, user code
+// sometimes relies on some special forms being classes and Type behaving like builtins.type.
+testcase!(
+    test_special_forms,
+    r#"
+from typing import Callable, Generic, Protocol, Tuple, Type
+def f1(cls):
+    if cls is Callable:
+        return cls.mro()
+def f2(cls):
+    if cls is Generic:
+        return cls.mro()
+def f3(cls):
+    if cls is Protocol:
+        return cls.mro()
+def f4(cls):
+    if cls is Tuple:
+        return cls.mro()
+def f5(cls, x: type):
+    if cls is Type:
+        return cls.mro(x)
+    "#,
+);
+
+testcase!(
+    test_get_type_new,
+    r#"
+from typing import cast, reveal_type
+def get_type_t[T]() -> type[T]:
+    return cast(type[T], 0)
+def foo[T](x: type[T]):
+    # mypy reveals the same thing we do (the type of `type.__new__`), while pyright reveals `Unknown`.
+    reveal_type(get_type_t().__new__)  # E: Overload[(cls: type[Self@type], o: object, /) -> type, (cls: type[TypeVar[Self]], name: str, bases: tuple[type, ...], namespace: dict[str, Any], /, **kwds: Any) -> TypeVar[Self]]
     "#,
 );

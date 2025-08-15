@@ -62,7 +62,7 @@ struct ParsedBaseClass {
 enum BaseClassParseResult {
     /// We can successfully extract the class object and metadata from the base class
     Parsed(ParsedBaseClass),
-    /// We can't parse the base class because its correpsponding `BaseClass` is not valid (e.g. base is a `TypedDict`
+    /// We can't parse the base class because its corresponding `BaseClass` is not valid (e.g. base is a `TypedDict`
     /// when is_new_type is true)
     InvalidBase(TextRange),
     /// We can't parse the base class because its expression is not recognized to be a valid base class expression
@@ -605,10 +605,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         // Determine final PydanticMetadata only if the class inherits from BaseModel in the MRO
+        // TODO: add validation alias to metadata
         let pydantic_metadata = match pydantic_metadata_binding {
-            PydanticMetadataBinding { frozen } if is_pydantic_model => {
-                Some(PydanticMetadata { frozen: *frozen })
-            }
+            PydanticMetadataBinding {
+                frozen,
+                validation_alias,
+            } if is_pydantic_model => Some(PydanticMetadata {
+                frozen: *frozen,
+                validation_alias: validation_alias.clone(),
+            }),
             _ => None,
         };
 

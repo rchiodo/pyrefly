@@ -430,3 +430,19 @@ class B(A):
     Attr = ChildAttr
     "#,
 );
+
+testcase!(
+    test_staticmethod_can_override_staticmethod,
+    r#"
+class Base:
+    @staticmethod
+    def method() -> int:
+        return 1
+
+def a_method() -> int:
+    return 1
+
+class Derived(Base):
+    method = staticmethod(a_method)
+    "#,
+);

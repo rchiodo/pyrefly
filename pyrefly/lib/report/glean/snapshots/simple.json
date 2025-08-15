@@ -304,7 +304,6 @@
                     }
                   }
                 },
-                "decorators": [],
                 "is_async": false,
                 "kwonly_params": [],
                 "params": [],
@@ -540,6 +539,102 @@
       }
     ],
     "predicate": "python.XRefsViaNameByFile.4"
+  },
+  {
+    "facts": [
+      {
+        "id": 0,
+        "key": {
+          "id": 0,
+          "key": "simple"
+        },
+        "value": {
+          "id": 0,
+          "key": {
+            "local_name": {
+              "id": 0,
+              "key": "simple"
+            }
+          }
+        }
+      },
+      {
+        "id": 0,
+        "key": {
+          "id": 0,
+          "key": "simple.hello_world"
+        },
+        "value": {
+          "id": 0,
+          "key": {
+            "local_name": {
+              "id": 0,
+              "key": "hello_world"
+            },
+            "parent": {
+              "id": 0,
+              "key": {
+                "local_name": {
+                  "id": 0,
+                  "key": "simple"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 0,
+        "key": {
+          "id": 0,
+          "key": "simple.x"
+        },
+        "value": {
+          "id": 0,
+          "key": {
+            "local_name": {
+              "id": 0,
+              "key": "x"
+            },
+            "parent": {
+              "id": 0,
+              "key": {
+                "local_name": {
+                  "id": 0,
+                  "key": "simple"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 0,
+        "key": {
+          "id": 0,
+          "key": "simple.y"
+        },
+        "value": {
+          "id": 0,
+          "key": {
+            "local_name": {
+              "id": 0,
+              "key": "y"
+            },
+            "parent": {
+              "id": 0,
+              "key": {
+                "local_name": {
+                  "id": 0,
+                  "key": "simple"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "predicate": "python.NameToSName.4"
   },
   {
     "facts": [

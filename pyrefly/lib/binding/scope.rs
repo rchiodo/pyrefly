@@ -354,7 +354,7 @@ impl FlowInfo {
     }
 }
 
-/// Because of compliciations related both to recursion in the binding graph and to
+/// Because of complications related both to recursion in the binding graph and to
 /// the need for efficient representations, Pyrefly relies on multiple different integer
 /// indexes used to refer to classes and retrieve different kinds of binding information.
 ///
@@ -681,16 +681,30 @@ impl Scopes {
         }
     }
 
-    pub fn current_class_and_metadata_keys(
-        &self,
+    // Is this scope a class scope? If so, return the keys for the class and its metadata.
+    pub fn get_class_and_metadata_keys(
+        scope: &Scope,
     ) -> Option<(Idx<KeyClass>, Idx<KeyClassMetadata>)> {
-        match &self.current().kind {
+        match &scope.kind {
             ScopeKind::Class(class_scope) => Some((
                 class_scope.indices.class_idx,
                 class_scope.indices.metadata_idx,
             )),
             _ => None,
         }
+    }
+
+    // Are we anywhere inside a class? If so, return the keys for the class and its metadata.
+    // This function looks at enclosing scopes, unlike `current_class_and_metadata_keys`.
+    pub fn enclosing_class_and_metadata_keys(
+        &self,
+    ) -> Option<(Idx<KeyClass>, Idx<KeyClassMetadata>)> {
+        for scope in self.iter_rev() {
+            if let Some(class_and_metadata) = Self::get_class_and_metadata_keys(scope) {
+                return Some(class_and_metadata);
+            }
+        }
+        None
     }
 
     pub fn function_predecessor_indices(

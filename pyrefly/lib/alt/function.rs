@@ -30,6 +30,7 @@ use vec1::Vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::types::decorated_function::DecoratedFunction;
+use crate::alt::types::decorated_function::SpecialDecorator;
 use crate::binding::binding::Binding;
 use crate::binding::binding::FunctionStubOrImpl;
 use crate::binding::binding::Key;
@@ -194,96 +195,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let is_dunder_init_subclass =
             defining_cls.is_some() && def.name.as_str() == dunder::INIT_SUBCLASS;
 
-        let mut is_overload = false;
-        let mut is_staticmethod = is_dunder_new;
-        let mut is_classmethod = is_dunder_init_subclass;
-        let mut is_deprecated = false;
-        let mut is_property_getter = false;
-        let mut is_property_setter_with_getter = None;
-        let mut has_enum_member_decoration = false;
-        let mut is_override = false;
-        let mut has_final_decoration = false;
-        let mut dataclass_transform_metadata = None;
-        let check_top_level_function_decorator = |name: &str, range| {
-            if is_top_level_function {
-                self.error(
-                    errors,
-                    range,
-                    ErrorInfo::Kind(ErrorKind::InvalidDecorator),
-                    format!("Decorator `@{name}` can only be used on methods."),
-                );
-            }
+        let mut flags = FuncFlags {
+            is_staticmethod: is_dunder_new,
+            is_classmethod: is_dunder_init_subclass,
+            ..Default::default()
         };
         let decorators = decorators
             .iter()
             .filter(|(k, range)| {
                 let decorator = self.get_idx(*k);
                 let decorator_ty = decorator.ty();
-                match decorator_ty.callee_kind() {
-                    Some(CalleeKind::Function(FunctionKind::Overload)) => {
-                        is_overload = true;
-                        false
+                if let Some(special_decorator) = self.get_special_decorator(decorator_ty) {
+                    if is_top_level_function {
+                        self.check_top_level_function_decorator(&special_decorator, *range, errors);
                     }
-                    Some(CalleeKind::Class(ClassKind::StaticMethod(name))) => {
-                        is_staticmethod = true;
-                        check_top_level_function_decorator(&name, *range);
-                        false
-                    }
-                    Some(CalleeKind::Class(ClassKind::ClassMethod(name))) => {
-                        is_classmethod = true;
-                        check_top_level_function_decorator(&name, *range);
-                        false
-                    }
-                    Some(CalleeKind::Class(ClassKind::Property(name))) => {
-                        is_property_getter = true;
-                        check_top_level_function_decorator(&name, *range);
-                        false
-                    }
-                    Some(CalleeKind::Class(ClassKind::EnumMember)) => {
-                        has_enum_member_decoration = true;
-                        check_top_level_function_decorator("member", *range);
-                        false
-                    }
-                    Some(CalleeKind::Function(FunctionKind::Override)) => {
-                        is_override = true;
-                        check_top_level_function_decorator("override", *range);
-                        false
-                    }
-                    Some(CalleeKind::Function(FunctionKind::Final)) => {
-                        has_final_decoration = true;
-                        check_top_level_function_decorator("final", *range);
-                        false
-                    }
-                    _ if matches!(decorator_ty, Type::ClassType(cls) if cls.has_qname("warnings", "deprecated")) => {
-                        is_deprecated = true;
-                        false
-                    }
-                    _ if decorator_ty.is_property_setter_decorator() => {
-                        // When the `setter` attribute is accessed on a property, we return the type
-                        // of the raw getter function, but with the `is_property_setter_decorator`
-                        // flag set to true; the type does does not accurately model the runtime
-                        // (calling the `.setter` decorator does not invoke a getter function),
-                        // but makes it convenient to construct the property getter and setter
-                        // in our class field logic.
-                        //
-                        // See AnswersSolver::lookup_attr_from_attribute_base
-                        // for details.
-                        is_property_setter_with_getter = Some(decorator.arc_clone_ty());
-                        false
-                    }
-                    _ if let Type::KwCall(call) = decorator_ty && call.has_function_kind(FunctionKind::DataclassTransform) => {
-                        dataclass_transform_metadata = Some(DataclassTransformKeywords::from_type_map(&call.keywords));
-                        false
-                    }
-                    Some(CalleeKind::Class(ClassKind::EnumNonmember)) => {
-                        check_top_level_function_decorator("nonmember", *range);
-                        true
-                    }
-                    Some(CalleeKind::Function(FunctionKind::AbstractMethod)) => {
-                        check_top_level_function_decorator("abstractmethod", *range);
-                        true
-                    }
-                    _ => true,
+                    !self.set_flag_from_special_decorator(&mut flags, &special_decorator)
+                } else {
+                    true
                 }
             })
             .collect::<Vec<_>>();
@@ -291,9 +219,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Look for a @classmethod or @staticmethod decorator and change the "self" type
         // accordingly. This is not totally correct, since it doesn't account for chaining
         // decorators, or weird cases like both decorators existing at the same time.
-        if is_classmethod || is_dunder_new {
+        if flags.is_classmethod || is_dunder_new {
             self_type = self_type.map(Type::type_form);
-        } else if is_staticmethod {
+        } else if flags.is_staticmethod {
             self_type = None;
         }
 
@@ -440,7 +368,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 &params,
                 def,
                 class_key,
-                is_staticmethod,
+                flags.is_staticmethod,
                 errors,
             );
         };
@@ -450,7 +378,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 &params,
                 def,
                 class_key,
-                is_staticmethod,
+                flags.is_staticmethod,
                 ty_narrow,
                 errors,
             );
@@ -518,22 +446,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             defining_cls.as_ref().map(|cls| cls.name()),
             &def.name.id,
         );
-        let metadata = FuncMetadata {
-            kind,
-            flags: FuncFlags {
-                is_overload,
-                is_staticmethod,
-                is_classmethod,
-                is_deprecated,
-                is_property_getter,
-                is_property_setter_decorator: false,
-                is_property_setter_with_getter,
-                has_enum_member_decoration,
-                is_override,
-                has_final_decoration,
-                dataclass_transform_metadata,
-            },
-        };
+        let metadata = FuncMetadata { kind, flags };
         let mut ty = Forallable::Function(Function {
             signature: callable,
             metadata: metadata.clone(),
@@ -544,7 +457,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             TParamsSource::Function,
             errors,
         ));
-        ty = self.move_return_tparams(ty);
+        ty = self.move_return_tparams_of_type(ty);
         for (x, _) in decorators.into_iter().rev() {
             ty = self.apply_function_decorator(*x, ty, &metadata, errors);
         }
@@ -557,43 +470,187 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
+    pub fn get_special_decorator(&'a self, decorator: &'a Type) -> Option<SpecialDecorator<'a>> {
+        match decorator.callee_kind() {
+            Some(CalleeKind::Function(FunctionKind::Overload)) => Some(SpecialDecorator::Overload),
+            Some(CalleeKind::Class(ClassKind::StaticMethod(name))) => {
+                Some(SpecialDecorator::StaticMethod(name))
+            }
+            Some(CalleeKind::Class(ClassKind::ClassMethod(name))) => {
+                Some(SpecialDecorator::ClassMethod(name))
+            }
+            Some(CalleeKind::Class(ClassKind::Property(name))) => {
+                Some(SpecialDecorator::Property(name))
+            }
+            Some(CalleeKind::Class(ClassKind::EnumMember)) => Some(SpecialDecorator::EnumMember),
+            Some(CalleeKind::Function(FunctionKind::Override)) => Some(SpecialDecorator::Override),
+            Some(CalleeKind::Function(FunctionKind::Final)) => Some(SpecialDecorator::Final),
+            _ if matches!(decorator, Type::ClassType(cls) if cls.has_qname("warnings", "deprecated")) => {
+                Some(SpecialDecorator::Deprecated)
+            }
+            _ if decorator.is_property_setter_decorator() => {
+                Some(SpecialDecorator::PropertySetter(decorator))
+            }
+            _ if let Type::KwCall(call) = decorator
+                && call.has_function_kind(FunctionKind::DataclassTransform) =>
+            {
+                Some(SpecialDecorator::DataclassTransformCall(&call.keywords))
+            }
+            Some(CalleeKind::Class(ClassKind::EnumNonmember)) => {
+                Some(SpecialDecorator::EnumNonmember)
+            }
+            Some(CalleeKind::Function(FunctionKind::AbstractMethod)) => {
+                Some(SpecialDecorator::AbstractMethod)
+            }
+            _ => None,
+        }
+    }
+
+    /// If the decorator corresponds to a function flag, set the flag appropriately. Returns whether a flag was set.
+    pub fn set_flag_from_special_decorator(
+        &self,
+        flags: &mut FuncFlags,
+        decorator: &SpecialDecorator,
+    ) -> bool {
+        match decorator {
+            SpecialDecorator::Overload => {
+                flags.is_overload = true;
+                true
+            }
+            SpecialDecorator::StaticMethod(_) => {
+                flags.is_staticmethod = true;
+                true
+            }
+            SpecialDecorator::ClassMethod(_) => {
+                flags.is_classmethod = true;
+                true
+            }
+            SpecialDecorator::Property(_) => {
+                flags.is_property_getter = true;
+                true
+            }
+            SpecialDecorator::EnumMember => {
+                flags.has_enum_member_decoration = true;
+                true
+            }
+            SpecialDecorator::Override => {
+                flags.is_override = true;
+                true
+            }
+            SpecialDecorator::Final => {
+                flags.has_final_decoration = true;
+                true
+            }
+            SpecialDecorator::Deprecated => {
+                flags.is_deprecated = true;
+                true
+            }
+            SpecialDecorator::PropertySetter(decorator) => {
+                // When the `setter` attribute is accessed on a property, we return the type
+                // of the raw getter function, but with the `is_property_setter_decorator`
+                // flag set to true; the type does does not accurately model the runtime
+                // (calling the `.setter` decorator does not invoke a getter function),
+                // but makes it convenient to construct the property getter and setter
+                // in our class field logic.
+                //
+                // See AnswersSolver::lookup_attr_from_attribute_base
+                // for details.
+                flags.is_property_setter_with_getter = Some((*decorator).clone());
+                true
+            }
+            SpecialDecorator::DataclassTransformCall(kws) => {
+                flags.dataclass_transform_metadata =
+                    Some(DataclassTransformKeywords::from_type_map(kws));
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn check_top_level_function_decorator(
+        &self,
+        decorator: &SpecialDecorator,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) {
+        let name = match decorator {
+            SpecialDecorator::StaticMethod(name) => name.as_str(),
+            SpecialDecorator::ClassMethod(name) => name.as_str(),
+            SpecialDecorator::Property(name) => name.as_str(),
+            SpecialDecorator::EnumMember => "member",
+            SpecialDecorator::Override => "override",
+            SpecialDecorator::Final => "final",
+            SpecialDecorator::EnumNonmember => "nonmember",
+            SpecialDecorator::AbstractMethod => "abstractmethod",
+            _ => return,
+        };
+        self.error(
+            errors,
+            range,
+            ErrorInfo::Kind(ErrorKind::InvalidDecorator),
+            format!("Decorator `@{name}` can only be used on methods."),
+        );
+    }
+
     /// Check if `ty` is a generic function whose return type is a callable that contains type
     /// parameters that appear nowhere else in `ty`'s signature. If so, we make the return type
     /// generic in those type parameters and remove them from `ty`'s tparams. For example, we turn:
     ///   [T1, T2](x: T1, y: T1) -> ((T2) -> T2)
     /// into:
     ///   [T1](x: T1, y: T1) -> ([T2](T2) -> T2)
-    fn move_return_tparams(&self, ty: Type) -> Type {
-        let returns_callable = |func: &Function| match &func.signature.ret {
+    fn move_return_tparams_of_type(&self, ty: Type) -> Type {
+        match ty {
+            Type::Forall(box Forall {
+                tparams,
+                body: Forallable::Function(func),
+            }) => {
+                let (tparams, signature) =
+                    self.move_return_tparams_of_signature(tparams, func.signature);
+                Forallable::Function(Function {
+                    signature,
+                    metadata: func.metadata,
+                })
+                .forall(tparams)
+            }
+            Type::Forall(box Forall {
+                tparams,
+                body: Forallable::Callable(signature),
+            }) => {
+                let (tparams, signature) =
+                    self.move_return_tparams_of_signature(tparams, signature);
+                Forallable::Callable(signature).forall(tparams)
+            }
+            _ => ty,
+        }
+    }
+
+    fn move_return_tparams_of_signature(
+        &self,
+        tparams: Arc<TParams>,
+        mut signature: Callable,
+    ) -> (Arc<TParams>, Callable) {
+        let returns_callable = match &signature.ret {
             Type::Callable(_) => true,
             Type::Union(ts) => ts.iter().any(|t| matches!(t, Type::Callable(_))),
             _ => false,
         };
-        match ty {
-            Type::Forall(box Forall {
-                tparams,
-                body: Forallable::Function(mut func),
-            }) if returns_callable(&func) => {
-                let (param_tparams, ret_tparams) =
-                    self.split_tparams(&tparams, &func.signature.params);
-                if ret_tparams.is_empty() {
-                    Forallable::Function(func).forall(tparams)
-                } else {
-                    let make_tparams = |tparams: Vec<&TParam>| {
-                        Arc::new(TParams::new(tparams.into_iter().cloned().collect()))
-                    };
-                    // Recursively move type parameters in the return type so that
-                    // things like `[T]() -> (() -> (T) -> T)` get rewritten properly.
-                    let ret = self.move_return_tparams(self.make_generic_return(
-                        func.signature.ret,
-                        make_tparams(ret_tparams),
-                        &func.metadata.kind,
-                    ));
-                    func.signature.ret = ret;
-                    Forallable::Function(func).forall(make_tparams(param_tparams))
-                }
-            }
-            _ => ty,
+        if !returns_callable {
+            return (tparams, signature);
+        }
+        let (param_tparams, ret_tparams) = self.split_tparams(&tparams, &signature.params);
+        if ret_tparams.is_empty() {
+            (tparams, signature)
+        } else {
+            let make_tparams = |tparams: Vec<&TParam>| {
+                Arc::new(TParams::new(tparams.into_iter().cloned().collect()))
+            };
+            // Recursively move type parameters in the return type so that
+            // things like `[T]() -> (() -> (T) -> T)` get rewritten properly.
+            let ret = self.move_return_tparams_of_type(
+                self.make_generic_return(signature.ret, make_tparams(ret_tparams)),
+            );
+            signature.ret = ret;
+            (make_tparams(param_tparams), signature)
         }
     }
 
@@ -613,22 +670,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Turn any top-level Type::Callable(callable) in `ret` into Forall[tparams, callable].
-    fn make_generic_return(&self, ret: Type, tparams: Arc<TParams>, kind: &FunctionKind) -> Type {
+    fn make_generic_return(&self, ret: Type, tparams: Arc<TParams>) -> Type {
         self.distribute_over_union(&ret, |ret| match ret {
             Type::Callable(callable) => {
-                // Generate some dummy function metadata to turn this callable into a Forallable::Function.
-                // TODO(rechen): Add Forallable::Callable so we don't need dummy metadata.
-                let mut ret_id = kind.as_func_id();
-                ret_id.func = Name::new(format!("{}.<return>", ret_id.func));
-                let ret_metadata = FuncMetadata {
-                    kind: FunctionKind::Def(Box::new(ret_id)),
-                    flags: FuncFlags::default(),
-                };
-                Forallable::Function(Function {
-                    signature: (**callable).clone(),
-                    metadata: ret_metadata,
-                })
-                .forall(tparams.clone())
+                Forallable::Callable((**callable).clone()).forall(tparams.clone())
             }
             t => t.clone(),
         })
@@ -647,6 +692,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 signature: *c,
                 metadata: metadata.clone(),
             })),
+            Type::Forall(box Forall {
+                tparams,
+                body: Forallable::Callable(c),
+            }) => Forallable::Function(Function {
+                signature: c,
+                metadata: metadata.clone(),
+            })
+            .forall(tparams),
             // Callback protocol. We convert it to a function so we can add function metadata.
             Type::ClassType(cls)
                 if self
@@ -673,14 +726,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     cls.to_type()
                 }
             }
-            // See `make_generic_return` - sometimes we manually convert a Callable return type
-            // into a Function with dummy metadata, which we need to overwrite.
-            mut t => {
-                t.transform_toplevel_func_metadata(&mut |m: &mut FuncMetadata| {
-                    *m = metadata.clone();
-                });
-                t
-            }
+            t => t,
         }
     }
 
@@ -791,6 +837,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         metadata,
                     }),
                     Type::Function(function) => OverloadType::Function(*function),
+                    Type::Forall(box Forall {
+                        tparams,
+                        body: Forallable::Callable(callable),
+                    }) => OverloadType::Forall(Forall {
+                        tparams,
+                        body: Function {
+                            signature: callable,
+                            metadata,
+                        },
+                    }),
                     Type::Forall(box Forall {
                         tparams,
                         body: Forallable::Function(func),

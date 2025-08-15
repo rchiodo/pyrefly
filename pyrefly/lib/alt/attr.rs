@@ -11,6 +11,8 @@ use dupe::Dupe;
 use pyrefly_python::dunder;
 use pyrefly_python::module::TextRangeWithModule;
 use pyrefly_python::module_name::ModuleName;
+use pyrefly_types::special_form::SpecialForm;
+use pyrefly_types::types::Var;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_set::SmallSet;
@@ -385,7 +387,7 @@ impl LookupResult {
     /// This means we assume it is both readable and writable with that type.
     ///
     /// TODO(stroxler) The uses of this eventually need to be audited, but we
-    /// need to prioiritize the class logic first.
+    /// need to prioritize the class logic first.
     fn found_type(ty: Type) -> Self {
         Self::Found(Attribute::read_write(ty))
     }
@@ -989,7 +991,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// The `is_subset` function (which in most cases will just behave as the
     /// usual subset function) is provided as a callback because we need a way
-    /// to track the recursive hypthothesis.
+    /// to track the recursive hypothesis.
     pub fn is_protocol_subset_at_attr(
         &self,
         got: &Type,
@@ -1441,7 +1443,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 None => LookupResult::NotFound(NotFound::ModuleExport(module)),
             },
             AttributeBase::TypeVar(q, bound) => match (q.kind(), attr_name.as_str()) {
-                // Note that is is for cases like `P.args` where `P` is a param spec, or `T.x` where
+                // Note that this is for cases like `P.args` where `P` is a param spec, or `T.x` where
                 // `T` is a type variable (the latter is illegal, but a user could write it). It is
                 // not for cases where `base` is a term with a quantified type.
                 (QuantifiedKind::ParamSpec, "args") => {
@@ -1694,6 +1696,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    fn force_var_for_attribute_base(&self, var: Var) -> Type {
+        if let Some(_guard) = self.recurser.recurse(var) {
+            self.solver().force_var(var)
+        } else {
+            Type::any_implicit()
+        }
+    }
+
     // This function is intended as a low-level building block
     // Unions or intersections should be handled by callers
     fn as_attribute_base_no_union(&self, ty: Type) -> Option<AttributeBase> {
@@ -1738,6 +1748,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             },
             Type::Type(box Type::Quantified(q)) => Some(AttributeBase::TypeVar(*q, None)),
             Type::Type(box Type::Any(style)) => Some(AttributeBase::TypeAny(style)),
+            // At runtime, these special forms are classes. This has been tested with Python
+            // versions 3.11-3.13. Note that other special forms are classes in some versions, but
+            // their representations aren't stable across versions.
+            //
+            // We don't have access to the class definitions, so the best we can do is model these
+            // as type[Any].
+            Type::Type(box Type::SpecialForm(
+                SpecialForm::Callable
+                | SpecialForm::Generic
+                | SpecialForm::Protocol
+                | SpecialForm::Tuple,
+            )) => Some(AttributeBase::TypeAny(AnyStyle::Implicit)),
+            Type::Type(box Type::SpecialForm(SpecialForm::Type)) => Some(
+                AttributeBase::ClassObject(self.stdlib.builtins_type().class_object().dupe()),
+            ),
             Type::Module(module) => Some(AttributeBase::Module(module)),
             Type::TypeVar(_) | Type::Type(box Type::TypeVar(_)) => {
                 Some(AttributeBase::ClassInstance(self.stdlib.type_var().clone()))
@@ -1784,13 +1809,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.stdlib.ellipsis_type()?.clone(),
             )),
             Type::Forall(forall) => self.as_attribute_base_no_union(forall.body.as_type()),
-            Type::Var(v) => {
-                if let Some(_guard) = self.recurser.recurse(v) {
-                    self.as_attribute_base_no_union(self.solver().force_var(v))
-                } else {
-                    Some(AttributeBase::Any(AnyStyle::Implicit))
-                }
-            }
+            Type::Var(v) => self.as_attribute_base_no_union(self.force_var_for_attribute_base(v)),
+            Type::Type(box Type::Var(v)) => self
+                .as_attribute_base_no_union(Type::type_form(self.force_var_for_attribute_base(v))),
             Type::SuperInstance(box (cls, obj)) => Some(AttributeBase::SuperInstance(cls, obj)),
             // TODO: check to see which ones should have class representations
             Type::Union(_)

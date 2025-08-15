@@ -25,7 +25,6 @@ use ruff_python_ast::StmtClassDef;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
-use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
 
 use crate::binding::base_class::BaseClass;
@@ -67,7 +66,6 @@ use crate::binding::scope::Scope;
 use crate::binding::scope::ScopeKind;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
-use crate::export::special::SpecialExport;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
 use crate::types::types::Type;
@@ -113,35 +111,6 @@ impl<'a> BindingsBuilder<'a> {
         (class_object, class_indices)
     }
 
-    // TODO Zeina: We should expect to extend this beyond the frozen data.
-    fn make_pydantic_metadata(&self, frozen: bool) -> PydanticMetadataBinding {
-        PydanticMetadataBinding { frozen }
-    }
-
-    // The goal of this function is to extract pydantic metadata (https://docs.pydantic.dev/latest/concepts/models/) from expressions.
-    // TODO: Consider propagating the entire expression instead of the value
-    // in case it is aliased.
-    fn extract_frozen_pydantic_metadata(&self, e: &Expr, name: Hashed<&Name>) -> Option<bool> {
-        if name.as_str() == "model_config"
-            && let Some(call) = e.as_call_expr()
-            && let Some(special) = self.as_special_export(&call.func)
-            && special == SpecialExport::PydanticConfigDict
-        {
-            let mut frozen = false;
-            for kw in &call.arguments.keywords {
-                if let Some(arg_name) = &kw.arg
-                    && arg_name.id.as_str() == "frozen"
-                    && let Expr::BooleanLiteral(bl) = &kw.value
-                {
-                    frozen = bl.value;
-                    break;
-                }
-            }
-            return Some(frozen);
-        }
-        None
-    }
-
     pub fn class_def(&mut self, mut x: StmtClassDef) {
         if self.module_info.name() == ModuleName::typing() && x.name.as_str() == "Any" {
             // We special case the definition of `Any`, because it isn't a `SpecialForm`,
@@ -155,7 +124,8 @@ impl<'a> BindingsBuilder<'a> {
         }
 
         let (mut class_object, class_indices) = self.class_object_and_indices(&x.name);
-        let mut pydantic_frozen = false;
+        let mut pydantic_frozen = None;
+        let mut pydantic_validation_alias = None;
         let docstring_range = Docstring::range_from_stmts(x.body.as_slice());
         let body = mem::take(&mut x.body);
         let decorators_with_ranges = self.ensure_and_bind_decorators_with_ranges(
@@ -268,12 +238,13 @@ impl<'a> BindingsBuilder<'a> {
                     } else {
                         match info.as_initial_value() {
                             ClassFieldInBody::InitializedByAssign(e) => {
-                                // TODO Zeina: This logic will need to be updated after we extract more data
-                                let curr_frozen_pydantic_info =
-                                    self.extract_frozen_pydantic_metadata(&e, name);
-                                if let Some(frozen) = curr_frozen_pydantic_info {
-                                    pydantic_frozen = frozen;
-                                }
+                                // TODO Zeina: Replace these calls with a single call
+                                self.extract_frozen_pydantic_metadata(
+                                    &e,
+                                    name,
+                                    &mut pydantic_frozen,
+                                );
+                                self.extract_validation_alias(&e, &mut pydantic_validation_alias);
                                 (
                                     ClassFieldDefinition::AssignedInBody {
                                         value: ExprOrBinding::Expr(e.clone()),
@@ -408,7 +379,8 @@ impl<'a> BindingsBuilder<'a> {
                 decorators: decorators_with_ranges.clone().into_boxed_slice(),
                 is_new_type: false,
                 special_base: None,
-                pydantic_metadata: self.make_pydantic_metadata(pydantic_frozen),
+                pydantic_metadata: self
+                    .make_pydantic_metadata(pydantic_frozen, pydantic_validation_alias),
             },
         );
     }
@@ -814,7 +786,8 @@ impl<'a> BindingsBuilder<'a> {
                 }
             } else if let Some(name) = &kw.arg
                 && name.id == "defaults"
-                && let Expr::Tuple(ExprTuple { elts, .. }) = &kw.value
+                && let Expr::Tuple(ExprTuple { elts, .. }) | Expr::List(ExprList { elts, .. }) =
+                    &kw.value
             {
                 let n_defaults = elts.len();
                 if n_defaults > n_members {
@@ -834,7 +807,7 @@ impl<'a> BindingsBuilder<'a> {
                 self.error(
                     kw.value.range(),
                     ErrorInfo::Kind(ErrorKind::InvalidArgument),
-                    "Unrecognized argument for typed dictionary definition".to_owned(),
+                    "Unrecognized argument for named tuple definition".to_owned(),
                 );
             }
         }

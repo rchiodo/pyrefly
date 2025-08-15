@@ -101,6 +101,53 @@ Hover Result: None
 }
 
 #[test]
+fn lhs_reassignment() {
+    let code = r#"
+xy = 5
+xy = xy + 1
+#^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 | xy = xy + 1
+     ^
+Hover Result: `int`
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn reassignment_scopes_dont_overlap() {
+    let code = r#"
+async def test(vals: dict[int, str]) -> None:
+    for k, v in vals.items(): # 1
+    #   ^
+        k, v
+
+    for k in vals.keys(): # 2
+        k
+        
+    for v in vals.values(): # 3
+        v
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+3 |     for k, v in vals.items(): # 1
+            ^
+Hover Result: `int`
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn import_test() {
     let code = r#"
 import typing
@@ -415,7 +462,7 @@ foo(C)
 # main.py
 11 | foo(C)
        ^
-Hover Result: `(x: type[C]) -> C`
+Hover Result: `(x: type[T]) -> T`
 "#
         .trim(),
         report.trim(),
