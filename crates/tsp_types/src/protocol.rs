@@ -156,55 +156,122 @@ pub enum TSPRequestMethods {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(tag = "method")]
 pub enum TSPRequests {
     #[serde(rename = "typeServer/getSnapshot")]
-    GetSnapshotRequest,
+    GetSnapshotRequest { id: serde_json::Value },
     #[serde(rename = "typeServer/getSupportedProtocolVersion")]
-    GetSupportedProtocolVersionRequest,
+    GetSupportedProtocolVersionRequest { id: serde_json::Value },
     #[serde(rename = "typeServer/getDiagnostics")]
-    GetDiagnosticsRequest(GetDiagnosticsParams),
+    GetDiagnosticsRequest {
+        id: serde_json::Value,
+        params: GetDiagnosticsParams,
+    },
     #[serde(rename = "typeServer/getDiagnosticsVersion")]
-    GetDiagnosticsVersionRequest(GetDiagnosticsVersionParams),
+    GetDiagnosticsVersionRequest {
+        id: serde_json::Value,
+        params: GetDiagnosticsVersionParams,
+    },
     #[serde(rename = "typeServer/getType")]
-    GetTypeRequest(GetTypeParams),
+    GetTypeRequest {
+        id: serde_json::Value,
+        params: GetTypeParams,
+    },
     #[serde(rename = "typeServer/getBuiltinType")]
-    GetBuiltinTypeRequest(GetBuiltinTypeParams),
+    GetBuiltinTypeRequest {
+        id: serde_json::Value,
+        params: GetBuiltinTypeParams,
+    },
     #[serde(rename = "typeServer/getTypeArgs")]
-    GetTypeArgsRequest(GetTypeArgsParams),
+    GetTypeArgsRequest {
+        id: serde_json::Value,
+        params: GetTypeArgsParams,
+    },
     #[serde(rename = "typeServer/searchForTypeAttribute")]
-    SearchForTypeAttributeRequest(SearchForTypeAttributeParams),
+    SearchForTypeAttributeRequest {
+        id: serde_json::Value,
+        params: SearchForTypeAttributeParams,
+    },
     #[serde(rename = "typeServer/getTypeAttributes")]
-    GetTypeAttributesRequest(GetTypeAttributesParams),
+    GetTypeAttributesRequest {
+        id: serde_json::Value,
+        params: GetTypeAttributesParams,
+    },
     #[serde(rename = "typeServer/getOverloads")]
-    GetOverloadsRequest(GetOverloadsParams),
+    GetOverloadsRequest {
+        id: serde_json::Value,
+        params: GetOverloadsParams,
+    },
     #[serde(rename = "typeServer/getMatchingOverloads")]
-    GetMatchingOverloadsRequest(GetMatchingOverloadsParams),
+    GetMatchingOverloadsRequest {
+        id: serde_json::Value,
+        params: GetMatchingOverloadsParams,
+    },
     #[serde(rename = "typeServer/getMetaclass")]
-    GetMetaclassRequest(GetMetaclassParams),
+    GetMetaclassRequest {
+        id: serde_json::Value,
+        params: GetMetaclassParams,
+    },
     #[serde(rename = "typeServer/getTypeOfDeclaration")]
-    GetTypeOfDeclarationRequest(GetTypeOfDeclarationParams),
+    GetTypeOfDeclarationRequest {
+        id: serde_json::Value,
+        params: GetTypeOfDeclarationParams,
+    },
     #[serde(rename = "typeServer/getSymbol")]
-    GetSymbolRequest(GetSymbolParams),
+    GetSymbolRequest {
+        id: serde_json::Value,
+        params: GetSymbolParams,
+    },
     #[serde(rename = "typeServer/getSymbolsForFile")]
-    GetSymbolsForFileRequest(GetSymbolsForFileParams),
+    GetSymbolsForFileRequest {
+        id: serde_json::Value,
+        params: GetSymbolsForFileParams,
+    },
     #[serde(rename = "typeServer/getFunctionParts")]
-    GetFunctionPartsRequest(GetFunctionPartsParams),
+    GetFunctionPartsRequest {
+        id: serde_json::Value,
+        params: GetFunctionPartsParams,
+    },
     #[serde(rename = "typeServer/getRepr")]
-    GetReprRequest(GetReprParams),
+    GetReprRequest {
+        id: serde_json::Value,
+        params: GetReprParams,
+    },
     #[serde(rename = "typeServer/getDocString")]
-    GetDocstringRequest(GetDocstringParams),
+    GetDocstringRequest {
+        id: serde_json::Value,
+        params: GetDocstringParams,
+    },
     #[serde(rename = "typeServer/resolveImportDeclaration")]
-    ResolveImportDeclarationRequest(ResolveImportDeclarationParams),
+    ResolveImportDeclarationRequest {
+        id: serde_json::Value,
+        params: ResolveImportDeclarationParams,
+    },
     #[serde(rename = "typeServer/resolveImport")]
-    ResolveImportRequest(ResolveImportParams),
+    ResolveImportRequest {
+        id: serde_json::Value,
+        params: ResolveImportParams,
+    },
     #[serde(rename = "typeServer/getTypeAliasInfo")]
-    GetTypeAliasInfoRequest(GetTypeAliasInfoParams),
+    GetTypeAliasInfoRequest {
+        id: serde_json::Value,
+        params: GetTypeAliasInfoParams,
+    },
     #[serde(rename = "typeServer/combineTypes")]
-    CombineTypesRequest(CombineTypesParams),
+    CombineTypesRequest {
+        id: serde_json::Value,
+        params: CombineTypesParams,
+    },
     #[serde(rename = "typeServer/createInstanceType")]
-    CreateInstanceTypeRequest(CreateInstanceTypeParams),
+    CreateInstanceTypeRequest {
+        id: serde_json::Value,
+        params: CreateInstanceTypeParams,
+    },
     #[serde(rename = "typeServer/getPythonSearchPaths")]
-    GetPythonSearchPathsRequest(GetPythonSearchPathsParams),
+    GetPythonSearchPathsRequest {
+        id: serde_json::Value,
+        params: GetPythonSearchPathsParams,
+    },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]

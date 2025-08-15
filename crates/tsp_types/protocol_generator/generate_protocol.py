@@ -238,11 +238,12 @@ def generate_request_enum(content: str, requests: list[model.Request]) -> str:
     end_offset = content.find('\n', end_offset)
 
     new_str = "#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]\n"
+    new_str += "#[serde(tag = \"method\")]"
     new_str += "pub enum TSPRequests {\n"
     for request in requests:
         new_str += f"    #[serde(rename = \"{request.method}\")]"
-        request_params = "" if request.params is None else f"({request.params.name})"
-        new_str += f"    {request.typeName}{request_params},\n"
+        request_params = "" if request.params is None else f"\n        params: {request.params.name},"
+        new_str += f"    {request.typeName}{{\n        id: serde_json::Value,{request_params}\n    }},\n"
     new_str += "}\n"
     return content[:end_offset] + "\n\n" + new_str + content[end_offset:]
 

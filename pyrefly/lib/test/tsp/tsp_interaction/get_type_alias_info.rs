@@ -124,13 +124,13 @@ MyDict = Dict[str, int]
             }),
         ],
         expected_messages_from_language_server: vec![
-            // Error response for invalid params
+            // Error response for method not found (since empty params cause deserialization failure)
             Message::Response(Response {
                 id: RequestId::from(2),
                 result: None,
                 error: Some(lsp_server::ResponseError {
-                    code: lsp_server::ErrorCode::InvalidParams as i32, // Changed from ParseError to InvalidParams
-                    message: "$$MATCH_EVERYTHING$$".to_owned(), // Accept any parse error message
+                    code: lsp_server::ErrorCode::MethodNotFound as i32,
+                    message: "$$MATCH_EVERYTHING$$".to_owned(), // Accept any error message
                     data: None,
                 }),
             }),
