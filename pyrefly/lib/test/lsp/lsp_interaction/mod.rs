@@ -19,5 +19,6 @@ mod io;
 mod object_model;
 mod references;
 mod rename;
-pub mod util;
+mod type_definition;
+mod util;
 mod workspace_symbol;
