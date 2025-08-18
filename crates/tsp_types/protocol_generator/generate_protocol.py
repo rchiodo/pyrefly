@@ -1,7 +1,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "lsprotocol=git+https://github.com/microsoft/lsprotocol.git",
+#   "generator @ git+https://github.com/microsoft/lsprotocol.git",
 # ]
 # ///
 """
