@@ -3245,6 +3245,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tsp_types"
+version = "0.1.0"
+dependencies = [
+ "lsp-server",
+ "lsp-types",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "typenum"
 version = "1.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
