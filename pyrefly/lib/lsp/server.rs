@@ -505,7 +505,7 @@ impl Server {
     }
 
     /// Process the event and return next step.
-    pub fn process_event<'a>(
+    fn process_event<'a>(
         &'a self,
         ide_transaction_manager: &mut TransactionManager<'a>,
         canceled_requests: &mut HashSet<RequestId>,
@@ -845,7 +845,7 @@ impl Server {
         Ok(ProcessEvent::Continue)
     }
 
-    pub fn new(
+    fn new(
         connection: Arc<Connection>,
         lsp_queue: LspQueue,
         initialize_params: InitializeParams,
