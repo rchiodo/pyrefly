@@ -1213,3 +1213,154 @@ class Bad2(TypedDict, closed=f()):  # E: Expected literal True or False
     pass
     "#,
 );
+
+testcase!(
+    test_closed_items_and_values,
+    r#"
+from typing import assert_type, TypedDict
+class TD(TypedDict, closed=True):
+    x: int
+def f(td: TD):
+    assert_type(list(td.items()), list[tuple[str, int]])
+    assert_type(list(td.values()), list[int])
+    "#,
+);
+
+testcase!(
+    test_extra_items_and_values,
+    r#"
+from typing import assert_type, TypedDict
+class TD(TypedDict, extra_items=int):
+    x: str
+def f(td: TD):
+    assert_type(list(td.items()), list[tuple[str, int | str]])
+    assert_type(list(td.values()), list[int | str])
+    "#,
+);
+
+testcase!(
+    test_cannot_unclose,
+    r#"
+from typing import TypedDict
+
+class ClosedParent(TypedDict, closed=True):
+    pass
+class BadOpenChild1(ClosedParent, closed=False):  # E: Non-closed TypedDict cannot inherit from closed TypedDict `ClosedParent`
+    pass
+
+class ExtraItemsParent(TypedDict, extra_items=int):
+    pass
+class BadOpenChild2(ExtraItemsParent, closed=False):  # E: Non-closed TypedDict cannot inherit from TypedDict `ExtraItemsParent` with extra items
+    pass
+    "#,
+);
+
+testcase!(
+    test_inherit_closed,
+    r#"
+from typing import assert_type, TypedDict
+class Parent(TypedDict, closed=True):
+    x: int
+class Child(Parent):
+    pass
+def f(child: Child):
+    assert_type(list(child.values()), list[int])
+    "#,
+);
+
+testcase!(
+    test_inherit_extra_items,
+    r#"
+from typing import TypedDict
+class Parent(TypedDict, extra_items=int):
+    x: str
+class Child(Parent):
+    pass
+Child(x='ok', y=42)
+    "#,
+);
+
+testcase!(
+    test_can_close_if_readonly_extra,
+    r#"
+from typing import ReadOnly, TypedDict
+class Parent1(TypedDict, extra_items=int):
+    pass
+class BadChild(Parent1, closed=True):  # E: Closed TypedDict cannot inherit from TypedDict `Parent1` with non-read-only extra items
+    pass
+class Parent2(TypedDict, extra_items=ReadOnly[int]):
+    pass
+class GoodChild1(Parent2, closed=True):
+    pass
+# A closed=False TypedDict (the default) is considered to have extra items of type `ReadOnly[object]`.
+class Parent3(TypedDict):
+    pass
+class GoodChild2(Parent3, closed=True):
+    pass
+class Parent4(TypedDict, closed=False):
+    pass
+class GoodChild3(Parent4, closed=True):
+    pass
+    "#,
+);
+
+testcase!(
+    test_change_extra_items,
+    r#"
+from typing import ReadOnly, TypedDict
+class Parent1(TypedDict, extra_items=int):
+    pass
+class BadChild(Parent1, extra_items=bool):  # E: Cannot change the non-read-only extra items type of TypedDict `Parent1`
+    pass
+class Parent2(TypedDict, extra_items=ReadOnly[int]):
+    pass
+class GoodChild1(Parent2, extra_items=bool):  # ok because Parent2's extra_items is read-only
+    pass
+class Parent3(TypedDict):
+    pass
+class GoodChild2(Parent3, extra_items=bool):  # ok because Parent3 has extra items of type `ReadOnly[object]` by default
+    pass
+    "#,
+);
+
+testcase!(
+    bug = "You shouldn't be able to add items to a closed TypedDict",
+    test_no_add_items_if_closed,
+    r#"
+from typing import TypedDict
+class Parent(TypedDict, closed=True):
+    x: int
+class Child(Parent):
+    y: str  # E: Cannot extend closed TypedDict `Parent` with extra item `y`
+    "#,
+);
+
+testcase!(
+    test_add_items_with_readonly_extra_items,
+    r#"
+from typing import NotRequired, ReadOnly, Required, TypedDict
+class Parent(TypedDict, extra_items=ReadOnly[int]):
+    pass
+class GoodChild(Parent):
+    x: int
+    y: Required[int]
+    z: NotRequired[bool]
+class BadChild(Parent):
+    x: str  # E: `str` is not assignable to `extra_items` type `int` of TypedDict `Parent`
+    "#,
+);
+
+testcase!(
+    test_add_items_with_readwrite_extra_items,
+    r#"
+from typing import NotRequired, Required, TypedDict
+class Parent(TypedDict, extra_items=int):
+    pass
+class GoodChild(Parent):
+    x: NotRequired[int]
+class BadChild1(Parent):
+    x: Required[int]  # E: cannot be extended with required extra item `x`
+class BadChild2(Parent):
+    x: NotRequired[bool]  # E: `bool` is not consistent with `extra_items` type `int`
+    "#,
+);

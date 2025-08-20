@@ -10034,16 +10034,6 @@
     },
     {
       "code": -2,
-      "column": 5,
-      "concise_description": "Key `other_extra_key` is not defined in TypedDict `InheritedMovie`",
-      "description": "Key `other_extra_key` is not defined in TypedDict `InheritedMovie`",
-      "line": 43,
-      "name": "typed-dict-key-error",
-      "stop_column": 22,
-      "stop_line": 43
-    },
-    {
-      "code": -2,
       "column": 7,
       "concise_description": "Expected literal True or False for keyword `closed`, got instance of `bool`",
       "description": "Expected literal True or False for keyword `closed`, got instance of `bool`",
@@ -10051,6 +10041,66 @@
       "name": "bad-typed-dict",
       "stop_column": 16,
       "stop_line": 49
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Non-closed TypedDict cannot inherit from closed TypedDict `ClosedBase`",
+      "description": "Non-closed TypedDict cannot inherit from closed TypedDict `ClosedBase`",
+      "line": 67,
+      "name": "bad-typed-dict",
+      "stop_column": 20,
+      "stop_line": 67
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Cannot extend closed TypedDict `ClosedBase` with extra item `age`",
+      "description": "Cannot extend closed TypedDict `ClosedBase` with extra item `age`",
+      "line": 68,
+      "name": "typed-dict-key-error",
+      "stop_column": 8,
+      "stop_line": 68
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Non-closed TypedDict cannot inherit from TypedDict `ExtraItemsBase` with extra items",
+      "description": "Non-closed TypedDict cannot inherit from TypedDict `ExtraItemsBase` with extra items",
+      "line": 73,
+      "name": "bad-typed-dict",
+      "stop_column": 20,
+      "stop_line": 73
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "TypedDict `ExtraItemsBase` with non-read-only `extra_items` cannot be extended with required extra item `age`",
+      "description": "TypedDict `ExtraItemsBase` with non-read-only `extra_items` cannot be extended with required extra item `age`",
+      "line": 74,
+      "name": "typed-dict-key-error",
+      "stop_column": 8,
+      "stop_line": 74
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Cannot extend closed TypedDict `MovieA` with extra item `age`",
+      "description": "Cannot extend closed TypedDict `MovieA` with extra item `age`",
+      "line": 92,
+      "name": "typed-dict-key-error",
+      "stop_column": 8,
+      "stop_line": 92
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Cannot extend closed TypedDict `MovieB` with extra item `age`",
+      "description": "Cannot extend closed TypedDict `MovieB` with extra item `age`",
+      "line": 95,
+      "name": "typed-dict-key-error",
+      "stop_column": 8,
+      "stop_line": 95
     },
     {
       "code": -2,
@@ -10114,6 +10164,36 @@
     },
     {
       "code": -2,
+      "column": 7,
+      "concise_description": "Cannot change the non-read-only extra items type of TypedDict `Parent`",
+      "description": "Cannot change the non-read-only extra items type of TypedDict `Parent`",
+      "line": 171,
+      "name": "bad-typed-dict",
+      "stop_column": 12,
+      "stop_line": 171
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "TypedDict `MovieBase2` with non-read-only `extra_items` cannot be extended with required extra item `year`",
+      "description": "TypedDict `MovieBase2` with non-read-only `extra_items` cannot be extended with required extra item `year`",
+      "line": 182,
+      "name": "typed-dict-key-error",
+      "stop_column": 9,
+      "stop_line": 182
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "`int` is not consistent with `extra_items` type `int | None` of TypedDict `MovieBase2`",
+      "description": "`int` is not consistent with `extra_items` type `int | None` of TypedDict `MovieBase2`",
+      "line": 185,
+      "name": "typed-dict-key-error",
+      "stop_column": 9,
+      "stop_line": 185
+    },
+    {
+      "code": -2,
       "column": 47,
       "concise_description": "Unexpected keyword argument `year` in function `NonClosedMovie.__init__`",
       "description": "Unexpected keyword argument `year` in function `NonClosedMovie.__init__`",
@@ -10174,26 +10254,6 @@
     },
     {
       "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(list[tuple[str, object]], list[tuple[str, int | str]]) failed",
-      "description": "assert_type(list[tuple[str, object]], list[tuple[str, int | str]]) failed",
-      "line": 301,
-      "name": "assert-type",
-      "stop_column": 66,
-      "stop_line": 301
-    },
-    {
-      "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(list[object], list[int | str]) failed",
-      "description": "assert_type(list[object], list[int | str]) failed",
-      "line": 302,
-      "name": "assert-type",
-      "stop_column": 55,
-      "stop_line": 302
-    },
-    {
-      "code": -2,
       "column": 25,
       "concise_description": "`TypedDict[IntDict]` is not assignable to `dict[str, int]`",
       "description": "`TypedDict[IntDict]` is not assignable to `dict[str, int]`",
@@ -10201,16 +10261,6 @@
       "name": "bad-assignment",
       "stop_column": 26,
       "stop_line": 317
-    },
-    {
-      "code": -2,
-      "column": 52,
-      "concise_description": "Key `bar` is not defined in TypedDict `IntDictWithNum`",
-      "description": "Key `bar` is not defined in TypedDict `IntDictWithNum`",
-      "line": 320,
-      "name": "typed-dict-key-error",
-      "stop_column": 57,
-      "stop_line": 320
     },
     {
       "code": -2,

@@ -9,7 +9,6 @@
 
 use std::io::Cursor;
 use std::iter;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -327,6 +326,7 @@ impl Query {
             match ty {
                 Type::ClassType(c) => qname_to_string(c.qname()),
                 Type::ClassDef(c) => qname_to_string(c.qname()),
+                Type::TypedDict(d) => qname_to_string(d.qname()),
                 Type::Literal(Lit::Str(_)) | Type::LiteralString => String::from("builtins.str"),
                 Type::Literal(Lit::Int(_)) => String::from("builtins.int"),
                 Type::Literal(Lit::Bool(_)) => String::from("builtins.bool"),
@@ -403,18 +403,22 @@ impl Query {
                     );
                     if defs.len() == 1 {
                         // TODO: decide what do to with multiple definitions
-                        if let DefinitionMetadata::Variable(_) = defs[0].metadata {
-                            let name = module_info.code_at(defs[0].definition_range);
-                            vec![Callee {
-                                kind: String::from(CALLEE_KIND_FUNCTION),
-                                target: format!("$parameter${name}"),
-                                class_name: None,
-                            }]
-                        } else {
-                            panic!(
-                                "callable ty - unexpected metadata kind, {:?}",
-                                defs[0].metadata
-                            )
+                        match &defs[0].metadata {
+                            DefinitionMetadata::Variable(_) => {
+                                let name = module_info.code_at(defs[0].definition_range);
+                                vec![Callee {
+                                    kind: String::from(CALLEE_KIND_FUNCTION),
+                                    target: format!("$parameter${name}"),
+                                    class_name: None,
+                                }]
+                            }
+                            DefinitionMetadata::Attribute(_) => {
+                                // cannot determine callee for case a.b() when b is callable but not function
+                                // (i.e instance of the class defining __call__)
+                                // - return no results similar to pyre1
+                                vec![]
+                            }
+                            x => panic!("callable ty - unexpected metadata kind, {:?}", x),
                         }
                     } else {
                         panic!("callable ty not supported yet, {defs:?}")
@@ -457,7 +461,10 @@ impl Query {
                     },
                 ),
                 Type::Any(_) => vec![],
-                _ => panic!("unexpected type: {ty:?}"),
+                _ => panic!(
+                    "unexpected type at [{}]: {ty:?}",
+                    module_info.display_range(callee_range)
+                ),
             }
         }
 
@@ -578,31 +585,110 @@ impl Query {
     /// Given an expression, which contains qualified types, guess which imports to add.
     ///
     /// For example `foo.bar.baz` will return `[foo.bar]`.
-    fn find_imports(x: &ModModule) -> Vec<String> {
-        fn g(x: &ExprAttribute) -> Option<Vec<&Name>> {
-            match &*x.value {
-                Expr::Attribute(x) => {
-                    let mut res = g(x)?;
-                    res.push(&x.attr.id);
+    ///
+    /// The expression comes in as a module because we are parsing it from a raw string
+    /// input; we expect it to actually be a type expression.
+    fn find_imports(module: &ModModule, t: &Transaction, h: &Handle) -> Vec<String> {
+        fn compute_prefix(attr: &ExprAttribute) -> Option<Vec<&Name>> {
+            match &*attr.value {
+                Expr::Attribute(base) => {
+                    let mut res = compute_prefix(base)?;
+                    res.push(&base.attr.id);
                     Some(res)
                 }
-                Expr::Name(x) => Some(vec![&x.id]),
+                Expr::Name(base) => Some(vec![&base.id]),
                 _ => None,
             }
         }
 
-        fn f(x: &Expr, res: &mut SmallSet<String>) {
-            if let Expr::Attribute(x) = x {
-                if let Some(module) = g(x) {
-                    res.insert(module.map(|x| x.as_str()).join("."));
+        fn collect_attribute_prefixes(
+            x: &Expr,
+            res: &mut SmallSet<String>,
+            t: &Transaction,
+            h: &Handle,
+        ) {
+            if let Expr::Attribute(attr) = x {
+                // `attr` is a qname of a type. Get its prefix, which is likely the
+                // module where it is defined.
+                if let Some(mut names) = compute_prefix(attr) {
+                    // The initial prefix may not be an actual module, if the type in question
+                    // is a nested class. Search recursively for the longest part of the prefix
+                    // that is a module, and assume that is where the type is defined.
+                    //
+                    // Note: in messy codebases that include name collisions between submodules
+                    // and attributes of `__init__.py` modules, this rule can fail (in this
+                    // scenario it's also possible for the qname to be ambiguous, as in two
+                    // distinct types have the same qname). We do not support such codebases.
+                    loop {
+                        if !names.is_empty() {
+                            let module_name = names.map(|name| name.as_str()).join(".");
+                            if t.import_handle(
+                                h,
+                                ModuleName::from_string(module_name.clone()),
+                                None,
+                            )
+                            .is_ok()
+                            {
+                                // We found the longest matching prefix, assume this is the import.
+                                res.insert(names.map(|name| name.as_str()).join("."));
+                                break;
+                            } else {
+                                // No module at this prefix, keep looking.
+                                names.pop();
+                            }
+                        } else {
+                            // If we get here, either the name is undefined or it is is defined in `builtins`;
+                            // either way we can skip it.
+                            break;
+                        }
+                    }
                 }
             } else {
-                x.recurse(&mut |x| f(x, res));
+                x.recurse(&mut |x| collect_attribute_prefixes(x, res, t, h));
             }
         }
         let mut res = SmallSet::new();
-        x.visit(&mut |x| f(x, &mut res));
+        module.visit(&mut |x| collect_attribute_prefixes(x, &mut res, t, h));
         res.into_iter().collect()
+    }
+
+    /// Check a snippet of code; used as part of performing is_subtype checks via the query API.
+    fn check_code_snippet(
+        &self,
+        name: ModuleName,
+        path: PathBuf,
+        lt: &str,
+        gt: &str,
+        types: String,
+        check: &'static str,
+    ) -> Result<bool, String> {
+        let mut t = self.state.transaction();
+        let h = self.make_handle(name, ModulePath::memory(path.clone()));
+        let imported = Query::find_imports(&Ast::parse(&types).0, &t, &h);
+        let imports = imported.map(|x| format!("import {x}\n")).join("");
+
+        // First, make sure that the types are well-formed and importable, return `Err` if not
+        let before = format!("{imports}\n{types}\n");
+        t.set_memory(vec![(path.clone(), Some(Arc::new(before.clone())))]);
+        t.run(&[(h.dupe(), Require::Everything)]);
+        let errors = t.get_errors([&h]).collect_errors();
+        if !errors.shown.is_empty() {
+            let mut res = Vec::new();
+            for e in errors.shown {
+                e.write_line(&mut Cursor::new(&mut res), true).unwrap();
+            }
+            return Err(format!(
+                "Errors from is_subtype `{lt}` <: `{gt}`\n{}\n\nSource code:\n{before}",
+                str::from_utf8(&res).unwrap_or("UTF8 error")
+            ));
+        }
+
+        // Now that we know the types are valid, check a snippet to do the actual subtype test.
+        let after = format!("{imports}\n{types}\n{check}");
+        t.set_memory(vec![(path, Some(Arc::new(after)))]);
+        t.run(&[(h.dupe(), Require::Everything)]);
+        let errors = t.get_errors([&h]).collect_errors();
+        Ok(errors.shown.is_empty())
     }
 
     /// Return `Err` if you can't resolve them to types, otherwise return `lt <: gt`.
@@ -613,45 +699,7 @@ impl Query {
         lt: &str,
         gt: &str,
     ) -> Result<bool, String> {
-        fn do_check(
-            t: &mut Transaction<'_>,
-            h: Handle,
-            path: &Path,
-            lt: &str,
-            gt: &str,
-            types: String,
-            check: &'static str,
-        ) -> Result<bool, String> {
-            let imported = Query::find_imports(&Ast::parse(&types).0);
-            let imports = imported.map(|x| format!("import {x}\n")).join("");
-
-            // First, make sure that the types are well-formed and importable, return `Err` if not
-            let before = format!("{imports}\n{types}\n");
-            t.set_memory(vec![(path.to_owned(), Some(Arc::new(before.clone())))]);
-            t.run(&[(h.dupe(), Require::Everything)]);
-            let errors = t.get_errors([&h]).collect_errors();
-            if !errors.shown.is_empty() {
-                let mut res = Vec::new();
-                for e in errors.shown {
-                    e.write_line(&mut Cursor::new(&mut res), true).unwrap();
-                }
-                return Err(format!(
-                    "Errors from is_subtype `{lt}` <: `{gt}`\n{}\n\nSource code:\n{before}",
-                    str::from_utf8(&res).unwrap_or("UTF8 error")
-                ));
-            }
-
-            // Now that we know the types are valid, check a snippet to do the actual subtype test.
-            let after = format!("{imports}\n{types}\n{check}");
-            t.set_memory(vec![(path.to_owned(), Some(Arc::new(after)))]);
-            t.run(&[(h.dupe(), Require::Everything)]);
-            let errors = t.get_errors([&h]).collect_errors();
-            Ok(errors.shown.is_empty())
-        }
-
-        let mut t = self.state.transaction();
-        let h = self.make_handle(name, ModulePath::memory(path.clone()));
-
+        println!("At is_subtype top level");
         if gt == "TypedDictionary" || gt == "NonTotalTypedDictionary" {
             // For backward compatibility with Pyre, we allow `is_subset` comparison for checking if something
             // is a TypedDict. That isn't actually a valid subtype relationship, so we look for magic
@@ -659,12 +707,12 @@ impl Query {
             let types = format!("type pyrefly_lt = ({lt})");
             let check =
                 "pyrefly_lt.__required_keys__, pyrefly_lt.__optional_keys__, pyrefly_lt.__total__";
-            do_check(&mut t, h, &path, lt, gt, types, check)
+            self.check_code_snippet(name, path, lt, gt, types, check)
         } else {
             // In the normal case, synthesize a function whose return is a type error if the subset fails.
             let types = format!("type pyrefly_lt = ({lt})\ntype pyrefly_gt = ({gt})\n");
             let check = "def pyrefly_func(x: pyrefly_lt) -> pyrefly_gt:\n    return x";
-            do_check(&mut t, h, &path, lt, gt, types, check)
+            self.check_code_snippet(name, path, lt, gt, types, check)
         }
     }
 }

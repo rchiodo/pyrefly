@@ -14,6 +14,7 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::annotation::Annotation;
 use pyrefly_types::type_info::TypeInfo;
+use pyrefly_types::typed_dict::ExtraItem;
 use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::prelude::SliceExt;
@@ -142,6 +143,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 "metaclass" => Either::Left(x),
                 _ => Either::Right((n.clone(), self.expr_class_keyword(x, errors))),
             });
+
         let base_metaclasses = bases_with_metadata
             .iter()
             .filter_map(|(b, metadata)| metadata.metaclass().map(|m| (b.name(), m)))
@@ -186,9 +188,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 "Named tuples do not support multiple inheritance".to_owned(),
             );
         }
-
-        let pydantic_metadata =
-            self.pydantic_metadata(&bases_with_metadata, pydantic_metadata_binding);
+        // collect pydantic metadata
+        let (pydantic_validate_by_alias, pydantic_validate_by_name) =
+            self.extract_pydantic_validation_alias(&keywords);
+        let pydantic_metadata = self.pydantic_metadata(
+            &bases_with_metadata,
+            pydantic_metadata_binding,
+            pydantic_validate_by_alias,
+            pydantic_validate_by_name,
+        );
 
         let is_typed_dict = has_typed_dict_base_class
             || bases_with_metadata
@@ -279,6 +287,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let keywords =
             keywords.into_map(|(name, annot)| (name, annot.ty.unwrap_or_else(Type::any_implicit)));
 
+        // TODO Zeina: Consider not passing pydantic metadata here and only pass the info we need for downstream
         ClassMetadata::new(
             bases,
             metaclass,
@@ -367,6 +376,27 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         protocol_metadata
     }
 
+    fn extract_pydantic_validation_alias(
+        &self,
+        keywords: &Vec<(Name, Annotation)>,
+    ) -> (bool, bool) {
+        let mut pydantic_validate_by_alias = true;
+        let mut pydantic_validate_by_name = false;
+        // collect pydantic validation data from class keywords
+        for (name, ann) in keywords {
+            match name.as_str() {
+                "validate_by_alias" => {
+                    pydantic_validate_by_alias = ann.get_type().as_bool().unwrap_or(true);
+                }
+                "validate_by_name" => {
+                    pydantic_validate_by_name = ann.get_type().as_bool().unwrap_or(false);
+                }
+                _ => {}
+            }
+        }
+        (pydantic_validate_by_alias, pydantic_validate_by_name)
+    }
+
     fn named_tuple_metadata(
         &self,
         cls: &Class,
@@ -393,6 +423,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
         pydantic_metadata_binding: &PydanticMetadataBinding,
+        class_validate_by_alias: bool,
+        class_validate_by_name: bool,
     ) -> Option<PydanticMetadata> {
         let has_pydantic_base_model_base_class =
             bases_with_metadata.iter().any(|(base_class_object, _)| {
@@ -406,9 +438,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Determine final PydanticMetadata only if the class inherits from BaseModel in the MRO
         match pydantic_metadata_binding {
-            PydanticMetadataBinding { frozen } if is_pydantic_model => {
-                Some(PydanticMetadata { frozen: *frozen })
-            }
+            PydanticMetadataBinding { frozen } if is_pydantic_model => Some(PydanticMetadata {
+                frozen: *frozen,
+                class_validate_by_alias,
+                class_validate_by_name,
+            }),
             _ => None,
         }
     }
@@ -442,6 +476,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ("closed", Type::Literal(Lit::Bool(true))) => {
                         extra_items = Some(ExtraItems::Closed);
                     }
+                    ("closed", Type::Literal(Lit::Bool(false))) => {
+                        // Note that we need to distinguish between explicitly setting and
+                        // implicitly defaulting to `closed=False` in order to catch illegal
+                        // attempts to open a closed TypedDict.
+                        extra_items = Some(ExtraItems::Default);
+                    }
                     ("extra_items", value_ty) => {
                         let ty = self.untype_opt(value_ty.clone(), cls.range()).unwrap_or_else(|| {
                             self.error(
@@ -453,7 +493,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         });
                         extra_items = Some(ExtraItems::extra(ty, &value.qualifiers));
                     }
-                    ("total" | "closed", Type::Literal(Lit::Bool(_))) => {}
+                    ("total", Type::Literal(Lit::Bool(_))) => {}
                     ("total" | "closed", value_ty) => {
                         self.error(
                             errors,
@@ -481,13 +521,87 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             let fields =
                 self.calculate_typed_dict_metadata_fields(cls, bases_with_metadata, is_total);
+            let extra_items = self.calculate_typed_dict_extra_items(
+                extra_items,
+                bases_with_metadata,
+                cls.range(),
+                errors,
+            );
             Some(TypedDictMetadata {
                 fields,
-                extra_items: extra_items.unwrap_or(ExtraItems::Default),
+                extra_items,
             })
         } else {
             None
         }
+    }
+
+    fn calculate_typed_dict_extra_items(
+        &self,
+        cur_extra_items: Option<ExtraItems>,
+        bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> ExtraItems {
+        let inherited_extra_items = bases_with_metadata.iter().find_map(|(base, metadata)| {
+            metadata
+                .typed_dict_metadata()
+                .map(|td| (base, &td.extra_items))
+        });
+        if cur_extra_items.is_none() || inherited_extra_items.is_none() {
+            return cur_extra_items.unwrap_or_else(|| {
+                inherited_extra_items.map_or(ExtraItems::Default, |(_, extra)| extra.clone())
+            });
+        }
+        let cur_extra_items = cur_extra_items.unwrap();
+        let (base_typed_dict, inherited_extra_items) = inherited_extra_items.unwrap();
+        match (&cur_extra_items, inherited_extra_items) {
+            (ExtraItems::Default, ExtraItems::Closed | ExtraItems::Extra(_)) => {
+                let base = if *inherited_extra_items == ExtraItems::Closed {
+                    format!("closed TypedDict `{}`", base_typed_dict.name())
+                } else {
+                    format!("TypedDict `{}` with extra items", base_typed_dict.name())
+                };
+                self.error(
+                    errors,
+                    range,
+                    ErrorInfo::Kind(ErrorKind::BadTypedDict),
+                    format!("Non-closed TypedDict cannot inherit from {base}"),
+                );
+            }
+            (
+                ExtraItems::Closed,
+                ExtraItems::Extra(ExtraItem {
+                    read_only: false, ..
+                }),
+            ) => {
+                self.error(
+                    errors,
+                    range,
+                    ErrorInfo::Kind(ErrorKind::BadTypedDict),
+                    format!("Closed TypedDict cannot inherit from TypedDict `{}` with non-read-only extra items", base_typed_dict.name()),
+                );
+            }
+            (
+                ExtraItems::Extra(ExtraItem { ty: cur_ty, .. }),
+                ExtraItems::Extra(ExtraItem {
+                    ty: inherited_ty,
+                    read_only: false,
+                }),
+            ) if cur_ty != inherited_ty => {
+                self.error(
+                    errors,
+                    range,
+                    ErrorInfo::Kind(ErrorKind::BadTypedDict),
+                    format!(
+                        "Cannot change the non-read-only extra items type of TypedDict `{}`",
+                        base_typed_dict.name()
+                    ),
+                );
+            }
+            _ => {}
+        }
+        cur_extra_items
     }
 
     fn enum_metadata(
@@ -628,6 +742,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(m)
         });
 
+        // TODO Zeina: Upgrade this logic to include validate by name and alias
+        // specifically, a single name is not enough to determine the downstream behavior
         let mut alias_keyword = DataclassFieldKeywords::ALIAS;
         if pydantic_metadata.is_some() {
             alias_keyword = VALIDATION_ALIAS;

@@ -229,6 +229,8 @@ impl Workspaces {
                         env.site_package_path = site_package_path;
                         config.interpreters.set_lsp_python_interpreter(interpreter);
                         config.python_environment = env;
+                        // skip interpreter query because we already have the interpreter from the workspace
+                        config.interpreters.skip_interpreter_query = true;
                     }
                 })
             };
@@ -273,8 +275,13 @@ impl Workspaces {
         scope_uri: &Option<Url>,
         config: Value,
     ) {
-        let config = match serde_json::from_value::<LspConfig>(config) {
-            Err(_) => return,
+        let config = match serde_json::from_value::<LspConfig>(config.clone()) {
+            Err(e) => {
+                eprintln!(
+                    "Could not decode `LspConfig` from {config:?}, skipping client configuration request: {e}."
+                );
+                return;
+            }
             Ok(x) => x,
         };
 

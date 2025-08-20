@@ -16,6 +16,8 @@ use pyrefly_derive::VisitMut;
 use pyrefly_python::dunder;
 use pyrefly_types::callable::Params;
 use pyrefly_types::simplify::unions;
+use pyrefly_types::typed_dict::ExtraItem;
+use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_util::owner::Owner;
 use pyrefly_util::prelude::ResultExt;
 use ruff_python_ast::Expr;
@@ -905,6 +907,68 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         format!("`{q}` may only be used for TypedDict members"),
                     );
                 }
+            }
+        }
+        if let Some(td) = metadata.typed_dict_metadata()
+            && let Some(is_total) = td.fields.get(name)
+        {
+            // If this is a TypedDict field, make sure it is compatible with any inherited metadata
+            // restricting extra items.
+            let inherited_extra = metadata.base_class_objects().iter().find_map(|base| {
+                self.get_metadata_for_class(base)
+                    .typed_dict_metadata()
+                    .map(|m| (base, m.extra_items.clone()))
+            });
+            match inherited_extra {
+                Some((base, ExtraItems::Closed)) => {
+                    self.error(
+                        errors,
+                        range,
+                        ErrorInfo::Kind(ErrorKind::TypedDictKeyError),
+                        format!(
+                            "Cannot extend closed TypedDict `{}` with extra item `{}`",
+                            base.name(),
+                            name
+                        ),
+                    );
+                }
+                Some((base, ExtraItems::Extra(ExtraItem { ty, read_only })))
+                    if let Some(annot) = &direct_annotation =>
+                {
+                    let field_ty = annot.get_type();
+                    if read_only {
+                        // The field type needs to be assignable to the extra_items type.
+                        if !self.is_subset_eq(field_ty, &ty) {
+                            self.error(
+                                errors, range, ErrorInfo::Kind(ErrorKind::TypedDictKeyError),
+                            format!(
+                                "`{}` is not assignable to `extra_items` type `{}` of TypedDict `{}`",
+                                self.for_display(field_ty.clone()), self.for_display(ty), base.name()));
+                        }
+                    } else {
+                        // The field needs to be non-required and its type consistent with the extra_items type.
+                        let required = annot.has_qualifier(&Qualifier::Required)
+                            || (*is_total && !annot.has_qualifier(&Qualifier::NotRequired));
+                        if required {
+                            self.error(
+                                errors,
+                                range,
+                                ErrorInfo::Kind(ErrorKind::TypedDictKeyError),
+                                format!("TypedDict `{}` with non-read-only `extra_items` cannot be extended with required extra item `{}`", base.name(), name),
+                            );
+                        } else if !self.is_equal(field_ty, &ty) {
+                            self.error(
+                                errors,
+                                range,
+                                ErrorInfo::Kind(ErrorKind::TypedDictKeyError),
+                                format!(
+                                    "`{}` is not consistent with `extra_items` type `{}` of TypedDict `{}`",
+                                    self.for_display(field_ty.clone()), self.for_display(ty), base.name()),
+                            );
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
