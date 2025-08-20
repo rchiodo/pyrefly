@@ -19,14 +19,15 @@ use crate::commands::lsp::IndexingMode;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
 use crate::lsp::server::ProcessEvent;
-use crate::lsp::server::Server;
 use crate::lsp::server::capabilities;
 use crate::lsp::server::dispatch_lsp_events;
+use crate::lsp::server_interface::LspServerFactory;
+use crate::lsp::server_interface::LspServerInterface;
 use crate::lsp::transaction_manager::TransactionManager;
 
 /// TSP server that delegates to LSP server infrastructure while handling only TSP requests
 pub struct TspServer {
-    pub inner: Server,
+    pub inner: Box<dyn LspServerInterface>,
 }
 
 impl TspServer {
@@ -37,7 +38,7 @@ impl TspServer {
         indexing_mode: IndexingMode,
         workspace_indexing_limit: usize,
     ) -> Self {
-        let inner = Server::new(
+        let inner = LspServerFactory::create(
             connection,
             lsp_queue,
             initialization_params,

@@ -178,6 +178,7 @@ use crate::lsp::module_helpers::to_lsp_location;
 use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
+use crate::lsp::server_interface::LspServerInterface;
 use crate::lsp::transaction_manager::TransactionManager;
 use crate::lsp::workspace::LspAnalysisConfig;
 use crate::lsp::workspace::Workspace;
@@ -229,8 +230,8 @@ pub struct Server {
     initialize_params: InitializeParams,
     indexing_mode: IndexingMode,
     workspace_indexing_limit: usize,
-    pub state: Arc<State>,
-    pub open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
+    state: Arc<State>,
+    open_files: Arc<RwLock<HashMap<PathBuf, Arc<String>>>>,
     /// A set of configs where we have already indexed all the files within the config.
     indexed_configs: Mutex<HashSet<ArcId<ConfigFile>>>,
     /// A set of workspaces where we have already performed best-effort indexing.
@@ -239,7 +240,7 @@ pub struct Server {
     /// we rely on file watchers to catch up.
     indexed_workspaces: Mutex<HashSet<PathBuf>>,
     cancellation_handles: Arc<Mutex<HashMap<RequestId, CancellationHandle>>>,
-    pub workspaces: Arc<Workspaces>,
+    workspaces: Arc<Workspaces>,
     outgoing_request_id: AtomicI32,
     outgoing_requests: Mutex<HashMap<RequestId, Request>>,
     filewatcher_registered: AtomicBool,
@@ -445,7 +446,7 @@ pub fn lsp_loop(
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
-    pub fn extract_request_params_or_send_err_response<T>(
+    fn extract_request_params_or_send_err_response<T>(
         &self,
         params: Result<T::Params, serde_json::Error>,
         id: &RequestId,
@@ -1896,5 +1897,26 @@ impl Server {
 
     fn invalidate_config(&self) {
         self.invalidate(|t| t.invalidate_config());
+    }
+}
+
+impl LspServerInterface for Server {
+    fn send_response(&self, response: Response) {
+        self.send_response(response)
+    }
+
+    fn process_event<'a>(
+        &'a self,
+        ide_transaction_manager: &mut TransactionManager<'a>,
+        canceled_requests: &mut HashSet<RequestId>,
+        subsequent_mutation: bool,
+        event: LspEvent,
+    ) -> anyhow::Result<ProcessEvent> {
+        self.process_event(
+            ide_transaction_manager,
+            canceled_requests,
+            subsequent_mutation,
+            event,
+        )
     }
 }

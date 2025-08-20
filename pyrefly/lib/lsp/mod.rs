@@ -10,5 +10,6 @@ pub mod lsp;
 pub mod module_helpers;
 pub mod queue;
 pub mod server;
+pub mod server_interface;
 pub mod transaction_manager;
 pub mod workspace;
