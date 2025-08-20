@@ -128,4 +128,3 @@ pub fn tsp_capabilities(
     // but will only respond to TSP protocol requests
     capabilities(indexing_mode, initialization_params)
 }
-
