@@ -18,11 +18,11 @@ use lsp_types::ServerCapabilities;
 use crate::commands::lsp::IndexingMode;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
+use crate::lsp::server::LspServerFactory;
+use crate::lsp::server::LspServerInterface;
 use crate::lsp::server::ProcessEvent;
 use crate::lsp::server::capabilities;
 use crate::lsp::server::dispatch_lsp_events;
-use crate::lsp::server_interface::LspServerFactory;
-use crate::lsp::server_interface::LspServerInterface;
 use crate::lsp::transaction_manager::TransactionManager;
 
 /// TSP server that delegates to LSP server infrastructure while handling only TSP requests

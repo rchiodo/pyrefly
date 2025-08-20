@@ -178,7 +178,6 @@ use crate::lsp::module_helpers::to_lsp_location;
 use crate::lsp::module_helpers::to_real_path;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
-use crate::lsp::server_interface::LspServerInterface;
 use crate::lsp::transaction_manager::TransactionManager;
 use crate::lsp::workspace::LspAnalysisConfig;
 use crate::lsp::workspace::Workspace;
@@ -190,6 +189,43 @@ use crate::state::require::Require;
 use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
+
+/// Interface exposed for outside modules to interact with the LSP server
+pub trait LspServerInterface {
+    /// Send a response back to the LSP client
+    fn send_response(&self, response: Response);
+
+    /// Process an LSP event and return the next step
+    fn process_event<'a>(
+        &'a self,
+        ide_transaction_manager: &mut TransactionManager<'a>,
+        canceled_requests: &mut HashSet<RequestId>,
+        subsequent_mutation: bool,
+        event: LspEvent,
+    ) -> anyhow::Result<ProcessEvent>;
+}
+
+/// Factory for creating LSP server instances that implement LspServerInterface
+pub struct LspServerFactory;
+
+impl LspServerFactory {
+    /// Create a new LSP server instance
+    pub fn create(
+        connection: Arc<Connection>,
+        lsp_queue: LspQueue,
+        initialization_params: InitializeParams,
+        indexing_mode: IndexingMode,
+        workspace_indexing_limit: usize,
+    ) -> Box<dyn LspServerInterface> {
+        Box::new(Server::new(
+            connection,
+            lsp_queue,
+            initialization_params,
+            indexing_mode,
+            workspace_indexing_limit,
+        ))
+    }
+}
 
 #[derive(Clone, Dupe)]
 struct ServerConnection(Arc<Connection>);
@@ -222,7 +258,7 @@ impl ServerConnection {
     }
 }
 
-pub struct Server {
+struct Server {
     connection: ServerConnection,
     /// A thread pool of size one for heavy read operations on the State
     async_state_read_threads: ThreadPool,
