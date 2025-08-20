@@ -76,7 +76,7 @@ impl TspServer {
         _request: &Request,
     ) -> anyhow::Result<bool> {
         // TODO: Add handling for TSP requests
-        return Ok(false);
+        Ok(false);
     }
 }
 
