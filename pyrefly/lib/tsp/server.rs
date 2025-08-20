@@ -35,8 +35,15 @@ impl TspServer {
         lsp_queue: LspQueue,
         initialization_params: InitializeParams,
         indexing_mode: IndexingMode,
+        workspace_indexing_limit: usize,
     ) -> Self {
-        let inner = Server::new(connection, lsp_queue, initialization_params, indexing_mode);
+        let inner = Server::new(
+            connection,
+            lsp_queue,
+            initialization_params,
+            indexing_mode,
+            workspace_indexing_limit,
+        );
         Self { inner }
     }
 
@@ -84,6 +91,7 @@ pub fn tsp_loop(
     connection: Arc<Connection>,
     initialization_params: InitializeParams,
     indexing_mode: IndexingMode,
+    workspace_indexing_limit: usize,
 ) -> anyhow::Result<()> {
     eprintln!("Reading TSP messages");
     let connection_for_dispatcher = connection.dupe();
@@ -94,6 +102,7 @@ pub fn tsp_loop(
         lsp_queue.dupe(),
         initialization_params,
         indexing_mode,
+        workspace_indexing_limit,
     );
 
     let lsp_queue2 = lsp_queue.dupe();

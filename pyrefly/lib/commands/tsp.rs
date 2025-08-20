@@ -24,6 +24,10 @@ pub struct TspArgs {
     /// Find the struct that contains this field and add the indexing mode used by the language server
     #[arg(long, value_enum, default_value_t)]
     pub(crate) indexing_mode: IndexingMode,
+    /// Sets the maximum number of user files for Pyrefly to index in the workspace.
+    /// Note that indexing files is a performance-intensive task.
+    #[arg(long, default_value_t = if cfg!(fbcode_build) {0} else {2000})]
+    pub(crate) workspace_indexing_limit: usize,
 }
 
 pub fn run_tsp(connection: Arc<Connection>, args: TspArgs) -> anyhow::Result<()> {
@@ -34,7 +38,12 @@ pub fn run_tsp(connection: Arc<Connection>, args: TspArgs) -> anyhow::Result<()>
         }
     };
     // Reuse the existing lsp_loop but with TSP initialization
-    tsp_loop(connection, initialization_params, args.indexing_mode)?;
+    tsp_loop(
+        connection,
+        initialization_params,
+        args.indexing_mode,
+        args.workspace_indexing_limit,
+    )?;
     Ok(())
 }
 
