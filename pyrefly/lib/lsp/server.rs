@@ -892,7 +892,7 @@ impl Server {
         s
     }
 
-    pub fn send_response(&self, x: Response) {
+    fn send_response(&self, x: Response) {
         self.connection.send(Message::Response(x))
     }
 
