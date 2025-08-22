@@ -26,8 +26,8 @@ use crate::lsp::server::dispatch_lsp_events;
 use crate::lsp::transaction_manager::TransactionManager;
 
 /// TSP server that delegates to LSP server infrastructure while handling only TSP requests
-pub struct TspServer {
-    pub inner: Box<dyn LspServerInterface>,
+pub struct TspServer<T: LspServerInterface> {
+    pub inner: T,
 }
 
 impl TspServer {
