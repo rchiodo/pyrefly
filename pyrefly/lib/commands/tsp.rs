@@ -8,12 +8,14 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use dupe::Dupe;
 use lsp_server::Connection;
 use lsp_server::ProtocolError;
 use lsp_types::InitializeParams;
 
 use crate::commands::lsp::IndexingMode;
 use crate::commands::util::CommandExitStatus;
+use crate::lsp::queue::LspQueue;
 use crate::tsp::server::tsp_capabilities;
 use crate::tsp::server::tsp_loop;
 
@@ -37,13 +39,19 @@ pub fn run_tsp(connection: Arc<Connection>, args: TspArgs) -> anyhow::Result<()>
             return Err(e.into());
         }
     };
-    // Reuse the existing lsp_loop but with TSP initialization
-    tsp_loop(
-        connection,
-        initialization_params,
+
+    // Create an LSP server instance for the TSP server to use.
+    let lsp_queue = LspQueue::new();
+    let lsp_server = Box::new(crate::lsp::server::Server::new(
+        connection.dupe(),
+        lsp_queue,
+        initialization_params.clone(),
         args.indexing_mode,
         args.workspace_indexing_limit,
-    )?;
+    ));
+
+    // Reuse the existing lsp_loop but with TSP initialization
+    tsp_loop(lsp_server, connection, initialization_params)?;
     Ok(())
 }
 

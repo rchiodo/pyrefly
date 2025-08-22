@@ -18,34 +18,20 @@ use lsp_types::ServerCapabilities;
 use crate::commands::lsp::IndexingMode;
 use crate::lsp::queue::LspEvent;
 use crate::lsp::queue::LspQueue;
-use crate::lsp::server::LspServerFactory;
-use crate::lsp::server::LspServerInterface;
 use crate::lsp::server::ProcessEvent;
+use crate::lsp::server::TspInterface;
 use crate::lsp::server::capabilities;
 use crate::lsp::server::dispatch_lsp_events;
 use crate::lsp::transaction_manager::TransactionManager;
 
 /// TSP server that delegates to LSP server infrastructure while handling only TSP requests
-pub struct TspServer<T: LspServerInterface> {
-    pub inner: T,
+pub struct TspServer {
+    pub inner: Box<dyn TspInterface>,
 }
 
 impl TspServer {
-    pub fn new(
-        connection: Arc<Connection>,
-        lsp_queue: LspQueue,
-        initialization_params: InitializeParams,
-        indexing_mode: IndexingMode,
-        workspace_indexing_limit: usize,
-    ) -> Self {
-        let inner = LspServerFactory::create(
-            connection,
-            lsp_queue,
-            initialization_params,
-            indexing_mode,
-            workspace_indexing_limit,
-        );
-        Self { inner }
+    pub fn new(lsp_server: Box<dyn TspInterface>) -> Self {
+        Self { inner: lsp_server }
     }
 
     pub fn process_event<'a>(
@@ -89,22 +75,15 @@ impl TspServer {
 }
 
 pub fn tsp_loop(
+    lsp_server: Box<dyn TspInterface>,
     connection: Arc<Connection>,
-    initialization_params: InitializeParams,
-    indexing_mode: IndexingMode,
-    workspace_indexing_limit: usize,
+    _initialization_params: InitializeParams,
 ) -> anyhow::Result<()> {
     eprintln!("Reading TSP messages");
     let connection_for_dispatcher = connection.dupe();
     let lsp_queue = LspQueue::new();
 
-    let server = TspServer::new(
-        connection,
-        lsp_queue.dupe(),
-        initialization_params,
-        indexing_mode,
-        workspace_indexing_limit,
-    );
+    let server = TspServer::new(lsp_server);
 
     let lsp_queue2 = lsp_queue.dupe();
     std::thread::spawn(move || {

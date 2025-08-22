@@ -190,8 +190,8 @@ use crate::state::semantic_tokens::SemanticTokensLegends;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 
-/// Interface exposed for outside modules to interact with the LSP server
-pub trait LspServerInterface {
+/// Interface exposed for TSP to interact with the LSP server
+pub trait TspInterface {
     /// Send a response back to the LSP client
     fn send_response(&self, response: Response);
 
@@ -203,28 +203,6 @@ pub trait LspServerInterface {
         subsequent_mutation: bool,
         event: LspEvent,
     ) -> anyhow::Result<ProcessEvent>;
-}
-
-/// Factory for creating LSP server instances that implement LspServerInterface
-pub struct LspServerFactory;
-
-impl LspServerFactory {
-    /// Create a new LSP server instance
-    pub fn create(
-        connection: Arc<Connection>,
-        lsp_queue: LspQueue,
-        initialization_params: InitializeParams,
-        indexing_mode: IndexingMode,
-        workspace_indexing_limit: usize,
-    ) -> Box<dyn LspServerInterface> {
-        Box::new(Server::new(
-            connection,
-            lsp_queue,
-            initialization_params,
-            indexing_mode,
-            workspace_indexing_limit,
-        ))
-    }
 }
 
 #[derive(Clone, Dupe)]
@@ -258,7 +236,7 @@ impl ServerConnection {
     }
 }
 
-struct Server {
+pub struct Server {
     connection: ServerConnection,
     /// A thread pool of size one for heavy read operations on the State
     async_state_read_threads: ThreadPool,
@@ -845,7 +823,7 @@ impl Server {
         Ok(ProcessEvent::Continue)
     }
 
-    fn new(
+    pub fn new(
         connection: Arc<Connection>,
         lsp_queue: LspQueue,
         initialize_params: InitializeParams,
@@ -1936,7 +1914,7 @@ impl Server {
     }
 }
 
-impl LspServerInterface for Server {
+impl TspInterface for Server {
     fn send_response(&self, response: Response) {
         self.send_response(response)
     }
