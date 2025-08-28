@@ -5,7 +5,6 @@
 # ]
 # ///
 
-
 """
 Type Server Protocol Generator
 
@@ -23,7 +22,6 @@ import sys
 from typing import Any, Dict, Iterable, Optional
 
 # Import the lsprotocol generator modules
-
 
 import generator.model as model
 from generator.plugins.rust import generate as rust_generate
