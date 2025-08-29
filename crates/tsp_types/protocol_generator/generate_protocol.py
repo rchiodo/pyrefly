@@ -535,14 +535,7 @@ def extract_flag_enums_from_tsp(tsp_json: Dict[str, Any]) -> Dict[str, Dict[str,
 
         if "Flags" in enum_name:
             is_flag_enum = True
-        # Heuristic: most non-zero values are powers of 2
-
-        elif (
-            total_values > 1 and power_of_two_count >= (total_values - zero_count) * 0.7
-        ):
-            is_flag_enum = True
         # Special case: all values are powers of 2 or 0
-
         elif total_values > 1 and (power_of_two_count + zero_count) == total_values:
             is_flag_enum = True
         if is_flag_enum:
