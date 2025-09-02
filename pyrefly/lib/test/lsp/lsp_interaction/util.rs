@@ -263,7 +263,7 @@ fn get_initialize_params(
     params
 }
 
-fn get_initialize_messages(
+pub fn get_initialize_messages(
     workspace_folders: &Option<Vec<(String, Url)>>,
     configuration: bool,
     file_watch: bool,
@@ -281,7 +281,7 @@ fn get_initialize_messages(
     ]
 }
 
-fn get_initialize_responses(find_refs: bool) -> Vec<Message> {
+pub fn get_initialize_responses(find_refs: bool) -> Vec<Message> {
     vec![Message::Response(Response {
         id: RequestId::from(1),
         result: Some(serde_json::json!({"capabilities": &ServerCapabilities {
