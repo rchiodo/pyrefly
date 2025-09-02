@@ -46,7 +46,6 @@ use crate::commands::tsp::run_tsp;
 // Re-export necessary types and functions for TSP tests
 pub use crate::test::lsp::lsp_interaction::util::TestCase;
 use crate::test::lsp::lsp_interaction::util::get_initialize_messages;
-// Don't import get_initialize_responses from LSP - we'll define our own for TSP
 use crate::test::util::init_test;
 
 /// Simple TSP test runner that follows the same pattern as LSP tests but uses TSP server
