@@ -20,5 +20,5 @@ mod object_model;
 mod references;
 mod rename;
 mod type_definition;
-pub mod util;
+mod util;
 mod workspace_symbol;

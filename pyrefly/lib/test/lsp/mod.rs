@@ -16,6 +16,6 @@ mod hover_docstring;
 mod hover_type;
 mod inlay_hint;
 mod local_find_refs;
-pub mod lsp_interaction;
+mod lsp_interaction;
 mod semantic_tokens;
 mod signature_help;
