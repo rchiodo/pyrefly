@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-/// This file contains a new implementation of the tsp_interaction test suite that follows 
+/// This file contains a new implementation of the tsp_interaction test suite that follows
 /// the same pattern as the LSP object model tests.
 use std::io;
 use std::path::PathBuf;
@@ -68,18 +68,6 @@ impl TestTspServer {
         }
     }
 
-    pub fn expect_stop(&self) {
-        let start = std::time::Instant::now();
-        while let Some(thread) = &self.server_thread
-            && !thread.is_finished()
-        {
-            if start.elapsed() > Duration::from_secs(10) {
-                panic!("Server did not shutdown in time");
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
-    }
-
     /// Send a message to this server
     pub fn send_message(&self, message: Message) {
         eprintln!(
@@ -131,60 +119,6 @@ impl TestTspServer {
         }));
     }
 
-    pub fn get_type_definition(&mut self, file: &'static str, line: u32, col: u32) {
-        let path = self.get_root_or_panic().join(file);
-        let id = self.next_request_id();
-        self.send_message(Message::Request(Request {
-            id,
-            method: "typeServer/getTypeDefinition".to_owned(),
-            params: serde_json::json!({
-                "textDocument": {
-                    "uri": Url::from_file_path(&path).unwrap().to_string(),
-                },
-                "position": {
-                    "line": line,
-                    "character": col,
-                },
-            }),
-        }));
-    }
-
-    pub fn get_hover(&mut self, file: &'static str, line: u32, col: u32) {
-        let path = self.get_root_or_panic().join(file);
-        let id = self.next_request_id();
-        self.send_message(Message::Request(Request {
-            id,
-            method: "typeServer/getHover".to_owned(),
-            params: serde_json::json!({
-                "textDocument": {
-                    "uri": Url::from_file_path(&path).unwrap().to_string(),
-                },
-                "position": {
-                    "line": line,
-                    "character": col,
-                },
-            }),
-        }));
-    }
-
-    pub fn get_completion(&mut self, file: &'static str, line: u32, col: u32) {
-        let path = self.get_root_or_panic().join(file);
-        let id = self.next_request_id();
-        self.send_message(Message::Request(Request {
-            id,
-            method: "typeServer/getCompletion".to_owned(),
-            params: serde_json::json!({
-                "textDocument": {
-                    "uri": Url::from_file_path(&path).unwrap().to_string(),
-                },
-                "position": {
-                    "line": line,
-                    "character": col,
-                },
-            }),
-        }));
-    }
-
     pub fn did_open(&self, file: &'static str) {
         let path = self.get_root_or_panic().join(file);
         self.send_message(Message::Notification(Notification {
@@ -197,21 +131,6 @@ impl TestTspServer {
                     "text": read_to_string(&path).unwrap(),
                 },
             }),
-        }));
-    }
-
-    pub fn did_change_configuration(&self) {
-        self.send_message(Message::Notification(Notification {
-            method: lsp_types::notification::DidChangeConfiguration::METHOD.to_owned(),
-            params: serde_json::json!({"settings": {}}),
-        }));
-    }
-
-    pub fn send_configuration_response(&self, id: i32, result: serde_json::Value) {
-        self.send_message(Message::Response(Response {
-            id: RequestId::from(id),
-            result: Some(result),
-            error: None,
         }));
     }
 
@@ -273,19 +192,14 @@ pub struct TestTspClient {
     receiver: crossbeam_channel::Receiver<Message>,
     timeout: Duration,
     root: Option<PathBuf>,
-    request_idx: Arc<Mutex<i32>>,
 }
 
 impl TestTspClient {
-    pub fn new(
-        receiver: crossbeam_channel::Receiver<Message>,
-        request_idx: Arc<Mutex<i32>>,
-    ) -> Self {
+    pub fn new(receiver: crossbeam_channel::Receiver<Message>) -> Self {
         Self {
             receiver,
             timeout: Duration::from_secs(25),
             root: None,
-            request_idx,
         }
     }
 
@@ -318,100 +232,10 @@ impl TestTspClient {
         }
     }
 
-    pub fn expect_message(&self, expected_message: Message) {
-        self.expect_message_helper(expected_message, |_| false);
-    }
-
     pub fn expect_response(&self, expected_response: Response) {
         self.expect_message_helper(Message::Response(expected_response), |msg| {
             matches!(msg, Message::Notification(_) | Message::Request(_))
         });
-    }
-
-    pub fn expect_protocol_version_response(&self, version: &str) {
-        self.expect_response(Response {
-            id: RequestId::from(*self.request_idx.lock().unwrap()),
-            result: Some(serde_json::json!(version)),
-            error: None,
-        })
-    }
-
-    pub fn expect_type_definition_response_absolute(
-        &self,
-        file: String,
-        line_start: u32,
-        char_start: u32,
-        line_end: u32,
-        char_end: u32,
-    ) {
-        self.expect_response(Response {
-            id: RequestId::from(*self.request_idx.lock().unwrap()),
-            result: Some(serde_json::json!(
-            {
-                "uri": Url::from_file_path(file).unwrap().to_string(),
-                "range": {
-                    "start": {"line": line_start, "character": char_start},
-                    "end": {"line": line_end, "character": char_end}
-                },
-                })),
-            error: None,
-        })
-    }
-
-    pub fn expect_type_definition_response_from_root(
-        &self,
-        file: &'static str,
-        line_start: u32,
-        char_start: u32,
-        line_end: u32,
-        char_end: u32,
-    ) {
-        self.expect_response(Response {
-            id: RequestId::from(*self.request_idx.lock().unwrap()),
-            result: Some(serde_json::json!(
-            {
-                "uri": Url::from_file_path(self.get_root_or_panic().join(file)).unwrap().to_string(),
-                "range": {
-                    "start": {"line": line_start, "character": char_start},
-                    "end": {"line": line_end, "character": char_end}
-                },
-                })),
-            error: None,
-        })
-    }
-
-    pub fn expect_response_with<F>(&self, validator: F, description: &str)
-    where
-        F: Fn(&Response) -> bool,
-    {
-        loop {
-            match self.receiver.recv_timeout(self.timeout) {
-                Ok(msg) => {
-                    eprintln!("client<---server {}", serde_json::to_string(&msg).unwrap());
-
-                    match &msg {
-                        Message::Notification(_) | Message::Request(_) => {
-                            continue;
-                        }
-                        Message::Response(response) => {
-                            if validator(response) {
-                                return;
-                            } else {
-                                panic!(
-                                    "Response validation failed: {description}. Response: {response:?}"
-                                );
-                            }
-                        }
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    panic!("Timeout waiting for response. Expected: {description}");
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    panic!("Channel disconnected. Expected: {description}");
-                }
-            }
-        }
     }
 
     pub fn expect_any_message(&self) {
@@ -426,45 +250,6 @@ impl TestTspClient {
                 panic!("Channel disconnected");
             }
         }
-    }
-
-    pub fn expect_configuration_request(&self, id: i32, scope_uri: Option<&Url>) {
-        use lsp_types::ConfigurationItem;
-        use lsp_types::ConfigurationParams;
-        use lsp_types::request::WorkspaceConfiguration;
-
-        let items = if let Some(uri) = scope_uri {
-            Vec::from([
-                ConfigurationItem {
-                    scope_uri: Some(uri.clone()),
-                    section: Some("python".to_owned()),
-                },
-                ConfigurationItem {
-                    scope_uri: None,
-                    section: Some("python".to_owned()),
-                },
-            ])
-        } else {
-            Vec::from([ConfigurationItem {
-                scope_uri: None,
-                section: Some("python".to_owned()),
-            }])
-        };
-
-        self.expect_message_helper(
-            Message::Request(Request {
-                id: RequestId::from(id),
-                method: WorkspaceConfiguration::METHOD.to_owned(),
-                params: serde_json::json!(ConfigurationParams { items }),
-            }),
-            |msg| matches!(msg, Message::Notification(_)),
-        );
-    }
-
-    fn get_root_or_panic(&self) -> PathBuf {
-        self.root
-            .clone()
-            .expect("Root not set, please call set_root")
     }
 }
 
@@ -505,7 +290,7 @@ impl TspInteraction {
 
         server.server_thread = Some(thread_handle);
 
-        let client = TestTspClient::new(language_client_receiver, request_idx.clone());
+        let client = TestTspClient::new(language_client_receiver);
 
         Self { server, client }
     }
