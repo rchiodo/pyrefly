@@ -7,29 +7,21 @@
  *
  * TSP interaction tests for getSupportedProtocolVersion request handler
  *
- * These tests verify the full TSP message protocol for getSupportedProtocolVersion requests by:
- * 1. Following the LSP interaction test pattern using run_test_tsp
- * 2. Testing complete request/response flows including typeServer/getSupportedProtocolVersion
- * 3. Validating that the correct protocol version is returned
- * 4. Using real message passing to simulate end-to-end TSP interactions
+ * These tests verify the full TSP message protocol for getSupportedProtocolVersion requests using
+ * the object model pattern that provides a more ergonomic and maintainable test framework.
  *
  * The getSupportedProtocolVersion request returns the current TSP protocol version.
  */
 
-use lsp_server::Message;
-use lsp_server::Request;
 use lsp_server::RequestId;
 use lsp_server::Response;
 use tempfile::TempDir;
 
-use crate::commands::lsp::IndexingMode;
-use crate::test::tsp::tsp_interaction::util::TestCase;
-use crate::test::tsp::tsp_interaction::util::build_did_open_notification;
-use crate::test::tsp::tsp_interaction::util::run_test_tsp;
+use crate::test::tsp::tsp_interaction::object_model::TspInteraction;
 
 #[test]
 fn test_tsp_get_supported_protocol_version_interaction() {
-    // Test retrieval of TSP protocol version
+    // Test retrieval of TSP protocol version with null params
     let temp_dir = TempDir::new().unwrap();
     let test_file_path = temp_dir.path().join("version_test.py");
 
@@ -39,31 +31,27 @@ print("Hello, World!")
 
     std::fs::write(&test_file_path, test_content).unwrap();
 
-    run_test_tsp(TestCase {
-        messages_from_language_client: vec![
-            // Open the test file
-            Message::from(build_did_open_notification(test_file_path.clone())),
-            // Get supported protocol version - test with null params
-            Message::from(Request {
-                id: RequestId::from(2),
-                method: "typeServer/getSupportedProtocolVersion".to_owned(),
-                params: serde_json::json!(null),
-            }),
-        ],
-        expected_messages_from_language_server: vec![
-            // Protocol version response - should return "0.2.0"
-            Message::Response(Response {
-                id: RequestId::from(2),
-                result: Some(serde_json::json!("0.2.0")),
-                error: None,
-            }),
-        ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_indexing_limit: 0,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
+    let mut tsp = TspInteraction::new();
+    tsp.set_root(temp_dir.path().to_path_buf());
+    tsp.initialize(Default::default());
+
+    // Open the test file
+    tsp.server.did_open("version_test.py");
+
+    // Wait for any diagnostics
+    tsp.client.expect_any_message();
+
+    // Get supported protocol version - test with null params
+    tsp.server.get_supported_protocol_version();
+
+    // Expect protocol version response
+    tsp.client.expect_response(Response {
+        id: RequestId::from(2),
+        result: Some(serde_json::json!("0.2.0")),
+        error: None,
     });
+
+    tsp.shutdown();
 }
 
 #[test]
@@ -78,29 +66,25 @@ x = 42
 
     std::fs::write(&test_file_path, test_content).unwrap();
 
-    run_test_tsp(TestCase {
-        messages_from_language_client: vec![
-            // Open the test file
-            Message::from(build_did_open_notification(test_file_path.clone())),
-            // Get supported protocol version - test with empty object params
-            Message::from(Request {
-                id: RequestId::from(2),
-                method: "typeServer/getSupportedProtocolVersion".to_owned(),
-                params: serde_json::json!({}),
-            }),
-        ],
-        expected_messages_from_language_server: vec![
-            // Protocol version response - should return "0.2.0"
-            Message::Response(Response {
-                id: RequestId::from(2),
-                result: Some(serde_json::json!("0.2.0")),
-                error: None,
-            }),
-        ],
-        indexing_mode: IndexingMode::LazyBlocking,
-        workspace_indexing_limit: 0,
-        workspace_folders: None,
-        configuration: false,
-        file_watch: false,
+    let mut tsp = TspInteraction::new();
+    tsp.set_root(temp_dir.path().to_path_buf());
+    tsp.initialize(Default::default());
+
+    // Open the test file
+    tsp.server.did_open("version_test_2.py");
+
+    // Wait for any diagnostics
+    tsp.client.expect_any_message();
+
+    // Get supported protocol version - test with empty object params
+    tsp.server.get_supported_protocol_version();
+
+    // Expect protocol version response
+    tsp.client.expect_response(Response {
+        id: RequestId::from(2),
+        result: Some(serde_json::json!("0.2.0")),
+        error: None,
     });
+
+    tsp.shutdown();
 }
