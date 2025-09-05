@@ -77,6 +77,28 @@ del super(B, B()).a # E: Cannot delete field `a`
 );
 
 testcase!(
+    test_super_retain_self,
+    r#"
+from typing import Self
+class A:
+    def m(self) -> Self:
+        return self
+
+    @classmethod
+    def classm(cls) -> type[Self]:
+        return cls
+
+class B(A):
+    def m(self) -> Self:
+        return super().m()
+
+    @classmethod
+    def classm(cls) -> type[Self]:
+        return super().classm()
+    "#,
+);
+
+testcase!(
     test_self_attribute_assign_twice,
     r#"
 from typing import assert_type
@@ -490,7 +512,7 @@ class C:
     def __init__(self, y: str):
         self.x = 0
         self.y = y
-assert_type(C.x, Any)  # E: Instance-only attribute `x` of class `C` is not visible on the class
+assert_type(C.x, int)
 assert_type(C.y, Any)  # E: Instance-only attribute `y` of class `C` is not visible on the class
 c = C("y")
 assert_type(c.x, int)

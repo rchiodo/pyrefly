@@ -6,6 +6,7 @@
  */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufWriter;
 use std::ops::Not;
@@ -31,11 +32,13 @@ use pyrefly_types::types::Overload;
 use pyrefly_types::types::Type;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::lined_buffer::DisplayRange;
+use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::visit::Visit;
 use rayon::prelude::*;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprContext;
+use ruff_python_ast::ExprName;
 use ruff_python_ast::ModModule;
 use ruff_python_ast::Stmt;
 use ruff_python_ast::StmtImportFrom;
@@ -178,6 +181,27 @@ struct FunctionSignature {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct ClassRef {
+    module_id: ModuleId,
+    module_name: String, // For debugging purposes only. Reader should use the module id.
+    class_id: ClassId,
+    class_name: String, // For debugging purposes only. Reader should use the class id.
+}
+
+impl ClassRef {
+    fn from_class(class: &Class, module_ids: &ModuleIds) -> ClassRef {
+        ClassRef {
+            module_id: module_ids
+                .get(ModuleKey::from_module(class.module()))
+                .unwrap(),
+            module_name: class.module_name().to_string(),
+            class_id: ClassId::from_class(class),
+            class_name: class.qname().id().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct FunctionDefinition {
     name: String,
     parent: ScopeParent,
@@ -194,6 +218,13 @@ struct FunctionDefinition {
     is_property_setter: bool,
     #[serde(skip_serializing_if = "<&bool>::not")]
     is_stub: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// If this is a method, record the class it is defined in.
+    defining_class: Option<ClassRef>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// If the method directly overrides a method in a parent class, we record that class.
+    /// This is used for building overriding graphs.
+    overridden_base_class: Option<ClassRef>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -202,14 +233,6 @@ struct DefinitionRef {
     module_name: String, // For debugging purposes only. Reader should use the module id.
     location: String,
     identifier: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct ClassRef {
-    module_id: ModuleId,
-    module_name: String, // For debugging purposes only. Reader should use the module id.
-    class_id: ClassId,
-    class_name: String, // For debugging purposes only. Reader should use the class id.
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -235,6 +258,7 @@ struct PysaModuleFile {
     goto_definitions_of_expression: HashMap<String, Vec<DefinitionRef>>,
     function_definitions: HashMap<String, FunctionDefinition>,
     class_definitions: HashMap<String, ClassDefinition>,
+    global_variables: HashSet<String>,
 }
 
 /// Represents what makes a module unique
@@ -313,24 +337,19 @@ struct ModuleContext<'a> {
     module_ids: &'a ModuleIds,
 }
 
-impl ClassRef {
-    fn from_class(class: &Class, context: &ModuleContext) -> ClassRef {
-        ClassRef {
-            module_id: context
-                .module_ids
-                .get(ModuleKey::from_module(class.module()))
-                .unwrap(),
-            module_name: class.module_name().to_string(),
-            class_id: ClassId::from_class(class),
-            class_name: class.qname().id().to_string(),
-        }
-    }
-}
-
 fn string_for_type(type_: &Type) -> String {
     let mut ctx = TypeDisplayContext::new(&[type_]);
-    ctx.always_display_module_name();
+    ctx.always_display_module_name_except_builtins();
     ctx.display(type_).to_string()
+}
+
+fn strip_self_type(mut ty: Type) -> Type {
+    ty.transform_mut(&mut |t| {
+        if let Type::SelfType(cls) = t {
+            *t = Type::ClassType(cls.clone());
+        }
+    });
+    ty
 }
 
 fn has_superclass(class: &Class, want: &Class, context: &ModuleContext) -> bool {
@@ -390,7 +409,6 @@ fn is_scalar_type(get: &Type, want: &Class, context: &ModuleContext) -> bool {
     }
     match get {
         Type::ClassType(class_type) => has_superclass(class_type.class_object(), want, context),
-        Type::Type(inner) => is_scalar_type(inner, want, context),
         Type::TypeAlias(alias) => is_scalar_type(&alias.as_type(), want, context),
         _ => false,
     }
@@ -412,7 +430,6 @@ fn get_classes_of_type(type_: &Type, context: &ModuleContext) -> Vec<Class> {
             .iter()
             .flat_map(|inner| get_classes_of_type(inner, context))
             .collect(),
-        Type::Type(inner) => get_classes_of_type(inner, context),
         Type::TypeAlias(alias) => get_classes_of_type(&alias.as_type(), context),
         _ => Vec::new(),
     }
@@ -422,6 +439,8 @@ impl PysaType {
     fn from_type(type_: &Type, context: &ModuleContext) -> PysaType {
         // Promote `Literal[..]` into `str` or `int`.
         let type_ = type_.clone().promote_literals(context.stdlib);
+        let type_ = strip_self_type(type_);
+
         let string = string_for_type(&type_);
 
         PysaType {
@@ -436,7 +455,7 @@ impl PysaType {
                 classes.dedup();
                 classes
                     .into_iter()
-                    .map(|class_type| ClassRef::from_class(&class_type, context))
+                    .map(|class_type| ClassRef::from_class(&class_type, context.module_ids))
                     .collect()
             },
         }
@@ -447,6 +466,7 @@ struct VisitorContext<'a> {
     module_context: &'a ModuleContext<'a>,
     type_of_expression: &'a mut HashMap<String, PysaType>,
     definitions_of_expression: &'a mut HashMap<String, Vec<DefinitionRef>>,
+    global_variables: &'a mut HashSet<String>,
 }
 
 fn add_expression_definitions(
@@ -617,7 +637,17 @@ fn visit_expression(e: &Expr, context: &mut VisitorContext) {
     e.recurse(&mut |e| visit_expression(e, context));
 }
 
-fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
+fn visit_assign_target(target: &Expr, is_top_level: bool, context: &mut VisitorContext) {
+    if !is_top_level {
+        return;
+    }
+
+    Ast::expr_lvalue(target, &mut |global: &ExprName| {
+        context.global_variables.insert(global.id.to_string());
+    });
+}
+
+fn visit_statement(stmt: &Stmt, is_top_level: bool, context: &mut VisitorContext) {
     match stmt {
         Stmt::FunctionDef(function_def) => {
             visit_expressions(
@@ -651,7 +681,11 @@ fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
                     .filter_map(|argument| argument.default.as_deref()),
                 context,
             );
-            visit_statements(function_def.body.iter(), context);
+            visit_statements(
+                function_def.body.iter(),
+                /* is_top_level */ false,
+                context,
+            );
         }
         Stmt::ClassDef(class_def) => {
             visit_expressions(
@@ -668,39 +702,52 @@ fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
                     context,
                 );
             }
-            visit_statements(class_def.body.iter(), context);
+            visit_statements(
+                class_def.body.iter(),
+                /* is_top_level */ false,
+                context,
+            );
         }
         Stmt::Expr(e) => {
             visit_expression(&e.value, context);
         }
-        Stmt::Return(_)
-        | Stmt::Delete(_)
-        | Stmt::Assign(_)
-        | Stmt::AugAssign(_)
-        | Stmt::AnnAssign(_)
-        | Stmt::Raise(_) => {
+        Stmt::Assign(assign) => {
+            stmt.visit(&mut |e| visit_expression(e, context));
+            for t in &assign.targets {
+                visit_assign_target(t, is_top_level, context);
+            }
+        }
+        Stmt::AnnAssign(assign) => {
+            stmt.visit(&mut |e| visit_expression(e, context));
+            visit_assign_target(&assign.target, is_top_level, context);
+        }
+        Stmt::AugAssign(assign) => {
+            stmt.visit(&mut |e| visit_expression(e, context));
+            visit_assign_target(&assign.target, is_top_level, context);
+        }
+        Stmt::Return(_) | Stmt::Delete(_) | Stmt::Raise(_) => {
             // Statements that only contains expressions, use Visit<Expr>
             stmt.visit(&mut |e| visit_expression(e, context));
         }
         Stmt::For(for_stmt) => {
             visit_expression(&for_stmt.iter, context);
             visit_expression(&for_stmt.target, context);
-            visit_statements(for_stmt.body.iter(), context);
-            visit_statements(for_stmt.orelse.iter(), context);
+            visit_statements(for_stmt.body.iter(), is_top_level, context);
+            visit_statements(for_stmt.orelse.iter(), is_top_level, context);
         }
         Stmt::While(while_stmt) => {
             visit_expression(&while_stmt.test, context);
-            visit_statements(while_stmt.body.iter(), context);
-            visit_statements(while_stmt.orelse.iter(), context);
+            visit_statements(while_stmt.body.iter(), is_top_level, context);
+            visit_statements(while_stmt.orelse.iter(), is_top_level, context);
         }
         Stmt::If(if_stmt) => {
             visit_expression(&if_stmt.test, context);
-            visit_statements(if_stmt.body.iter(), context);
+            visit_statements(if_stmt.body.iter(), is_top_level, context);
             for elif_else_clause in &if_stmt.elif_else_clauses {
                 if let Some(test) = &elif_else_clause.test {
                     visit_expression(test, context);
                 }
-                visit_statements(elif_else_clause.body.iter(), context);
+                visit_statements(elif_else_clause.body.iter(), is_top_level, context);
             }
         }
         Stmt::With(with_stmt) => {
@@ -708,7 +755,7 @@ fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
                 visit_expression(&item.context_expr, context);
                 visit_expressions(item.optional_vars.iter().map(|x| &**x), context);
             }
-            visit_statements(with_stmt.body.iter(), context);
+            visit_statements(with_stmt.body.iter(), is_top_level, context);
         }
         Stmt::Match(match_stmt) => {
             visit_expression(&match_stmt.subject, context);
@@ -716,19 +763,19 @@ fn visit_statement(stmt: &Stmt, context: &mut VisitorContext) {
                 if let Some(guard) = &case.guard {
                     visit_expression(guard, context);
                 }
-                visit_statements(case.body.iter(), context);
+                visit_statements(case.body.iter(), is_top_level, context);
             }
         }
         Stmt::Try(try_stmt) => {
-            visit_statements(try_stmt.body.iter(), context);
-            visit_statements(try_stmt.orelse.iter(), context);
-            visit_statements(try_stmt.finalbody.iter(), context);
+            visit_statements(try_stmt.body.iter(), is_top_level, context);
+            visit_statements(try_stmt.orelse.iter(), is_top_level, context);
+            visit_statements(try_stmt.finalbody.iter(), is_top_level, context);
             for ruff_python_ast::ExceptHandler::ExceptHandler(except_handler) in &try_stmt.handlers
             {
                 if let Some(annotation) = &except_handler.type_ {
                     visit_expression(annotation, context);
                 }
-                visit_statements(except_handler.body.iter(), context);
+                visit_statements(except_handler.body.iter(), is_top_level, context);
             }
         }
         Stmt::Assert(assert_stmt) => {
@@ -760,9 +807,13 @@ fn visit_expressions<'a>(
     }
 }
 
-fn visit_statements<'a>(statements: impl Iterator<Item = &'a Stmt>, context: &mut VisitorContext) {
+fn visit_statements<'a>(
+    statements: impl Iterator<Item = &'a Stmt>,
+    is_top_level: bool,
+    context: &mut VisitorContext,
+) {
     for stmt in statements {
-        visit_statement(stmt, context);
+        visit_statement(stmt, is_top_level, context);
     }
 }
 
@@ -814,6 +865,20 @@ fn should_export_function(function: &DecoratedFunction, context: &ModuleContext)
     !has_successor || !function.is_overload()
 }
 
+fn get_super_class_member(
+    class: &Class,
+    field: &Name,
+    context: &ModuleContext,
+) -> Option<ClassRef> {
+    context
+        .transaction
+        .ad_hoc_solve(context.handle, |solver| {
+            solver.get_super_class_member(class, None, field)
+        })
+        .unwrap()
+        .map(|member| ClassRef::from_class(&member.defining_class, context.module_ids))
+}
+
 fn export_all_functions(
     ast: &ModModule,
     context: &ModuleContext,
@@ -858,14 +923,17 @@ fn export_all_functions(
         };
 
         let display_range = context.module_info.display_range(function.id_range());
-        let name = function.metadata().kind.as_func_id().func.to_string();
+        let name = function.metadata().kind.as_func_id().func;
         let parent = get_scope_parent(ast, context.module_info, function.id_range());
+        let overridden_base_class = function
+            .defining_cls()
+            .and_then(|class| get_super_class_member(class, &name, context));
         assert!(
             function_definitions
                 .insert(
                     location_key(&display_range),
                     FunctionDefinition {
-                        name,
+                        name: name.to_string(),
                         parent,
                         undecorated_signatures,
                         is_overload: function.metadata().flags.is_overload,
@@ -878,6 +946,10 @@ fn export_all_functions(
                             .is_property_setter_with_getter
                             .is_some(),
                         is_stub: function.is_stub(),
+                        defining_class: function
+                            .defining_cls()
+                            .map(|class| ClassRef::from_class(class, context.module_ids)),
+                        overridden_base_class,
                     }
                 )
                 .is_none(),
@@ -962,7 +1034,7 @@ fn export_all_classes(
             bases: metadata
                 .base_class_objects()
                 .iter()
-                .map(|base_class| ClassRef::from_class(base_class, context))
+                .map(|base_class| ClassRef::from_class(base_class, context.module_ids))
                 .collect::<Vec<_>>(),
             is_synthesized,
             fields,
@@ -1052,6 +1124,7 @@ fn get_module_file(
 
     let mut type_of_expression = HashMap::new();
     let mut definitions_of_expression = HashMap::new();
+    let mut global_variables = HashSet::new();
     let context = ModuleContext {
         handle,
         transaction,
@@ -1065,10 +1138,12 @@ fn get_module_file(
     for stmt in &ast.body {
         visit_statement(
             stmt,
+            /* is_top_level */ true,
             &mut VisitorContext {
                 module_context: &context,
                 type_of_expression: &mut type_of_expression,
                 definitions_of_expression: &mut definitions_of_expression,
+                global_variables: &mut global_variables,
             },
         );
     }
@@ -1085,6 +1160,7 @@ fn get_module_file(
         goto_definitions_of_expression: definitions_of_expression,
         function_definitions,
         class_definitions,
+        global_variables,
     }
 }
 
@@ -1151,28 +1227,30 @@ pub fn write_results(results_directory: &Path, transaction: &Transaction) -> any
     let project_modules = Arc::new(Mutex::new(project_modules));
 
     // Retrieve and dump information about each module, in parallel.
-    module_info_tasks.into_par_iter().try_for_each(
-        |(handle, module_id, info_path)| -> anyhow::Result<()> {
-            let writer = BufWriter::new(File::create(
-                results_directory.join("modules").join(info_path),
-            )?);
-            serde_json::to_writer(
-                writer,
-                &get_module_file(handle, module_id, transaction, &module_ids),
-            )?;
+    ThreadPool::new().install(|| -> anyhow::Result<()> {
+        module_info_tasks.into_par_iter().try_for_each(
+            |(handle, module_id, info_path)| -> anyhow::Result<()> {
+                let writer = BufWriter::new(File::create(
+                    results_directory.join("modules").join(info_path),
+                )?);
+                serde_json::to_writer(
+                    writer,
+                    &get_module_file(handle, module_id, transaction, &module_ids),
+                )?;
 
-            if is_test_module(handle, transaction) {
-                project_modules
-                    .lock()
-                    .unwrap()
-                    .get_mut(&module_id)
-                    .unwrap()
-                    .is_test = true;
-            }
+                if is_test_module(handle, transaction) {
+                    project_modules
+                        .lock()
+                        .unwrap()
+                        .get_mut(&module_id)
+                        .unwrap()
+                        .is_test = true;
+                }
 
-            Ok(())
-        },
-    )?;
+                Ok(())
+            },
+        )
+    })?;
 
     // Dump all typeshed files, so we can parse them.
     let typeshed = typeshed()?;

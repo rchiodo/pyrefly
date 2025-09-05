@@ -215,6 +215,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .into_ty()
     }
 
+    /// Check whether a type corresponds to a deprecated function or method, and if so, log a deprecation warning.
+    pub fn check_for_deprecated_call(&self, ty: &Type, range: TextRange, errors: &ErrorCollector) {
+        let deprecated_function = match ty {
+            Type::Function(f) if f.metadata.flags.is_deprecated => {
+                Some(f.metadata.kind.as_func_id().format(self.module().name()))
+            }
+            Type::BoundMethod(m) if m.func.metadata().flags.is_deprecated => Some(
+                m.func
+                    .metadata()
+                    .kind
+                    .as_func_id()
+                    .format(self.module().name()),
+            ),
+            Type::Overload(o) if o.metadata.flags.is_deprecated => {
+                Some(o.metadata.kind.as_func_id().format(self.module().name()))
+            }
+            _ => None,
+        };
+        if let Some(deprecated_function) = deprecated_function {
+            self.error(
+                errors,
+                range,
+                ErrorInfo::Kind(ErrorKind::Deprecated),
+                format!("`{}` is deprecated", deprecated_function),
+            );
+        }
+    }
+
     /// Like expr_infer_with_hint(), but returns a TypeInfo that includes narrowing information.
     pub fn expr_infer_type_info_with_hint(
         &self,
@@ -264,6 +292,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // at the end.
             _ => TypeInfo::of_ty(self.expr_infer_type_no_trace(x, hint, errors)),
         };
+        // Check for deprecation
+        self.check_for_deprecated_call(res.ty(), x.range(), errors);
         self.record_type_trace(x.range(), res.ty());
         res
     }
@@ -318,8 +348,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::If(x) => {
                 let condition_type = self.expr_infer(&x.test, errors);
-                let body_type = self.expr_infer_type_no_trace(&x.body, hint, errors);
-                let orelse_type = self.expr_infer_type_no_trace(&x.orelse, hint, errors);
+                let body_type = self
+                    .expr_infer_type_info_with_hint(&x.body, hint, errors)
+                    .into_ty();
+                let orelse_type = self
+                    .expr_infer_type_info_with_hint(&x.orelse, hint, errors)
+                    .into_ty();
                 self.check_dunder_bool_is_callable(&condition_type, x.range(), errors);
                 self.check_redundant_condition(&condition_type, x.range(), errors);
                 match self.as_bool(&condition_type, x.test.range(), errors) {
@@ -1163,9 +1197,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             arg_name = true;
         }
 
-        let constraints = iargs
+        let constraints: Vec<Type> = iargs
             .map(|arg| self.expr_untype(arg, TypeFormContext::TypeVarConstraint, errors))
-            .collect::<Vec<_>>();
+            .collect();
         if !constraints.is_empty() {
             restriction = Some(Restriction::Constraints(constraints));
         }
@@ -1183,6 +1217,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 ErrorInfo::Kind(ErrorKind::InvalidTypeVar),
                                 "TypeVar cannot have both constraints and bound".to_owned(),
                             );
+                            restriction = Some(Restriction::Unrestricted);
                         } else {
                             restriction = Some(Restriction::Bound(bound));
                         }
@@ -1237,6 +1272,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ErrorInfo::Kind(ErrorKind::InvalidTypeVar),
                 "Missing `name` argument".to_owned(),
             );
+        }
+        // If we ended up with a single constraint, emit an error and treat as unrestricted.
+        if let Some(Restriction::Constraints(cs)) = &restriction
+            && cs.len() < 2
+        {
+            self.error(
+                errors,
+                x.range,
+                ErrorInfo::Kind(ErrorKind::InvalidTypeVar),
+                format!(
+                    "Expected at least 2 constraints in TypeVar `{}`, got {}",
+                    name.id,
+                    cs.len(),
+                ),
+            );
+            restriction = Some(Restriction::Unrestricted);
         }
         let restriction = restriction.unwrap_or(Restriction::Unrestricted);
         let mut default_value = None;

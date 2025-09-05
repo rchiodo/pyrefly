@@ -1255,42 +1255,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
 
-        // Enum handling:
-        // - Check whether the field is a member (which depends only on its type and name)
-        // - Validate that a member should not have an annotation, and should respect any explicit annotation on `_value_`
-        //
-        // TODO(stroxler, yangdanny): We currently operate on promoted types, which means we do not infer `Literal[...]`
-        // types for the `.value` / `._value_` attributes of literals. This is permitted in the spec although not optimal
-        // for most cases; we are handling it this way in part because generic enum behavior is not yet well-specified.
-        //
-        // We currently skip the check for `_value_` if the class defines `__new__`, since that can
-        // change the value of the enum member. https://docs.python.org/3/howto/enum.html#when-to-use-new-vs-init
-        let ty = if let Some(enum_) = metadata.enum_metadata()
-            && self.is_valid_enum_member(name, &ty, &initialization)
-        {
-            if direct_annotation.is_some() {
-                self.error(
-                    errors, range,ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
-                    format!("Enum member `{name}` may not be annotated directly. Instead, annotate the `_value_` attribute."),
-                );
-            }
-            if enum_.has_value
-                && let Some(enum_value_ty) = self.type_of_enum_value(enum_)
-                && !class.fields().contains(&dunder::NEW)
-                && (!matches!(value, ExprOrBinding::Expr(Expr::EllipsisLiteral(_)))
-                    || !self.module().path().is_interface())
-            {
-                self.check_enum_value_annotation(&ty, &enum_value_ty, name, range, errors);
-            }
-            Type::Literal(Lit::Enum(Box::new(LitEnum {
-                class: enum_.cls.clone(),
-                member: name.clone(),
-                ty: ty.clone(),
-            })))
-        } else {
-            ty
-        };
-
         // Identify whether this is a descriptor
         let mut descriptor = None;
         match &ty {
@@ -1318,6 +1282,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             _ => {}
+        };
+
+        // Enum handling:
+        // - Check whether the field is a member (which depends only on its type and name)
+        // - Validate that a member should not have an annotation, and should respect any explicit annotation on `_value_`
+        //
+        // TODO(stroxler, yangdanny): We currently operate on promoted types, which means we do not infer `Literal[...]`
+        // types for the `.value` / `._value_` attributes of literals. This is permitted in the spec although not optimal
+        // for most cases; we are handling it this way in part because generic enum behavior is not yet well-specified.
+        //
+        // We currently skip the check for `_value_` if the class defines `__new__`, since that can
+        // change the value of the enum member. https://docs.python.org/3/howto/enum.html#when-to-use-new-vs-init
+        let ty = if descriptor.is_none()
+            && let Some(enum_) = metadata.enum_metadata()
+            && self.is_valid_enum_member(name, &ty, &initialization)
+        {
+            if direct_annotation.is_some() {
+                self.error(
+                    errors, range,ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                    format!("Enum member `{name}` may not be annotated directly. Instead, annotate the `_value_` attribute."),
+                );
+            }
+            if enum_.has_value
+                && let Some(enum_value_ty) = self.type_of_enum_value(enum_)
+                && !class.fields().contains(&dunder::NEW)
+                && (!matches!(value, ExprOrBinding::Expr(Expr::EllipsisLiteral(_)))
+                    || !self.module().path().is_interface())
+            {
+                self.check_enum_value_annotation(&ty, &enum_value_ty, name, range, errors);
+            }
+            Type::Literal(Lit::Enum(Box::new(LitEnum {
+                class: enum_.cls.clone(),
+                member: name.clone(),
+                ty: ty.clone(),
+            })))
+        } else {
+            ty
         };
 
         // Pin any vars in the type: leaking a var in a class field is particularly
@@ -1632,8 +1633,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 DescriptorBase::ClassDef(cls.class_object().dupe()),
             ),
             ClassFieldInner::Simple {
-                initialization:
-                    ClassFieldInitialization::Method | ClassFieldInitialization::Uninitialized,
+                initialization: ClassFieldInitialization::Method,
                 ..
             } => ClassAttribute::no_access(NoAccessReason::ClassUseOfInstanceAttribute(
                 cls.class_object().dupe(),
@@ -1972,7 +1972,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         name: &Name,
     ) -> Option<WithDefiningClass<Arc<ClassField>>> {
         self.get_field_from_mro(cls, name, &|cls, name| {
-            self.get_non_synthesized_field_from_current_class_only(cls, name)
+            let field = self.get_non_synthesized_field_from_current_class_only(cls, name)?;
+            if field.initialization() == ClassFieldInitialization::Method {
+                // This parent happens to assign to the field in a method but doesn't define it.
+                None
+            } else {
+                Some(field)
+            }
         })
     }
 
@@ -2066,17 +2072,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .map(|member| self.as_instance_attribute(&member.value, &Instance::of_typed_dict(td)))
     }
 
-    fn get_super_class_member(
+    pub fn get_super_class_member(
         &self,
         cls: &Class,
-        start_lookup_cls: &ClassType,
+        start_lookup_cls: Option<&ClassType>,
         name: &Name,
     ) -> Option<WithDefiningClass<Arc<ClassField>>> {
         // Skip ancestors in the MRO until we find the class we want to start at
         let metadata = self.get_mro_for_class(cls);
-        let ancestors = metadata
-            .ancestors(self.stdlib)
-            .skip_while(|ancestor| *ancestor != start_lookup_cls);
+        let ancestors = metadata.ancestors(self.stdlib).skip_while(|ancestor| {
+            if let Some(start_lookup_cls) = start_lookup_cls {
+                *ancestor != start_lookup_cls
+            } else {
+                false
+            }
+        });
         self.get_field_from_ancestors(cls, ancestors, name, &|cls, name| {
             self.get_field_from_current_class_only(cls, name)
                 .filter(|field| !field.is_init_var())
@@ -2092,12 +2102,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Option<ClassAttribute> {
         match super_obj {
             SuperObj::Instance(obj) => self
-                .get_super_class_member(obj.class_object(), start_lookup_cls, name)
-                .map(|member| self.as_instance_attribute(&member.value, &Instance::of_class(obj))),
-            SuperObj::Class(obj) => self
-                .get_super_class_member(obj.class_object(), start_lookup_cls, name)
+                .get_super_class_member(obj.class_object(), Some(start_lookup_cls), name)
                 .map(|member| {
-                    self.as_class_attribute(&member.value, &ClassBase::ClassType(obj.clone()))
+                    self.as_instance_attribute(&member.value, &Instance::of_self_type(obj))
+                }),
+            SuperObj::Class(obj) => self
+                .get_super_class_member(obj.class_object(), Some(start_lookup_cls), name)
+                .map(|member| {
+                    self.as_class_attribute(&member.value, &ClassBase::SelfType(obj.clone()))
                 }),
         }
     }

@@ -18,6 +18,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_map::Entry;
 use starlark_map::small_map::SmallMap;
+use starlark_map::small_set::SmallSet;
 use starlark_map::smallmap;
 
 use crate::callable::Function;
@@ -119,6 +120,24 @@ impl<'a> TypeDisplayContext<'a> {
         let fake_module = ModuleName::from_str("__pyrefly__type__display__context__");
         for c in self.qnames.values_mut() {
             c.info.insert(fake_module, None);
+        }
+    }
+
+    /// Always display the module name, except for builtins.
+    pub fn always_display_module_name_except_builtins(&mut self) {
+        let builtins_module = ModuleName::from_str("builtins");
+        let fake_module = ModuleName::from_str("__pyrefly__type__display__context__");
+        for c in self.qnames.values_mut() {
+            if c.info.len() > 1 {
+                continue; // Multiple modules, so we need to keep the module name to disambiguate.
+            }
+            if let Some(value) = c.info.get_mut(&builtins_module) {
+                // Name is a builtin, we set it a default location so we hit the fallback branch in `QNameInfo::fmt`.
+                *value = Some(TextRange::default());
+            } else {
+                // Name is not a builtins, so we add a fake module to force the module name to be displayed.
+                c.info.insert(fake_module, None);
+            }
         }
     }
 
@@ -352,7 +371,13 @@ impl<'a> TypeDisplayContext<'a> {
                 if let Some(i) = literal_idx {
                     display_types.insert(i, format!("Literal[{}]", commas_iter(|| &literals)));
                 }
-                write!(f, "{}", display_types.join(" | "))
+                // This is mainly to prettify types for functions with different names but the same signature
+                let display_types_deduped = display_types
+                    .into_iter()
+                    .collect::<SmallSet<_>>()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                write!(f, "{}", display_types_deduped.join(" | "))
             }
             Type::Intersect(types) => {
                 write!(
@@ -768,6 +793,35 @@ pub mod tests {
 
         ctx.always_display_module_name();
         assert_eq!(ctx.display(&t).to_string(), "mod.ule.foo");
+    }
+
+    #[test]
+    fn test_display_qualified_except_builtins() {
+        let foo_class = fake_class("foo", "test", 5);
+        let foo_type = Type::ClassType(ClassType::new(foo_class, TArgs::default()));
+
+        {
+            let mut ctx = TypeDisplayContext::new(&[&foo_type]);
+            ctx.always_display_module_name_except_builtins();
+            assert_eq!(ctx.display(&foo_type).to_string(), "test.foo");
+        }
+
+        let int_class = fake_class("int", "builtins", 6);
+        let int_type = Type::ClassType(ClassType::new(int_class, TArgs::default()));
+
+        {
+            let mut ctx = TypeDisplayContext::new(&[&int_type]);
+            ctx.always_display_module_name_except_builtins();
+            assert_eq!(ctx.display(&int_type).to_string(), "int");
+        }
+
+        let union_foo_int = Type::Union(vec![foo_type, int_type]);
+
+        {
+            let mut ctx = TypeDisplayContext::new(&[&union_foo_int]);
+            ctx.always_display_module_name_except_builtins();
+            assert_eq!(ctx.display(&union_foo_int).to_string(), "test.foo | int");
+        }
     }
 
     #[test]
