@@ -55,11 +55,11 @@ impl TspServer {
             let transaction =
                 ide_transaction_manager.non_committable_transaction(self.inner.state());
             let new_snapshot = transaction.current_epoch().as_u32() as i32;
-            if let Ok(mut current) = self.current_snapshot.lock() {
-                if *current != new_snapshot {
-                    *current = new_snapshot;
-                    eprintln!("TSP: Updated snapshot to {}", new_snapshot);
-                }
+            if let Ok(mut current) = self.current_snapshot.lock()
+                && *current != new_snapshot
+            {
+                *current = new_snapshot;
+                eprintln!("TSP: Updated snapshot to {new_snapshot}");
             }
             // Continue to let the inner server handle RecheckFinished as well
         }
