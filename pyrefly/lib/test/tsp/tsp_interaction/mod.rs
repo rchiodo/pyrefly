@@ -8,4 +8,5 @@
 //! Tests for TSP (Type Server Protocol) request handlers
 
 pub mod get_supported_protocol_version;
+pub mod get_snapshot;
 pub mod object_model;

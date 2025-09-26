@@ -8,3 +8,4 @@
 //! TSP request implementations
 
 pub mod get_supported_protocol_version;
+pub mod get_snapshot;
