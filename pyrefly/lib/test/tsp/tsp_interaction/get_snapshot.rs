@@ -72,28 +72,28 @@ x = 1
 
     // Get initial snapshot
     tsp.server.get_snapshot();
-    
+
     // Expect first snapshot response
     tsp.client.expect_response(Response {
         id: RequestId::from(2),
         result: Some(serde_json::json!(0)), // Should be 0 or higher
         error: None,
     });
-    
+
     // Modify the file to trigger a state change
     let updated_content = r#"# Updated content
 x = 2
 y = "hello"
 "#;
-    
+
     std::fs::write(&test_file_path, updated_content).unwrap();
-    
+
     // Get updated snapshot - snapshot tracking works automatically via RecheckFinished
     tsp.server.get_snapshot();
-    
+
     // Expect second snapshot response (value may be same since file watching is complex)
     tsp.client.expect_response(Response {
-        id: RequestId::from(3), 
+        id: RequestId::from(3),
         result: Some(serde_json::json!(0)), // May still be 0 without proper file watching
         error: None,
     });

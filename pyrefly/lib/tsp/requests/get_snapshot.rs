@@ -11,7 +11,7 @@ use crate::tsp::server::TspServer;
 
 impl TspServer {
     /// Get the current snapshot version
-    /// 
+    ///
     /// The snapshot represents the current epoch of the global state.
     /// It changes whenever files are modified, configuration changes,
     /// or any other event that would trigger a recomputation.

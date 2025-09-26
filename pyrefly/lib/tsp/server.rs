@@ -52,7 +52,8 @@ impl TspServer {
         // Handle TSP-specific logic for RecheckFinished to track snapshot updates
         if let LspEvent::RecheckFinished = event {
             // Update our snapshot when global state changes
-            let transaction = ide_transaction_manager.non_committable_transaction(self.inner.state());
+            let transaction =
+                ide_transaction_manager.non_committable_transaction(self.inner.state());
             let new_snapshot = transaction.current_epoch().as_u32() as i32;
             if let Ok(mut current) = self.current_snapshot.lock() {
                 if *current != new_snapshot {
@@ -116,10 +117,8 @@ impl TspServer {
             }
             TSPRequests::GetSnapshotRequest { .. } => {
                 // Get snapshot doesn't need a transaction since it just returns the cached value
-                self.inner.send_response(new_response(
-                    request.id.clone(),
-                    Ok(self.get_snapshot()),
-                ));
+                self.inner
+                    .send_response(new_response(request.id.clone(), Ok(self.get_snapshot())));
                 Ok(true)
             }
             _ => {
