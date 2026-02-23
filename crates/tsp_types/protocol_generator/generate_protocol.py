@@ -197,10 +197,17 @@ def convert_json_to_model(tsp_json: Dict[str, Any]) -> model.LSPModel:
                         documentation=prop_def.get("documentation"),
                     )
                 )
+            # Convert extends references so the Rust generator flattens
+            # parent properties into child structs.
+            extends = [
+                convert_type_reference(ext)
+                for ext in type_def.get("extends", [])
+            ]
             structures.append(
                 model.Structure(
                     name=type_name,
                     properties=properties,
+                    extends=extends,
                     documentation=type_def.get("documentation"),
                 )
             )
@@ -304,7 +311,13 @@ def convert_type_reference(type_def: Dict[str, Any]) -> model.LSP_TYPE_SPEC:
         name = base_type_mapping.get(name, name)
         return model.BaseType(kind="base", name=name)
     elif kind == "reference":
-        return model.ReferenceType(kind="reference", name=type_def["name"])
+        name = type_def["name"]
+        # Generic type parameters like T in TypeBase<T> and DeclarationBase<T>
+        # are used as discriminator fields. In JSON serialization these are just
+        # strings, so map them to the string base type.
+        if name == "T":
+            return model.BaseType(kind="base", name="string")
+        return model.ReferenceType(kind="reference", name=name)
     elif kind == "array":
         element_type = convert_type_reference(type_def["element"])
         return model.ArrayType(kind="array", element=element_type)

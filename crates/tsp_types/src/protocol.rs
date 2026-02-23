@@ -494,7 +494,7 @@ pub struct SentinelLiteral {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeclarationBase {
     /// Discriminator field that determines which declaration variant this is. Regular: Has source code and AST node Synthesized: Created by type checker, no source node
-    pub kind: T,
+    pub kind: String,
 }
 
 /// Represents a declaration that exists in source code. Points to the actual AST node where a symbol is declared. Fields: - category: Type of declaration (Variable, Function, Class, etc.) - node: AST node pointing to the declaration location - name: Name of the declared symbol (undefined for anonymous/implicit declarations) Examples: ```python def my_function(x: int) -> str:  # Function declaration return str(x) class MyClass:  # Class declaration x: int      # Variable declaration T = TypeVar('T')  # TypeParam declaration ```
@@ -503,6 +503,9 @@ pub struct DeclarationBase {
 pub struct RegularDeclaration {
     /// Category of the declaration (Variable, Function, Class, etc.). Determines how the declaration should be interpreted. Example: DeclarationCategory.Function for `def foo():`.
     pub category: DeclarationCategory,
+
+    /// Discriminator field that determines which declaration variant this is. Regular: Has source code and AST node Synthesized: Created by type checker, no source node
+    pub kind: String,
 
     /// Name of the declared symbol, or undefined for anonymous declarations. Example: "foo" for `def foo():`, undefined for lambda functions.
     pub name: Option<String>,
@@ -515,6 +518,9 @@ pub struct RegularDeclaration {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SynthesizedDeclaration {
+    /// Discriminator field that determines which declaration variant this is. Regular: Has source code and AST node Synthesized: Created by type checker, no source node
+    pub kind: String,
+
     /// URI of the file where this symbol is conceptually declared. For built-ins, this might be a special URI; for decorator-generated code, it's the file containing the decorator. Example: File URI of a @dataclass-decorated class for synthesized __init__.
     pub uri: String,
 }
@@ -562,7 +568,7 @@ pub struct TypeBase {
     pub id: i32,
 
     /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
-    pub kind: T,
+    pub kind: String,
 
     /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
     pub type_alias_info: Option<TypeAliasInfo>,
@@ -575,11 +581,23 @@ pub struct BuiltInType {
     /// Optional declaration information for built-in types (usually undefined for true built-ins). Example: Some built-ins like __class__ have synthesized declarations.
     pub declaration: Option<Declaration>,
 
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// The name of the built-in type. Limited to specific known built-in types. 'unknown': Type cannot be determined 'any': Accepts any value (gradual typing) 'unbound': Variable not yet bound to a value 'ellipsis': The ... literal 'never': Type that never occurs (e.g., function that always raises) 'noreturn': Function that doesn't return (alias for never)
     pub name: String,
 
     /// For 'unknown' types, this may contain a possible type based on context. Used when type inference has partial information but can't fully determine the type. Example: In `if isinstance(x, int): ...` the possibleType of unknown x might be int
     pub possible_type: Option<Box<Type>>,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Base type for symbols that have a declaration in source code. This is the common parent for FunctionType and ClassType when the type comes from an actual declaration node in the parse tree. The type parameter T allows subtypes to specify their own TypeKind (e.g., Function or Class) while sharing the common declaration field. Used for: - Functions and methods with actual `def` statements (TypeKind.Function) - Classes with actual `class` statements (TypeKind.Class) - Variables with declarations in source (TypeKind.Declared) Not used for: - Synthesized types (use SynthesizedType) - Built-in types (use BuiltInType) Example: ```python def my_function(x: int) -> str:  # FunctionType with TypeKind.Function return str(x) class MyClass:  # ClassType with TypeKind.Class pass ```
@@ -588,6 +606,18 @@ pub struct BuiltInType {
 pub struct DeclaredType {
     /// Declaration node information (source location, category, name). Points to where this type was declared in the source code. Example: For a function, this contains the node pointing to the 'def' keyword and function name.
     pub declaration: Declaration,
+
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Represents a function or method that has a declaration in the source code. Used for functions parsed from actual `def` statements. Uses TypeKind.Function for discrimination from ClassType and other types. Binding behavior: - boundToType: Contains the class/instance the method is bound to. Used for: - User-defined functions with `def` statements - Methods declared in source classes - Lambda functions (though simple ones) Not used for: - Built-in functions like `len`, `print` (use SynthesizedType) - Synthesized methods from decorators like @dataclass (use SynthesizedType) Example: ```python def calculate(x: int, y: int) -> int: return x + y class MyClass: def method(self, value: str) -> None: pass ```
@@ -597,19 +627,49 @@ pub struct FunctionType {
     /// The class or object instance that this method is bound to. Example: In `obj.method`, boundToType is the type of `obj`.
     pub bound_to_type: Option<Box<Type>>,
 
+    /// Declaration node information (source location, category, name). Points to where this type was declared in the source code. Example: For a function, this contains the node pointing to the 'def' keyword and function name.
+    pub declaration: Declaration,
+
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// The return type annotation of the function. Example: In `def foo() -> int:`, returnType is the int type.
     pub return_type: Option<Box<Type>>,
 
     /// Specialized versions of parameter types and return type when the function has type parameters. Contains concrete types substituted for generic type variables. Example: When calling `list[int].append(1)`, the self parameter is specialized to list[int].
     pub specialized_types: Option<SpecializedFunctionTypes>,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Represents a class or class instance that has a declaration in the source code. Used for classes parsed from actual `class` statements. Uses TypeKind.Class for discrimination from FunctionType and other types. Used for: - User-defined classes with `class` statements - Class instances (instances of user-defined classes) - Specialized generic classes (e.g., `MyClass[int]`) - Literal instances (e.g., the number `42` is an instance of `int`) Not used for: - Built-in classes like `int`, `str`, `list` (use SynthesizedType) - Classes synthesized by decorators (use SynthesizedType) Example: ```python class Point: x: int y: int class Container[T]: value: T # point has ClassType (instance of Point) point = Point() # container has ClassType with typeArgs=[int] container: Container[int] = Container() ```
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClassType {
+    /// Declaration node information (source location, category, name). Points to where this type was declared in the source code. Example: For a function, this contains the node pointing to the 'def' keyword and function name.
+    pub declaration: Declaration,
+
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// The literal value if this class represents a literal (e.g., int literal 42, str literal "hello"). Can be a primitive value, enum member, or sentinel object. Example: For the literal `42`, literalValue = 42.
     pub literal_value: Option<LiteralValue>,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 
     /// Type arguments when this class is a specialized generic type. Example: For `list[int]`, typeArgs = [int].
     pub type_args: Option<Vec<Type>>,
@@ -619,16 +679,40 @@ pub struct ClassType {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UnionType {
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// Array of types that make up this union. Example: For `int | str | None`, subTypes = [int, str, None].
     pub sub_types: Vec<Type>,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Represents a Python module as a type. Used when a module object itself is referenced (not its contents). Used for: - Module imports: `import os` makes `os` a ModuleType - Module attributes accessed via __file__, __name__, etc. - Submodule references: `os.path` is also a ModuleType The loaderFields contain all the symbols exported by the module that would be accessible via attribute access (module.symbol_name). Examples: ```python import os import os.path as path from typing import Protocol # `os` has ModuleType with loaderFields containing {"path": ..., "getcwd": ..., etc.} # `path` has ModuleType for the os.path module # In type stubs, Protocol is a module symbol that gets loaded ```
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModuleType {
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// Fully qualified name of the module. Example: "os.path" for the os.path module.
     pub module_name: String,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 
     /// URI of the module's source file. Example: "file:///path/to/module.py" or "<builtin>" for built-in modules.
     pub uri: String,
@@ -638,11 +722,23 @@ pub struct ModuleType {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OverloadedType {
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
     /// The implementation signature (if present). This is the actual function body, as opposed to the @overload declarations. Example: The non-decorated function definition after all @overload decorators.
     pub implementation: Option<Box<Type>>,
 
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     /// List of overload signatures for this overloaded function. Each overload represents a different way the function can be called. Example: For a function with @overload decorators, each overload is in this array.
     pub overloads: Vec<Type>,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Metadata about a synthesized type that provides additional context. This information is used by the client to enhance IntelliSense and type checking.
@@ -658,15 +754,39 @@ pub struct SynthesizedTypeMetadata {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SynthesizedType {
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
     pub metadata: SynthesizedTypeMetadata,
 
     pub stub_content: String,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
 }
 
 /// Represents a reference to another type by its ID. Used to avoid duplicating large type structures and to handle forward references. Used for: - Deduplication: When the same type appears multiple times, subsequent occurrences can reference the first occurrence instead of duplicating all fields - Cyclic references: Breaking cycles in recursive type definitions - Large types: Reducing payload size for complex types used repeatedly This is an optimization mechanism in the protocol to keep type handles compact when transmitting over the wire. Examples: ```python # Recursive type definition class Node: value: int next: Node | None  # 'Node' references back to itself # When serializing the type of 'next', the second occurrence of Node # uses TypeReferenceType pointing to the first Node's ID # Repeated complex type def process_lists( list1: list[dict[str, int]], list2: list[dict[str, int]],  # Can reference the type from list1 list3: list[dict[str, int]]   # Can reference the type from list1 ) -> None: pass ```
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TypeReferenceType {
+    /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
+    pub flags: TypeFlags,
+
+    /// Unique identifier for this type instance. Used to detect cycles and cache type lookups. Example: During recursive type resolution, the id is checked to avoid infinite loops.
+    pub id: i32,
+
+    /// Discriminator field that determines which Type variant this is. Used for type narrowing when processing Type unions. Example: `if (type.kind === TypeKind.BuiltIn) { ... }`
+    pub kind: String,
+
+    /// Information about type aliases. Present when this type was created from a type alias. Contains the alias name, module, file location, type parameters, and type arguments. Example: `type MyList = list[int]` - typeAliasInfo contains name="MyList", typeArgs=[int]
+    pub type_alias_info: Option<TypeAliasInfo>,
+
     /// Identifier that references another Type by its id. Used to avoid duplicating large type structures and handle forward references. Example: When a type appears multiple times, later occurrences use TypeReference pointing to the first occurrence's id.
     pub type_reference_id: i32,
 }
