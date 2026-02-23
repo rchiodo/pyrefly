@@ -793,9 +793,24 @@ def generate_rust_protocol(tsp_json_path: str, output_dir: str) -> None:
         constants_rust = generate_constants_rust(tsp_json)
         if constants_rust:
             content += "\n\n" + constants_rust
-        # Add crate-level allows
+        # Remove the Microsoft copyright from the lsprotocol generator output
+        content = content.replace(
+            "// Copyright (c) Microsoft Corporation. All rights reserved.\n// Licensed under the MIT License.\n\n",
+            "",
+        )
 
-        content = "#![allow(clippy::all)]\n#![allow(dead_code)]\n\n" + content
+        # Add crate-level allows and Meta copyright header
+
+        content = (
+            "/*\n"
+            " * Copyright (c) Meta Platforms, Inc. and affiliates.\n"
+            " *\n"
+            " * This source code is licensed under the MIT license found in the\n"
+            " * LICENSE file in the root directory of this source tree.\n"
+            " */\n"
+            "\n"
+            "#![allow(clippy::all)]\n#![allow(dead_code)]\n\n" + content
+        )
 
         # Fixup flag enums - automatically detect flag enums from TSP JSON
 
