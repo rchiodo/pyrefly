@@ -152,8 +152,7 @@ mod tests {
     #[test]
     fn test_absolute_import_single_part() {
         let name =
-            resolve_module_name(&["os".to_owned()], 0, ModuleName::from_str("any"), false)
-                .unwrap();
+            resolve_module_name(&["os".to_owned()], 0, ModuleName::from_str("any"), false).unwrap();
         assert_eq!(name.as_str(), "os");
     }
 
@@ -204,13 +203,9 @@ mod tests {
     fn test_relative_import_two_dots_with_name() {
         // `from ..foo import ...` in module a.b.c
         // leading_dots=2 → strip 2 → a, then append "foo" → a.foo
-        let name = resolve_module_name(
-            &["foo".to_owned()],
-            2,
-            ModuleName::from_str("a.b.c"),
-            false,
-        )
-        .unwrap();
+        let name =
+            resolve_module_name(&["foo".to_owned()], 2, ModuleName::from_str("a.b.c"), false)
+                .unwrap();
         assert_eq!(name.as_str(), "a.foo");
     }
 
@@ -219,9 +214,8 @@ mod tests {
         // `from .utils import ...` in module a.b.__init__
         // is_init=true, leading_dots=1 → effective dots = 0 (subtract 1),
         // so no components stripped from a.b, then append "utils" → a.b.utils
-        let name =
-            resolve_module_name(&["utils".to_owned()], 1, ModuleName::from_str("a.b"), true)
-                .unwrap();
+        let name = resolve_module_name(&["utils".to_owned()], 1, ModuleName::from_str("a.b"), true)
+            .unwrap();
         assert_eq!(name.as_str(), "a.b.utils");
     }
 
@@ -236,12 +230,8 @@ mod tests {
     #[test]
     fn test_relative_import_too_many_dots_is_error() {
         // `from ....foo import ...` in module a.b.c → 4 dots exceeds depth 3
-        let result = resolve_module_name(
-            &["foo".to_owned()],
-            4,
-            ModuleName::from_str("a.b.c"),
-            false,
-        );
+        let result =
+            resolve_module_name(&["foo".to_owned()], 4, ModuleName::from_str("a.b.c"), false);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("relative import level exceeds"));
