@@ -373,6 +373,9 @@ pub trait TspInterface: Send + Sync {
     ) -> anyhow::Result<ProcessEvent>;
 
     fn telemetry_state(&self) -> TelemetryServerState;
+
+    /// Access the internal state for module resolution and type queries.
+    fn state(&self) -> &State;
 }
 
 pub struct Connection {
@@ -5016,5 +5019,9 @@ impl TspInterface for Server {
 
     fn telemetry_state(&self) -> TelemetryServerState {
         self.telemetry_state()
+    }
+
+    fn state(&self) -> &State {
+        &self.state
     }
 }

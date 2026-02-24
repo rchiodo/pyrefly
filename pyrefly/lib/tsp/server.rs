@@ -18,7 +18,6 @@ use tracing::info;
 use tsp_types::TSPRequests;
 
 use crate::commands::lsp::IndexingMode;
-use crate::lsp::non_wasm::lsp::new_response;
 use crate::lsp::non_wasm::protocol::Request;
 use crate::lsp::non_wasm::protocol::Response;
 use crate::lsp::non_wasm::queue::LspEvent;
@@ -98,7 +97,7 @@ impl<T: TspInterface> TspServer<T> {
 
     fn handle_tsp_request<'a>(
         &'a self,
-        _ide_transaction_manager: &mut TransactionManager<'a>,
+        ide_transaction_manager: &mut TransactionManager<'a>,
         request: &Request,
     ) -> anyhow::Result<bool> {
         // Convert the request into a TSPRequests enum
@@ -115,21 +114,26 @@ impl<T: TspInterface> TspServer<T> {
 
         match msg {
             TSPRequests::GetSupportedProtocolVersionRequest { .. } => {
-                self.inner.send_response(new_response(
-                    request.id.clone(),
-                    Ok(self.get_supported_protocol_version()),
-                ));
+                self.send_ok(request.id.clone(), self.get_supported_protocol_version());
                 Ok(true)
             }
             TSPRequests::GetSnapshotRequest { .. } => {
                 // Get snapshot doesn't need a transaction since it just returns the cached value
-                self.inner
-                    .send_response(new_response(request.id.clone(), Ok(self.get_snapshot())));
+                self.send_ok(request.id.clone(), self.get_snapshot());
+                Ok(true)
+            }
+            TSPRequests::ResolveImportRequest { params, .. } => {
+                self.handle_resolve_import(request.id.clone(), params, ide_transaction_manager);
                 Ok(true)
             }
             _ => {
-                // Other TSP requests not yet implemented
-                Ok(false)
+                // Recognized TSP method but not yet implemented — return MethodNotFound
+                self.inner.send_response(Response::new_err(
+                    request.id.clone(),
+                    lsp_server::ErrorCode::MethodNotFound as i32,
+                    format!("TSP method not implemented: {}", request.method),
+                ));
+                Ok(true)
             }
         }
     }
