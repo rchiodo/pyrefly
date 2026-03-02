@@ -374,8 +374,19 @@ pub trait TspInterface: Send + Sync {
 
     fn telemetry_state(&self) -> TelemetryServerState;
 
-    /// Access the internal state for module resolution and type queries.
-    fn state(&self) -> &State;
+    /// Build a [`Handle`] from a [`ModulePath`], using the server's internal
+    /// config and search-path state.
+    fn handle_from_module_path(&self, path: ModulePath) -> Handle;
+
+    /// Produce a read-only [`Transaction`] for powering IDE queries.
+    ///
+    /// Delegates to [`TransactionManager::non_committable_transaction`] with
+    /// the server's internal state, so callers never need direct access to
+    /// [`State`].
+    fn non_committable_transaction<'a>(
+        &'a self,
+        tm: &mut TransactionManager<'a>,
+    ) -> Transaction<'a>;
 }
 
 pub struct Connection {
@@ -5021,7 +5032,14 @@ impl TspInterface for Server {
         self.telemetry_state()
     }
 
-    fn state(&self) -> &State {
-        &self.state
+    fn handle_from_module_path(&self, path: ModulePath) -> Handle {
+        handle_from_module_path(&self.state, path)
+    }
+
+    fn non_committable_transaction<'a>(
+        &'a self,
+        tm: &mut TransactionManager<'a>,
+    ) -> Transaction<'a> {
+        tm.non_committable_transaction(&self.state)
     }
 }
