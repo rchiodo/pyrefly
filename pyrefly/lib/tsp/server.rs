@@ -16,10 +16,14 @@ use pyrefly_util::telemetry::Telemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
 use pyrefly_util::telemetry::TelemetryEventKind;
 use tracing::info;
+use tsp_types::TSPNotificationMethods;
 use tsp_types::TSPRequests;
+use tsp_types::snapshot_outdated_error;
 
 use crate::commands::lsp::IndexingMode;
 use crate::lsp::non_wasm::lsp::new_response;
+use crate::lsp::non_wasm::protocol::Message;
+use crate::lsp::non_wasm::protocol::Notification;
 use crate::lsp::non_wasm::protocol::Request;
 use crate::lsp::non_wasm::protocol::Response;
 use crate::lsp::non_wasm::queue::LspEvent;
@@ -94,9 +98,43 @@ impl<T: TspInterface> TspServer<T> {
         // Increment snapshot after the inner server has processed the event
         if should_increment_snapshot && let Ok(mut current) = self.current_snapshot.lock() {
             *current += 1;
+            self.send_snapshot_changed_notification();
         }
 
         Ok(result)
+    }
+
+    /// Validate that the caller's snapshot matches the current one.
+    /// Returns `Err(snapshot_outdated_error())` when stale.
+    pub fn validate_snapshot(&self, snapshot: i32) -> Result<(), lsp_server::ResponseError> {
+        let current = self.get_snapshot();
+        if snapshot != current {
+            Err(snapshot_outdated_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Send a snapshotChanged notification to the client.
+    ///
+    /// Called whenever the snapshot counter increments, so the client knows
+    /// any previously-returned types are stale.
+    fn send_snapshot_changed_notification(&self) {
+        let method = serde_json::to_value(TSPNotificationMethods::TypeServerSnapshotChanged)
+            .expect("TSPNotificationMethods serialization is infallible");
+        let method_str = method
+            .as_str()
+            .expect("TSPNotificationMethods serializes to a string")
+            .to_owned();
+
+        let _ = self
+            .inner
+            .sender()
+            .send(Message::Notification(Notification {
+                method: method_str,
+                params: serde_json::json!(null),
+                activity_key: None,
+            }));
     }
 
     fn handle_tsp_request<'a>(
@@ -130,9 +168,66 @@ impl<T: TspInterface> TspServer<T> {
                     .send_response(new_response(request.id.clone(), Ok(self.get_snapshot())));
                 Ok(true)
             }
-            _ => {
-                // Other TSP requests not yet implemented
-                Ok(false)
+            TSPRequests::GetPythonSearchPathsRequest { params, .. } => {
+                let response = match self.handle_get_python_search_paths(params) {
+                    Ok(result) => Response::new_ok(request.id.clone(), result),
+                    Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
+                };
+                self.inner.send_response(response);
+                Ok(true)
+            }
+            TSPRequests::ResolveImportRequest { params, .. } => {
+                let response = match self.handle_resolve_import(params) {
+                    Ok(result) => Response::new_ok(request.id.clone(), result),
+                    Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
+                };
+                self.inner.send_response(response);
+                Ok(true)
+            }
+            TSPRequests::GetComputedTypeRequest { params, .. } => {
+                let response = match serde_json::from_value::<tsp_types::GetTypeParams>(params) {
+                    Ok(typed_params) => match self.handle_get_computed_type(typed_params) {
+                        Ok(result) => Response::new_ok(request.id.clone(), result),
+                        Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
+                    },
+                    Err(e) => Response::new_err(
+                        request.id.clone(),
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        format!("Invalid params for getComputedType: {e}"),
+                    ),
+                };
+                self.inner.send_response(response);
+                Ok(true)
+            }
+            TSPRequests::GetDeclaredTypeRequest { params, .. } => {
+                let response = match serde_json::from_value::<tsp_types::GetTypeParams>(params) {
+                    Ok(typed_params) => match self.handle_get_declared_type(typed_params) {
+                        Ok(result) => Response::new_ok(request.id.clone(), result),
+                        Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
+                    },
+                    Err(e) => Response::new_err(
+                        request.id.clone(),
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        format!("Invalid params for getDeclaredType: {e}"),
+                    ),
+                };
+                self.inner.send_response(response);
+                Ok(true)
+            }
+            TSPRequests::GetExpectedTypeRequest { params, .. } => {
+                let response = match serde_json::from_value::<tsp_types::GetTypeParams>(params) {
+                    Ok(typed_params) => match self.handle_get_expected_type(typed_params) {
+                        Ok(result) => Response::new_ok(request.id.clone(), result),
+                        Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
+                    },
+                    Err(e) => Response::new_err(
+                        request.id.clone(),
+                        lsp_server::ErrorCode::InvalidParams as i32,
+                        format!("Invalid params for getExpectedType: {e}"),
+                    ),
+                };
+                self.inner.send_response(response);
+                Ok(true)
             }
         }
     }

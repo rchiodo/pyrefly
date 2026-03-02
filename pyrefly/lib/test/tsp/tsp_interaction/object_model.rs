@@ -135,6 +135,84 @@ impl TestTspServer {
         }));
     }
 
+    pub fn get_python_search_paths(&mut self, from_uri: &str, snapshot: i32) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/getPythonSearchPaths".to_owned(),
+            params: serde_json::json!({
+                "fromUri": from_uri,
+                "snapshot": snapshot
+            }),
+            activity_key: None,
+        }));
+    }
+
+    pub fn resolve_import(
+        &mut self,
+        source_uri: &str,
+        leading_dots: i32,
+        name_parts: &[&str],
+        snapshot: i32,
+    ) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/resolveImport".to_owned(),
+            params: serde_json::json!({
+                "sourceUri": source_uri,
+                "moduleDescriptor": {
+                    "leadingDots": leading_dots,
+                    "nameParts": name_parts
+                },
+                "snapshot": snapshot
+            }),
+            activity_key: None,
+        }));
+    }
+
+    pub fn get_computed_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/getComputedType".to_owned(),
+            params: serde_json::json!({
+                "uri": uri,
+                "position": { "line": line, "character": character },
+                "snapshot": snapshot
+            }),
+            activity_key: None,
+        }));
+    }
+
+    pub fn get_declared_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/getDeclaredType".to_owned(),
+            params: serde_json::json!({
+                "uri": uri,
+                "position": { "line": line, "character": character },
+                "snapshot": snapshot
+            }),
+            activity_key: None,
+        }));
+    }
+
+    pub fn get_expected_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/getExpectedType".to_owned(),
+            params: serde_json::json!({
+                "uri": uri,
+                "position": { "line": line, "character": character },
+                "snapshot": snapshot
+            }),
+            activity_key: None,
+        }));
+    }
+
     pub fn did_open(&self, file: &'static str) {
         let path = self.get_root_or_panic().join(file);
         self.send_message(Message::Notification(Notification {
@@ -295,6 +373,34 @@ impl TestTspClient {
         });
     }
 
+    /// Wait for a notification with the given method name, skipping any
+    /// non-notification messages (responses, requests) and notifications
+    /// with a different method. Returns the notification params.
+    pub fn expect_notification(&self, method: &str) -> serde_json::Value {
+        loop {
+            match self.receiver.recv_timeout(self.timeout) {
+                Ok(msg) => {
+                    eprintln!(
+                        "client<---server {}",
+                        serde_json::to_string(&JsonRpcMessage::from_message(msg.clone())).unwrap()
+                    );
+                    if let Message::Notification(ref n) = msg {
+                        if n.method == method {
+                            return n.params.clone();
+                        }
+                    }
+                    // Skip non-matching messages
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("Timeout waiting for notification '{method}'");
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("Channel disconnected waiting for notification '{method}'");
+                }
+            }
+        }
+    }
+
     pub fn expect_any_message(&self) {
         match self.receiver.recv_timeout(self.timeout) {
             Ok(msg) => {
@@ -312,7 +418,6 @@ impl TestTspClient {
         }
     }
 
-    #[expect(dead_code)]
     pub fn receive_any_message(&self) -> Message {
         match self.receiver.recv_timeout(self.timeout) {
             Ok(msg) => {

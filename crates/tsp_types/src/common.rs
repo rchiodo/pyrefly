@@ -88,6 +88,23 @@ where
     }
 }
 
+/// Parameters for getComputedType, getDeclaredType, and getExpectedType requests.
+///
+/// The generated protocol uses `Option<serde_json::Value>` for these request
+/// params, so we define a concrete params type here for handler convenience.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetTypeParams {
+    /// URI of the source file containing the node to query.
+    pub uri: String,
+
+    /// Zero-based line and character position identifying the node.
+    pub position: tsp::Position,
+
+    /// Snapshot version — the server returns `ServerCancelled` when stale.
+    pub snapshot: i32,
+}
+
 /// Helper to build a JSON-RPC error response for TSP handlers
 #[allow(dead_code)]
 pub fn error_response(

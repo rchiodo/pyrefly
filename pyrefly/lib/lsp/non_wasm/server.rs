@@ -216,6 +216,7 @@ use pyrefly_util::telemetry::TelemetryFileWatcherStats;
 use pyrefly_util::telemetry::TelemetryServerState;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::watch_pattern::WatchPattern;
+use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
@@ -289,6 +290,7 @@ use crate::lsp::wasm::notebook::DidSaveNotebookDocument;
 use crate::lsp::wasm::provide_type::ProvideType;
 use crate::lsp::wasm::provide_type::ProvideTypeResponse;
 use crate::lsp::wasm::provide_type::provide_type;
+use crate::module::finder::find_import;
 use crate::state::load::LspFile;
 use crate::state::lsp::DisplayTypeErrors;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
@@ -383,6 +385,36 @@ pub trait TspInterface: Send + Sync {
     ) -> anyhow::Result<ProcessEvent>;
 
     fn telemetry_state(&self) -> TelemetryServerState;
+
+    /// Return the Python search paths (search path + site-packages) for the
+    /// given file URI.  The URI is used to locate the relevant config.
+    fn get_python_search_paths(&self, from_uri: &str) -> Vec<String>;
+
+    /// Resolve a Python import to a file URI.
+    ///
+    /// * `source_uri` – URI of the file containing the import statement.
+    /// * `leading_dots` – number of leading dots (0 for absolute imports).
+    /// * `name_parts` – module name components (e.g. `["os", "path"]`).
+    ///
+    /// Returns `Some(uri_string)` on success, `None` when the module cannot
+    /// be found.
+    fn resolve_import(
+        &self,
+        source_uri: &str,
+        leading_dots: i32,
+        name_parts: &[String],
+    ) -> Option<String>;
+
+    /// Get the computed (inferred) type at the given position in a file.
+    ///
+    /// Returns `None` if the file is not loaded or no type can be determined
+    /// at the given position.
+    fn get_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type>;
 }
 
 pub struct Connection {
@@ -5289,5 +5321,103 @@ impl TspInterface for Server {
 
     fn telemetry_state(&self) -> TelemetryServerState {
         self.telemetry_state()
+    }
+
+    fn get_python_search_paths(&self, from_uri: &str) -> Vec<String> {
+        let url = Url::parse(from_uri)
+            .ok()
+            .or_else(|| Url::from_file_path(from_uri).ok());
+        let path = url.and_then(|u| u.to_file_path().ok());
+        let Some(path) = path else {
+            return Vec::new();
+        };
+
+        let module_path = ModulePath::filesystem(path);
+        let config = self.state.config_finder().python_file(
+            ModuleNameWithKind::guaranteed(ModuleName::unknown()),
+            &module_path,
+        );
+
+        config
+            .search_path()
+            .chain(config.site_package_path())
+            .map(|p| {
+                Url::from_file_path(p)
+                    .map_or_else(|()| p.to_string_lossy().to_string(), |u| u.to_string())
+            })
+            .collect()
+    }
+
+    fn resolve_import(
+        &self,
+        source_uri: &str,
+        leading_dots: i32,
+        name_parts: &[String],
+    ) -> Option<String> {
+        let url = Url::parse(source_uri)
+            .ok()
+            .or_else(|| Url::from_file_path(source_uri).ok());
+        let path = url.and_then(|u| u.to_file_path().ok());
+        let origin_path = ModulePath::filesystem(path?);
+
+        let config = self.state.config_finder().python_file(
+            ModuleNameWithKind::guaranteed(ModuleName::unknown()),
+            &origin_path,
+        );
+
+        // Build the absolute module name from TSP parameters
+        let module_name = if leading_dots == 0 {
+            // Absolute import: join name_parts with "."
+            ModuleName::from_parts(name_parts)
+        } else {
+            // Relative import: resolve against origin module
+            let origin_name = ModuleName::from_path(origin_path.as_path(), config.search_path())
+                .unwrap_or(ModuleName::unknown());
+
+            let suffix = if name_parts.is_empty() {
+                None
+            } else {
+                Some(Name::new(name_parts.join(".")))
+            };
+
+            origin_name.new_maybe_relative(
+                origin_path.is_init(),
+                leading_dots as u32,
+                suffix.as_ref(),
+            )?
+        };
+
+        let result = find_import(&config, module_name, Some(&origin_path), None);
+        let module_path = result.finding()?;
+
+        // `Url::from_file_path` only works for absolute paths (FileSystem,
+        // Memory). For bundled typeshed the path is relative, so fall back
+        // to the raw lossy string — the same strategy `get_python_search_paths`
+        // uses.
+        Some(Url::from_file_path(module_path.as_path()).map_or_else(
+            |()| module_path.as_path().to_string_lossy().to_string(),
+            |u| u.to_string(),
+        ))
+    }
+
+    fn get_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type> {
+        let url = Url::parse(uri)
+            .ok()
+            .or_else(|| Url::from_file_path(uri).ok())?;
+        let path = url.to_file_path().ok()?;
+
+        let handle = make_open_handle(&self.state, &path);
+        let transaction = self.state.transaction();
+        let module_info = transaction.get_module_info(&handle)?;
+        let position = module_info.from_lsp_position(
+            lsp_types::Position { line, character },
+            /* notebook_cell */ None,
+        );
+        transaction.get_type_at(&handle, position)
     }
 }
