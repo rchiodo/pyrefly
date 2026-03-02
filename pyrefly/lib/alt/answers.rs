@@ -62,6 +62,9 @@ use crate::types::equality::TypeEq;
 use crate::types::equality::TypeEqCtx;
 use crate::types::heap::TypeHeap;
 use crate::types::stdlib::Stdlib;
+use crate::types::types::Forall;
+use crate::types::types::Forallable;
+use crate::types::types::TParams;
 use crate::types::types::Type;
 
 /// The index stores all the references where the definition is external to the current module.
@@ -82,14 +85,36 @@ pub struct Index {
     pub parent_methods_map: SmallMap<TextRange, Vec<(ModulePath, TextRange)>>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct OverloadTrace {
+    callable: Callable,
+    tparams: Option<Arc<TParams>>,
+}
+
+impl OverloadTrace {
+    pub(crate) fn new(callable: Callable, tparams: Option<Arc<TParams>>) -> Self {
+        Self { callable, tparams }
+    }
+
+    fn as_type(&self) -> Type {
+        match &self.tparams {
+            Some(tparams) if !tparams.is_empty() => Type::Forall(Box::new(Forall {
+                tparams: tparams.clone(),
+                body: Forallable::Callable(self.callable.clone()),
+            })),
+            _ => Type::Callable(Box::new(self.callable.clone())),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum OverloadedCallee {
     Resolved {
-        callable: Callable,
+        callable: OverloadTrace,
     },
     Candidates {
-        all: Vec<Callable>,
-        closest: Callable,
+        all: Vec<OverloadTrace>,
+        closest: OverloadTrace,
         is_closest_chosen: bool,
     },
 }
@@ -774,16 +799,12 @@ impl Answers {
     pub fn get_chosen_overload_trace(&self, range: TextRange) -> Option<Type> {
         let lock = self.trace.as_ref()?.lock();
         match lock.overloaded_callees.get(&range)? {
-            OverloadedCallee::Resolved { callable } => {
-                Some(self.deep_force(self.heap().mk_callable_from(callable.clone())))
-            }
+            OverloadedCallee::Resolved { callable } => Some(self.deep_force(callable.as_type())),
             OverloadedCallee::Candidates {
                 closest,
                 is_closest_chosen,
                 ..
-            } if *is_closest_chosen => {
-                Some(self.deep_force(self.heap().mk_callable_from(closest.clone())))
-            }
+            } if *is_closest_chosen => Some(self.deep_force(closest.as_type())),
             _ => None,
         }
     }
@@ -795,10 +816,15 @@ impl Answers {
     ) -> Option<(Vec<Callable>, Option<usize>)> {
         let lock = self.trace.as_ref()?.lock();
         match lock.overloaded_callees.get(&range)? {
-            OverloadedCallee::Resolved { callable } => Some((vec![callable.clone()], Some(0))),
+            OverloadedCallee::Resolved { callable } => {
+                Some((vec![callable.callable.clone()], Some(0)))
+            }
             OverloadedCallee::Candidates { all, closest, .. } => {
-                let chosen_index = all.iter().position(|signature| signature == closest);
-                Some((all.clone(), chosen_index))
+                let chosen_index = all
+                    .iter()
+                    .position(|signature| signature.callable == closest.callable);
+                let signatures = all.iter().map(|trace| trace.callable.clone()).collect();
+                Some((signatures, chosen_index))
             }
         }
     }
@@ -846,28 +872,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(trace) = &self.current().trace
             && let Some(callable) = ty.to_callable()
         {
-            trace
-                .lock()
-                .overloaded_callees
-                .insert(loc, OverloadedCallee::Resolved { callable });
+            trace.lock().overloaded_callees.insert(
+                loc,
+                OverloadedCallee::Resolved {
+                    callable: OverloadTrace::new(callable, None),
+                },
+            );
         }
     }
 
     /// Record all the overloads and the chosen overload.
     /// The trace will be used to power signature help and hover for overloaded functions.
-    pub fn record_overload_trace(
+    pub(crate) fn record_overload_trace(
         &self,
         loc: TextRange,
-        all_overloads: Vec<&Callable>,
-        closest_overload: &Callable,
+        all_overloads: Vec<OverloadTrace>,
+        closest_overload: OverloadTrace,
         is_closest_overload_chosen: bool,
     ) {
         if let Some(trace) = &self.current().trace {
             trace.lock().overloaded_callees.insert(
                 loc,
                 OverloadedCallee::Candidates {
-                    all: all_overloads.into_iter().cloned().collect(),
-                    closest: closest_overload.clone(),
+                    all: all_overloads,
+                    closest: closest_overload,
                     is_closest_chosen: is_closest_overload_chosen,
                 },
             );
