@@ -1350,45 +1350,41 @@ impl<'a> Transaction<'a> {
     {
         let key = Hashed::new(key);
 
-        // Either: We have solutions (use that), or we have answers (calculate that), or we have none (demand and try again)
-        // Check; demand; check - the second check is guaranteed to work.
-        for _ in 0..2 {
-            if module_data.state.is_checked(self.data.now) {
-                // Only use existing solutions or answers if the module data is current.
-                // Otherwise, the module might be dirty and require computation.
-                if let Some(solutions) = module_data.state.get_solutions()
-                    && module_data.state.last_step() == Some(Step::Solutions)
-                {
-                    return solutions.get_hashed_opt(key).duped();
-                } else if let Some(answers) = module_data.state.get_answers() {
-                    // Fast path: check if the answer is already computed in the
-                    // Calculation cell. This avoids duping Arcs and constructing
-                    // a TransactionHandle when the value is cached.
-                    if let Some(idx) = answers.0.key_to_idx_hashed_opt(key)
-                        && let Some(v) = answers.1.get_idx(idx)
-                    {
-                        return Some(v);
-                    }
-                    // Slow path: need full solve_exported_key for computation.
-                    let load = module_data.state.get_load().unwrap();
-                    let stdlib = self.get_stdlib(&module_data.handle);
-                    let lookup = self.lookup(module_data);
-                    let result = answers.1.solve_exported_key(
-                        &lookup,
-                        &lookup,
-                        &answers.0,
-                        &load.errors,
-                        &stdlib,
-                        &self.data.state.uniques,
-                        key,
-                        thread_state,
-                    );
-                    return result;
-                }
-            }
-            self.demand(&module_data, Step::Answers);
+        // Ensure answers (or solutions) are computed. Cheap if already done.
+        self.demand(&module_data, Step::Answers);
+
+        // If answers is None, solutions must exist.
+        let Some(answers) = module_data.state.get_answers() else {
+            let solutions = module_data
+                .state
+                .get_solutions()
+                .expect("answers evicted implies solutions exist");
+            return solutions.get_hashed_opt(key).duped();
+        };
+
+        // Fast path: check if the answer is already computed in the
+        // Calculation cell. This avoids duping Arcs and constructing
+        // a TransactionHandle when the value is cached.
+        if let Some(idx) = answers.0.key_to_idx_hashed_opt(key)
+            && let Some(v) = answers.1.get_idx(idx)
+        {
+            return Some(v);
         }
-        unreachable!("We demanded the answers, either answers or solutions should be present");
+
+        // Slow path: need full solve_exported_key for computation.
+        let load = module_data.state.get_load().unwrap();
+        let stdlib = self.get_stdlib(&module_data.handle);
+        let lookup = self.lookup(module_data);
+        answers.1.solve_exported_key(
+            &lookup,
+            &lookup,
+            &answers.0,
+            &load.errors,
+            &stdlib,
+            &self.data.state.uniques,
+            key,
+            thread_state,
+        )
     }
 
     fn memory_lookup<'b>(&'b self) -> MemoryFilesLookup<'b> {
