@@ -1218,7 +1218,7 @@ impl Solver {
             solver: self,
             type_order,
             gas: INITIAL_GAS,
-            recursive_assumptions: SmallSet::new(),
+            subset_cache: SmallMap::new(),
             class_protocol_assumptions: SmallSet::new(),
         }
     }
@@ -1424,15 +1424,43 @@ impl SubsetError {
     }
 }
 
+/// Cached result for a recursive subset check. Used by `Subset::subset_cache`.
+#[derive(Clone, Debug)]
+pub(crate) enum SubsetCacheEntry {
+    /// Currently being computed — used for coinductive cycle detection.
+    /// Treated as `Ok(())`: if we encounter a pair already being checked,
+    /// we optimistically assume the check succeeds (coinductive reasoning).
+    InProgress,
+    /// Computed and succeeded.
+    Ok,
+}
+
 /// A helper to implement subset ergonomically.
 /// Should only be used within `crate::subset`, which implements part of it.
 pub struct Subset<'a, Ans: LookupAnswer> {
     pub(crate) solver: &'a Solver,
     pub type_order: TypeOrder<'a, Ans>,
     gas: Gas,
-    /// Recursive assumptions of pairs of types that is_subset_eq returns true for.
-    /// Used for structural typechecking of protocols and recursive type aliases.
-    pub recursive_assumptions: SmallSet<(Type, Type)>,
+    /// Memoization cache for recursive subset checks (protocols and recursive type aliases).
+    /// Doubles as a cycle detector: `InProgress` entries break cycles via coinductive
+    /// reasoning by optimistically returning `Ok(())`.
+    ///
+    /// Unlike a stack-based cycle detector (which removes entries on return and forces
+    /// re-computation from sibling call paths), this cache persists `Ok` results across
+    /// the entire query, preventing exponential re-checking when the same `(got, want)`
+    /// pair is encountered from multiple sibling call paths (e.g., different methods of
+    /// a protocol each requiring the same structural subtype check).
+    ///
+    /// On failure, entries added *during* the failing computation are rolled back
+    /// (popped from the end of the map back to the saved size), because intermediate
+    /// `Ok` entries may have depended on a coinductive assumption that the failure
+    /// invalidated. For example, if checking `A <: P1` internally succeeds on
+    /// `A <: P2` (via the coinductive assumption that `A <: P1` holds) but then
+    /// `A <: P1` ultimately fails, the cached success for `A <: P2` is unsound and
+    /// must be discarded. Only entries added during the failing computation are
+    /// removed; entries from earlier (independent) computations are preserved.
+    /// This works because `SmallMap` preserves insertion order.
+    pub subset_cache: SmallMap<(Type, Type), SubsetCacheEntry>,
     /// Class-level recursive assumptions for protocol checks.
     /// When checking `got <: protocol` where got's type arguments contain Vars
     /// (indicating we're in a recursive pattern), we track (got_class, protocol_class)
