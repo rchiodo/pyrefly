@@ -98,7 +98,9 @@ impl<T: TspInterface> TspServer<T> {
         // Increment snapshot after the inner server has processed the event
         if should_increment_snapshot && let Ok(mut current) = self.current_snapshot.lock() {
             *current += 1;
-            self.send_snapshot_changed_notification();
+            let snapshot = *current;
+            drop(current); // Release the lock before sending the notification
+            self.send_snapshot_changed_notification(snapshot);
         }
 
         Ok(result)
@@ -119,7 +121,7 @@ impl<T: TspInterface> TspServer<T> {
     ///
     /// Called whenever the snapshot counter increments, so the client knows
     /// any previously-returned types are stale.
-    fn send_snapshot_changed_notification(&self) {
+    fn send_snapshot_changed_notification(&self, snapshot: i32) {
         let method = serde_json::to_value(TSPNotificationMethods::TypeServerSnapshotChanged)
             .expect("TSPNotificationMethods serialization is infallible");
         let method_str = method
@@ -132,7 +134,7 @@ impl<T: TspInterface> TspServer<T> {
             .sender()
             .send(Message::Notification(Notification {
                 method: method_str,
-                params: serde_json::json!(null),
+                params: serde_json::json!({ "snapshot": snapshot }),
                 activity_key: None,
             }));
     }
