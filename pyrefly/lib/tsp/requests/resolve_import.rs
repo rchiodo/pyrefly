@@ -82,7 +82,9 @@ impl<T: TspInterface> TspServer<T> {
         };
 
         // --- 4. Resolve the import via existing infrastructure ---
-        let transaction = self.inner.non_committable_transaction(ide_transaction_manager);
+        let transaction = self
+            .inner
+            .non_committable_transaction(ide_transaction_manager);
         let result = transaction.import_handle(&source_handle, module_name, None);
 
         // --- 5. Convert result to URI string (or null) ---
