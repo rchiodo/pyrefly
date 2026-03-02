@@ -59,6 +59,10 @@ pub struct LspArgs {
     /// an up-to-date source DB. Only useful for benchmarking.
     #[arg(long)]
     pub(crate) build_system_blocking: bool,
+
+    /// Enable external references integration for cross-repo go-to-definition.
+    #[arg(long, hide = true)]
+    pub enable_external_references: bool,
 }
 
 /// Run LSP server with optional path remapping.
