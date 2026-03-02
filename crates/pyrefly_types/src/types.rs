@@ -208,6 +208,18 @@ impl TArgs {
         self.0.1.is_empty()
     }
 
+    /// Returns the number of type arguments to display, stripping trailing args
+    /// that match their parameter defaults (WYSIWYG display per issue #2461).
+    pub fn display_count(&self) -> usize {
+        let mut last_non_default = 0;
+        for (i, (param, arg)) in self.iter_paired().enumerate() {
+            if param.default().is_none() || arg != &param.as_gradual_type() {
+                last_non_default = i + 1;
+            }
+        }
+        last_non_default
+    }
+
     /// Apply a substitution to type arguments.
     ///
     /// This is useful mainly to re-express ancestors (which, in the MRO, are in terms of class
