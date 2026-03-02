@@ -1125,6 +1125,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             if let Some(entry) = self.subset_cache.get(&key) {
                 return match entry {
                     SubsetCacheEntry::InProgress | SubsetCacheEntry::Ok => Ok(()),
+                    SubsetCacheEntry::Err(err) => Err(err.clone()),
                 };
             }
             Some(key)
@@ -1145,7 +1146,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 Ok(()) => {
                     self.subset_cache.insert(key, SubsetCacheEntry::Ok);
                 }
-                Err(_) => {
+                Err(err) => {
                     // Roll back entries added during our computation. These entries
                     // may have depended on a coinductive assumption (our InProgress
                     // entry being treated as Ok) that this failure invalidates.
@@ -1154,6 +1155,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     while self.subset_cache.len() > cache_size.unwrap() {
                         self.subset_cache.pop();
                     }
+                    self.subset_cache
+                        .insert(key, SubsetCacheEntry::Err(err.clone()));
                 }
             }
         }

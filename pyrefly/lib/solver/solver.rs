@@ -1433,6 +1433,8 @@ pub(crate) enum SubsetCacheEntry {
     InProgress,
     /// Computed and succeeded.
     Ok,
+    /// Computed and failed.
+    Err(SubsetError),
 }
 
 /// A helper to implement subset ergonomically.
