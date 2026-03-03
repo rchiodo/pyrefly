@@ -51,6 +51,7 @@ use crate::alt::traits::Solve;
 use crate::binding::binding::AnyIdx;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Exported;
+use crate::binding::binding::Key;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::KeyTypeAlias;
 use crate::binding::bindings::BindingEntry;
@@ -1129,6 +1130,8 @@ pub struct ThreadState {
     recursion_limit_config: Option<RecursionLimitConfig>,
     /// How SCC participants store answers during solving.
     scc_solving_mode: SccSolvingMode,
+    /// Partial answers for inline first-use pinning. Keyed by (NameAssign def_idx, CalcStack height).
+    partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
 }
 
 /// Internal SCC-solving modes controlled via `PYREFLY_SCC_SOLVING_MODE`.
@@ -1148,6 +1151,7 @@ impl ThreadState {
             debug: RefCell::new(false),
             recursion_limit_config,
             scc_solving_mode: SccSolvingMode::from_env(),
+            partial_answers: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -1244,6 +1248,46 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn stack(&self) -> &CalcStack {
         &self.thread_state.stack
+    }
+
+    /// Store a partial answer for inline first-use pinning.
+    /// `def_idx` is the Key::Definition idx of the NameAssign.
+    #[expect(dead_code)]
+    fn store_partial_answer(&self, def_idx: Idx<Key>, type_info: Arc<TypeInfo>) {
+        let height = self.stack().len();
+        self.thread_state
+            .partial_answers
+            .borrow_mut()
+            .insert((def_idx, height), type_info);
+    }
+
+    /// Remove the partial answer for a NameAssign at the current height.
+    #[expect(dead_code)]
+    fn clear_partial_answer(&self, def_idx: Idx<Key>) {
+        let height = self.stack().len();
+        self.thread_state
+            .partial_answers
+            .borrow_mut()
+            .remove(&(def_idx, height));
+    }
+
+    /// Check for a matching partial answer. Returns the stored TypeInfo if
+    /// there is an entry for (def_idx, current_height - 1).
+    ///
+    /// The height offset of 1 exists because the NameAssign is solved at height H
+    /// (where it calls binding_to_type_info, staying at H), but the ForwardToFirstUse
+    /// is checked inside solve_binding at height H+1 (pushed by get_idx).
+    #[expect(dead_code)]
+    fn check_partial_answer(&self, def_idx: Idx<Key>) -> Option<Arc<TypeInfo>> {
+        let current_height = self.stack().len();
+        if current_height == 0 {
+            return None;
+        }
+        self.thread_state
+            .partial_answers
+            .borrow()
+            .get(&(def_idx, current_height - 1))
+            .cloned()
     }
 
     fn recursion_limit_config(&self) -> Option<RecursionLimitConfig> {
