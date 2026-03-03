@@ -1899,6 +1899,7 @@ pub struct NameAssign {
     pub expr: Box<Expr>,
     pub legacy_tparams: Option<Box<[Idx<KeyLegacyTypeParam>]>>,
     pub is_in_function_scope: bool,
+    pub first_use: FirstUse,
 }
 
 /// Data for a type alias binding.

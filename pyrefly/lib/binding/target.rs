@@ -534,6 +534,8 @@ impl<'a> BindingsBuilder<'a> {
                 expr: value,
                 legacy_tparams: tparams,
                 is_in_function_scope: self.scopes.in_function_scope(),
+                // TODO(stroxler): dummy value, unused for now
+                first_use: FirstUse::DoesNotPin,
             }))
         };
         // Record the raw assignment
