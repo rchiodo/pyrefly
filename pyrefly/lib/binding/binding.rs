@@ -1900,6 +1900,9 @@ pub struct NameAssign {
     pub legacy_tparams: Option<Box<[Idx<KeyLegacyTypeParam>]>>,
     pub is_in_function_scope: bool,
     pub first_use: FirstUse,
+    /// The CompletedPartialType idx for this NameAssign, if infer_with_first_use
+    /// is enabled. Used at solve time for inline first-use pinning.
+    pub pinned_idx: Option<Idx<Key>>,
 }
 
 /// Data for a type alias binding.

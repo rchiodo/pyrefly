@@ -535,6 +535,7 @@ impl<'a> BindingsBuilder<'a> {
                 legacy_tparams: tparams,
                 is_in_function_scope: self.scopes.in_function_scope(),
                 first_use: FirstUse::Undetermined,
+                pinned_idx,
             }))
         };
         // Record the raw assignment
