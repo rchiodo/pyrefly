@@ -1130,7 +1130,10 @@ pub struct ThreadState {
     recursion_limit_config: Option<RecursionLimitConfig>,
     /// How SCC participants store answers during solving.
     scc_solving_mode: SccSolvingMode,
-    /// Partial answers for inline first-use pinning. Keyed by (NameAssign def_idx, CalcStack height).
+    /// Partial answers for inline first-use pinning, keyed by (NameAssign def_idx, CalcStack height).
+    /// The height ensures that only ForwardToFirstUse bindings at the same CalcStack depth
+    /// as the NameAssign's solve_binding can see the partial answer (offset 0 in get_idx,
+    /// which checks before pushing its own frame).
     partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
 }
 
@@ -1271,21 +1274,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .remove(&(def_idx, height));
     }
 
-    /// Check for a matching partial answer. Returns the stored TypeInfo if
-    /// there is an entry for (def_idx, current_height - 1).
+    /// Check for a matching partial answer at the current CalcStack height.
     ///
-    /// The height offset of 1 exists because the NameAssign is solved at height H
-    /// (where it calls binding_to_type_info, staying at H), but the ForwardToFirstUse
-    /// is checked inside solve_binding at height H+1 (pushed by get_idx).
+    /// The height check ensures that only a ForwardToFirstUse resolved at the same
+    /// CalcStack depth as the NameAssign's solve_binding can see the partial answer.
+    /// This is offset 0 because the check runs in `get_idx` BEFORE pushing the
+    /// ForwardToFirstUse's own frame. Bindings at deeper heights (e.g., a ClassField
+    /// that indirectly depends on the same variable) correctly miss the partial answer
+    /// and go through normal resolution.
     pub(crate) fn check_partial_answer(&self, def_idx: Idx<Key>) -> Option<Arc<TypeInfo>> {
-        let current_height = self.stack().len();
-        if current_height == 0 {
-            return None;
-        }
+        let height = self.stack().len();
         self.thread_state
             .partial_answers
             .borrow()
-            .get(&(def_idx, current_height - 1))
+            .get(&(def_idx, height))
             .cloned()
     }
 
@@ -1339,6 +1341,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
+        // Check for a partial answer shortcut before pushing to the CalcStack.
+        // This is used by ForwardToFirstUse during inline first-use pinning to
+        // return the raw type without caching it in shared Answers and without
+        // triggering cycle detection against the NameAssign's CalcStack frame.
+        let binding = self.bindings().get(idx);
+        if let Some(answer) = K::check_shortcut(self, binding) {
+            return answer;
+        }
+
         let current = CalcId(self.bindings().dupe(), K::to_anyidx(idx));
         let calculation = self.get_calculation(idx);
 

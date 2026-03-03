@@ -1874,16 +1874,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Arc<TypeInfo> {
-        // Special case for forward, as we don't want to re-expand the type
-        if let Binding::Forward(fwd) = binding {
-            return self.get_idx(*fwd);
-        }
-        if let Binding::ForwardToFirstUse(fwd) = binding {
-            if let Some(def_idx) = self.def_idx_for_forward_to_first_use(*fwd)
-                && let Some(type_info) = self.check_partial_answer(def_idx)
-            {
-                return type_info;
-            }
+        // Special case for forward, as we don't want to re-expand the type.
+        // ForwardToFirstUse is handled identically here; the partial answer
+        // shortcut is checked in get_idx before pushing to the CalcStack.
+        if let Binding::Forward(fwd) | Binding::ForwardToFirstUse(fwd) = binding {
             return self.get_idx(*fwd);
         }
         let mut type_info = self.binding_to_type_info(binding, errors);
