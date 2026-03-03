@@ -720,6 +720,7 @@ impl FlowStyle {
 pub struct ClassIndices {
     pub def_index: ClassDefIndex,
     pub class_idx: Idx<KeyClass>,
+    pub class_object_idx: Idx<Key>,
     pub base_type_idx: Idx<KeyClassBaseType>,
     pub metadata_idx: Idx<KeyClassMetadata>,
     pub mro_idx: Idx<KeyClassMro>,
@@ -1123,6 +1124,13 @@ impl Scope {
             _ => None,
         }
     }
+
+    fn class_object_idx(&self) -> Option<Idx<Key>> {
+        match &self.kind {
+            ScopeKind::Class(class_scope) => Some(class_scope.indices.class_object_idx),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1221,6 +1229,10 @@ impl Scopes {
             .any(|scope| matches!(scope.kind, ScopeKind::Function(_) | ScopeKind::Method(_)))
     }
 
+    pub fn current_static_contains(&self, name: &Name) -> bool {
+        self.current().stat.0.contains_key(name)
+    }
+
     /// Enter a with block.
     pub fn enter_with(&mut self) {
         self.current_mut().with_depth += 1;
@@ -1274,6 +1286,17 @@ impl Scopes {
         for scope in self.iter_rev() {
             if let Some(class_and_metadata) = scope.class_and_metadata_keys() {
                 return Some(class_and_metadata);
+            }
+        }
+        None
+    }
+
+    /// Are we anywhere inside a class? If so, return the class object idx.
+    /// This function looks at enclosing scopes.
+    pub fn enclosing_class_object_idx(&self) -> Option<Idx<Key>> {
+        for scope in self.iter_rev() {
+            if let Some(class_object_idx) = scope.class_object_idx() {
+                return Some(class_object_idx);
             }
         }
         None
@@ -1954,6 +1977,18 @@ impl Scopes {
             name.range,
             StaticStyle::PossibleLegacyTParam,
         )
+    }
+
+    /// Add a name to the current static scope.
+    ///
+    /// Callers must always define the name via a `Key::Definition` immediately
+    /// afterward or downstream lookups may panic.
+    pub fn add_name_to_current_static(&mut self, name: &Identifier) {
+        self.current_mut().stat.upsert(
+            Hashed::new(name.id.clone()),
+            name.range,
+            StaticStyle::SingleDef(None),
+        );
     }
 
     /// Add an adhoc name - if it does not already exist - to the current static

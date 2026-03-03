@@ -111,9 +111,11 @@ impl<'a> BindingsBuilder<'a> {
         key: Key,
     ) -> (CurrentIdx, ClassIndices) {
         let def_index = self.def_index();
+        let class_object = self.declare_current_idx(key);
         let class_indices = ClassIndices {
             def_index,
             class_idx: self.idx_for_promise(KeyClass(ShortIdentifier::new(class_name))),
+            class_object_idx: class_object.idx(),
             base_type_idx: self.idx_for_promise(KeyClassBaseType(def_index)),
             metadata_idx: self.idx_for_promise(KeyClassMetadata(def_index)),
             mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
@@ -124,7 +126,6 @@ impl<'a> BindingsBuilder<'a> {
                 .idx_for_promise(KeyConsistentOverrideCheck(def_index)),
             abstract_class_check_idx: self.idx_for_promise(KeyAbstractClassCheck(def_index)),
         };
-        let class_object = self.declare_current_idx(key);
         (class_object, class_indices)
     }
 
