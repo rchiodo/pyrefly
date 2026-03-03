@@ -177,7 +177,8 @@ struct Facts {
     callee_to_callers: Vec<python::CalleeToCaller>,
     containing_top_level_declarations: Vec<python::ContainingTopLevelDeclaration>,
     xrefs_via_name: Vec<python::XRefViaName>,
-    xrefs_by_target: HashMap<python::Name, Vec<src::ByteSpan>>,
+    xrefs_via_name_by_target: HashMap<python::Name, Vec<src::ByteSpan>>,
+    xrefs: Vec<python_xrefs::XRef>,
     declaration_docstrings: Vec<python::DeclarationDocstring>,
     name_to_sname: Vec<python::NameToSName>,
 }
@@ -219,7 +220,8 @@ impl Facts {
             callee_to_callers: vec![],
             containing_top_level_declarations: vec![],
             xrefs_via_name: vec![],
-            xrefs_by_target: HashMap::new(),
+            xrefs: vec![],
+            xrefs_via_name_by_target: HashMap::new(),
             declaration_docstrings: vec![],
             name_to_sname: vec![],
         }
@@ -810,17 +812,24 @@ impl GleanState<'_> {
 
     fn add_xref(&mut self, definition_location: DefinitionLocation, range: TextRange) {
         let source = to_span(range);
-        let target = python::Name::new(definition_location.name);
-        if let Some(spans) = self.facts.xrefs_by_target.get_mut(&target) {
+        let target_name = python::Name::new(definition_location.name);
+        let target = python_xrefs::XRefDefinitionLocation {
+            name: target_name.clone(),
+            file: definition_location.file,
+        };
+        if let Some(spans) = self.facts.xrefs_via_name_by_target.get_mut(&target_name) {
             spans.push(source.clone());
         } else {
             self.facts
-                .xrefs_by_target
-                .insert(target.clone(), vec![source.clone()]);
+                .xrefs_via_name_by_target
+                .insert(target_name.clone(), vec![source.clone()]);
         }
-        self.facts
-            .xrefs_via_name
-            .push(python::XRefViaName { target, source });
+        self.facts.xrefs_via_name.push(python::XRefViaName {
+            target: target_name,
+            source: source.clone(),
+        });
+
+        self.facts.xrefs.push(python_xrefs::XRef { target, source });
     }
 
     fn xrefs_for_type_info(
@@ -1541,8 +1550,8 @@ impl Glean {
         let xrefs_via_name_by_file_fact =
             python::XRefsViaNameByFile::new(file_fact.clone(), facts.xrefs_via_name.to_owned());
 
-        let xrefs_by_target: Vec<python::XRefsViaNameByTarget> = facts
-            .xrefs_by_target
+        let xrefs_via_name_by_target: Vec<python::XRefsViaNameByTarget> = facts
+            .xrefs_via_name_by_target
             .into_iter()
             .map(|(target, spans)| {
                 python::XRefsViaNameByTarget::new(
@@ -1552,6 +1561,8 @@ impl Glean {
                 )
             })
             .collect();
+
+        let xrefs_by_file = python_xrefs::XRefsByFile::new(file_fact.clone(), facts.xrefs);
 
         let entries = vec![
             GleanEntry::SchemaId {
@@ -1569,7 +1580,8 @@ impl Glean {
             facts.callee_to_callers.glean_entry(),
             facts.containing_top_level_declarations.glean_entry(),
             xrefs_via_name_by_file_fact.glean_entry(),
-            xrefs_by_target.glean_entry(),
+            xrefs_via_name_by_target.glean_entry(),
+            xrefs_by_file.glean_entry(),
             facts.declaration_docstrings.glean_entry(),
             facts.name_to_sname.glean_entry(),
             gencode_fact.glean_entry(),
