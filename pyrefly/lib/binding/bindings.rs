@@ -1380,25 +1380,71 @@ impl<'a> BindingsBuilder<'a> {
         }
     }
 
-    /// Mark a CompletedPartialType as used by a specific binding.
+    /// Mark a CompletedPartialType as used by a specific binding,
+    /// and mirror the first_use on the corresponding NameAssign.
     fn mark_first_use(&mut self, partial_type_idx: Idx<Key>, user_idx: Idx<Key>) {
+        // First, read the chain immutably to find the NameAssign def_idx.
+        let def_idx = if let Some(Binding::CompletedPartialType(unpinned_idx, _)) =
+            self.idx_to_binding(partial_type_idx)
+        {
+            if let Some(Binding::PartialTypeWithUpstreamsCompleted(def_idx, _)) =
+                self.idx_to_binding(*unpinned_idx)
+            {
+                Some(*def_idx)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Now mutate the CompletedPartialType.
         if let Some(Binding::CompletedPartialType(_, first_use)) =
             self.idx_to_binding_mut(partial_type_idx)
         {
             *first_use = FirstUse::UsedBy(user_idx);
         }
+        // Mirror onto the NameAssign.
+        if let Some(def_idx) = def_idx
+            && let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx)
+        {
+            na.first_use = FirstUse::UsedBy(user_idx);
+        }
     }
 
-    /// Mark a CompletedPartialType as DoesNotPin if it's the first use.
+    /// Mark a CompletedPartialType as DoesNotPin if it's the first use,
+    /// and mirror onto the corresponding NameAssign.
     ///
     /// This is used when looking up names in static type contexts or for narrowing,
     /// where we don't want to pin partial types. Should be called after `lookup_name`.
     pub fn mark_does_not_pin_if_first_use(&mut self, partial_type_idx: Idx<Key>) {
+        // First, read the chain immutably to find the NameAssign def_idx, but only
+        // if the CompletedPartialType is still Undetermined.
+        let def_idx = if let Some(Binding::CompletedPartialType(unpinned_idx, first_use)) =
+            self.idx_to_binding(partial_type_idx)
+            && matches!(first_use, FirstUse::Undetermined)
+        {
+            if let Some(Binding::PartialTypeWithUpstreamsCompleted(def_idx, _)) =
+                self.idx_to_binding(*unpinned_idx)
+            {
+                Some(*def_idx)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // Mutate the CompletedPartialType.
         if let Some(Binding::CompletedPartialType(_, first_use)) =
             self.idx_to_binding_mut(partial_type_idx)
             && matches!(first_use, FirstUse::Undetermined)
         {
             *first_use = FirstUse::DoesNotPin;
+        }
+        // Mirror onto the NameAssign.
+        if let Some(def_idx) = def_idx
+            && let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx)
+        {
+            na.first_use = FirstUse::DoesNotPin;
         }
     }
 
