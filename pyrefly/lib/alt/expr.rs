@@ -392,17 +392,27 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 } else {
                     Vec::new()
                 };
+
                 // Pass any contextual information to the parameter bindings used in the lambda body as a side
                 // effect, by setting an answer for the vars created at binding time.
                 let return_hint = hint.and_then(|hint| self.decompose_lambda(hint, &param_vars));
 
-                let mut params = param_vars.into_map(|(name, var)| {
-                    Param::Pos(
-                        name.clone(),
-                        self.solver().force_var(var),
-                        Required::Required,
-                    )
-                });
+                let mut params: Vec<Param> = if let Some(parameters) = &lambda.parameters {
+                    param_vars
+                        .into_iter()
+                        .zip(parameters.iter_non_variadic_params())
+                        .map(|((name, var), param)| {
+                            let required = if param.default.is_some() {
+                                Required::Optional(None)
+                            } else {
+                                Required::Required
+                            };
+                            Param::Pos(name.clone(), self.solver().force_var(var), required)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 if let Some(parameters) = &lambda.parameters {
                     params.extend(parameters.vararg.iter().map(|x| {
                         Param::VarArg(

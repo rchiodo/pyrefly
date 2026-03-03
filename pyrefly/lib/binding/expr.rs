@@ -454,6 +454,20 @@ impl<'a> BindingsBuilder<'a> {
     }
 
     pub fn bind_lambda(&mut self, lambda: &mut ExprLambda, usage: &mut Usage) {
+        // Process default values in the enclosing scope before pushing the lambda scope,
+        // because default values are evaluated at function definition time.
+        if let Some(parameters) = &mut lambda.parameters {
+            for x in parameters
+                .posonlyargs
+                .iter_mut()
+                .chain(parameters.args.iter_mut())
+                .chain(parameters.kwonlyargs.iter_mut())
+            {
+                if let Some(default) = x.default.as_deref_mut() {
+                    self.ensure_expr(default, usage);
+                }
+            }
+        }
         self.scopes.push(Scope::lambda(lambda.range, false));
         if let Some(parameters) = &lambda.parameters {
             for x in parameters {

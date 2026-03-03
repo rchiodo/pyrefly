@@ -26,6 +26,24 @@ f8: Callable[[int], int] = lambda x: x + "foo" # E: Argument `Literal['foo']` is
 );
 
 testcase!(
+    test_lambda_defaults,
+    r#"
+from typing import reveal_type
+f = lambda x, y=1: x + y
+reveal_type(f)  # E: revealed type: (x: Unknown, y: Unknown = ...) -> Unknown
+f(1)  # OK, y has default
+f(1, 2)  # OK
+f()  # E: Missing argument `x`
+
+g = lambda x, y="hello", z=None: (x, y, z)
+reveal_type(g)  # E: revealed type: (x: Unknown, y: Unknown = ..., z: Unknown = ...) -> tuple[Unknown, Unknown, Unknown]
+g(1)  # OK
+g(1, "world")  # OK
+g(1, "world", True)  # OK
+"#,
+);
+
+testcase!(
     test_callable_variable_typevar_annotation,
     r#"
 from typing import Callable, TypeVar, reveal_type
