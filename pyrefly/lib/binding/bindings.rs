@@ -1026,7 +1026,7 @@ impl<'a> BindingsBuilder<'a> {
                 Binding::PartialTypeWithUpstreamsCompleted(inner_idx, _) => {
                     idx = *inner_idx;
                 }
-                Binding::Forward(inner_idx) => {
+                Binding::Forward(inner_idx) | Binding::ForwardToFirstUse(inner_idx) => {
                     idx = *inner_idx;
                 }
                 Binding::NameAssign(x) => {
@@ -1238,7 +1238,10 @@ impl<'a> BindingsBuilder<'a> {
                 Usage::StaticTypeInformation | Usage::TypeAliasRhs
             ) {
                 self.mark_does_not_pin_if_first_use(pinned_idx);
-                self.insert_binding_idx(deferred.bound_name_idx, Binding::Forward(pinned_idx));
+                self.insert_binding_idx(
+                    deferred.bound_name_idx,
+                    Binding::ForwardToFirstUse(pinned_idx),
+                );
                 return;
             }
 
@@ -1258,7 +1261,7 @@ impl<'a> BindingsBuilder<'a> {
                         }
                         self.insert_binding_idx(
                             deferred.bound_name_idx,
-                            Binding::Forward(unpinned_idx),
+                            Binding::ForwardToFirstUse(unpinned_idx),
                         );
                     }
                     FirstUse::UsedBy(other_idx) => {
@@ -1266,19 +1269,19 @@ impl<'a> BindingsBuilder<'a> {
                         if same_context {
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::Forward(unpinned_idx),
+                                Binding::ForwardToFirstUse(unpinned_idx),
                             );
                         } else {
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::Forward(pinned_idx),
+                                Binding::ForwardToFirstUse(pinned_idx),
                             );
                         }
                     }
                     FirstUse::DoesNotPin => {
                         self.insert_binding_idx(
                             deferred.bound_name_idx,
-                            Binding::Forward(pinned_idx),
+                            Binding::ForwardToFirstUse(pinned_idx),
                         );
                     }
                 }
@@ -1293,26 +1296,26 @@ impl<'a> BindingsBuilder<'a> {
                         self.mark_does_not_pin_if_first_use(pinned_idx);
                         self.insert_binding_idx(
                             deferred.bound_name_idx,
-                            Binding::Forward(pinned_idx),
+                            Binding::ForwardToFirstUse(pinned_idx),
                         );
                     }
                     FirstUse::UsedBy(other_idx) => {
                         if enclosing_idx == other_idx {
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::Forward(unpinned_idx),
+                                Binding::ForwardToFirstUse(unpinned_idx),
                             );
                         } else {
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::Forward(pinned_idx),
+                                Binding::ForwardToFirstUse(pinned_idx),
                             );
                         }
                     }
                     FirstUse::DoesNotPin => {
                         self.insert_binding_idx(
                             deferred.bound_name_idx,
-                            Binding::Forward(pinned_idx),
+                            Binding::ForwardToFirstUse(pinned_idx),
                         );
                     }
                 }
@@ -1321,7 +1324,10 @@ impl<'a> BindingsBuilder<'a> {
                 if matches!(first_use, FirstUse::Undetermined) {
                     self.mark_does_not_pin_if_first_use(pinned_idx);
                 }
-                self.insert_binding_idx(deferred.bound_name_idx, Binding::Forward(pinned_idx));
+                self.insert_binding_idx(
+                    deferred.bound_name_idx,
+                    Binding::ForwardToFirstUse(pinned_idx),
+                );
             }
         } else {
             // Default: forward to whatever we found (no partial type in chain)
@@ -1344,7 +1350,7 @@ impl<'a> BindingsBuilder<'a> {
             seen.insert(current);
 
             match self.idx_to_binding(current) {
-                Some(Binding::Forward(target)) => {
+                Some(Binding::Forward(target) | Binding::ForwardToFirstUse(target)) => {
                     current = *target;
                 }
                 Some(Binding::CompletedPartialType(unpinned_idx, first_use)) => {
@@ -1878,6 +1884,7 @@ impl<'a> BindingsBuilder<'a> {
         let mut gas = Gas::new(100);
         while let Some(
             Binding::Forward(fwd_idx)
+            | Binding::ForwardToFirstUse(fwd_idx)
             | Binding::CompletedPartialType(fwd_idx, _)
             | Binding::PartialTypeWithUpstreamsCompleted(fwd_idx, _)
             | Binding::Phi(JoinStyle::NarrowOf(fwd_idx), _),

@@ -227,6 +227,7 @@ impl<'a> CapturedVariableVisitor<'a> {
         let binding = self.module_context.bindings.get(idx);
         match binding {
             Binding::Forward(definition_idx)
+            | Binding::ForwardToFirstUse(definition_idx)
             | Binding::CompletedPartialType(definition_idx, _)
             | Binding::PartialTypeWithUpstreamsCompleted(definition_idx, _) => {
                 self.get_definition_from_idx(
@@ -263,7 +264,9 @@ impl<'a> CapturedVariableVisitor<'a> {
 
         let binding = self.module_context.bindings.get(idx);
         match binding {
-            Binding::Forward(idx) => self.get_definition_from_idx(*idx, seen, depth),
+            Binding::Forward(idx) | Binding::ForwardToFirstUse(idx) => {
+                self.get_definition_from_idx(*idx, seen, depth)
+            }
             Binding::Phi(_, branches) => {
                 for branch in branches {
                     if let Some(function_ref) =

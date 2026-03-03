@@ -2017,6 +2017,10 @@ pub enum Binding {
     ClassDef(Idx<KeyClass>, Box<[Idx<KeyDecorator>]>),
     /// A forward reference to another binding.
     Forward(Idx<Key>),
+    /// A forward reference produced during first-use resolution of a partial type.
+    /// Behaves identically to `Forward` but marks that this indirection came from
+    /// the partial-type / first-use machinery.
+    ForwardToFirstUse(Idx<Key>),
     /// A phi node, representing the union of several alternative keys.
     /// Each BranchInfo contains the value key and optional termination key from one branch.
     Phi(JoinStyle<Idx<Key>>, Box<[BranchInfo]>),
@@ -2219,6 +2223,9 @@ impl DisplayWith<Bindings> for Binding {
             }
             Self::ClassDef(x, _) => write!(f, "ClassDef({})", ctx.display(*x)),
             Self::Forward(k) => write!(f, "Forward({})", ctx.display(*k)),
+            Self::ForwardToFirstUse(k) => {
+                write!(f, "ForwardToFirstUse({})", ctx.display(*k))
+            }
             Self::AugAssign(a, s) => write!(f, "AugAssign({}, {})", ann(a), m.display(s)),
             Self::None => write!(f, "None"),
             Self::Any(style) => write!(f, "Any({style:?})"),
@@ -2476,6 +2483,7 @@ impl Binding {
             | Binding::None
             | Binding::Any(_)
             | Binding::Forward(_)
+            | Binding::ForwardToFirstUse(_)
             | Binding::Phi(_, _)
             | Binding::LoopPhi(_, _)
             | Binding::Narrow(_, _, _)

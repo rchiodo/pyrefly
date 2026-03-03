@@ -104,7 +104,7 @@ mod impl_ {
             }
             seen.insert(current);
             match bindings.get(current) {
-                Binding::Forward(next) => current = *next,
+                Binding::Forward(next) | Binding::ForwardToFirstUse(next) => current = *next,
                 Binding::Narrow(_, op, _) => {
                     let key = bindings.idx_to_key(current);
                     let Key::Narrow(x) = key else {
@@ -140,6 +140,7 @@ mod impl_ {
             }
             match bindings.get(current) {
                 Binding::Forward(next)
+                | Binding::ForwardToFirstUse(next)
                 | Binding::Narrow(next, ..)
                 | Binding::CompletedPartialType(next, ..)
                 | Binding::PartialTypeWithUpstreamsCompleted(next, ..)

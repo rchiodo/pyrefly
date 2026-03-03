@@ -1875,7 +1875,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Arc<TypeInfo> {
         // Special case for forward, as we don't want to re-expand the type
-        if let Binding::Forward(fwd) = binding {
+        if let Binding::Forward(fwd) | Binding::ForwardToFirstUse(fwd) = binding {
             return self.get_idx(*fwd);
         }
         let mut type_info = self.binding_to_type_info(binding, errors);
@@ -4053,7 +4053,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn binding_to_type_info(&self, binding: &Binding, errors: &ErrorCollector) -> TypeInfo {
         match binding {
-            Binding::Forward(k) => self.get_idx(*k).arc_clone(),
+            Binding::Forward(k) | Binding::ForwardToFirstUse(k) => self.get_idx(*k).arc_clone(),
             Binding::Narrow(k, op, range) => {
                 self.narrow(self.get_idx(*k).as_ref(), op, range.range(), errors)
             }
@@ -4482,6 +4482,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn binding_to_type(&self, binding: &Binding, errors: &ErrorCollector) -> Type {
         match binding {
             Binding::Forward(..)
+            | Binding::ForwardToFirstUse(..)
             | Binding::Phi(..)
             | Binding::LoopPhi(..)
             | Binding::Narrow(..)
