@@ -256,6 +256,8 @@ pub enum ErrorKind {
     UnexpectedKeyword,
     /// An error caused by passing a positional argument for a keyword-only parameter.
     UnexpectedPositionalArgument,
+    /// Attempting to use a type checker directive without importing it from `typing`.
+    UnimportedDirective,
     /// Attempting to use a name that is not defined.
     UnknownName,
     /// Identity comparison (`is` or `is not`) between types that are provably disjoint

@@ -378,7 +378,7 @@ impl<'a> BindingsBuilder<'a> {
                 if is_special_name(name.id.as_str()) {
                     self.error(
                         name.range,
-                        ErrorInfo::Kind(ErrorKind::UnknownName),
+                        ErrorInfo::Kind(ErrorKind::UnimportedDirective),
                         format!(
                             "`{}` must be imported from `typing` for runtime usage",
                             name
