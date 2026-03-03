@@ -1277,8 +1277,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// The height offset of 1 exists because the NameAssign is solved at height H
     /// (where it calls binding_to_type_info, staying at H), but the ForwardToFirstUse
     /// is checked inside solve_binding at height H+1 (pushed by get_idx).
-    #[expect(dead_code)]
-    fn check_partial_answer(&self, def_idx: Idx<Key>) -> Option<Arc<TypeInfo>> {
+    pub(crate) fn check_partial_answer(&self, def_idx: Idx<Key>) -> Option<Arc<TypeInfo>> {
         let current_height = self.stack().len();
         if current_height == 0 {
             return None;
@@ -1288,6 +1287,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .borrow()
             .get(&(def_idx, current_height - 1))
             .cloned()
+    }
+
+    /// Given the target idx of a ForwardToFirstUse binding, traverse the binding
+    /// graph to find the originating NameAssign's def_idx.
+    ///
+    /// A ForwardToFirstUse(target_idx) can point to either:
+    /// - PartialTypeWithUpstreamsCompleted(def_idx, _) — one hop to def_idx
+    /// - CompletedPartialType(unpinned_idx, _) — two hops: first to unpinned_idx,
+    ///   then to PartialTypeWithUpstreamsCompleted(def_idx, _)
+    pub(crate) fn def_idx_for_forward_to_first_use(&self, target: Idx<Key>) -> Option<Idx<Key>> {
+        let binding = self.bindings().get(target);
+        match binding {
+            Binding::PartialTypeWithUpstreamsCompleted(def_idx, _) => Some(*def_idx),
+            Binding::CompletedPartialType(unpinned_idx, _) => {
+                let inner = self.bindings().get(*unpinned_idx);
+                match inner {
+                    Binding::PartialTypeWithUpstreamsCompleted(def_idx, _) => Some(*def_idx),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     fn recursion_limit_config(&self) -> Option<RecursionLimitConfig> {
