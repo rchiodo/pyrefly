@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::sync::MutexGuard;
 use std::sync::RwLockReadGuard;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -671,7 +672,11 @@ impl<'a> Transaction<'a> {
             tasks.push((), chunk.collect_vec(), false);
         }
         let pool = custom_thread_pool.unwrap_or(&self.data.state.threads);
+        let search_start = Instant::now();
+        let max_dispatch_nanos = AtomicU64::new(0);
         pool.spawn_many(|| {
+            let dispatch_nanos = search_start.elapsed().as_nanos() as u64;
+            max_dispatch_nanos.fetch_max(dispatch_nanos, Ordering::Relaxed);
             tasks.work_without_cancellation(|_, modules| {
                 let mut thread_local_results = Vec::new();
                 for (handle, module_data) in modules {
@@ -684,6 +689,10 @@ impl<'a> Transaction<'a> {
                 }
             });
         });
+        let mut stats = self.stats.lock();
+        stats.search_exports_time += search_start.elapsed();
+        stats.search_exports_dispatch_time +=
+            Duration::from_nanos(max_dispatch_nanos.load(Ordering::Relaxed));
 
         all_results.into_inner().into_iter().flatten().collect()
     }

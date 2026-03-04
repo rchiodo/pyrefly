@@ -134,6 +134,10 @@ pub struct TelemetryTransactionStats {
     pub run_todo_count: usize,
     /// Time spent in `work()` (the parallel solve phase) during `run_step`.
     pub run_work_time: Duration,
+    /// Time spent in `spawn_many` during `search_exports`.
+    pub search_exports_time: Duration,
+    /// Max time a thread waited before starting work in `search_exports`.
+    pub search_exports_dispatch_time: Duration,
 }
 
 #[derive(Default)]
