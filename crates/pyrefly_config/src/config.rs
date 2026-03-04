@@ -1138,36 +1138,6 @@ impl ConfigFile {
             }
         };
 
-        // TODO(connernilsen): remove once PyTorch performs an upgrade
-        #[allow(unexpected_cfgs)]
-        if cfg!(fbcode_build) {
-            let root = match &self.source {
-                ConfigSource::File(path) => {
-                    let mut root = path.to_path_buf();
-                    root.pop();
-                    Some(root)
-                }
-                _ => None,
-            };
-            if let Some(root) = root
-                && root.ends_with("fbsource/fbcode/caffe2")
-            {
-                self.build_system = Some(BuildSystem::new(
-                    Some(".pyrelsp".to_owned()),
-                    Some(vec![
-                        "--oncall=pyre".to_owned(),
-                        "--client-metadata=id=pyrefly".to_owned(),
-                    ]),
-                    true,
-                    vec![
-                        "../python/typeshed_experimental".into(),
-                        "../python/typeshed_internal".into(),
-                        "../python/pyre_temporary_stubs".into(),
-                    ],
-                ));
-            }
-        }
-
         if let Some(build_system) = &mut self.build_system
             && let Some(error) = configure_source_db(build_system)
         {
