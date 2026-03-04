@@ -135,6 +135,30 @@ impl TestTspServer {
         }));
     }
 
+    /// Send a `typeServer/resolveImport` request.
+    pub fn resolve_import(
+        &mut self,
+        source_uri: &str,
+        name_parts: Vec<&str>,
+        leading_dots: i32,
+        snapshot: i32,
+    ) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/resolveImport".to_owned(),
+            params: serde_json::json!({
+                "sourceUri": source_uri,
+                "moduleDescriptor": {
+                    "nameParts": name_parts,
+                    "leadingDots": leading_dots,
+                },
+                "snapshot": snapshot,
+            }),
+            activity_key: None,
+        }));
+    }
+
     pub fn did_open(&self, file: &'static str) {
         let path = self.get_root_or_panic().join(file);
         self.send_message(Message::Notification(Notification {
@@ -327,6 +351,31 @@ impl TestTspClient {
             }
             Err(RecvTimeoutError::Disconnected) => {
                 panic!("Channel disconnected");
+            }
+        }
+    }
+
+    /// Receive messages until a Response is found, skipping any Notification
+    /// or Request messages. Returns the Response.
+    pub fn receive_response_skip_notifications(&self) -> Response {
+        loop {
+            match self.receiver.recv_timeout(self.timeout) {
+                Ok(msg) => {
+                    eprintln!(
+                        "client<---server {}",
+                        serde_json::to_string(&JsonRpcMessage::from_message(msg.clone())).unwrap()
+                    );
+                    if let Message::Response(resp) = msg {
+                        return resp;
+                    }
+                    // Skip notifications and requests
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!("Timeout waiting for response (skipping notifications)");
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!("Channel disconnected while waiting for response");
+                }
             }
         }
     }
