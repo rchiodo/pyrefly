@@ -30,17 +30,21 @@
 pub mod alt;
 mod binding;
 #[cfg(not(target_arch = "wasm32"))]
-mod commands;
+#[doc(hidden)]
+pub mod commands;
 mod compat;
 mod error;
 mod export;
-mod lsp;
-mod module;
+#[doc(hidden)]
+pub mod lsp;
+#[doc(hidden)]
+pub mod module;
 pub mod playground;
 pub mod query;
 mod report;
 mod solver;
-mod state;
+#[doc(hidden)]
+pub mod state;
 mod test;
 #[cfg(not(target_arch = "wasm32"))]
 mod tsp;

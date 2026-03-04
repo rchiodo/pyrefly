@@ -404,7 +404,6 @@ pub struct Connection {
     /// Channel receiver, only present for test connections created via
     /// `Connection::memory()`. The test client reads from this to observe
     /// messages sent by the server.
-    #[cfg(test)]
     channel_receiver: Option<Receiver<Message>>,
 }
 
@@ -462,7 +461,6 @@ impl Connection {
         (
             Self {
                 sender: writer_sender,
-                #[cfg(test)]
                 channel_receiver: None,
             },
             MessageReader::Stdio(BufReader::new(std::io::stdin())),
@@ -470,7 +468,6 @@ impl Connection {
         )
     }
 
-    #[cfg(test)]
     pub fn memory() -> ((Self, MessageReader), (Self, MessageReader)) {
         let (s1, r1) = crossbeam_channel::unbounded();
         let (s2, r2) = crossbeam_channel::unbounded();
@@ -494,7 +491,6 @@ impl Connection {
 
     /// Access the underlying channel receiver. Only available for
     /// channel-based connections (tests).
-    #[cfg(test)]
     pub fn channel_receiver(&self) -> &Receiver<Message> {
         self.channel_receiver
             .as_ref()

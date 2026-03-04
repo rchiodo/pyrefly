@@ -60,24 +60,24 @@ use lsp_types::request::SignatureHelpRequest;
 use lsp_types::request::WillRenameFiles;
 use lsp_types::request::WorkspaceConfiguration;
 use pretty_assertions::assert_eq;
+use pyrefly::commands::lsp::IndexingMode;
+use pyrefly::commands::lsp::LspArgs;
+use pyrefly::commands::lsp::run_lsp;
+use pyrefly::lsp::non_wasm::external_references::NoExternalReferences;
+use pyrefly::lsp::non_wasm::protocol::JsonRpcMessage;
+use pyrefly::lsp::non_wasm::protocol::Message;
+use pyrefly::lsp::non_wasm::protocol::Notification;
+use pyrefly::lsp::non_wasm::protocol::Request;
+use pyrefly::lsp::non_wasm::protocol::Response;
+use pyrefly::lsp::non_wasm::server::Connection;
+use pyrefly::lsp::wasm::provide_type::ProvideType;
 use pyrefly_util::fs_anyhow::read_to_string;
 use pyrefly_util::lock::FinishHandle;
 use pyrefly_util::telemetry::NoTelemetry;
 use serde_json::Value;
 use serde_json::json;
 
-use crate::commands::lsp::IndexingMode;
-use crate::commands::lsp::LspArgs;
-use crate::commands::lsp::run_lsp;
-use crate::lsp::non_wasm::external_references::NoExternalReferences;
-use crate::lsp::non_wasm::protocol::JsonRpcMessage;
-use crate::lsp::non_wasm::protocol::Message;
-use crate::lsp::non_wasm::protocol::Notification;
-use crate::lsp::non_wasm::protocol::Request;
-use crate::lsp::non_wasm::protocol::Response;
-use crate::lsp::non_wasm::server::Connection;
-use crate::lsp::wasm::provide_type::ProvideType;
-use crate::test::util::init_test;
+use crate::init::init_test;
 
 #[derive(Debug)]
 pub enum LspMessageError {
