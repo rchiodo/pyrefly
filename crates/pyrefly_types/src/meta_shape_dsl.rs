@@ -157,6 +157,7 @@ impl Val {
 pub(crate) mod extract {
     use crate::literal::Lit;
     use crate::literal::Literal;
+    use crate::tensor::SizeExpr;
     use crate::tensor::TensorShape;
     use crate::tuple::Tuple;
     use crate::types::Type;
@@ -212,9 +213,7 @@ pub(crate) mod extract {
             // Literal int -> wrap in SizeExpr
             Type::Literal(box Literal {
                 value: Lit::Int(n), ..
-            }) => n
-                .as_i64()
-                .map(|v| Type::Size(crate::tensor::SizeExpr::Literal(v))),
+            }) => n.as_i64().map(|v| Type::Size(SizeExpr::Literal(v))),
             _ => None,
         }
     }

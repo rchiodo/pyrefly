@@ -17,6 +17,7 @@ use std::sync::Arc;
 use crate::meta_shape_dsl::DslFnDef;
 use crate::meta_shape_dsl::DslMetaShapeFunction;
 use crate::meta_shape_dsl::MetaShapeFunction;
+use crate::meta_shape_dsl::parse_dsl;
 
 // ============================================================================
 // DSL-based MetaShapeFunction construction
@@ -55,7 +56,7 @@ impl TensorOpsRegistry {
     /// Create a new registry with built-in meta-shape functions.
     pub fn new() -> Self {
         // Parse DSL once; definitions are shared via Arc across all instances.
-        let dsl_fns: Vec<Arc<DslFnDef>> = crate::meta_shape_dsl::parse_dsl(DSL_SOURCE)
+        let dsl_fns: Vec<Arc<DslFnDef>> = parse_dsl(DSL_SOURCE)
             .expect("DSL source in tensor_ops_registry.rs has errors")
             .into_iter()
             .map(Arc::new)

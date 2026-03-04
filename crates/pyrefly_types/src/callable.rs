@@ -33,6 +33,7 @@ use vec1::vec1;
 
 use crate::class::Class;
 use crate::class::ClassType;
+use crate::display::TypeDisplayContext;
 use crate::equality::TypeEq;
 use crate::keywords::DataclassTransformMetadata;
 use crate::type_output::TypeOutput;
@@ -831,7 +832,7 @@ impl Param {
     ///
     /// This is similar to the `Display` impl, but allows passing in a `TypeDisplayContext`
     /// for context-aware formatting (e.g., disambiguating types with the same name).
-    pub fn format_for_signature(&self, type_ctx: &crate::display::TypeDisplayContext) -> String {
+    pub fn format_for_signature(&self, type_ctx: &TypeDisplayContext) -> String {
         use pyrefly_util::display::Fmt;
 
         use crate::type_output::DisplayOutput;
