@@ -129,3 +129,134 @@ fn test_safe_delete_file_rejects_usages() {
 
     interaction.shutdown().unwrap();
 }
+
+#[test]
+fn test_safe_delete_file_rejects_from_import() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("safe_delete_file_from_import");
+    let (interaction, _scope_uri) = init_with_delete_support(&root_path);
+
+    let file = "target.py";
+    let file_path = root_path.join(file);
+    let uri = Url::from_file_path(&file_path).unwrap();
+
+    interaction.client.did_open(file);
+    interaction.client.did_open("consumer.py");
+
+    interaction
+        .client
+        .send_request::<CodeActionRequest>(json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }))
+        .expect_response_with(|response| {
+            let Some(actions) = response else {
+                return true;
+            };
+            actions.iter().all(|action| {
+                let CodeActionOrCommand::CodeAction(code_action) = action else {
+                    return true;
+                };
+                code_action.title != "Safe delete file `target.py`"
+            })
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
+
+#[test]
+fn test_safe_delete_file_from_import_unused() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("safe_delete_file_from_import");
+    let (interaction, _scope_uri) = init_with_delete_support(&root_path);
+
+    let file = "unused.py";
+    let file_path = root_path.join(file);
+    let uri = Url::from_file_path(&file_path).unwrap();
+
+    interaction.client.did_open(file);
+
+    interaction
+        .client
+        .send_request::<CodeActionRequest>(json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }))
+        .expect_response_with(|response| {
+            let Some(actions) = response else {
+                return false;
+            };
+            actions.iter().any(|action| {
+                let CodeActionOrCommand::CodeAction(code_action) = action else {
+                    return false;
+                };
+                if code_action.title != "Safe delete file `unused.py`" {
+                    return false;
+                }
+                let Some(edit) = &code_action.edit else {
+                    return false;
+                };
+                let Some(DocumentChanges::Operations(ops)) = &edit.document_changes else {
+                    return false;
+                };
+                if ops.len() != 1 {
+                    return false;
+                }
+                match &ops[0] {
+                    DocumentChangeOperation::Op(ResourceOp::Delete(delete)) => delete.uri == uri,
+                    _ => false,
+                }
+            })
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
+
+#[test]
+fn test_safe_delete_file_rejects_relative_import() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("safe_delete_file_relative");
+    let (interaction, _scope_uri) = init_with_delete_support(&root_path);
+
+    let file = "pkg/target.py";
+    let file_path = root_path.join(file);
+    let uri = Url::from_file_path(&file_path).unwrap();
+
+    interaction.client.did_open(file);
+    interaction.client.did_open("pkg/consumer.py");
+
+    interaction
+        .client
+        .send_request::<CodeActionRequest>(json!({
+            "textDocument": { "uri": uri },
+            "range": {
+                "start": { "line": 0, "character": 0 },
+                "end": { "line": 0, "character": 0 }
+            },
+            "context": { "diagnostics": [] }
+        }))
+        .expect_response_with(|response| {
+            let Some(actions) = response else {
+                return true;
+            };
+            actions.iter().all(|action| {
+                let CodeActionOrCommand::CodeAction(code_action) = action else {
+                    return true;
+                };
+                code_action.title != "Safe delete file `target.py`"
+            })
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
