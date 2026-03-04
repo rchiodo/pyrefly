@@ -13,29 +13,8 @@ use tempfile::TempDir;
 
 use crate::lsp::non_wasm::protocol::Response;
 use crate::test::tsp::tsp_interaction::object_model::TspInteraction;
-
-/// Helper: create a minimal pyproject.toml so pyrefly recognises the project.
-fn write_pyproject(dir: &std::path::Path) {
-    let content = r#"[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "test-project"
-version = "1.0.0"
-"#;
-    std::fs::write(dir.join("pyproject.toml"), content).unwrap();
-}
-
-/// Helper: get the current snapshot value from the TSP server.
-/// Sends a getSnapshot request then uses `expect_response` to skip notifications.
-fn get_current_snapshot(tsp: &mut TspInteraction, expected_id: i32) -> i32 {
-    tsp.server.get_snapshot();
-    // expect_response skips notifications, so it will wait until the response arrives.
-    let resp = tsp.client.receive_response_skip_notifications();
-    assert_eq!(resp.id, RequestId::from(expected_id));
-    serde_json::from_value(resp.result.unwrap()).unwrap()
-}
+use crate::test::tsp::tsp_interaction::object_model::get_current_snapshot;
+use crate::test::tsp::tsp_interaction::object_model::write_pyproject;
 
 #[test]
 fn test_resolve_import_absolute_stdlib() {

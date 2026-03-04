@@ -407,7 +407,10 @@ pub trait TspInterface: Send + Sync {
     /// Each path is returned as a `file://` URI string. The list includes
     /// user-configured search paths, inferred import roots, and site-packages
     /// directories.
-    fn get_python_search_paths(&self, from_url: &Url) -> Vec<String>;
+    ///
+    /// Returns `Err` if `from_url` cannot be converted to a filesystem path
+    /// (e.g. on the wrong platform).
+    fn get_python_search_paths(&self, from_url: &Url) -> Result<Vec<String>, String>;
 }
 
 pub struct Connection {
@@ -5553,16 +5556,22 @@ impl TspInterface for Server {
         tm.non_committable_transaction(&self.state)
     }
 
-    fn get_python_search_paths(&self, from_url: &Url) -> Vec<String> {
+    fn get_python_search_paths(&self, from_url: &Url) -> Result<Vec<String>, String> {
         let path = from_url
             .to_file_path()
-            .expect("from_url must be a file:// URI (validated by caller)");
+            .map_err(|_| format!("Cannot convert URI to file path: {from_url}"))?;
         let module_path = ModulePath::filesystem(path);
         let config = self.state.config_finder().python_file(
             ModuleNameWithKind::guaranteed(ModuleName::unknown()),
             &module_path,
         );
-        config
+        // We intentionally use `search_path()` + `site_package_path()` rather
+        // than `structured_import_lookup_path()` because the latter also
+        // includes build-system paths and fallback search paths that are
+        // internal heuristics, not stable directories the client should depend
+        // on.
+        let mut seen = std::collections::HashSet::new();
+        let paths: Vec<String> = config
             .search_path()
             .chain(config.site_package_path())
             .filter_map(|p| {
@@ -5570,6 +5579,8 @@ impl TspInterface for Server {
                     .ok()
                     .map(|u| u.to_string())
             })
-            .collect()
+            .filter(|uri| seen.insert(uri.clone()))
+            .collect();
+        Ok(paths)
     }
 }

@@ -465,3 +465,30 @@ impl TspInteraction {
         self.client.root = Some(root);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Shared test helpers
+// ---------------------------------------------------------------------------
+
+/// Create a minimal `pyproject.toml` so pyrefly recognises the directory as a
+/// project root.
+pub fn write_pyproject(dir: &std::path::Path) {
+    let content = r#"[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "test-project"
+version = "1.0.0"
+"#;
+    std::fs::write(dir.join("pyproject.toml"), content).unwrap();
+}
+
+/// Send a `typeServer/getSnapshot` request and return the current snapshot
+/// value from the TSP server.
+pub fn get_current_snapshot(tsp: &mut TspInteraction, expected_id: i32) -> i32 {
+    tsp.server.get_snapshot();
+    let resp = tsp.client.receive_response_skip_notifications();
+    assert_eq!(resp.id, RequestId::from(expected_id));
+    serde_json::from_value(resp.result.unwrap()).unwrap()
+}

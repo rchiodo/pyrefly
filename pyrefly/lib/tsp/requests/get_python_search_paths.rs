@@ -12,13 +12,12 @@
 //! search paths, inferred import roots, and site-packages directories.
 
 use lsp_server::RequestId;
-use lsp_server::ResponseError;
-use lsp_types::Url;
 use tsp_types::protocol::GetPythonSearchPathsParams;
 
 use crate::lsp::non_wasm::server::TspInterface;
 use crate::tsp::server::TspServer;
-use crate::tsp::validation::invalid_params_error;
+use crate::tsp::validation::internal_error;
+use crate::tsp::validation::parse_file_uri;
 
 impl<T: TspInterface> TspServer<T> {
     /// Handle a `typeServer/getPythonSearchPaths` request.
@@ -38,11 +37,11 @@ impl<T: TspInterface> TspServer<T> {
         }
 
         // --- 2. Parse from_uri and delegate ---
-        match parse_from_uri(&params.from_uri) {
-            Ok(url) => {
-                let paths = self.inner.get_python_search_paths(&url);
-                self.send_ok(id, paths);
-            }
+        match parse_file_uri(&params.from_uri) {
+            Ok(url) => match self.inner.get_python_search_paths(&url) {
+                Ok(paths) => self.send_ok(id, paths),
+                Err(detail) => self.send_err(id, internal_error(&detail)),
+            },
             Err(err) => {
                 self.send_err(id, err);
             }
@@ -50,36 +49,21 @@ impl<T: TspInterface> TspServer<T> {
     }
 }
 
-/// Parse and validate the `fromUri` parameter.
-///
-/// Accepts a URI string and returns a validated [`Url`] that must be a
-/// `file://` scheme URI. Returns an `InvalidParams` error if the URI is
-/// malformed or not a `file://` URI.
-fn parse_from_uri(from_uri: &str) -> Result<Url, ResponseError> {
-    let url =
-        Url::parse(from_uri).map_err(|_| invalid_params_error("fromUri is not a valid URI"))?;
-    // Ensure it's a file:// URI so we can resolve a filesystem path.
-    if url.scheme() != "file" {
-        return Err(invalid_params_error("fromUri must be a file:// URI"));
-    }
-    Ok(url)
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::tsp::validation::parse_file_uri;
 
-    // --- parse_from_uri unit tests ---
+    // --- parse_file_uri unit tests (exercised via this module) ---
 
     #[test]
     fn test_valid_file_uri() {
-        let url = parse_from_uri("file:///home/user/project/main.py").unwrap();
+        let url = parse_file_uri("file:///home/user/project/main.py").unwrap();
         assert_eq!(url.scheme(), "file");
     }
 
     #[test]
     fn test_valid_file_uri_windows_style() {
-        let url = parse_from_uri("file:///C:/Users/test/project/main.py").unwrap();
+        let url = parse_file_uri("file:///C:/Users/test/project/main.py").unwrap();
         assert_eq!(url.scheme(), "file");
         // Should be convertible to a file path
         assert!(url.to_file_path().is_ok());
@@ -87,22 +71,22 @@ mod tests {
 
     #[test]
     fn test_empty_uri_is_error() {
-        let result = parse_from_uri("");
+        let result = parse_file_uri("");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.message.contains("not a valid URI"));
+        assert!(err.message.contains("not valid"));
     }
 
     #[test]
     fn test_relative_path_is_error() {
         // A bare path without a scheme is not a valid URI
-        let result = parse_from_uri("some/path/main.py");
+        let result = parse_file_uri("some/path/main.py");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_http_scheme_is_error() {
-        let result = parse_from_uri("http://example.com/main.py");
+        let result = parse_file_uri("http://example.com/main.py");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("file://"));
@@ -110,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_https_scheme_is_error() {
-        let result = parse_from_uri("https://example.com/main.py");
+        let result = parse_file_uri("https://example.com/main.py");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("file://"));
@@ -118,7 +102,7 @@ mod tests {
 
     #[test]
     fn test_untitled_scheme_is_error() {
-        let result = parse_from_uri("untitled:Untitled-1");
+        let result = parse_file_uri("untitled:Untitled-1");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.message.contains("file://"));
@@ -126,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_uri_with_spaces_encoded() {
-        let url = parse_from_uri("file:///home/user/my%20project/main.py").unwrap();
+        let url = parse_file_uri("file:///home/user/my%20project/main.py").unwrap();
         assert_eq!(url.scheme(), "file");
     }
 }

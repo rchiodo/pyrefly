@@ -20,6 +20,7 @@
 use lsp_server::ErrorCode;
 use lsp_server::RequestId;
 use lsp_server::ResponseError;
+use lsp_types::Url;
 use serde::Serialize;
 
 use crate::lsp::non_wasm::lsp::new_response;
@@ -62,6 +63,26 @@ pub fn internal_error(detail: &str) -> ResponseError {
         message: format!("Internal error: {detail}"),
         data: None,
     }
+}
+
+// ---------------------------------------------------------------------------
+// URI parsing
+// ---------------------------------------------------------------------------
+
+/// Parse and validate a `file://` URI string.
+///
+/// Accepts a URI string and returns a validated [`Url`] that must have a
+/// `file` scheme.  Returns an `InvalidParams` error if the URI is malformed
+/// or uses a non-file scheme.
+///
+/// This is the canonical validation entrypoint for any TSP parameter that
+/// accepts a file URI (e.g. `sourceUri`, `fromUri`).
+pub fn parse_file_uri(uri: &str) -> Result<Url, ResponseError> {
+    let url = Url::parse(uri).map_err(|_| invalid_params_error("URI is not valid"))?;
+    if url.scheme() != "file" {
+        return Err(invalid_params_error("URI must use the file:// scheme"));
+    }
+    Ok(url)
 }
 
 // ---------------------------------------------------------------------------
@@ -155,5 +176,29 @@ mod tests {
         assert_ne!(snap, params);
         assert_ne!(snap, internal);
         assert_ne!(params, internal);
+    }
+
+    // --- parse_file_uri unit tests ---
+
+    #[test]
+    fn test_parse_file_uri_valid() {
+        let url = parse_file_uri("file:///home/user/project/main.py").unwrap();
+        assert_eq!(url.scheme(), "file");
+    }
+
+    #[test]
+    fn test_parse_file_uri_empty_is_error() {
+        assert!(parse_file_uri("").is_err());
+    }
+
+    #[test]
+    fn test_parse_file_uri_http_is_error() {
+        let err = parse_file_uri("http://example.com").unwrap_err();
+        assert!(err.message.contains("file://"));
+    }
+
+    #[test]
+    fn test_parse_file_uri_relative_path_is_error() {
+        assert!(parse_file_uri("some/path").is_err());
     }
 }

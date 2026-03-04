@@ -13,27 +13,8 @@ use tempfile::TempDir;
 
 use crate::lsp::non_wasm::protocol::Response;
 use crate::test::tsp::tsp_interaction::object_model::TspInteraction;
-
-/// Helper: create a minimal pyproject.toml so pyrefly recognises the project.
-fn write_pyproject(dir: &std::path::Path) {
-    let content = r#"[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "test-project"
-version = "1.0.0"
-"#;
-    std::fs::write(dir.join("pyproject.toml"), content).unwrap();
-}
-
-/// Helper: get the current snapshot value from the TSP server.
-fn get_current_snapshot(tsp: &mut TspInteraction, expected_id: i32) -> i32 {
-    tsp.server.get_snapshot();
-    let resp = tsp.client.receive_response_skip_notifications();
-    assert_eq!(resp.id, RequestId::from(expected_id));
-    serde_json::from_value(resp.result.unwrap()).unwrap()
-}
+use crate::test::tsp::tsp_interaction::object_model::get_current_snapshot;
+use crate::test::tsp::tsp_interaction::object_model::write_pyproject;
 
 #[test]
 fn test_get_python_search_paths_returns_array() {
@@ -165,6 +146,51 @@ fn test_get_python_search_paths_invalid_uri() {
     assert!(resp.error.is_some(), "Expected error response");
     let err = resp.error.unwrap();
     assert_eq!(err.code, lsp_server::ErrorCode::InvalidParams as i32);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_python_search_paths_src_layout() {
+    // When source files live under a `src/` subdirectory, the import root
+    // heuristic should detect `src/` and include it in the search paths.
+    let temp_dir = TempDir::new().unwrap();
+    write_pyproject(temp_dir.path());
+
+    let src_dir = temp_dir.path().join("src");
+    std::fs::create_dir_all(&src_dir).unwrap();
+
+    let test_file = src_dir.join("main.py");
+    std::fs::write(&test_file, "x = 1\n").unwrap();
+
+    let mut tsp = TspInteraction::new();
+    tsp.set_root(temp_dir.path().to_path_buf());
+    tsp.initialize(Default::default());
+
+    tsp.server.did_open("src/main.py");
+    tsp.client.expect_any_message();
+
+    let snapshot = get_current_snapshot(&mut tsp, 2);
+
+    let from_uri = Url::from_file_path(&test_file).unwrap().to_string();
+    tsp.server.get_python_search_paths(&from_uri, snapshot);
+
+    let resp = tsp.client.receive_response_skip_notifications();
+    assert!(
+        resp.error.is_none(),
+        "Expected success, got error: {:?}",
+        resp.error
+    );
+    let result = resp.result.expect("Expected result");
+    let paths: Vec<String> = serde_json::from_value(result).expect("Expected array of strings");
+
+    // The canonical src/ directory should appear among the search paths.
+    let canonical_src = src_dir.canonicalize().unwrap();
+    let src_uri = Url::from_file_path(&canonical_src).unwrap().to_string();
+    assert!(
+        paths.iter().any(|p| p == &src_uri),
+        "Expected search paths to contain src/ directory {src_uri}, got: {paths:?}"
+    );
 
     tsp.shutdown();
 }
