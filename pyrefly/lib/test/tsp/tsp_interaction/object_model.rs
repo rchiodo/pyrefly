@@ -159,6 +159,20 @@ impl TestTspServer {
         }));
     }
 
+    /// Send a `typeServer/getPythonSearchPaths` request.
+    pub fn get_python_search_paths(&mut self, from_uri: &str, snapshot: i32) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: "typeServer/getPythonSearchPaths".to_owned(),
+            params: serde_json::json!({
+                "fromUri": from_uri,
+                "snapshot": snapshot,
+            }),
+            activity_key: None,
+        }));
+    }
+
     pub fn did_open(&self, file: &'static str) {
         let path = self.get_root_or_panic().join(file);
         self.send_message(Message::Notification(Notification {

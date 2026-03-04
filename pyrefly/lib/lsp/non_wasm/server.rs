@@ -400,6 +400,14 @@ pub trait TspInterface: Send + Sync {
         &'a self,
         tm: &mut TransactionManager<'a>,
     ) -> Transaction<'a>;
+
+    /// Return the ordered list of directories used for import resolution for
+    /// the project that owns the file at `from_url`.
+    ///
+    /// Each path is returned as a `file://` URI string. The list includes
+    /// user-configured search paths, inferred import roots, and site-packages
+    /// directories.
+    fn get_python_search_paths(&self, from_url: &Url) -> Vec<String>;
 }
 
 pub struct Connection {
@@ -5543,5 +5551,25 @@ impl TspInterface for Server {
         tm: &mut TransactionManager<'a>,
     ) -> Transaction<'a> {
         tm.non_committable_transaction(&self.state)
+    }
+
+    fn get_python_search_paths(&self, from_url: &Url) -> Vec<String> {
+        let path = from_url
+            .to_file_path()
+            .expect("from_url must be a file:// URI (validated by caller)");
+        let module_path = ModulePath::filesystem(path);
+        let config = self.state.config_finder().python_file(
+            ModuleNameWithKind::guaranteed(ModuleName::unknown()),
+            &module_path,
+        );
+        config
+            .search_path()
+            .chain(config.site_package_path())
+            .filter_map(|p| {
+                Url::from_file_path(p.canonicalize().unwrap_or_else(|_| p.clone()))
+                    .ok()
+                    .map(|u| u.to_string())
+            })
+            .collect()
     }
 }
