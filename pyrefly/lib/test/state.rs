@@ -221,9 +221,26 @@ fn test_crash_on_search() {
     // Now we run two searches, this used to crash
     let t = state.new_transaction(REQUIRE, None);
     eprintln!("First search");
-    t.search_exports_exact("x", None);
+    t.search_exports_exact("x", None).unwrap();
     eprintln!("Second search");
-    t.search_exports_exact("x", None);
+    t.search_exports_exact("x", None).unwrap();
+}
+
+#[test]
+fn test_search_exports_cancellation() {
+    let mut t = TestEnv::new();
+    t.add("foo", "x = 1");
+    let (state, _) = t.to_state();
+
+    let t = state.new_transaction(Require::Everything, None);
+
+    // Cancel the transaction before searching.
+    // The cancellation check in search_exports' get_module loop fires immediately.
+    t.get_cancellation_handle().cancel();
+    assert!(
+        t.search_exports_exact("x", None).is_err(),
+        "search_exports_exact should return Err(Cancelled) when cancelled"
+    );
 }
 
 #[test]

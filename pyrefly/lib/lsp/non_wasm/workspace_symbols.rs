@@ -22,7 +22,10 @@ impl Transaction<'_> {
             return None;
         }
         let mut result = Vec::new();
-        for (handle, name, export) in self.search_exports_fuzzy(query, custom_thread_pool) {
+        for (handle, name, export) in self
+            .search_exports_fuzzy(query, custom_thread_pool)
+            .unwrap_or_default()
+        {
             if let Some(module) = self.get_module_info(&handle) {
                 let kind = export
                     .symbol_kind

@@ -569,6 +569,11 @@ impl<'a> Transaction<'a> {
         self.stats.lock().compute_stdlib_prewarm_time
     }
 
+    /// Returns a handle that can be used to cancel ongoing work in this transaction.
+    pub fn get_cancellation_handle(&self) -> CancellationHandle {
+        self.data.todo.get_cancellation_handle()
+    }
+
     /// Sets a callback that will be invoked immediately each time an ad-hoc solve completes,
     /// recording the operation label, start time, and duration as a telemetry event.
     pub fn set_ad_hoc_solve_recorder(
@@ -654,16 +659,21 @@ impl<'a> Transaction<'a> {
         &self,
         searcher: impl Fn(&Handle, &Exports, &SmallMap<Name, ExportLocation>) -> Vec<V> + Sync,
         custom_thread_pool: Option<&ThreadPool>,
-    ) -> Vec<V> {
+    ) -> Result<Vec<V>, Cancelled> {
         // Make sure all the modules are in updated_modules.
         // We have to get a mutable module data to do the lookup we need anyway.
         for x in self.readable.modules.keys() {
+            if self.data.todo.get_cancellation_handle().is_cancelled() {
+                return Err(Cancelled);
+            }
             self.get_module(x);
         }
 
         let all_results = Mutex::new(Vec::new());
+        let transaction_cancelled = &self.data.todo.get_cancellation_handle();
 
         let tasks = TaskHeap::new();
+        let local_cancelled = tasks.get_cancellation_handle();
         // It's very fast to find whether a module contains an export, but the cost will
         // add up for a large codebase. Therefore, we will parallelize the work. The work is
         // distributed in the task heap above.
@@ -677,7 +687,13 @@ impl<'a> Transaction<'a> {
         pool.spawn_many(|| {
             let dispatch_nanos = search_start.elapsed().as_nanos() as u64;
             max_dispatch_nanos.fetch_max(dispatch_nanos, Ordering::Relaxed);
-            tasks.work_without_cancellation(|_, modules| {
+            let _ = tasks.work(|_, modules| {
+                // Propagate transaction-level cancellation to the local TaskHeap
+                // so `work()` will stop popping chunks.
+                if transaction_cancelled.is_cancelled() {
+                    local_cancelled.cancel();
+                    return;
+                }
                 let mut thread_local_results = Vec::new();
                 for (handle, module_data) in modules {
                     let exports_data = self.lookup_export(module_data);
@@ -694,7 +710,10 @@ impl<'a> Transaction<'a> {
         stats.search_exports_dispatch_time +=
             Duration::from_nanos(max_dispatch_nanos.load(Ordering::Relaxed));
 
-        all_results.into_inner().into_iter().flatten().collect()
+        if transaction_cancelled.is_cancelled() {
+            return Err(Cancelled);
+        }
+        Ok(all_results.into_inner().into_iter().flatten().collect())
     }
 
     pub fn get_config_errors(&self) -> Vec<ConfigError> {

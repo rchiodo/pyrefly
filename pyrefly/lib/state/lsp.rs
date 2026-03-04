@@ -2012,8 +2012,9 @@ impl<'a> Transaction<'a> {
                     let error_range = error.range();
                     if error_range.contains_range(range) {
                         let unknown_name = module_info.code_at(error_range);
-                        for (handle_to_import_from, export) in
-                            self.search_exports_exact(unknown_name, custom_thread_pool)
+                        for (handle_to_import_from, export) in self
+                            .search_exports_exact(unknown_name, custom_thread_pool)
+                            .unwrap_or_default()
                         {
                             self.create_quickfix_action_for_export(
                                 handle,
@@ -3069,7 +3070,7 @@ impl<'a> Transaction<'a> {
         &self,
         name: &str,
         custom_thread_pool: Option<&ThreadPool>,
-    ) -> Vec<(Handle, Export)> {
+    ) -> Result<Vec<(Handle, Export)>, Cancelled> {
         self.search_exports(
             |handle, exports_data, exports| {
                 let name = Name::new(name);
@@ -3102,7 +3103,7 @@ impl<'a> Transaction<'a> {
         &self,
         pattern: &str,
         custom_thread_pool: Option<&ThreadPool>,
-    ) -> Vec<(Handle, String, Export)> {
+    ) -> Result<Vec<(Handle, String, Export)>, Cancelled> {
         let mut res = self.search_exports(
             |handle, exports_data, exports| {
                 let matcher = SkimMatcherV2::default().smart_case();
@@ -3131,9 +3132,9 @@ impl<'a> Transaction<'a> {
                 results
             },
             custom_thread_pool,
-        );
+        )?;
         res.sort_by_key(|(score, _, _, _)| Reverse(*score));
-        res.into_map(|(_, handle, name, export)| (handle, name, export))
+        Ok(res.into_map(|(_, handle, name, export)| (handle, name, export)))
     }
 }
 

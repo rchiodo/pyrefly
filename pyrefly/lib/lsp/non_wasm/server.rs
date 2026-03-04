@@ -1643,6 +1643,14 @@ impl Server {
                 let mut transaction =
                     ide_transaction_manager.non_committable_transaction(&self.state);
 
+                // Store cancellation handle so the recheck thread can cancel this
+                // request if it needs to commit.
+                let request_id_for_cancel = x.id.clone();
+                self.cancellation_handles.lock().insert(
+                    request_id_for_cancel.clone(),
+                    transaction.get_cancellation_handle(),
+                );
+
                 // Set up immediate per-call telemetry for ad-hoc solves. Each solve event is
                 // logged the instant it completes rather than batched.
                 {
@@ -2181,6 +2189,9 @@ impl Server {
                     ));
                     info!("Unhandled request: {x:?}");
                 }
+                self.cancellation_handles
+                    .lock()
+                    .remove(&request_id_for_cancel);
                 ide_transaction_manager.save(transaction, telemetry_event);
             }
         }

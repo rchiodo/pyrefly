@@ -667,8 +667,9 @@ impl Transaction<'_> {
             if identifier_text.len() < MIN_CHARACTERS_TYPED_AUTOIMPORT {
                 return;
             }
-            for (handle_to_import_from, name, export) in
-                self.search_exports_fuzzy(identifier_text, custom_thread_pool)
+            for (handle_to_import_from, name, export) in self
+                .search_exports_fuzzy(identifier_text, custom_thread_pool)
+                .unwrap_or_default()
             {
                 // Using handle itself doesn't always work because handles can be made separately and have different hashes
                 if handle_to_import_from.module() == handle.module()
