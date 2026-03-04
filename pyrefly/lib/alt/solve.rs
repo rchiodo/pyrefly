@@ -4500,6 +4500,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ty_range: TextRange,
         errors: &ErrorCollector,
     ) {
+        // NOTE: the traversal logic should match `solve_binding_with_first_use_pinning`
+        //
         // Expand the type, in case unexpanded `Vars` are hiding further `Var`s that
         // need to be pinned.
         self.solver().expand_vars_mut(ty);
