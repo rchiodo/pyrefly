@@ -650,11 +650,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             self.validate_init_self_annotation(cls.name(), &callable, def.id_range(), errors);
         }
+        // Extend tparams with any implicit jaxtyping dimension TypeVars found
+        // in the signature, and detect mixing of native and jaxtyping syntax.
+        let tparams =
+            self.collect_jaxtyping_tparams(&callable, &def.tparams, stmt.name.range, errors);
+
         let mut ty = Forallable::Function(Function {
             signature: callable,
             metadata: def.metadata.clone(),
         })
-        .forall(def.tparams.dupe());
+        .forall(tparams);
         ty = self.move_return_tparams_of_type(ty);
         for (x, range) in def.decorators.iter().rev() {
             ty = self.apply_function_decorator(x.clone(), ty, &def.metadata, *range, errors);

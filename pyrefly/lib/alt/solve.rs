@@ -5450,7 +5450,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .collect();
                 Type::ParamSpecValue(ParamList::new(elts))
             }
-            // Special case: integer literals in type argument context with tensor shapes enabled
+            // Special case: integer literals in type argument context with native tensor shapes
             // These can be used for Dim-bounded parameters (e.g., LinearLayer[6, 9])
             // We convert them directly to Type::Size to distinguish from Literal[6]
             Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. })

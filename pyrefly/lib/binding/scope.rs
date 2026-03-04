@@ -1768,6 +1768,22 @@ impl Scopes {
         None
     }
 
+    /// Check if `name` was imported from a module with the given name.
+    /// Traverses all enclosing scopes to find the import.
+    pub fn is_imported_from_module(&self, name: &Name, module_name: &str) -> bool {
+        if let Some(flow_info) = self.get_flow_info(name)
+            && let Some(value) = flow_info.value()
+        {
+            return match &value.style {
+                FlowStyle::Import(m, _)
+                | FlowStyle::ImportAs(m)
+                | FlowStyle::MergeableImport(m) => m.as_str() == module_name,
+                _ => false,
+            };
+        }
+        false
+    }
+
     /// Get the flow style for `name` in the current scope.
     ///
     /// Returns `None` if there is no current flow (which may mean the

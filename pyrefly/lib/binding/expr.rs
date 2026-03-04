@@ -956,6 +956,18 @@ impl<'a> BindingsBuilder<'a> {
                     self.ensure_expr(e, &mut Usage::StaticTypeInformation);
                 }
             }
+            // Jaxtyping annotations: Float[Tensor, "batch channels"].
+            // The second argument is a shape string, not a forward reference.
+            Expr::Subscript(ExprSubscript { value, slice, .. })
+                if self.tensor_shapes()
+                    && matches!(&**value, Expr::Name(n) if self.scopes.is_imported_from_module(&n.id, "jaxtyping"))
+                    && matches!(&**slice, Expr::Tuple(tup) if tup.elts.len() == 2) =>
+            {
+                self.ensure_type_impl(&mut *value, tparams_builder, in_string_literal, usage);
+                let tup = slice.as_tuple_expr_mut().unwrap();
+                self.ensure_type_impl(&mut tup.elts[0], tparams_builder, in_string_literal, usage);
+                self.ensure_expr(&mut tup.elts[1], &mut Usage::StaticTypeInformation);
+            }
             Expr::Subscript(ExprSubscript { value, slice, .. }) => {
                 self.ensure_type_impl(&mut *value, tparams_builder, in_string_literal, usage);
                 self.ensure_type_impl(&mut *slice, tparams_builder, in_string_literal, usage);

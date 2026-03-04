@@ -1969,6 +1969,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::ClassDef(ref cls) if self.is_tensor_class(cls) => {
                     Type::type_form(self.parse_tensor_type(cls, xs, errors))
                 }
+                // Jaxtyping annotation parsing: Float[Tensor, "batch channels"] syntax
+                Type::ClassDef(ref cls)
+                    if self.is_jaxtyping_wrapper(cls)
+                        && self.solver().tensor_shapes =>
+                {
+                    Type::type_form(self.parse_jaxtyping_annotation(xs, range, errors))
+                }
                 // Dim type parsing: Dim[3], Dim[N], Dim[N+1] syntax
                 Type::ClassDef(ref cls) if self.is_symint_class(cls) => {
                     self.parse_symint_type(xs, range, errors)

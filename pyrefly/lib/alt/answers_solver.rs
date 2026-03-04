@@ -28,13 +28,18 @@ use pyrefly_graph::index::Idx;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::heap::TypeHeap;
+use pyrefly_types::quantified::Quantified;
+use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::type_alias::TypeAlias;
 use pyrefly_types::type_alias::TypeAliasData;
+use pyrefly_types::type_var::PreInferenceVariance;
+use pyrefly_types::type_var::Restriction;
 use pyrefly_types::types::Union;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::recurser::Guard;
 use pyrefly_util::uniques::UniqueFactory;
 use pyrefly_util::visit::VisitMut;
+use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
@@ -1193,6 +1198,11 @@ pub struct AnswersSolver<'a, Ans: LookupAnswer> {
     pub recurser: &'a VarRecurser,
     pub stdlib: &'a Stdlib,
     pub heap: &'a TypeHeap,
+    /// Cache for jaxtyping dimension name → Quantified type mappings.
+    /// Module-scoped: the same dimension name always maps to the same Quantified,
+    /// which is correct because each function independently wraps its signature
+    /// in a Forall (just like legacy TypeVars defined at module scope).
+    jaxtyping_dims: RefCell<FxHashMap<Name, Quantified>>,
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
@@ -1219,6 +1229,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             current,
             thread_state,
             heap,
+            jaxtyping_dims: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -1231,6 +1242,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     #[allow(dead_code)]
     pub fn set_debug(&self, value: bool) {
         *self.thread_state.debug.borrow_mut() = value;
+    }
+
+    /// Get or create a Quantified type for a jaxtyping dimension name.
+    /// Cached per module: the same name always returns the same Quantified.
+    pub fn get_or_create_jaxtyping_dim(&self, name: Name, kind: QuantifiedKind) -> Quantified {
+        let mut dims = self.jaxtyping_dims.borrow_mut();
+        dims.entry(name.clone())
+            .or_insert_with(|| match kind {
+                QuantifiedKind::TypeVar => Quantified::type_var(
+                    name,
+                    self.uniques,
+                    None,
+                    Restriction::Unrestricted,
+                    PreInferenceVariance::Invariant,
+                ),
+                QuantifiedKind::TypeVarTuple => {
+                    Quantified::type_var_tuple(name, self.uniques, None)
+                }
+                QuantifiedKind::ParamSpec => {
+                    unreachable!("jaxtyping dimensions cannot be ParamSpec")
+                }
+            })
+            .clone()
+    }
+
+    /// Check if a Quantified type was created by jaxtyping dimension parsing.
+    pub fn is_jaxtyping_dim(&self, q: &Quantified) -> bool {
+        self.jaxtyping_dims.borrow().values().any(|v| v == q)
     }
 
     pub fn current(&self) -> &Answers {

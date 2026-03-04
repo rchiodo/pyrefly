@@ -744,6 +744,11 @@ impl<'a> BindingsBuilder<'a> {
         self.solver.infer_with_first_use
     }
 
+    /// Whether tensor shape type inference is enabled.
+    pub fn tensor_shapes(&self) -> bool {
+        self.solver.tensor_shapes
+    }
+
     /// Given a `key: K = impl Keyed`, get an `Idx<K>` for it. The intended use case
     /// is when creating a complex binding where the process of creating the binding
     /// requires being able to identify what we are binding.
