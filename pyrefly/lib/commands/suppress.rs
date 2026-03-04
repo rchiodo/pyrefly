@@ -11,6 +11,7 @@ use clap::Parser;
 use pyrefly_config::args::ConfigOverrideArgs;
 use pyrefly_config::error_kind::Severity;
 
+use crate::commands::check::CheckArgs;
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::files::FilesArgs;
 use crate::commands::util::CommandExitStatus;
@@ -61,11 +62,7 @@ impl SuppressArgs {
                     .clone()
                     .resolve(self.config_override.clone(), wrapper.clone())?;
 
-                let check_args = super::check::CheckArgs::parse_from([
-                    "check",
-                    "--output-format",
-                    "omit-errors",
-                ]);
+                let check_args = CheckArgs::parse_from(["check", "--output-format", "omit-errors"]);
                 let (_, errors) = check_args.run_once(files_to_check, config_finder)?;
 
                 // Convert to SerializedErrors, filtering for UnusedIgnore only
@@ -96,11 +93,7 @@ impl SuppressArgs {
                     .clone()
                     .resolve(self.config_override.clone(), wrapper)?;
 
-                let check_args = super::check::CheckArgs::parse_from([
-                    "check",
-                    "--output-format",
-                    "omit-errors",
-                ]);
+                let check_args = CheckArgs::parse_from(["check", "--output-format", "omit-errors"]);
                 let (_, errors) = check_args.run_once(files_to_check, config_finder)?;
 
                 // Convert to SerializedErrors, filtering by severity and excluding UnusedIgnore

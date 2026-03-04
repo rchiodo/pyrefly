@@ -24,6 +24,7 @@ use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::files::FilesArgs;
 use crate::commands::util::CommandExitStatus;
 use crate::config::config::ConfigFile;
+use crate::error::error::Error as CheckError;
 
 const MAX_ERRORS_TO_PROMPT_SUPPRESSION: usize = 100;
 
@@ -112,7 +113,7 @@ impl InitArgs {
         &self,
         config_path: Option<PathBuf>,
         wrapper: Option<ConfigConfigurerWrapper>,
-    ) -> anyhow::Result<(CommandExitStatus, Vec<crate::error::error::Error>)> {
+    ) -> anyhow::Result<(CommandExitStatus, Vec<CheckError>)> {
         info!("Running pyrefly check...");
 
         // Create check args by parsing arguments with output-format set to omit-errors
