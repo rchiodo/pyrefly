@@ -142,7 +142,6 @@ mod impl_ {
                 Binding::Forward(next)
                 | Binding::ForwardToFirstUse(next)
                 | Binding::Narrow(next, ..)
-                | Binding::CompletedPartialType(next, ..)
                 | Binding::LoopPhi(next, ..) => current = *next,
                 // All branches of a Phi node originate from the same variable definition,
                 // so any branch will lead to the same Key::Definition. We follow the first.
@@ -161,14 +160,14 @@ mod impl_ {
         hover_position: TextSize,
     ) -> Option<String> {
         let def_identifier = definition_short_identifier(bindings, key)?;
-        let key = Key::CompletedPartialType(def_identifier);
+        let key = Key::Definition(def_identifier);
         if !bindings.is_valid_key(&key) {
             return None;
         }
         let idx = bindings.key_to_idx(&key);
         match bindings.get(idx) {
-            Binding::CompletedPartialType(_, FirstUse::UsedBy(use_idx)) => {
-                let use_range = bindings.idx_to_key(*use_idx).range();
+            Binding::NameAssign(na) if let FirstUse::UsedBy(use_idx) = na.first_use => {
+                let use_range = bindings.idx_to_key(use_idx).range();
                 if use_range.contains(hover_position) {
                     return None;
                 }

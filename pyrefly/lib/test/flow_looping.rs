@@ -91,11 +91,11 @@ def f(condition) -> None:
     # It's fine to error here, but ideally we would error at the assignment
     # rather than the `while`, and ideally we would note that the type is recursive
     # in a way we don't support.
-    while condition():  # E: `Literal[1] | list[int]` is not assignable to `int`
-        assert_type(x, Literal[1] | list[int])
+    while condition():
+        assert_type(x, Literal[1] | list[Literal[1] | list[Any]])
         x = [x]
-        assert_type(x, list[int])
-    assert_type(x, Literal[1] | list[int])
+        assert_type(x, list[Literal[1] | list[Any]])
+    assert_type(x, Literal[1] | list[Literal[1] | list[Any]])
     "#,
 );
 

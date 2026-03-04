@@ -84,7 +84,6 @@ fn find_definition_key_from<'a>(bindings: &'a Bindings, key: &'a Key) -> Option<
             Binding::Forward(k)
             | Binding::ForwardToFirstUse(k)
             | Binding::Narrow(k, _, _)
-            | Binding::CompletedPartialType(k, ..)
             | Binding::LoopPhi(k, ..) => {
                 current_idx = *k;
             }

@@ -479,15 +479,9 @@ impl<'a> BindingsBuilder<'a> {
             .is_some_and(|(e, _)| self.as_special_export(e) == Some(SpecialExport::TypeAlias));
         let is_definitely_type_alias =
             has_type_alias_qualifier || self.is_definitely_type_alias_rhs(value.as_ref());
-        // Only create partial type bindings when infer_with_first_use is enabled.
-        // When disabled, we bind directly to the definition idx and skip the
-        // CompletedPartialType indirection.
-        let pinned_idx = if !is_definitely_type_alias && self.infer_with_first_use() {
-            Some(self.idx_for_promise(Key::CompletedPartialType(identifier)))
-        } else {
-            None
-        };
-        let scope_idx = pinned_idx.unwrap_or_else(|| current.idx());
+        // Track whether this name assignment participates in partial type inference.
+        let uses_first_use = !is_definitely_type_alias && self.infer_with_first_use();
+        let scope_idx = current.idx();
         let mut tparams = None;
         if is_definitely_type_alias {
             let mut legacy = Some(LegacyTParamCollector::new(false));
@@ -511,6 +505,9 @@ impl<'a> BindingsBuilder<'a> {
             Some((_, idx)) => Some((AnnotationStyle::Direct, idx)),
             None => canonical_ann.map(|idx| (AnnotationStyle::Forwarded, idx)),
         };
+        // Compute def_idx before building the binding, since the NameAssign needs
+        // its own idx for partial type inference support.
+        let def_idx = current.into_idx();
         let binding = if is_definitely_type_alias {
             let range = value.range();
             let key_type_alias = KeyTypeAlias(self.type_alias_index());
@@ -536,20 +533,10 @@ impl<'a> BindingsBuilder<'a> {
                 legacy_tparams: tparams,
                 is_in_function_scope: self.scopes.in_function_scope(),
                 first_use: FirstUse::Undetermined,
-                pinned_idx,
+                def_idx: if uses_first_use { Some(def_idx) } else { None },
             }))
         };
-        // Record the raw assignment
-        let def_idx = current.into_idx();
-        let def_idx = self.insert_binding_idx(def_idx, binding);
-        // Create the CompletedPartialType binding (when infer_with_first_use is enabled).
-        // This wraps def_idx and manages first-use pinning.
-        if let Some(pinned_idx) = pinned_idx {
-            self.insert_binding_idx(
-                pinned_idx,
-                Binding::CompletedPartialType(def_idx, FirstUse::Undetermined),
-            );
-        }
+        self.insert_binding_idx(def_idx, binding);
         canonical_ann
     }
 

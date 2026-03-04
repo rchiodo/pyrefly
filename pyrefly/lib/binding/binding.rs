@@ -835,10 +835,6 @@ pub enum Key {
     Definition(ShortIdentifier),
     /// I am a mutable capture (`global` or `nonlocal`) declared at this location.
     MutableCapture(ShortIdentifier),
-    /// I am the pinned version of a definition corresponding to a name assignment.
-    ///
-    /// See [Binding::CompletedPartialType] for more details.
-    CompletedPartialType(ShortIdentifier),
     /// I am a name with possible attribute/subscript narrowing coming from an assignment at this location.
     FacetAssign(ShortIdentifier),
     /// The type at a specific return point.
@@ -908,7 +904,6 @@ impl Ranged for Key {
             Self::ImplicitGlobal(_) => TextRange::default(),
             Self::Definition(x) => x.range(),
             Self::MutableCapture(x) => x.range(),
-            Self::CompletedPartialType(x) => x.range(),
             Self::FacetAssign(x) => x.range(),
             Self::ReturnExplicit(r) => *r,
             Self::ReturnImplicit(x) => x.range(),
@@ -942,7 +937,6 @@ impl DisplayWith<ModuleInfo> for Key {
             Self::ImplicitGlobal(n) => write!(f, "Key::Global({n})"),
             Self::Definition(x) => write!(f, "Key::Definition({})", short(x)),
             Self::MutableCapture(x) => write!(f, "Key::MutableCapture({})", short(x)),
-            Self::CompletedPartialType(x) => write!(f, "Key::CompletedPartialType({})", short(x)),
             Self::FacetAssign(x) => write!(f, "Key::FacetAssign({})", short(x)),
             Self::BoundName(x) => write!(f, "Key::BoundName({})", short(x)),
             Self::Anon(r) => write!(f, "Key::Anon({})", ctx.display(r)),
@@ -1976,9 +1970,9 @@ pub struct NameAssign {
     pub legacy_tparams: Option<Box<[Idx<KeyLegacyTypeParam>]>>,
     pub is_in_function_scope: bool,
     pub first_use: FirstUse,
-    /// The CompletedPartialType idx for this NameAssign, if infer_with_first_use
-    /// is enabled. Used at solve time for inline first-use pinning.
-    pub pinned_idx: Option<Idx<Key>>,
+    /// The Definition idx for this NameAssign, if infer_with_first_use is enabled.
+    /// Used at solve time for inline first-use pinning and partial answer storage.
+    pub def_idx: Option<Idx<Key>>,
 }
 
 /// Data for a type alias binding.
@@ -2158,33 +2152,6 @@ pub enum Binding {
     /// later synthesize the correct `Type::SelfType` (this binding is needed
     /// because we need access to the current class to do so).
     SelfTypeLiteral(Idx<KeyClass>, TextRange),
-    /// Binding used to pin placeholder types from `NameAssign` bindings, which
-    /// can produce partial types that have `Var`s representing still-unknown
-    /// type parameters not determine by the initial assignment (e.g. empty
-    /// containers).
-    ///
-    /// The first entry should always correspond to a `Key::Definition` from a
-    /// name assignment and the second entry tells us if and where this
-    /// definition is first used.
-    ///
-    /// For example, in
-    /// ```python
-    /// x = []
-    /// x.append(1)
-    /// y = []
-    /// print(y)
-    /// z = []
-    /// ```
-    /// all three of the raw `NameAssign`s will result in a partial type `list[@_]`,
-    /// and downstream:
-    /// - the `Pin` for `x` will depend on the `Binding::Expr` for `x.append(1)`, which
-    ///   will force the type to `list[int]`.
-    /// - the `Pin` for `y` will depend on the `Binding::Expr` for `print(y)`, which
-    ///   will not force anything. Then the `Pin` itself will pin placeholders,
-    ///   resulting in `list[Any]`
-    /// - the `Pin` for `z` will have an empty `FirstUse`, so as with `y` it will
-    ///   simply force the placeholder and produce list[`Any`]
-    CompletedPartialType(Idx<Key>, FirstUse),
     /// `del` statement
     Delete(Box<Expr>),
     /// A name in the class body that wasn't found in the static scope
@@ -2443,15 +2410,6 @@ impl DisplayWith<Bindings> for Binding {
                     m.display(r)
                 )
             }
-            Self::CompletedPartialType(k, first_use) => {
-                write!(f, "CompletedPartialType({}, ", ctx.display(*k),)?;
-                match first_use {
-                    FirstUse::Undetermined => write!(f, "Undetermined")?,
-                    FirstUse::DoesNotPin => write!(f, "DoesNotPin")?,
-                    FirstUse::UsedBy(idx) => write!(f, "UsedBy {}", ctx.display(*idx))?,
-                }
-                write!(f, ")")
-            }
             Self::Delete(x) => write!(f, "Delete({})", m.display(x)),
             Self::ClassBodyUnknownName(x) => {
                 let (class_key, name, suggestion) = x.as_ref();
@@ -2549,7 +2507,6 @@ impl Binding {
             | Binding::UsageLink(_)
             | Binding::SelfTypeLiteral(..)
             | Binding::AssignToSubscript(_)
-            | Binding::CompletedPartialType(..)
             | Binding::Delete(_)
             | Binding::ClassBodyUnknownName(_)
             | Binding::Exhaustive(_) => None,

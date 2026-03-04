@@ -1290,17 +1290,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .cloned()
     }
 
-    /// Given the target idx of a ForwardToFirstUse binding, traverse the binding
-    /// graph to find the originating NameAssign's def_idx.
+    /// Given the target idx of a ForwardToFirstUse binding, find the NameAssign's
+    /// def_idx for partial answer lookup.
     ///
-    /// A ForwardToFirstUse(target_idx) can point to either:
-    /// - CompletedPartialType(def_idx, _) — one hop to def_idx
-    /// - A NameAssign directly (the def_idx itself) — target IS def_idx
+    /// ForwardToFirstUse always points to a NameAssign with `def_idx.is_some()`.
     pub(crate) fn def_idx_for_forward_to_first_use(&self, target: Idx<Key>) -> Option<Idx<Key>> {
         let binding = self.bindings().get(target);
         match binding {
-            Binding::CompletedPartialType(def_idx, _) => Some(*def_idx),
-            Binding::NameAssign(na) if na.pinned_idx.is_some() => Some(target),
+            Binding::NameAssign(na) if na.def_idx.is_some() => Some(target),
             _ => None,
         }
     }

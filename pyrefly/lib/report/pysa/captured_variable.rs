@@ -226,9 +226,7 @@ impl<'a> CapturedVariableVisitor<'a> {
             .key_to_idx_hashed_opt(Hashed::new(&key))?;
         let binding = self.module_context.bindings.get(idx);
         match binding {
-            Binding::Forward(definition_idx)
-            | Binding::ForwardToFirstUse(definition_idx)
-            | Binding::CompletedPartialType(definition_idx, _) => {
+            Binding::Forward(definition_idx) | Binding::ForwardToFirstUse(definition_idx) => {
                 self.get_definition_from_idx(
                     *definition_idx,
                     /* seen */ SmallSet::new(),
@@ -275,9 +273,6 @@ impl<'a> CapturedVariableVisitor<'a> {
                     }
                 }
                 None
-            }
-            Binding::CompletedPartialType(idx, _) => {
-                self.get_definition_from_idx(*idx, seen, depth)
             }
             _ => None,
         }

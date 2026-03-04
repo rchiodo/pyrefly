@@ -1018,9 +1018,6 @@ impl<'a> BindingsBuilder<'a> {
             }
             let binding = self.idx_to_binding(idx)?;
             match binding {
-                Binding::CompletedPartialType(inner_idx, _) => {
-                    idx = *inner_idx;
-                }
                 Binding::Forward(inner_idx) | Binding::ForwardToFirstUse(inner_idx) => {
                     idx = *inner_idx;
                 }
@@ -1178,115 +1175,45 @@ impl<'a> BindingsBuilder<'a> {
         let (default_idx, partial_type_info) =
             self.follow_to_partial_type(deferred.lookup_result_idx);
 
-        if let Some((pinned_idx, _def_idx, first_use)) = partial_type_info {
+        if let Some((def_idx, first_use)) = partial_type_info {
             let is_narrowing = matches!(deferred.usage, Usage::Narrowing(_));
 
+            // Determine side effects based on usage and first_use state.
             if matches!(
                 deferred.usage,
                 Usage::StaticTypeInformation | Usage::TypeAliasRhs
             ) {
-                self.mark_does_not_pin_if_first_use(pinned_idx);
-                self.insert_binding_idx(
-                    deferred.bound_name_idx,
-                    Binding::ForwardToFirstUse(pinned_idx),
-                );
-                return;
-            }
-
-            if !is_narrowing {
-                // Normal reads might pin partial types from upstream
-                match first_use {
-                    FirstUse::Undetermined => {
-                        if let Some(current_idx) = deferred.usage.current_idx() {
-                            self.mark_first_use(pinned_idx, current_idx);
-                        }
-                        // Forward to def_idx (raw NameAssign) to skip CPT's first-use
-                        // evaluation, since this binding IS the first use.
-                        self.insert_binding_idx(
-                            deferred.bound_name_idx,
-                            Binding::ForwardToFirstUse(_def_idx),
-                        );
-                    }
-                    FirstUse::UsedBy(other_idx) => {
-                        let same_context = deferred.usage.current_idx() == Some(other_idx);
-                        if same_context {
-                            // Same context as the first use — skip CPT's first-use evaluation.
-                            self.insert_binding_idx(
-                                deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(_def_idx),
-                            );
-                        } else {
-                            self.insert_binding_idx(
-                                deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(pinned_idx),
-                            );
-                        }
-                    }
-                    FirstUse::DoesNotPin => {
-                        self.insert_binding_idx(
-                            deferred.bound_name_idx,
-                            Binding::ForwardToFirstUse(pinned_idx),
-                        );
-                    }
-                }
-            } else if let Usage::Narrowing(Some(enclosing_idx)) = deferred.usage {
-                // Narrowing reads cannot pin partial types directly, but they *might* use the
-                // raw def_idx; this is used to prevent cycles when a narrow is nested inside a larger
-                // expression (e.g. `x = []; y = x.append(1) if x else x.append('foo')` ... if we tried to
-                // use the pinned version of `x` in the narrow we would get a cycle from the narrow to the
-                // entire definition of `y` to the pin of `x`.
-                match first_use {
-                    FirstUse::Undetermined => {
-                        self.mark_does_not_pin_if_first_use(pinned_idx);
-                        self.insert_binding_idx(
-                            deferred.bound_name_idx,
-                            Binding::ForwardToFirstUse(pinned_idx),
-                        );
-                    }
-                    FirstUse::UsedBy(other_idx) => {
-                        if enclosing_idx == other_idx {
-                            self.insert_binding_idx(
-                                deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(_def_idx),
-                            );
-                        } else {
-                            self.insert_binding_idx(
-                                deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(pinned_idx),
-                            );
-                        }
-                    }
-                    FirstUse::DoesNotPin => {
-                        self.insert_binding_idx(
-                            deferred.bound_name_idx,
-                            Binding::ForwardToFirstUse(pinned_idx),
-                        );
-                    }
+                self.mark_does_not_pin_if_first_use(def_idx);
+            } else if !is_narrowing {
+                // Normal reads: if this is the first use, mark it.
+                if matches!(first_use, FirstUse::Undetermined)
+                    && let Some(current_idx) = deferred.usage.current_idx()
+                {
+                    self.mark_first_use(def_idx, current_idx);
                 }
             } else {
-                // Any other kind of read (e.g. StaticTypeInformation) should use the pinned upstream.
+                // Narrowing or other reads: mark as DoesNotPin if still undetermined.
                 if matches!(first_use, FirstUse::Undetermined) {
-                    self.mark_does_not_pin_if_first_use(pinned_idx);
+                    self.mark_does_not_pin_if_first_use(def_idx);
                 }
-                self.insert_binding_idx(
-                    deferred.bound_name_idx,
-                    Binding::ForwardToFirstUse(pinned_idx),
-                );
             }
+
+            // All partial type reads forward to the NameAssign (def_idx).
+            self.insert_binding_idx(deferred.bound_name_idx, Binding::ForwardToFirstUse(def_idx));
         } else {
             // Default: forward to whatever we found (no partial type in chain)
             self.insert_binding_idx(deferred.bound_name_idx, Binding::Forward(default_idx));
         }
     }
 
-    /// Follow Forward chains to find a CompletedPartialType.
+    /// Follow Forward chains to find a NameAssign with partial type support.
     ///
-    /// Returns (default_idx, Some((pinned_idx, def_idx, first_use))) if a
-    /// CompletedPartialType is found, or (default_idx, None) otherwise.
+    /// Returns (default_idx, Some((def_idx, first_use))) if a NameAssign with
+    /// `def_idx.is_some()` is found, or (default_idx, None) otherwise.
     fn follow_to_partial_type(
         &self,
         start_idx: Idx<Key>,
-    ) -> (Idx<Key>, Option<(Idx<Key>, Idx<Key>, FirstUse)>) {
+    ) -> (Idx<Key>, Option<(Idx<Key>, FirstUse)>) {
         let mut current = start_idx;
         let mut seen = SmallSet::new();
 
@@ -1300,8 +1227,8 @@ impl<'a> BindingsBuilder<'a> {
                 Some(Binding::Forward(target) | Binding::ForwardToFirstUse(target)) => {
                     current = *target;
                 }
-                Some(Binding::CompletedPartialType(def_idx, first_use)) => {
-                    return (current, Some((current, *def_idx, first_use.clone())));
+                Some(Binding::NameAssign(na)) if na.def_idx.is_some() => {
+                    return (current, Some((current, na.first_use.clone())));
                 }
                 _ => {
                     return (current, None);
@@ -1333,56 +1260,20 @@ impl<'a> BindingsBuilder<'a> {
         }
     }
 
-    /// Mark a CompletedPartialType as used by a specific binding,
-    /// and mirror the first_use on the corresponding NameAssign.
-    fn mark_first_use(&mut self, partial_type_idx: Idx<Key>, user_idx: Idx<Key>) {
-        // Read def_idx from CompletedPartialType immutably first.
-        let def_idx = if let Some(Binding::CompletedPartialType(def_idx, _)) =
-            self.idx_to_binding(partial_type_idx)
-        {
-            Some(*def_idx)
-        } else {
-            None
-        };
-        // Now mutate the CompletedPartialType.
-        if let Some(Binding::CompletedPartialType(_, first_use)) =
-            self.idx_to_binding_mut(partial_type_idx)
-        {
-            *first_use = FirstUse::UsedBy(user_idx);
-        }
-        // Mirror onto the NameAssign.
-        if let Some(def_idx) = def_idx
-            && let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx)
-        {
+    /// Mark a NameAssign as used by a specific binding for first-use pinning.
+    fn mark_first_use(&mut self, def_idx: Idx<Key>, user_idx: Idx<Key>) {
+        if let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx) {
             na.first_use = FirstUse::UsedBy(user_idx);
         }
     }
 
-    /// Mark a CompletedPartialType as DoesNotPin if it's the first use,
-    /// and mirror onto the corresponding NameAssign.
+    /// Mark a NameAssign as DoesNotPin if it's still Undetermined.
     ///
     /// This is used when looking up names in static type contexts or for narrowing,
     /// where we don't want to pin partial types. Should be called after `lookup_name`.
-    pub fn mark_does_not_pin_if_first_use(&mut self, partial_type_idx: Idx<Key>) {
-        // Read def_idx from CompletedPartialType, only if still Undetermined.
-        let def_idx = if let Some(Binding::CompletedPartialType(def_idx, first_use)) =
-            self.idx_to_binding(partial_type_idx)
-            && matches!(first_use, FirstUse::Undetermined)
-        {
-            Some(*def_idx)
-        } else {
-            None
-        };
-        // Mutate the CompletedPartialType.
-        if let Some(Binding::CompletedPartialType(_, first_use)) =
-            self.idx_to_binding_mut(partial_type_idx)
-            && matches!(first_use, FirstUse::Undetermined)
-        {
-            *first_use = FirstUse::DoesNotPin;
-        }
-        // Mirror onto the NameAssign.
-        if let Some(def_idx) = def_idx
-            && let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx)
+    pub fn mark_does_not_pin_if_first_use(&mut self, def_idx: Idx<Key>) {
+        if let Some(Binding::NameAssign(na)) = self.idx_to_binding_mut(def_idx)
+            && matches!(na.first_use, FirstUse::Undetermined)
         {
             na.first_use = FirstUse::DoesNotPin;
         }
@@ -1819,7 +1710,6 @@ impl<'a> BindingsBuilder<'a> {
         while let Some(
             Binding::Forward(fwd_idx)
             | Binding::ForwardToFirstUse(fwd_idx)
-            | Binding::CompletedPartialType(fwd_idx, _)
             | Binding::Phi(JoinStyle::NarrowOf(fwd_idx), _),
         ) = original_binding
         {

@@ -1884,15 +1884,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Inline first-use pinning for NameAssign.
         let mut type_info = if let Binding::NameAssign(na) = binding
             && self.solver().infer_with_first_use
-            && na.pinned_idx.is_some()
+            && na.def_idx.is_some()
             && na.annotation.is_none()
             && let FirstUse::UsedBy(first_use_idx) = &na.first_use
         {
-            let pinned_idx = na.pinned_idx.unwrap();
-            // Derive def_idx from pinned_idx (CompletedPartialType -> PTWUC -> NameAssign)
-            let def_idx = self
-                .def_idx_for_forward_to_first_use(pinned_idx)
-                .expect("pinned_idx should resolve to def_idx via CompletedPartialType chain");
+            let def_idx = na.def_idx.unwrap();
 
             // Step 1: Compute raw TypeInfo (Vars unpinned)
             let type_info = self.binding_to_type_info(binding, errors);
@@ -4560,16 +4556,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 x.subject_range,
                 &x.exhaustiveness_info,
             ),
-            Binding::CompletedPartialType(unpinned_idx, first_use) => {
-                // Calculate the first use for its side-effects (it might pin `Var`s)
-                match first_use {
-                    FirstUse::UsedBy(idx) => {
-                        self.get_idx(*idx);
-                    }
-                    FirstUse::Undetermined | FirstUse::DoesNotPin => {}
-                }
-                self.get_idx(*unpinned_idx).arc_clone().into_ty()
-            }
             Binding::Expr(ann, e) => self.binding_to_type_expr(*ann, e, errors),
             Binding::StmtExpr(e, special_export) => {
                 self.binding_to_type_stmt_expr(e, *special_export, errors)
