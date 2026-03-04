@@ -29,6 +29,7 @@ use ruff_text_size::TextSize;
 
 use crate::binding::binding::Key;
 use crate::lsp::wasm::completion::RankedCompletion;
+use crate::state::state::Transaction;
 use crate::types::types::Type;
 
 #[derive(Clone)]
@@ -72,7 +73,7 @@ impl DictKeyLiteralContext {
     }
 }
 
-impl<'a> super::Transaction<'a> {
+impl<'a> Transaction<'a> {
     fn type_contains_typed_dict(ty: &Type) -> bool {
         match ty {
             Type::TypedDict(_) | Type::PartialTypedDict(_) => true,

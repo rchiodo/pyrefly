@@ -77,6 +77,7 @@ use crate::state::ide::import_regular_import_edit;
 use crate::state::ide::insert_import_edit;
 use crate::state::ide::key_to_intermediate_definition;
 use crate::state::lsp_attributes::AttributeContext;
+use crate::state::lsp_attributes::definition_from_executable_ast;
 use crate::state::require::Require;
 use crate::state::state::CancellableTransaction;
 use crate::state::state::Transaction;
@@ -1250,11 +1251,7 @@ impl<'a> Transaction<'a> {
             .into()
         });
         let (def_range, docstring_range) =
-            crate::state::lsp_attributes::definition_from_executable_ast(
-                ast.as_ref(),
-                &context,
-                attr_name,
-            )?;
+            definition_from_executable_ast(ast.as_ref(), &context, attr_name)?;
         Some((executable_module, def_range, docstring_range))
     }
 
