@@ -315,12 +315,25 @@ fn apply_first_inline_parameter_action(code: &str) -> Option<String> {
 }
 
 fn apply_first_safe_delete_action(code: &str) -> Option<String> {
-    let (handles, state) =
-        mk_multi_file_state_assert_no_errors(&[("main", code)], Require::Everything);
-    let handle = handles.get("main").unwrap();
+    apply_first_safe_delete_action_multi(&[("main", code)], "main")
+}
+
+/// Multi-file variant of `apply_first_safe_delete_action`. The cursor marker
+/// is expected inside the `target_module` source.
+fn apply_first_safe_delete_action_multi(
+    modules: &[(&'static str, &str)],
+    target_module: &'static str,
+) -> Option<String> {
+    let (handles, state) = mk_multi_file_state_assert_no_errors(modules, Require::Everything);
+    let handle = handles.get(target_module).unwrap();
     let mut transaction = state.transaction();
     let module_info = transaction.get_module_info(handle).unwrap();
-    let selection = cursor_selection(code);
+    let target_code = modules
+        .iter()
+        .find(|(name, _)| *name == target_module)
+        .unwrap()
+        .1;
+    let selection = cursor_selection(target_code);
     let actions = transaction
         .safe_delete_code_actions(handle, selection)
         .unwrap_or_default();
@@ -3936,6 +3949,148 @@ def foo():
 #   ^
     return 1
 foo()
+"#;
+    assert!(apply_first_safe_delete_action(code).is_none());
+}
+
+#[test]
+fn safe_delete_type_alias_no_refs() {
+    let code = r#"
+type MyType = int
+#    ^
+def keep(): ...
+"#;
+    let updated = apply_first_safe_delete_action(code).expect("expected safe delete action");
+    let expected = r#"
+#    ^
+def keep(): ...
+"#;
+    assert_eq!(expected, updated);
+}
+
+#[test]
+fn safe_delete_type_alias_with_refs() {
+    let code = r#"
+type MyType = int
+#    ^
+x: MyType = 1
+"#;
+    assert!(apply_first_safe_delete_action(code).is_none());
+}
+
+#[test]
+fn safe_delete_constant_no_refs() {
+    let code = r#"
+MY_CONST = 42
+# ^
+def keep(): ...
+"#;
+    let updated = apply_first_safe_delete_action(code).expect("expected safe delete action");
+    let expected = r#"
+# ^
+def keep(): ...
+"#;
+    assert_eq!(expected, updated);
+}
+
+#[test]
+fn safe_delete_constant_with_refs() {
+    let code = r#"
+MY_CONST = 42
+# ^
+x = MY_CONST
+"#;
+    assert!(apply_first_safe_delete_action(code).is_none());
+}
+
+#[test]
+fn safe_delete_annotated_attribute_no_refs() {
+    let code = r#"
+class Foo:
+    x: int = 1
+    y: int = 2
+#   ^
+"#;
+    let updated = apply_first_safe_delete_action(code).expect("expected safe delete action");
+    let expected = r#"
+class Foo:
+    x: int = 1
+#   ^
+"#;
+    assert_eq!(expected, updated);
+}
+
+#[test]
+fn safe_delete_only_attribute_inserts_pass() {
+    let code = r#"
+class Foo:
+    """A class."""
+    x: int = 1
+#   ^
+"#;
+    let updated = apply_first_safe_delete_action(code).expect("expected safe delete action");
+    let expected = r#"
+class Foo:
+    """A class."""
+    pass
+#   ^
+"#;
+    assert_eq!(expected, updated);
+}
+
+#[test]
+fn safe_delete_nested_function_no_refs() {
+    let code = r#"
+def outer():
+    def inner():
+#       ^
+        return 1
+    return 2
+"#;
+    let updated = apply_first_safe_delete_action(code).expect("expected safe delete action");
+    let expected = r#"
+def outer():
+    return 2
+"#;
+    assert_eq!(expected, updated);
+}
+
+#[test]
+fn safe_delete_nested_function_with_refs() {
+    let code = r#"
+def outer():
+    def inner():
+#       ^
+        return 1
+    return inner()
+"#;
+    assert!(apply_first_safe_delete_action(code).is_none());
+}
+
+#[test]
+fn safe_delete_multiple_assignment_targets() {
+    // `a = b = 1` has two assignment targets, so `find_definition_context`
+    // returns None (the `matches_definition` check requires exactly one target).
+    let code = r#"
+a = b = 1
+# ^
+"#;
+    assert!(apply_first_safe_delete_action(code).is_none());
+}
+
+#[test]
+fn safe_delete_child_impl_blocks_deletion() {
+    // A child class overriding Base.method counts as a reference,
+    // so safe-delete should be rejected.
+    let code = r#"
+class Base:
+    def method(self) -> int:
+#       ^
+        return 1
+
+class Child(Base):
+    def method(self) -> int:
+        return 2
 "#;
     assert!(apply_first_safe_delete_action(code).is_none());
 }
