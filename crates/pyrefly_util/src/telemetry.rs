@@ -123,6 +123,10 @@ pub struct TelemetryTransactionStats {
     pub set_memory_dirty: usize,
     /// Time spent in `compute_stdlib` during `run_step`.
     pub compute_stdlib_time: Duration,
+    /// `true` when stdlib was already cached and computation was skipped.
+    pub compute_stdlib_cached: bool,
+    /// Time spent in the parallel pre-warming phase of `compute_stdlib`.
+    pub compute_stdlib_prewarm_time: Duration,
     /// Number of modules in the dirty set at the start of `run_step`.
     pub run_dirty_count: usize,
     /// Number of items pushed to the todo work queue in `run_step`.

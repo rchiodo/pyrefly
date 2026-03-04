@@ -516,3 +516,49 @@ fn test_crash_on_cross_module_type_alias_ref() {
     let mut transaction = state.new_transaction(Require::Exports, None);
     transaction.run(&[handle], Require::Everything);
 }
+
+/// Verify that stdlib computation is cached across transaction runs.
+///
+/// The first run must compute the stdlib from bundled typeshed stubs (expensive,
+/// 80-150ms single-threaded). Subsequent runs within the same transaction, or
+/// new transactions created after committing, should reuse the cached stdlib
+/// and report `compute_stdlib_cached = true`.
+#[test]
+fn test_stdlib_cached_on_recheck() {
+    let env = TestEnv::one("foo", "x: int = 1");
+    let state = State::new(env.config_finder());
+    let handle = Handle::new(
+        ModuleName::from_str("foo"),
+        ModulePath::memory(PathBuf::from("foo.py")),
+        env.sys_info(),
+    );
+
+    // First run: stdlib must be computed from scratch.
+    let mut t1 = state.new_committable_transaction(Require::Exports, None);
+    t1.as_mut().set_memory(env.get_memory());
+    t1.as_mut().run(&[handle.dupe()], Require::Everything);
+    assert!(
+        !t1.as_ref().compute_stdlib_cached(),
+        "First run should compute stdlib, not use cache"
+    );
+    assert!(
+        t1.as_ref().compute_stdlib_prewarm_time() > Duration::ZERO,
+        "Pre-warming should take nonzero time on first run"
+    );
+    state.commit_transaction(t1, None);
+
+    // Second run (recheck): stdlib should be cached because it was committed.
+    let mut t2 = state.new_committable_transaction(Require::Exports, None);
+    t2.as_mut().set_memory(env.get_memory());
+    t2.as_mut().run(&[handle.dupe()], Require::Everything);
+    assert!(
+        t2.as_ref().compute_stdlib_cached(),
+        "Recheck should use cached stdlib, not recompute"
+    );
+    assert_eq!(
+        t2.as_ref().compute_stdlib_prewarm_time(),
+        Duration::ZERO,
+        "Cached stdlib should skip pre-warming entirely"
+    );
+    state.commit_transaction(t2, None);
+}

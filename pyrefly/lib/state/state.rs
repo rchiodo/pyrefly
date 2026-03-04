@@ -557,6 +557,17 @@ impl<'a> Transaction<'a> {
         self.stats.lock().fresh = true;
     }
 
+    /// Whether the stdlib computation was entirely cached (no work done).
+    pub fn compute_stdlib_cached(&self) -> bool {
+        self.stats.lock().compute_stdlib_cached
+    }
+
+    /// Time spent in the parallel pre-warming phase of `compute_stdlib`.
+    /// Returns `Duration::ZERO` when the stdlib was cached (no pre-warming needed).
+    pub fn compute_stdlib_prewarm_time(&self) -> Duration {
+        self.stats.lock().compute_stdlib_prewarm_time
+    }
+
     /// Sets a callback that will be invoked immediately each time an ad-hoc solve completes,
     /// recording the operation label, start time, and duration as a telemetry event.
     pub fn set_ad_hoc_solve_recorder(
@@ -1410,22 +1421,36 @@ impl<'a> Transaction<'a> {
         self.data.stdlib.get(handle.sys_info()).unwrap().dupe()
     }
 
-    fn compute_stdlib(&mut self, sys_infos: SmallSet<SysInfo>) {
+    /// Compute the `Stdlib` for each requested `SysInfo`.
+    ///
+    /// Stdlib is derived from bundled (immutable) typeshed stubs, so the result
+    /// is deterministic for a given `SysInfo`. We skip recomputation for any
+    /// `SysInfo` already present in the stdlib map — this avoids 80-150 ms of
+    /// redundant single-threaded work on rechecks and multi-epoch runs.
+    ///
+    /// Returns `true` if all entries were already cached (no work done).
+    fn compute_stdlib(&mut self, sys_infos: SmallSet<SysInfo>) -> bool {
+        // Filter out SysInfos that already have a computed stdlib.
+        let missing: SmallSet<SysInfo> = sys_infos
+            .into_iter()
+            .filter(|k| !self.data.stdlib.contains_key(k))
+            .collect();
+        if missing.is_empty() {
+            return true;
+        }
         let loader = self.get_cached_loader(&BundledTypeshedStdlib::config());
         // Use defaults (disabled) for stdlib - depth limiting is for user code
         let thread_state = ThreadState::new(None);
-        for k in sys_infos.into_iter_hashed() {
+        for k in missing.into_iter_hashed() {
             self.data
                 .stdlib
                 .insert_hashed(k.to_owned(), Arc::new(Stdlib::for_bootstrapping()));
             let v = Arc::new(Stdlib::new(
                 k.version(),
-                // Existing lookup_class callback
                 &|module, name| {
                     let path = loader.find_import(module, None).finding()?;
                     self.lookup_stdlib(&Handle::new(module, path, (*k).dupe()), name, &thread_state)
                 },
-                // New lookup_export_location callback
                 &|module, name| {
                     let path = loader.find_import(module, None).finding()?;
                     let handle = Handle::new(module, path, (*k).dupe());
@@ -1434,6 +1459,7 @@ impl<'a> Transaction<'a> {
             ));
             self.data.stdlib.insert_hashed(k, v);
         }
+        false
     }
 
     fn work(&self) -> Result<(), Cancelled> {
@@ -1447,14 +1473,6 @@ impl<'a> Transaction<'a> {
         let run_start = Instant::now();
 
         self.data.now.next();
-        let sys_infos = handles
-            .iter()
-            .map(|x| x.sys_info().dupe())
-            .collect::<SmallSet<_>>();
-        let stdlib_start = Instant::now();
-        self.compute_stdlib(sys_infos);
-        let compute_stdlib_time = stdlib_start.elapsed();
-        self.stats.lock().compute_stdlib_time += compute_stdlib_time;
 
         let mut todo_count = 0;
         let dirty_count;
@@ -1546,6 +1564,24 @@ impl<'a> Transaction<'a> {
 
     fn run_internal(&mut self, handles: &[Handle], require: Require) -> Result<(), Cancelled> {
         let run_number = self.data.state.run_count.fetch_add(1, Ordering::SeqCst);
+        // Compute stdlib once before the epoch loop. Stdlib is deterministic for a
+        // given SysInfo and does not depend on user code, so it only needs to run once.
+        let sys_infos = handles
+            .iter()
+            .map(|x| x.sys_info().dupe())
+            .collect::<SmallSet<_>>();
+        let stdlib_start = Instant::now();
+        let stdlib_cached = self.compute_stdlib(sys_infos);
+        let compute_stdlib_time = stdlib_start.elapsed();
+        {
+            let mut stats = self.stats.lock();
+            stats.compute_stdlib_time += compute_stdlib_time;
+            stats.compute_stdlib_cached = stdlib_cached;
+            if !stdlib_cached {
+                stats.compute_stdlib_prewarm_time += compute_stdlib_time;
+            }
+        }
+
         // We first compute all the modules that are either new or have changed.
         // Then we repeatedly compute all the modules who depend on modules that changed.
         //
@@ -2333,6 +2369,12 @@ pub struct CommittingTransaction<'a> {
 impl<'a> AsMut<Transaction<'a>> for CommittingTransaction<'a> {
     fn as_mut(&mut self) -> &mut Transaction<'a> {
         &mut self.transaction
+    }
+}
+
+impl<'a> AsRef<Transaction<'a>> for CommittingTransaction<'a> {
+    fn as_ref(&self) -> &Transaction<'a> {
+        &self.transaction
     }
 }
 
