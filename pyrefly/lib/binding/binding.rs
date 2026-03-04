@@ -601,20 +601,7 @@ impl Keyed for KeyExport {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        let inner = &bindings.get(idx).0;
-        let key_idx = match inner {
-            Binding::Forward(key_idx) => *key_idx,
-            Binding::AnnotatedType(_, inner) => match inner.as_ref() {
-                Binding::Forward(key_idx) => *key_idx,
-                _ => {
-                    unreachable!("BindingExport AnnotatedType should always wrap a Forward binding")
-                }
-            },
-            _ => {
-                unreachable!("BindingExport should always be Forward or AnnotatedType(_, Forward)")
-            }
-        };
-        bindings.idx_to_key(key_idx).range()
+        bindings.idx_to_key(bindings.get(idx).key_idx()).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyExport(self.clone()))
@@ -2606,12 +2593,36 @@ impl Binding {
     }
 }
 
+/// An export binding. Every export is a forward reference to a `Key`, optionally
+/// with an annotation.
 #[derive(Clone, Debug)]
-pub struct BindingExport(pub Binding);
+pub enum BindingExport {
+    Forward(Idx<Key>),
+    AnnotatedForward(Idx<KeyAnnotation>, Idx<Key>),
+}
+
+impl BindingExport {
+    /// The forwarded key index that this export points to.
+    pub fn key_idx(&self) -> Idx<Key> {
+        match self {
+            Self::Forward(idx) | Self::AnnotatedForward(_, idx) => *idx,
+        }
+    }
+}
 
 impl DisplayWith<Bindings> for BindingExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
-        DisplayWith::fmt(&self.0, f, ctx)
+        match self {
+            Self::Forward(idx) => write!(f, "BindingExport::Forward({})", ctx.display(*idx)),
+            Self::AnnotatedForward(ann, idx) => {
+                write!(
+                    f,
+                    "BindingExport::AnnotatedForward({}, {})",
+                    ctx.display(*ann),
+                    ctx.display(*idx)
+                )
+            }
+        }
     }
 }
 

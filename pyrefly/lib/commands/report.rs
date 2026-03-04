@@ -285,7 +285,7 @@ impl ReportArgs {
             if reported_names.contains(qualified_name.as_str()) {
                 continue;
             }
-            let BindingExport(binding) = bindings.get(idx);
+            let binding = bindings.get(idx);
             let location = match exports.get(name) {
                 Some(ExportLocation::ThisModule(export)) => {
                     Self::range_to_location(module, export.location)
@@ -293,7 +293,7 @@ impl ReportArgs {
                 _ => continue,
             };
             match binding {
-                Binding::AnnotatedType(annot_idx, _inner) => {
+                BindingExport::AnnotatedForward(annot_idx, _) => {
                     let annotation_text = match bindings.get(*annot_idx) {
                         BindingAnnotation::AnnotateExpr(_, expr, _) => {
                             Some(module.code_at(expr.range()).to_owned())
@@ -306,7 +306,7 @@ impl ReportArgs {
                         location,
                     });
                 }
-                Binding::Forward(idx) => match bindings.get(*idx) {
+                BindingExport::Forward(idx) => match bindings.get(*idx) {
                     // Skip injected implicit globals
                     Binding::Global(_) => {}
                     _ => {
@@ -317,7 +317,6 @@ impl ReportArgs {
                         });
                     }
                 },
-                _ => {}
             }
         }
         variables.sort_by(|a, b| a.location.cmp(&b.location));

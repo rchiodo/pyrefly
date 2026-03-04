@@ -550,17 +550,15 @@ impl Bindings {
         for (name, exportable) in scope_trace.exportables().into_iter_hashed() {
             let binding = match exportable {
                 Exportable::Initialized(key, Some(ann)) => {
-                    Binding::AnnotatedType(ann, Box::new(Binding::Forward(key)))
+                    BindingExport::AnnotatedForward(ann, key)
                 }
-                Exportable::Initialized(key, None) => Binding::Forward(key),
+                Exportable::Initialized(key, None) => BindingExport::Forward(key),
                 Exportable::Uninitialized(key) => {
-                    Binding::Forward(builder.table.types.0.insert(key))
+                    BindingExport::Forward(builder.table.types.0.insert(key))
                 }
             };
             if exported.contains_key_hashed(name.as_ref()) {
-                builder
-                    .table
-                    .insert(KeyExport(name.into_key()), BindingExport(binding));
+                builder.table.insert(KeyExport(name.into_key()), binding);
             }
         }
         Self(Arc::new(BindingsInner {

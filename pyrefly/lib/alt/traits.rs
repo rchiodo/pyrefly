@@ -230,11 +230,13 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyExport {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Arc<Type> {
-        Arc::new(
-            answers
-                .solve_binding(&binding.0, range, errors)
-                .arc_clone_ty(),
-        )
+        let inner = match binding {
+            BindingExport::Forward(idx) => Binding::Forward(*idx),
+            BindingExport::AnnotatedForward(ann, idx) => {
+                Binding::AnnotatedType(*ann, Box::new(Binding::Forward(*idx)))
+            }
+        };
+        Arc::new(answers.solve_binding(&inner, range, errors).arc_clone_ty())
     }
 
     fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
