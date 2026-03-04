@@ -516,6 +516,7 @@ impl<'a> BindingsBuilder<'a> {
             let key_type_alias = KeyTypeAlias(self.type_alias_index());
             let binding_type_alias = BindingTypeAlias::Legacy {
                 name: name.id.clone(),
+                range: name.range,
                 annotation: ann,
                 expr: value,
                 is_explicit: has_type_alias_qualifier,

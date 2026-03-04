@@ -2174,6 +2174,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 annotation: annot_key,
                 expr,
                 is_explicit,
+                ..
             } => {
                 let (annot, ty) = self.name_assign_infer(name, annot_key.as_ref(), expr, errors);
                 if let Some(annot) = &annot
@@ -2193,7 +2194,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     errors,
                 ))
             }
-            BindingTypeAlias::Scoped { name, expr } => {
+            BindingTypeAlias::Scoped { name, expr, .. } => {
                 let ty = self.expr_infer(expr, errors);
                 Arc::new(self.as_type_alias(name, TypeAliasStyle::Scoped, ty, expr, errors))
             }
@@ -2201,6 +2202,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 name,
                 annotation,
                 expr,
+                ..
             } => {
                 let ta = if let Some(expr) = expr {
                     let mut ty = self.expr_infer(expr, errors);

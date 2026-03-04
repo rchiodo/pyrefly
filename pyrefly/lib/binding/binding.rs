@@ -113,7 +113,7 @@ assert_words!(KeyUndecoratedFunction, 1);
 
 assert_words!(Binding, 6);
 assert_words!(BindingExpect, 16);
-assert_words!(BindingTypeAlias, 6);
+assert_words!(BindingTypeAlias, 7);
 assert_words!(BindingAnnotation, 15);
 assert_words!(BindingClass, 15);
 assert_words!(BindingTParams, 10);
@@ -425,7 +425,11 @@ impl Keyed for KeyTypeAlias {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        match bindings.get(idx) {
+            BindingTypeAlias::Legacy { range, .. }
+            | BindingTypeAlias::Scoped { range, .. }
+            | BindingTypeAlias::TypeAliasType { range, .. } => *range,
+        }
     }
 }
 impl Exported for KeyTypeAlias {
@@ -1260,15 +1264,21 @@ pub enum BindingTypeAlias {
     /// until we resolve their RHS in the answers phase.
     Legacy {
         name: Name,
+        range: TextRange,
         annotation: Option<(AnnotationStyle, Idx<KeyAnnotation>)>,
         expr: Box<Expr>,
         is_explicit: bool,
     },
     /// Scoped type aliases, like `type X = list[int]`.
-    Scoped { name: Name, expr: Box<Expr> },
+    Scoped {
+        name: Name,
+        range: TextRange,
+        expr: Box<Expr>,
+    },
     /// Calls to TypeAliasType, like `X = TypeAliasType('X', list[int])`.
     TypeAliasType {
         name: Name,
+        range: TextRange,
         annotation: Option<Idx<KeyAnnotation>>,
         expr: Option<Box<Expr>>,
     },
