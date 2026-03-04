@@ -338,7 +338,7 @@ impl<Function: FunctionTrait> Target<Function> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash, PartialOrd, Ord)]
-pub struct CallTarget<Function: FunctionTrait> {
+pub struct PysaCallTarget<Function: FunctionTrait> {
     pub(crate) target: Target<Function>,
     // `TrueWithClassReceiver` or `TrueWithObjectReceiver` if the call has an implicit receiver,
     // such as calling an instance or a class method.
@@ -363,16 +363,16 @@ pub struct CallTarget<Function: FunctionTrait> {
     pub(crate) return_type: ScalarTypeProperties,
 }
 
-impl<Function: FunctionTrait> CallTarget<Function> {
+impl<Function: FunctionTrait> PysaCallTarget<Function> {
     #[cfg(test)]
     fn map_function<OutputFunction: FunctionTrait, MapFunction>(
         self,
         map: &MapFunction,
-    ) -> CallTarget<OutputFunction>
+    ) -> PysaCallTarget<OutputFunction>
     where
         MapFunction: Fn(Function) -> OutputFunction,
     {
-        CallTarget {
+        PysaCallTarget {
             target: self.target.map_function(map),
             implicit_receiver: self.implicit_receiver,
             receiver_class: self.receiver_class,
@@ -414,7 +414,7 @@ impl<Function: FunctionTrait> CallTarget<Function> {
     }
 
     fn format_string_target() -> Self {
-        CallTarget {
+        PysaCallTarget {
             target: Target::FormatString,
             return_type: ScalarTypeProperties::none(),
             implicit_receiver: ImplicitReceiver::False,
@@ -624,7 +624,7 @@ impl<T> MaybeResolved<Vec1<T>> {
     }
 }
 
-impl MaybeResolved<Vec1<CallTarget<FunctionRef>>> {
+impl MaybeResolved<Vec1<PysaCallTarget<FunctionRef>>> {
     fn into_call_callees(self) -> CallCallees<FunctionRef> {
         match self {
             MaybeResolved::Resolved(call_targets) => CallCallees {
@@ -655,7 +655,7 @@ impl MaybeResolved<Vec1<CallTarget<FunctionRef>>> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HigherOrderParameter<Function: FunctionTrait> {
     pub(crate) index: u32,
-    pub(crate) call_targets: Vec<CallTarget<Function>>,
+    pub(crate) call_targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Unresolved::is_resolved")]
     pub(crate) unresolved: Unresolved,
 }
@@ -674,7 +674,7 @@ impl<Function: FunctionTrait> HigherOrderParameter<Function> {
             call_targets: self
                 .call_targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect(),
             unresolved: self.unresolved,
         }
@@ -695,11 +695,11 @@ impl<Function: FunctionTrait> HigherOrderParameter<Function> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CallCallees<Function: FunctionTrait> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) call_targets: Vec<CallTarget<Function>>,
+    pub(crate) call_targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) init_targets: Vec<CallTarget<Function>>,
+    pub(crate) init_targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) new_targets: Vec<CallTarget<Function>>,
+    pub(crate) new_targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub(crate) higher_order_parameters: HashMap<u32, HigherOrderParameter<Function>>,
     #[serde(skip_serializing_if = "Unresolved::is_resolved")]
@@ -717,7 +717,7 @@ impl<Function: FunctionTrait> CallCallees<Function> {
         }
     }
 
-    fn new(call_targets: Vec1<CallTarget<Function>>) -> Self {
+    fn new(call_targets: Vec1<PysaCallTarget<Function>>) -> Self {
         CallCallees {
             call_targets: call_targets.into_vec(),
             init_targets: vec![],
@@ -745,10 +745,10 @@ impl<Function: FunctionTrait> CallCallees<Function> {
     where
         MapFunction: Fn(Function) -> OutputFunction,
     {
-        let map_call_targets = |targets: Vec<CallTarget<Function>>| {
+        let map_call_targets = |targets: Vec<PysaCallTarget<Function>>| {
             targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect()
         };
         CallCallees {
@@ -779,7 +779,7 @@ impl<Function: FunctionTrait> CallCallees<Function> {
         !self.is_empty() || self.is_resolved()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.call_targets
             .iter()
             .chain(self.init_targets.iter())
@@ -842,9 +842,9 @@ pub struct AttributeAccessCallees<Function: FunctionTrait> {
     /// When the attribute access is called, the callees it may resolve to
     pub(crate) if_called: CallCallees<Function>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) property_setters: Vec<CallTarget<Function>>,
+    pub(crate) property_setters: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) property_getters: Vec<CallTarget<Function>>,
+    pub(crate) property_getters: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) global_targets: Vec<GlobalVariableRef>,
     /// True if that there is at least one case (i.e., execution flow) where this is a regular
@@ -862,10 +862,10 @@ impl<Function: FunctionTrait> AttributeAccessCallees<Function> {
     where
         MapFunction: Fn(Function) -> OutputFunction,
     {
-        let map_call_targets = |targets: Vec<CallTarget<Function>>| {
+        let map_call_targets = |targets: Vec<PysaCallTarget<Function>>| {
             targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect()
         };
         AttributeAccessCallees {
@@ -884,7 +884,7 @@ impl<Function: FunctionTrait> AttributeAccessCallees<Function> {
             && self.global_targets.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.if_called
             .all_targets()
             .chain(self.property_setters.iter())
@@ -947,7 +947,7 @@ impl<Function: FunctionTrait> IdentifierCallees<Function> {
             && self.captured_variables.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.if_called.all_targets()
     }
 
@@ -970,7 +970,7 @@ impl<Function: FunctionTrait> IdentifierCallees<Function> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DefineCallees<Function: FunctionTrait> {
-    pub(crate) define_targets: Vec<CallTarget<Function>>,
+    pub(crate) define_targets: Vec<PysaCallTarget<Function>>,
 }
 
 impl<Function: FunctionTrait> DefineCallees<Function> {
@@ -986,7 +986,7 @@ impl<Function: FunctionTrait> DefineCallees<Function> {
             define_targets: self
                 .define_targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect(),
         }
     }
@@ -996,7 +996,7 @@ impl<Function: FunctionTrait> DefineCallees<Function> {
         self.define_targets.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.define_targets.iter()
     }
 
@@ -1008,7 +1008,7 @@ impl<Function: FunctionTrait> DefineCallees<Function> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FormatStringArtificialCallees<Function: FunctionTrait> {
-    pub(crate) targets: Vec<CallTarget<Function>>,
+    pub(crate) targets: Vec<PysaCallTarget<Function>>,
 }
 
 impl<Function: FunctionTrait> FormatStringArtificialCallees<Function> {
@@ -1024,7 +1024,7 @@ impl<Function: FunctionTrait> FormatStringArtificialCallees<Function> {
             targets: self
                 .targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect(),
         }
     }
@@ -1034,7 +1034,7 @@ impl<Function: FunctionTrait> FormatStringArtificialCallees<Function> {
         self.targets.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.targets.iter()
     }
 
@@ -1047,7 +1047,7 @@ impl<Function: FunctionTrait> FormatStringArtificialCallees<Function> {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FormatStringStringifyCallees<Function: FunctionTrait> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) targets: Vec<CallTarget<Function>>,
+    pub(crate) targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Unresolved::is_resolved")]
     pub(crate) unresolved: Unresolved,
 }
@@ -1065,7 +1065,7 @@ impl<Function: FunctionTrait> FormatStringStringifyCallees<Function> {
             targets: self
                 .targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect(),
             unresolved: self.unresolved,
         }
@@ -1076,7 +1076,7 @@ impl<Function: FunctionTrait> FormatStringStringifyCallees<Function> {
         self.targets.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.targets.iter()
     }
 
@@ -1095,7 +1095,7 @@ pub enum ReturnShimArgumentMapping {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ReturnShimCallees<Function: FunctionTrait> {
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub(crate) targets: Vec<CallTarget<Function>>,
+    pub(crate) targets: Vec<PysaCallTarget<Function>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) arguments: Vec<ReturnShimArgumentMapping>,
 }
@@ -1113,7 +1113,7 @@ impl<Function: FunctionTrait> ReturnShimCallees<Function> {
             targets: self
                 .targets
                 .into_iter()
-                .map(|call_target| CallTarget::map_function(call_target, map))
+                .map(|call_target| PysaCallTarget::map_function(call_target, map))
                 .collect(),
             arguments: self.arguments,
         }
@@ -1124,7 +1124,7 @@ impl<Function: FunctionTrait> ReturnShimCallees<Function> {
         self.targets.is_empty()
     }
 
-    pub fn all_targets(&self) -> impl Iterator<Item = &CallTarget<Function>> {
+    pub fn all_targets(&self) -> impl Iterator<Item = &PysaCallTarget<Function>> {
         self.targets.iter()
     }
 
@@ -1194,7 +1194,9 @@ impl<Function: FunctionTrait> ExpressionCallees<Function> {
         }
     }
 
-    pub fn all_targets<'a>(&'a self) -> Box<dyn Iterator<Item = &'a CallTarget<Function>> + 'a> {
+    pub fn all_targets<'a>(
+        &'a self,
+    ) -> Box<dyn Iterator<Item = &'a PysaCallTarget<Function>> + 'a> {
         match self {
             ExpressionCallees::Call(call_callees) => Box::new(call_callees.all_targets()),
             ExpressionCallees::Identifier(identifier_callees) => {
@@ -1851,7 +1853,7 @@ impl<'a> CallGraphVisitor<'a> {
         callee_expr_suffix: Option<&str>,
         unknown_callee_as_direct_call: bool,
         exclude_object_methods: bool,
-    ) -> MaybeResolved<Vec1<CallTarget<FunctionRef>>> {
+    ) -> MaybeResolved<Vec1<PysaCallTarget<FunctionRef>>> {
         self.call_targets_from_callable_metadata(function, return_type, callee_expr_suffix)
             .map(|target| MaybeResolved::Resolved(Vec1::new(target)))
             .unwrap_or_else(|| {
@@ -1877,7 +1879,7 @@ impl<'a> CallGraphVisitor<'a> {
         function: &pyrefly_types::callable::Function,
         return_type: ScalarTypeProperties,
         callee_expr_suffix: Option<&str>,
-    ) -> Option<CallTarget<FunctionRef>> {
+    ) -> Option<PysaCallTarget<FunctionRef>> {
         // Resolve a `CallTarget::Function` directly via its `FuncDefIndex`, bypassing
         // name-based lookup. This handles module-level function aliases (e.g.,
         // `fromstring = XML` in `xml.etree.ElementTree`) where the type carries the
@@ -1942,7 +1944,7 @@ impl<'a> CallGraphVisitor<'a> {
         // For example, `f` in call expr `f(1)` or `__call__` in call expr `c.__call__(1)`
         callee_expr_suffix: Option<&str>,
         override_implicit_receiver: Option<ImplicitReceiver>,
-    ) -> CallTarget<FunctionRef> {
+    ) -> PysaCallTarget<FunctionRef> {
         let base_function = function_target.base_function().unwrap();
         let function_definition = self.get_base_definition(base_function);
         let is_classmethod =
@@ -1959,7 +1961,7 @@ impl<'a> CallGraphVisitor<'a> {
                 is_class_def: false,
             },
         };
-        CallTarget {
+        PysaCallTarget {
             implicit_receiver: override_implicit_receiver.unwrap_or(has_implicit_receiver(
                 function_definition,
                 is_receiver_class_def,
@@ -1985,7 +1987,7 @@ impl<'a> CallGraphVisitor<'a> {
         override_implicit_receiver: Option<ImplicitReceiver>,
         override_is_direct_call: Option<bool>,
         unknown_callee_as_direct_call: bool,
-    ) -> CallTarget<FunctionRef> {
+    ) -> PysaCallTarget<FunctionRef> {
         let is_direct_call = match override_is_direct_call {
             Some(override_is_direct_call) => DirectCall::from_bool(override_is_direct_call),
             None => DirectCall::is_direct_call(
@@ -2031,7 +2033,7 @@ impl<'a> CallGraphVisitor<'a> {
                     callee_expr_suffix,
                     override_implicit_receiver,
                 ),
-                Target::FormatString => CallTarget {
+                Target::FormatString => PysaCallTarget {
                     target,
                     implicit_receiver: ImplicitReceiver::False,
                     receiver_class: None,
@@ -2057,7 +2059,7 @@ impl<'a> CallGraphVisitor<'a> {
         override_is_direct_call: Option<bool>,
         unknown_callee_as_direct_call: bool,
         exclude_object_methods: bool,
-    ) -> MaybeResolved<Vec1<CallTarget<FunctionRef>>> {
+    ) -> MaybeResolved<Vec1<PysaCallTarget<FunctionRef>>> {
         let call_targets_from_method_name_with_class = |class| {
             match self.function_ref_from_class_field(class, method, exclude_object_methods) {
                 Result::Ok(function_ref) => {
@@ -2153,7 +2155,7 @@ impl<'a> CallGraphVisitor<'a> {
         return_type: ScalarTypeProperties,
         callee_expr_suffix: Option<&str>,
         exclude_object_methods: bool,
-    ) -> MaybeResolved<Vec1<CallTarget<FunctionRef>>> {
+    ) -> MaybeResolved<Vec1<PysaCallTarget<FunctionRef>>> {
         let class_type = find_class_type_for_new_method(&new_method.signature.params);
         self.call_targets_from_method_name(
             &method_name_from_function(new_method),
@@ -3622,7 +3624,7 @@ impl<'a> CallGraphVisitor<'a> {
         self.add_callees(
             ExpressionIdentifier::FormatStringArtificial(self.pysa_location(fstring.range())),
             ExpressionCallees::FormatStringArtificial(FormatStringArtificialCallees {
-                targets: vec![CallTarget::format_string_target()],
+                targets: vec![PysaCallTarget::format_string_target()],
             }),
         );
 
@@ -3791,7 +3793,7 @@ impl<'a> CallGraphVisitor<'a> {
                     }),
                 _ => false,
             };
-            let callees: Vec<CallTarget<FunctionRef>> = return_inner_class
+            let callees: Vec<PysaCallTarget<FunctionRef>> = return_inner_class
                 .fields()
                 .filter_map(|field_name| {
                     if let Some(class_field) = get_class_field_from_current_class_only(
@@ -4378,7 +4380,7 @@ fn resolve_call(
     function_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     module_context: &ModuleContext,
     override_graph: &OverrideGraph,
-) -> Vec<CallTarget<FunctionRef>> {
+) -> Vec<PysaCallTarget<FunctionRef>> {
     let mut call_graphs = CallGraphs::new();
     let visitor = CallGraphVisitor {
         call_graphs: &mut call_graphs,
@@ -4419,7 +4421,7 @@ fn resolve_expression(
     module_context: &ModuleContext,
     override_graph: &OverrideGraph,
     parent_expression: Option<&Expr>,
-) -> Vec<CallTarget<FunctionRef>> {
+) -> Vec<PysaCallTarget<FunctionRef>> {
     // This needs to be provided. Otherwise the callees won't be registered into `call_graphs`.
     let current_function = FunctionRef {
         module_id: module_context.module_id,
