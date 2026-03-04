@@ -16,6 +16,7 @@ use lsp_types::Url;
 use lsp_types::notification::DidChangeTextDocument;
 use lsp_types::request::Completion;
 use lsp_types::request::ResolveCompletionItem;
+use pyrefly::commands::lsp::IndexingMode;
 use serde_json::json;
 
 use crate::object_model::InitializeSettings;
@@ -455,8 +456,7 @@ fn test_completion_with_autoimport_submodule() {
     let root = get_test_files_root();
     let root_path = root.path().join("autoimport_submodule");
 
-    let mut interaction =
-        LspInteraction::new_with_indexing_mode(pyrefly::commands::lsp::IndexingMode::LazyBlocking);
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
 
     interaction.set_root(root_path.clone());
     interaction
