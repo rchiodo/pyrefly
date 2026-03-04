@@ -1731,7 +1731,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         eprintln!("\n--- Triggering Idx Details ---");
         let key = self.bindings().idx_to_key(idx);
-        let range = key.range();
+        let range = K::range_with(idx, self.bindings());
         let display_range = self.bindings().module().display_range(range);
         eprintln!("  Module: {}", self.module().name());
         eprintln!("  Range: {}", display_range);

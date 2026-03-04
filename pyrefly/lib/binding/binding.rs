@@ -362,7 +362,7 @@ pub enum AnyExportedKey {
 /// Any key that sets `EXPORTED` to `true` should not include positions
 /// Incremental updates depend on knowing when a file's exports changed, which uses equality between exported keys
 /// Moving code around should not cause all dependencies to be re-checked
-pub trait Keyed: Hash + Eq + Clone + DisplayWith<ModuleInfo> + Debug + Ranged + 'static {
+pub trait Keyed: Hash + Eq + Clone + DisplayWith<ModuleInfo> + Debug + 'static {
     const EXPORTED: bool = false;
     type Value: Debug + DisplayWith<Bindings>;
     type Answer: Clone + Debug + Display + TypeEq + VisitMut<Type> + Send + Sync;
@@ -918,6 +918,11 @@ impl Ranged for Key {
     fn range(&self) -> TextRange {
         match self {
             Self::Import(x) => x.1,
+            // ImplicitGlobals (e.g. __file__, __name__) are synthesized and have no
+            // source text. TextRange::default() (0..0) points to the start of the
+            // file, which is a valid byte position and can be targeted by suppression
+            // comments. Do not copy this pattern for other keys — nearly all keys
+            // should carry a real source range.
             Self::ImplicitGlobal(_) => TextRange::default(),
             Self::Definition(x) => x.range(),
             Self::MutableCapture(x) => x.range(),
@@ -1067,12 +1072,6 @@ impl DisplayWith<ModuleInfo> for KeyExpect {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyTypeAlias(pub TypeAliasIndex);
-
-impl Ranged for KeyTypeAlias {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
 
 impl DisplayWith<ModuleInfo> for KeyTypeAlias {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
@@ -1340,12 +1339,6 @@ where
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyExport(pub Name);
 
-impl Ranged for KeyExport {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyExport({})", self.0)
@@ -1412,12 +1405,6 @@ impl DisplayWith<ModuleInfo> for KeyUndecoratedFunction {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyUndecoratedFunctionRange(pub FuncDefIndex);
 
-impl Ranged for KeyUndecoratedFunctionRange {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyUndecoratedFunctionRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyUndecoratedFunctionRange({})", self.0)
@@ -1474,12 +1461,6 @@ impl DisplayWith<ModuleInfo> for KeyClass {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyTParams(pub ClassDefIndex);
 
-impl Ranged for KeyTParams {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyTParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyTParams({})", self.0)
@@ -1490,12 +1471,6 @@ impl DisplayWith<ModuleInfo> for KeyTParams {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyClassBaseType(pub ClassDefIndex);
 
-impl Ranged for KeyClassBaseType {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyClassBaseType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyClassBaseType({})", self.0)
@@ -1505,12 +1480,6 @@ impl DisplayWith<ModuleInfo> for KeyClassBaseType {
 /// A reference to a field in a class.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyClassField(pub ClassDefIndex, pub Name);
-
-impl Ranged for KeyClassField {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
 
 impl DisplayWith<ModuleInfo> for KeyClassField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
@@ -1524,12 +1493,6 @@ impl DisplayWith<ModuleInfo> for KeyClassField {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyClassSynthesizedFields(pub ClassDefIndex);
 
-impl Ranged for KeyClassSynthesizedFields {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyClassSynthesizedFields {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyClassSynthesizedFields(class{})", self.0)
@@ -1539,12 +1502,6 @@ impl DisplayWith<ModuleInfo> for KeyClassSynthesizedFields {
 // A key that denotes the variance of a type parameter
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyVariance(pub ClassDefIndex);
-
-impl Ranged for KeyVariance {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
 
 impl DisplayWith<ModuleInfo> for KeyVariance {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
@@ -1556,12 +1513,6 @@ impl DisplayWith<ModuleInfo> for KeyVariance {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyVarianceCheck(pub ClassDefIndex);
 
-impl Ranged for KeyVarianceCheck {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyVarianceCheck {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyVarianceCheck(class{})", self.0)
@@ -1571,12 +1522,6 @@ impl DisplayWith<ModuleInfo> for KeyVarianceCheck {
 // An expectation that attributes in this class need checking for inconsistent override
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyConsistentOverrideCheck(pub ClassDefIndex);
-
-impl Ranged for KeyConsistentOverrideCheck {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
 
 impl DisplayWith<ModuleInfo> for KeyConsistentOverrideCheck {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
@@ -1623,12 +1568,6 @@ impl DisplayWith<ModuleInfo> for KeyAnnotation {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyClassMetadata(pub ClassDefIndex);
 
-impl Ranged for KeyClassMetadata {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyClassMetadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyClassMetadata(class{})", self.0)
@@ -1640,12 +1579,6 @@ impl DisplayWith<ModuleInfo> for KeyClassMetadata {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyClassMro(pub ClassDefIndex);
 
-impl Ranged for KeyClassMro {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
-
 impl DisplayWith<ModuleInfo> for KeyClassMro {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyClassMro(class{})", self.0)
@@ -1654,12 +1587,6 @@ impl DisplayWith<ModuleInfo> for KeyClassMro {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyAbstractClassCheck(pub ClassDefIndex);
-
-impl Ranged for KeyAbstractClassCheck {
-    fn range(&self) -> TextRange {
-        TextRange::default()
-    }
-}
 
 impl DisplayWith<ModuleInfo> for KeyAbstractClassCheck {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
