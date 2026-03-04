@@ -601,7 +601,20 @@ impl Keyed for KeyExport {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        let inner = &bindings.get(idx).0;
+        let key_idx = match inner {
+            Binding::Forward(key_idx) => *key_idx,
+            Binding::AnnotatedType(_, inner) => match inner.as_ref() {
+                Binding::Forward(key_idx) => *key_idx,
+                _ => {
+                    unreachable!("BindingExport AnnotatedType should always wrap a Forward binding")
+                }
+            },
+            _ => {
+                unreachable!("BindingExport should always be Forward or AnnotatedType(_, Forward)")
+            }
+        };
+        bindings.idx_to_key(key_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyExport(self.clone()))
