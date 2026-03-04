@@ -277,6 +277,7 @@ use crate::lsp::non_wasm::type_hierarchy::find_class_at_position_in_ast;
 use crate::lsp::non_wasm::type_hierarchy::prepare_type_hierarchy_item;
 use crate::lsp::non_wasm::unsaved_file_tracker::UnsavedFileTracker;
 use crate::lsp::non_wasm::will_rename_files::will_rename_files;
+use crate::lsp::non_wasm::workspace::DiagnosticMode;
 use crate::lsp::non_wasm::workspace::LspAnalysisConfig;
 use crate::lsp::non_wasm::workspace::Workspace;
 use crate::lsp::non_wasm::workspace::Workspaces;
@@ -2413,6 +2414,17 @@ impl Server {
                     LspFile::Source(_) => Some((path.to_path_buf(), e.to_diagnostic())),
                 };
             }
+
+            // Workspace diagnostic mode: allow non-open files that are under a
+            // workspace root with DiagnosticMode::Workspace and within project scope.
+            if open_files.get(&path).is_none()
+                && self.workspaces.diagnostic_mode(&path) == DiagnosticMode::Workspace
+                && config.project_includes.covers(&path)
+                && !config.project_excludes.covers(&path)
+                && type_error_status.is_enabled()
+            {
+                return Some((path.to_path_buf(), e.to_diagnostic()));
+            }
         }
         None
     }
@@ -2518,6 +2530,7 @@ impl Server {
         for x in open_notebook_cells.keys() {
             notebook_cell_urls.insert(PathBuf::from(x.to_string()), x.clone());
         }
+        let mut open_diag_paths: HashSet<PathBuf> = HashSet::new();
         for handle in handles {
             let handle_path_buf = handle.path().as_path().to_path_buf();
             if let Some(lsp_file) = open_files.get(&handle_path_buf) {
@@ -2528,9 +2541,17 @@ impl Server {
                         }
                     }
                     LspFile::Source(_) => {
+                        open_diag_paths.insert(handle_path_buf.clone());
                         diags.insert(handle_path_buf, Vec::new());
                     }
                 }
+            } else if self.workspaces.diagnostic_mode(handle.path().as_path())
+                == DiagnosticMode::Workspace
+            {
+                // Non-open file in workspace diagnostic mode: create a diagnostic
+                // slot directly. No notebook handling needed since workspace
+                // diagnostics only covers on-disk .py/.pyi files.
+                diags.insert(handle_path_buf, Vec::new());
             }
         }
         for e in transaction.get_errors(handles).collect_errors().shown {
@@ -2544,6 +2565,11 @@ impl Server {
                 diagnostic.data = serde_json::to_value(source).ok()
             }
             if notebook_cell_urls.contains_key(path) {
+                continue;
+            }
+            // Skip IDE-specific diagnostics (unreachable code, unused params, etc.)
+            // for non-open workspace files to reduce noise.
+            if !open_diag_paths.contains(path) {
                 continue;
             }
             let handle = make_open_handle(&self.state, path);
@@ -3342,13 +3368,19 @@ impl Server {
                     return;
                 }
                 DidCloseKind::TextDocument => {
-                    self.connection.publish_diagnostics_for_uri(
-                        url.clone(),
-                        Vec::new(),
-                        version,
-                        DiagnosticSource::DidClose,
-                        self.diagnostic_markdown_support,
-                    );
+                    // In workspace diagnostic mode, don't clear diagnostics for the
+                    // file — it still has diagnostics from the last workspace-wide
+                    // check. The file transitions from versioned (open-file) to
+                    // unversioned (workspace) diagnostics.
+                    if self.workspaces.diagnostic_mode(&path) != DiagnosticMode::Workspace {
+                        self.connection.publish_diagnostics_for_uri(
+                            url.clone(),
+                            Vec::new(),
+                            version,
+                            DiagnosticSource::DidClose,
+                            self.diagnostic_markdown_support,
+                        );
+                    }
                     entry.remove();
                 }
             },

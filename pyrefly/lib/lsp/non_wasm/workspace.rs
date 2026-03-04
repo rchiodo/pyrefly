@@ -624,7 +624,6 @@ impl Workspaces {
     /// never for the catch-all default workspace. If the file resolves to the
     /// default workspace, `OpenFilesOnly` is returned regardless of the default
     /// workspace's settings, preventing the server from scanning the entire filesystem.
-    #[expect(dead_code)] // Used by server.rs in a later diff.
     pub fn diagnostic_mode(&self, path: &Path) -> DiagnosticMode {
         self.get_with(path.to_path_buf(), |(workspace_root, workspace)| {
             // Only honor Workspace mode for explicit workspace folders, not
