@@ -538,7 +538,7 @@ fn test_stdlib_cached_on_recheck() {
     // First run: stdlib must be computed from scratch.
     let mut t1 = state.new_committable_transaction(Require::Exports, None);
     t1.as_mut().set_memory(env.get_memory());
-    t1.as_mut().run(&[handle.dupe()], Require::Everything);
+    t1.as_mut().run(&[handle.dupe()], Require::Everything, None);
     assert!(
         !t1.as_ref().compute_stdlib_cached(),
         "First run should compute stdlib, not use cache"
@@ -552,7 +552,7 @@ fn test_stdlib_cached_on_recheck() {
     // Second run (recheck): stdlib should be cached because it was committed.
     let mut t2 = state.new_committable_transaction(Require::Exports, None);
     t2.as_mut().set_memory(env.get_memory());
-    t2.as_mut().run(&[handle.dupe()], Require::Everything);
+    t2.as_mut().run(&[handle.dupe()], Require::Everything, None);
     assert!(
         t2.as_ref().compute_stdlib_cached(),
         "Recheck should use cached stdlib, not recompute"
