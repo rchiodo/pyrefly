@@ -1410,7 +1410,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Note that we intentionally do not pass in the key when solving the binding,
         // as the result of a binding should not depend on the key it was bound to.
         // We use the range for error reporting.
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
 
         let local_errors = self.error_collector();
         let raw_answer = K::solve(self, binding, range, &local_errors);
@@ -1610,7 +1610,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
         let final_answer = K::record_recursive(self, range, answer, var, errors);
         if var != Var::ZERO {
             self.solver().force_var(var);
@@ -1687,7 +1687,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
         self.base_errors.add(
             range,
             ErrorInfo::Kind(ErrorKind::InternalError),

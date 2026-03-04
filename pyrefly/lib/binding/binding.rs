@@ -65,11 +65,14 @@ use crate::alt::types::yields::YieldFromResult;
 use crate::alt::types::yields::YieldResult;
 use crate::binding::base_class::BaseClass;
 use crate::binding::base_class::BaseClassGeneric;
+use crate::binding::bindings::BindingEntry;
+use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::Bindings;
 use crate::binding::django::DjangoFieldInfo;
 use crate::binding::narrow::NarrowOp;
 use crate::binding::narrow::NarrowingSubject;
 use crate::binding::pydantic::PydanticConfigDict;
+use crate::binding::table::TableKeyed;
 use crate::export::special::SpecialExport;
 use crate::module::module_info::ModuleInfo;
 use crate::types::annotation::Annotation;
@@ -365,6 +368,13 @@ pub trait Keyed: Hash + Eq + Clone + DisplayWith<ModuleInfo> + Debug + Ranged + 
     type Answer: Clone + Debug + Display + TypeEq + VisitMut<Type> + Send + Sync;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx;
 
+    /// Resolve the source range for this key, given access to the bindings.
+    /// Keys with a real source position can ignore bindings and return
+    /// `self.range()`. Keys without a position should look up their binding.
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>;
+
     /// Convert this key to an AnyExportedKey if it is an exported key.
     /// Returns None for non-exported keys.
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
@@ -384,12 +394,24 @@ impl Keyed for Key {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::Key(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyExpect {
     type Value = BindingExpect;
     type Answer = EmptyAnswer;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyExpect(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 impl Keyed for KeyTypeAlias {
@@ -398,6 +420,12 @@ impl Keyed for KeyTypeAlias {
     type Answer = TypeAlias;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyTypeAlias(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 impl Exported for KeyTypeAlias {
@@ -411,12 +439,24 @@ impl Keyed for KeyConsistentOverrideCheck {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyConsistentOverrideCheck(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyClass {
     type Value = BindingClass;
     type Answer = NoneIfRecursive<Class>;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClass(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 impl Keyed for KeyTParams {
@@ -425,6 +465,12 @@ impl Keyed for KeyTParams {
     type Answer = TParams;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyTParams(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyTParams(self.clone()))
@@ -442,6 +488,12 @@ impl Keyed for KeyClassBaseType {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClassBaseType(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassBaseType(self.clone()))
     }
@@ -457,6 +509,12 @@ impl Keyed for KeyClassField {
     type Answer = ClassField;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClassField(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassField(self.clone()))
@@ -474,6 +532,12 @@ impl Keyed for KeyClassSynthesizedFields {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClassSynthesizedFields(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassSynthesizedFields(self.clone()))
     }
@@ -489,6 +553,12 @@ impl Keyed for KeyVariance {
     type Answer = VarianceMap;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyVariance(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyVariance(self.clone()))
@@ -506,6 +576,12 @@ impl Keyed for KeyVarianceCheck {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyVarianceCheck(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         None
     }
@@ -516,6 +592,12 @@ impl Keyed for KeyExport {
     type Answer = Type;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyExport(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyExport(self.clone()))
@@ -532,12 +614,24 @@ impl Keyed for KeyDecorator {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyDecorator(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyDecoratedFunction {
     type Value = BindingDecoratedFunction;
     type Answer = Type;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyDecoratedFunction(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 impl Keyed for KeyUndecoratedFunction {
@@ -546,12 +640,24 @@ impl Keyed for KeyUndecoratedFunction {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyUndecoratedFunction(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyUndecoratedFunctionRange {
     type Value = BindingUndecoratedFunctionRange;
     type Answer = UndecoratedFunctionRangeAnswer;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyUndecoratedFunctionRange(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 impl Keyed for KeyAnnotation {
@@ -560,6 +666,12 @@ impl Keyed for KeyAnnotation {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyAnnotation(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyClassMetadata {
     const EXPORTED: bool = true;
@@ -567,6 +679,12 @@ impl Keyed for KeyClassMetadata {
     type Answer = ClassMetadata;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClassMetadata(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassMetadata(self.clone()))
@@ -584,6 +702,12 @@ impl Keyed for KeyClassMro {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyClassMro(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassMro(self.clone()))
     }
@@ -600,6 +724,12 @@ impl Keyed for KeyAbstractClassCheck {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyAbstractClassCheck(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyAbstractClassCheck(self.clone()))
     }
@@ -615,6 +745,12 @@ impl Keyed for KeyLegacyTypeParam {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyLegacyTypeParam(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyYield {
     type Value = BindingYield;
@@ -622,12 +758,24 @@ impl Keyed for KeyYield {
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyYield(idx)
     }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
+    }
 }
 impl Keyed for KeyYieldFrom {
     type Value = BindingYieldFrom;
     type Answer = YieldFromResult;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
         AnyIdx::KeyYieldFrom(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(idx).range()
     }
 }
 
