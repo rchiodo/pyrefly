@@ -11,7 +11,14 @@
 //! such as narrowing conditions or first-use inference sites.
 
 use lsp_types::Url;
+#[cfg(target_arch = "wasm32")]
+use pyrefly_build::handle::Handle;
 use pyrefly_util::lined_buffer::DisplayPos;
+#[cfg(target_arch = "wasm32")]
+use ruff_text_size::TextSize;
+
+#[cfg(target_arch = "wasm32")]
+use crate::state::state::Transaction;
 
 /// Set the URL fragment to a position suitable for editor navigation.
 /// Handles both regular source files (`L{line},{col}`) and notebook cells
@@ -232,9 +239,9 @@ pub use impl_::type_sources_for_hover;
 
 #[cfg(target_arch = "wasm32")]
 pub fn type_sources_for_hover(
-    _transaction: &crate::state::state::Transaction<'_>,
-    _handle: &pyrefly_build::handle::Handle,
-    _position: ruff_text_size::TextSize,
+    _transaction: &Transaction<'_>,
+    _handle: &Handle,
+    _position: TextSize,
 ) -> Vec<String> {
     Vec::new()
 }

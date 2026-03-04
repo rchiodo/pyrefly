@@ -291,6 +291,7 @@ use crate::lsp::wasm::notebook::DidCloseNotebookDocument;
 use crate::lsp::wasm::notebook::DidOpenNotebookDocument;
 use crate::lsp::wasm::notebook::DidSaveNotebookDocument;
 use crate::lsp::wasm::provide_type::ProvideType;
+use crate::lsp::wasm::provide_type::ProvideTypeParams;
 use crate::lsp::wasm::provide_type::ProvideTypeResponse;
 use crate::lsp::wasm::provide_type::provide_type;
 use crate::state::load::LspFile;
@@ -309,6 +310,7 @@ use crate::state::state::State;
 use crate::state::state::Transaction;
 use crate::state::subscriber::PublishDiagnosticsSubscriber;
 use crate::types::class::ClassDefIndex;
+use crate::types::class::ClassType;
 
 pub struct InitializeInfo {
     pub params: InitializeParams,
@@ -2450,7 +2452,7 @@ impl Server {
     fn provide_type(
         &self,
         transaction: &mut Transaction<'_>,
-        params: crate::lsp::wasm::provide_type::ProvideTypeParams,
+        params: ProvideTypeParams,
     ) -> Option<ProvideTypeResponse> {
         let uri = &params.text_document.uri;
         if self.open_notebook_cells.read().contains_key(uri) {
@@ -5394,7 +5396,7 @@ impl Server {
 
         let path_remapper = self.path_remapper.clone();
         let type_hierarchy_item_from_class_type =
-            move |class_type: &crate::types::class::ClassType| -> Option<TypeHierarchyItem> {
+            move |class_type: &ClassType| -> Option<TypeHierarchyItem> {
                 let class = class_type.class_object();
                 let module = class.module();
                 let uri = module_info_to_uri(module, path_remapper.as_ref())?;
