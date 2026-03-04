@@ -2180,6 +2180,25 @@ impl Scopes {
             }
         };
         self.pop(); // Also pop the annotation scope that wrapped the class body.
+
+        // Collect method-defined attributes up front so we can compute which class-body fields
+        // are initialized in a recognized instance method (e.g. `__init__`) before building
+        // field definitions — a Final field is legally uninitialized in the class body if it
+        // appears in such a method.
+        let method_attrs: Vec<_> = class_scope.method_defined_attributes().collect();
+        let recognized_instance_attrs: SmallSet<Name> = method_attrs
+            .iter()
+            .filter_map(|(name, method, _)| {
+                if method.recognized_attribute_defining_method
+                    && matches!(method.instance_or_class, MethodSelfKind::Instance)
+                {
+                    Some(name.key().clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         class_body.stat.0.iter_hashed().for_each(
             |(name, static_info)| {
             if matches!(static_info.style, StaticStyle::MutableCapture(..)) {
@@ -2225,6 +2244,8 @@ impl Scopes {
                         annotation: static_info.annotation().unwrap_or_else(
                             || panic!("A class field known in the body but uninitialized always has an annotation.")
                         ),
+                        initialized_in_recognized_method: recognized_instance_attrs
+                            .contains(name.key().as_str()),
                     },
                     _ => ClassFieldDefinition::DefinedWithoutAssign {
                         definition: value.idx,
@@ -2233,7 +2254,7 @@ impl Scopes {
                 field_definitions.insert_hashed(name.owned(), (definition, static_info.range));
             }
         });
-        class_scope.method_defined_attributes().for_each(
+        method_attrs.into_iter().for_each(
             |(name, method, InstanceAttribute(value, annotation, range, _))| {
                 if !field_definitions.contains_key_hashed(name.as_ref()) {
                     field_definitions.insert_hashed(

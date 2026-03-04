@@ -2900,7 +2900,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) {
-        if annot.annotation.is_final() {
+        // Skip when `AnnAssignHasValue::No`: that assignment is the initialization, not a
+        // reassignment.  The "must be initialized" error is handled in `Binding::AnnotatedType`.
+        if annot.annotation.is_final()
+            && !matches!(
+                annot.target,
+                AnnotationTarget::Assign(_, AnnAssignHasValue::No)
+            )
+        {
             self.error(
                 errors,
                 range,
@@ -4711,11 +4718,33 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.heap.mk_class_def(cls.dupe())
                 }
             },
-            Binding::AnnotatedType(ann, val) => match self.get_idx(*ann).ty(self.heap, self.stdlib)
-            {
-                Some(ty) => self.wrap_callable_legacy_typevars(ty),
-                None => self.binding_to_type(val, errors),
-            },
+            Binding::AnnotatedType(ann, val) => {
+                let annot = self.get_idx(*ann);
+                // `Binding::AnnotatedType` is the active binding for annotation-only declarations
+                // (`x: Final[int]`).  Fire the "must be initialized" error unless the name is
+                // subsequently initialized via a non-annotated assignment (tuple unpacking, walrus,
+                // `with … as`), which is tracked in `subsequently_initialized` at bind time.
+                if annot.annotation.is_final()
+                    && annot.annotation.ty.is_some()
+                    && matches!(
+                        annot.target,
+                        AnnotationTarget::Assign(_, AnnAssignHasValue::No)
+                    )
+                    && !self.module().path().is_interface()
+                    && !self.bindings().subsequently_initialized(*ann)
+                {
+                    self.error(
+                        errors,
+                        self.bindings().idx_to_key(*ann).range(),
+                        ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                        "Final name must be initialized with a value".to_owned(),
+                    );
+                }
+                match annot.ty(self.heap, self.stdlib) {
+                    Some(ty) => self.wrap_callable_legacy_typevars(ty),
+                    None => self.binding_to_type(val, errors),
+                }
+            }
             Binding::None => self.heap.mk_none(),
             Binding::Any(style) => self.heap.mk_any(*style),
             Binding::Global(global) => global.as_type(self.stdlib, self.heap),
