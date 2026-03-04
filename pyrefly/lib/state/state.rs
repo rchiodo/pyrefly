@@ -1051,90 +1051,84 @@ impl<'a> Transaction<'a> {
             // (thread-safe) and old_exports/old_answers/old_solutions are only
             // written during clean (which can't run concurrently in the same epoch).
             let post = guard.compute(todo, &ctx);
-            {
-                let mut load_result = None;
-                // Compute which exports changed for fine-grained invalidation.
-                // All diffing is done at the Solutions step, using old data
-                // saved during reset_for_rebuild().
-                let mut changed = ModuleChanges::default();
-                if todo == Step::Solutions {
-                    // Take old data saved during reset_for_rebuild (swap clears slot).
-                    let old_exports = post.take_old_exports();
-                    let old_answers = post.take_old_answers();
-                    let old_solutions = post.take_old_solutions();
+            let mut load_result = None;
+            // Compute which exports changed for fine-grained invalidation.
+            // All diffing is done at the Solutions step, using old data
+            // saved during reset_for_rebuild().
+            let mut changed = ModuleChanges::default();
+            if todo == Step::Solutions {
+                // Take old data saved during reset_for_rebuild (swap clears slot).
+                let old_exports = post.take_old_exports();
+                let old_answers = post.take_old_answers();
+                let old_solutions = post.take_old_solutions();
 
-                    // Exports diffing: compare old vs new exports.
-                    if let Some(old_exp) = old_exports {
-                        let new_exports = module_data
-                            .state
-                            .get_exports()
-                            .expect("exports must exist after computing Solutions");
-                        old_exp.changed_exports(&new_exports, ctx.lookup, &mut changed);
-                    }
-
-                    // Solutions diffing: compare old vs new solutions.
-                    let new_solutions = module_data
+                // Exports diffing: compare old vs new exports.
+                if let Some(old_exp) = old_exports {
+                    let new_exports = module_data
                         .state
-                        .get_solutions()
-                        .expect("solutions must exist after computing Solutions");
-                    if let Some(old_sol) = old_solutions {
-                        old_sol.changed_exports(&new_solutions, &mut changed);
-                    } else if let Some(old_ans) = old_answers {
-                        // Old solutions were None but old exports existed — module
-                        // was previously computed to Answers but not Solutions.
-                        // Diff new solutions against old answers.
-                        new_solutions.changed_exports_vs_answers(
-                            &old_ans.0,
-                            &old_ans.1,
-                            &mut changed,
-                        );
-                    }
+                        .get_exports()
+                        .expect("exports must exist after computing Solutions");
+                    old_exp.changed_exports(&new_exports, ctx.lookup, &mut changed);
                 }
-                if !changed.is_empty() {
-                    debug!(
-                        "Exports changed for `{}`: {:?}",
-                        module_data.handle.module(),
-                        changed
-                    );
-                }
-                if todo == Step::Answers && !require.keep_ast() {
-                    // We have captured the Ast, and must have already built Exports (we do it serially),
-                    // so won't need the Ast again.
-                    post.evict_ast();
-                } else if todo == Step::Solutions {
-                    if !require.keep_bindings() && !require.keep_answers() {
-                        // From now on we can use the answers directly, so evict the bindings/answers.
-                        post.evict_answers();
-                    }
-                    load_result = module_data.state.get_load();
-                }
-                if !changed.is_empty() {
-                    self.data
-                        .changed
-                        .lock()
-                        .push((module_data.dupe(), changed.clone()));
-                    let mut dirtied = Vec::new();
-                    // We clone so we drop the lock immediately
-                    let rdeps: Vec<Handle> = module_data.rdeps.lock().iter().cloned().collect();
-                    for rdep_handle in rdeps.iter() {
-                        let rdep_module = self.get_module(rdep_handle);
-                        let should_invalidate = rdep_module
-                            .get_depends_on(&module_data.handle)
-                            .is_none_or(|d| d.invalidated_by(&changed));
-                        if !should_invalidate {
-                            continue;
-                        }
-                        self.try_mark_module_dirty(&rdep_module, &mut dirtied);
-                    }
 
-                    self.stats.lock().dirty_rdeps += dirtied.len();
-                    self.data.dirty.lock().extend(dirtied);
+                // Solutions diffing: compare old vs new solutions.
+                let new_solutions = module_data
+                    .state
+                    .get_solutions()
+                    .expect("solutions must exist after computing Solutions");
+                if let Some(old_sol) = old_solutions {
+                    old_sol.changed_exports(&new_solutions, &mut changed);
+                } else if let Some(old_ans) = old_answers {
+                    // Old solutions were None but old exports existed — module
+                    // was previously computed to Answers but not Solutions.
+                    // Diff new solutions against old answers.
+                    new_solutions.changed_exports_vs_answers(&old_ans.0, &old_ans.1, &mut changed);
                 }
-                if let Some(load) = load_result
-                    && let Some(subscriber) = &self.data.subscriber
-                {
-                    subscriber.finish_work(self, &module_data.handle, &load, !changed.is_empty());
+            }
+            if !changed.is_empty() {
+                debug!(
+                    "Exports changed for `{}`: {:?}",
+                    module_data.handle.module(),
+                    changed
+                );
+            }
+            if todo == Step::Answers && !require.keep_ast() {
+                // We have captured the Ast, and must have already built Exports (we do it serially),
+                // so won't need the Ast again.
+                post.evict_ast();
+            } else if todo == Step::Solutions {
+                if !require.keep_bindings() && !require.keep_answers() {
+                    // From now on we can use the answers directly, so evict the bindings/answers.
+                    post.evict_answers();
                 }
+                load_result = module_data.state.get_load();
+            }
+            if !changed.is_empty() {
+                self.data
+                    .changed
+                    .lock()
+                    .push((module_data.dupe(), changed.clone()));
+                let mut dirtied = Vec::new();
+                // We clone so we drop the lock immediately
+                let rdeps: Vec<Handle> = module_data.rdeps.lock().iter().cloned().collect();
+                for rdep_handle in rdeps.iter() {
+                    let rdep_module = self.get_module(rdep_handle);
+                    let should_invalidate = rdep_module
+                        .get_depends_on(&module_data.handle)
+                        .is_none_or(|d| d.invalidated_by(&changed));
+                    if !should_invalidate {
+                        continue;
+                    }
+                    self.try_mark_module_dirty(&rdep_module, &mut dirtied);
+                }
+
+                self.stats.lock().dirty_rdeps += dirtied.len();
+                self.data.dirty.lock().extend(dirtied);
+            }
+            if let Some(load) = load_result
+                && let Some(subscriber) = &self.data.subscriber
+            {
+                subscriber.finish_work(self, &module_data.handle, &load, !changed.is_empty());
             }
             if todo == step {
                 break; // Fast path - avoid asking again since we just did it.
