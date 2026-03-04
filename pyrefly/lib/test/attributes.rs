@@ -2331,3 +2331,15 @@ class Derived(Base):
 Derived.from_pretrained("model")
 "#,
 );
+
+testcase!(
+    test_classmethod_vararg_does_not_bind_self,
+    r#"
+class C:
+    @classmethod
+    def create(*args, **kwargs): ...
+
+C.create(42)
+C.create(a=42)
+"#,
+);
