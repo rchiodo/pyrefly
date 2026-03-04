@@ -514,7 +514,7 @@ impl Keyed for KeyClassField {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.get(idx).range
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassField(self.clone()))
@@ -657,7 +657,7 @@ impl Keyed for KeyUndecoratedFunctionRange {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.get(idx).0.range()
     }
 }
 impl Keyed for KeyAnnotation {
