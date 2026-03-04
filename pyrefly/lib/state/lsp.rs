@@ -35,6 +35,7 @@ use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::Cancelled;
+use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Alias;
 use ruff_python_ast::AnyNodeRef;
@@ -588,6 +589,33 @@ impl<'a> Transaction<'a> {
         }
     }
 
+    pub(crate) fn submodule_autoimport_edit(
+        &self,
+        handle: &Handle,
+        ast: &ModModule,
+        module_name: ModuleName,
+        import_format: ImportFormat,
+    ) -> Option<(String, TextSize, String, String)> {
+        let (parent_module_str, submodule_name) = module_name.as_str().rsplit_once('.')?;
+        let parent_handle = self
+            .import_handle(handle, ModuleName::from_str(parent_module_str), None)
+            .finding()?;
+        let (position, insert_text, imported_module) = insert_import_edit(
+            ast,
+            self.config_finder(),
+            handle.dupe(),
+            parent_handle,
+            submodule_name,
+            import_format,
+        );
+        Some((
+            submodule_name.to_owned(),
+            position,
+            insert_text,
+            imported_module,
+        ))
+    }
+
     fn type_from_expression_at(&self, handle: &Handle, position: TextSize) -> Option<Type> {
         let module = self.get_ast(handle)?;
         let covering_nodes = Ast::locate_node(&module, position);
@@ -962,9 +990,11 @@ impl<'a> Transaction<'a> {
             return ty;
         }
         let original = ty.clone();
-        self.ad_hoc_solve(handle, |solver| Self::callable_from_type(&solver, ty))
-            .and_then(|callable| callable)
-            .unwrap_or(original)
+        self.ad_hoc_solve(handle, "coerce_callable", |solver| {
+            Self::callable_from_type(&solver, ty)
+        })
+        .and_then(|callable| callable)
+        .unwrap_or(original)
     }
 
     /// Extract a callable type from `ty` by invoking the solver to find its `__call__` method.
@@ -1366,7 +1396,7 @@ impl<'a> Transaction<'a> {
         base_type: Type,
         name: &Name,
     ) -> Vec<FindDefinitionItemWithDocstring> {
-        self.ad_hoc_solve(handle, |solver| {
+        self.ad_hoc_solve(handle, "attribute_definition", |solver| {
             let completions = |ty| solver.completions(ty, Some(name), false);
 
             match base_type {
@@ -1968,6 +1998,7 @@ impl<'a> Transaction<'a> {
         handle: &Handle,
         range: TextRange,
         import_format: ImportFormat,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Option<Vec<(String, Module, TextRange, String)>> {
         let module_info = self.get_module_info(handle)?;
         let ast = self.get_ast(handle)?;
@@ -1982,7 +2013,7 @@ impl<'a> Transaction<'a> {
                     if error_range.contains_range(range) {
                         let unknown_name = module_info.code_at(error_range);
                         for (handle_to_import_from, export) in
-                            self.search_exports_exact(unknown_name)
+                            self.search_exports_exact(unknown_name, custom_thread_pool)
                         {
                             self.create_quickfix_action_for_export(
                                 handle,
@@ -2003,12 +2034,30 @@ impl<'a> Transaction<'a> {
                             &mut import_actions,
                             unknown_name,
                         );
-
                         for module_name in self.search_modules_fuzzy(unknown_name) {
-                            if module_name == handle.module()
-                                || aliased_module.is_some_and(|m| m == module_name)
-                            {
+                            if module_name == handle.module() {
                                 continue;
+                            }
+                            if aliased_module.is_some_and(|m| m == module_name) {
+                                continue;
+                            }
+                            if let Some((_submodule_name, position, insert_text, _)) = self
+                                .submodule_autoimport_edit(handle, &ast, module_name, import_format)
+                            {
+                                let range = TextRange::at(position, TextSize::new(0));
+                                let title = format!("Insert import: `{}`", insert_text.trim());
+                                let is_private_import = module_name
+                                    .components()
+                                    .last()
+                                    .is_some_and(|component| component.as_str().starts_with('_'));
+                                import_actions.push(QuickfixAction {
+                                    title,
+                                    module_info: module_info.dupe(),
+                                    range,
+                                    insert_text,
+                                    is_deprecated: false,
+                                    is_private_import,
+                                });
                             }
                             self.create_quickfix_action_for_fuzzy_match(
                                 handle,
@@ -2466,7 +2515,12 @@ impl<'a> Transaction<'a> {
         Some(identifier_context?.identifier.range)
     }
 
-    pub fn find_local_references(&self, handle: &Handle, position: TextSize) -> Vec<TextRange> {
+    pub fn find_local_references(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+        include_declaration: bool,
+    ) -> Vec<TextRange> {
         self.find_definition(
             handle,
             position,
@@ -2484,7 +2538,13 @@ impl<'a> Transaction<'a> {
                  docstring_range: _,
                  ..
              }| {
-                self.local_references_from_definition(handle, metadata, definition_range, &module)
+                self.local_references_from_definition(
+                    handle,
+                    metadata,
+                    definition_range,
+                    &module,
+                    include_declaration,
+                )
             },
         )
         .concat()
@@ -2535,6 +2595,7 @@ impl<'a> Transaction<'a> {
         definition_metadata: DefinitionMetadata,
         definition_name: &Name,
         definition_range: TextRange,
+        include_declaration: bool,
     ) -> Option<Vec<TextRange>> {
         let mut references = match definition_metadata {
             DefinitionMetadata::Attribute => self.local_attribute_references_from_local_definition(
@@ -2567,7 +2628,9 @@ impl<'a> Transaction<'a> {
             ]
             .concat(),
         };
-        references.push(definition_range);
+        if include_declaration {
+            references.push(definition_range);
+        }
         Some(references)
     }
 
@@ -2577,6 +2640,7 @@ impl<'a> Transaction<'a> {
         definition_metadata: DefinitionMetadata,
         definition_range: TextRange,
         module: &Module,
+        include_declaration: bool,
     ) -> Option<Vec<TextRange>> {
         let mut references = if handle.path() != module.path() {
             self.local_references_from_external_definition(handle, definition_range, module)?
@@ -2587,6 +2651,7 @@ impl<'a> Transaction<'a> {
                 definition_metadata,
                 &definition_name,
                 definition_range,
+                include_declaration,
             )?
         };
         references.sort_by_key(|range| range.start());
@@ -2619,7 +2684,7 @@ impl<'a> Transaction<'a> {
         };
         // For each attribute we found above, we will test whether it actually will jump to the
         // given `definition`.
-        self.ad_hoc_solve(handle, |solver| {
+        self.ad_hoc_solve(handle, "attribute_references", |solver| {
             let mut references = Vec::new();
             for attribute in relevant_attributes {
                 if let Some(answers) = self.get_answers(handle)
@@ -2829,6 +2894,7 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         import_format: ImportFormat,
         supports_completion_item_details: bool,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Vec<CompletionItem> {
         self.completion_with_incomplete(
             handle,
@@ -2838,6 +2904,7 @@ impl<'a> Transaction<'a> {
                 supports_completion_item_details,
                 ..Default::default()
             },
+            custom_thread_pool,
         )
         .0
     }
@@ -2849,6 +2916,7 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         import_format: ImportFormat,
         options: CompletionOptions,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool) {
         self.completion_with_incomplete_impl(
             handle,
@@ -2856,6 +2924,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             None::<fn(&CompletionItem) -> Option<usize>>,
+            custom_thread_pool,
         )
     }
 
@@ -2866,6 +2935,7 @@ impl<'a> Transaction<'a> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mru_index: F,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -2876,6 +2946,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             Some(mru_index),
+            custom_thread_pool,
         )
     }
 
@@ -2886,6 +2957,7 @@ impl<'a> Transaction<'a> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mru_index: Option<F>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -2904,6 +2976,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             mru_index,
+            custom_thread_pool,
         );
         results.sort_by(|item1, item2| {
             item1
@@ -2992,59 +3065,73 @@ impl<'a> Transaction<'a> {
         false
     }
 
-    pub fn search_exports_exact(&self, name: &str) -> Vec<(Handle, Export)> {
-        self.search_exports(|handle, exports_data, exports| {
-            let name = Name::new(name);
-            match exports.get(&name) {
-                Some(location) => {
-                    if let Some((canonical_handle, export)) =
-                        self.export_from_location(handle, &name, location)
-                    {
-                        let mut results = vec![(canonical_handle.dupe(), export.clone())];
-                        if canonical_handle != *handle
-                            && (Self::should_include_reexport(handle, &canonical_handle)
-                                || (exports_data.is_explicit_reexport(&name)
-                                    && Self::allows_explicit_reexport(handle)))
+    pub fn search_exports_exact(
+        &self,
+        name: &str,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Vec<(Handle, Export)> {
+        self.search_exports(
+            |handle, exports_data, exports| {
+                let name = Name::new(name);
+                match exports.get(&name) {
+                    Some(location) => {
+                        if let Some((canonical_handle, export)) =
+                            self.export_from_location(handle, &name, location)
                         {
-                            results.push((handle.dupe(), export));
+                            let mut results = vec![(canonical_handle.dupe(), export.clone())];
+                            if canonical_handle != *handle
+                                && (Self::should_include_reexport(handle, &canonical_handle)
+                                    || (exports_data.is_explicit_reexport(&name)
+                                        && Self::allows_explicit_reexport(handle)))
+                            {
+                                results.push((handle.dupe(), export));
+                            }
+                            results
+                        } else {
+                            Vec::new()
                         }
-                        results
-                    } else {
-                        Vec::new()
                     }
+                    None => Vec::new(),
                 }
-                None => Vec::new(),
-            }
-        })
+            },
+            custom_thread_pool,
+        )
     }
 
-    pub fn search_exports_fuzzy(&self, pattern: &str) -> Vec<(Handle, String, Export)> {
-        let mut res = self.search_exports(|handle, exports_data, exports| {
-            let matcher = SkimMatcherV2::default().smart_case();
-            let mut results = Vec::new();
-            for (name, location) in exports.iter() {
-                let name_str = name.as_str();
-                if let Some(score) = matcher.fuzzy_match(name_str, pattern)
-                    && let Some((canonical_handle, export)) =
-                        self.export_from_location(handle, name, location)
-                {
-                    results.push((
-                        score,
-                        canonical_handle.dupe(),
-                        name_str.to_owned(),
-                        export.clone(),
-                    ));
-                    if canonical_handle != *handle
-                        && (Self::should_include_reexport(handle, &canonical_handle)
-                            || (exports_data.is_explicit_reexport(name)
-                                && Self::allows_explicit_reexport(handle)))
+    pub fn search_exports_fuzzy(
+        &self,
+        pattern: &str,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Vec<(Handle, String, Export)> {
+        let mut res = self.search_exports(
+            |handle, exports_data, exports| {
+                let matcher = SkimMatcherV2::default().smart_case();
+                let mut results = Vec::new();
+                for (name, location) in exports.iter() {
+                    let name_str = name.as_str();
+                    if let Some(score) = matcher.fuzzy_match(name_str, pattern)
+                        && let Some((canonical_handle, export)) =
+                            self.export_from_location(handle, name, location)
                     {
-                        results.push((score, handle.dupe(), name_str.to_owned(), export));
+                        results.push((
+                            score,
+                            canonical_handle.dupe(),
+                            name_str.to_owned(),
+                            export.clone(),
+                        ));
+                        if canonical_handle != *handle
+                            && (Self::should_include_reexport(handle, &canonical_handle)
+                                || (exports_data.is_explicit_reexport(name)
+                                    && Self::allows_explicit_reexport(handle)))
+                        {
+                            results.push((score, handle.dupe(), name_str.to_owned(), export));
+                        }
                     }
                 }
-            }
-            results
-        });
+                results
+            },
+            custom_thread_pool,
+        );
         res.sort_by_key(|(score, _, _, _)| Reverse(*score));
         res.into_map(|(_, handle, name, export)| (handle, name, export))
     }
@@ -3119,7 +3206,7 @@ impl<'a> CancellableTransaction<'a> {
                 let rdeps = self.as_ref().get_transitive_rdeps(definition_handle.dupe());
                 // We still need to know everything about the definition file, because the index
                 // only contains non-local references.
-                self.run(&[definition_handle], Require::Everything)?;
+                self.run(&[definition_handle], Require::Everything, None)?;
                 rdeps
             }
         };
@@ -3226,6 +3313,7 @@ impl<'a> CancellableTransaction<'a> {
         sys_info: &SysInfo,
         definition_kind: DefinitionMetadata,
         definition: TextRangeWithModule,
+        include_declaration: bool,
     ) -> Result<Vec<(Module, Vec<TextRange>)>, Cancelled> {
         let results = self.process_rdeps_with_definition(
             sys_info,
@@ -3241,6 +3329,7 @@ impl<'a> CancellableTransaction<'a> {
                         definition_kind.clone(),
                         patched_definition.range,
                         &patched_definition.module,
+                        include_declaration,
                     )
                     .unwrap_or_default();
                 if !references.is_empty()

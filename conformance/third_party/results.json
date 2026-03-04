@@ -1,9 +1,9 @@
 {
   "total": 138,
-  "pass": 121,
-  "fail": 17,
+  "pass": 122,
+  "fail": 16,
   "pass_rate": 0.88,
-  "differences": 52,
+  "differences": 43,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -12,7 +12,6 @@
     "aliases_typealiastype.py",
     "aliases_variance.py",
     "annotations_coroutines.py",
-    "annotations_generators.py",
     "annotations_methods.py",
     "annotations_typeexpr.py",
     "callables_kwargs.py",
@@ -74,6 +73,7 @@
     "generics_typevartuple_callable.py",
     "generics_typevartuple_concat.py",
     "generics_typevartuple_overloads.py",
+    "generics_typevartuple_specialization.py",
     "generics_typevartuple_unpack.py",
     "generics_upper_bound.py",
     "generics_variance.py",
@@ -103,6 +103,7 @@
     "protocols_self.py",
     "protocols_subtyping.py",
     "protocols_variance.py",
+    "qualifiers_annotated.py",
     "qualifiers_final_decorator.py",
     "specialtypes_any.py",
     "specialtypes_never.py",
@@ -130,6 +131,7 @@
   "failing": {
     "aliases_implicit.py": 5,
     "annotations_forward_refs.py": 2,
+    "annotations_generators.py": 3,
     "callables_annotation.py": 2,
     "constructors_callable.py": 4,
     "dataclasses_descriptors.py": 6,
@@ -141,10 +143,8 @@
     "generics_self_basic.py": 2,
     "generics_self_usage.py": 2,
     "generics_typevartuple_basic.py": 1,
-    "generics_typevartuple_specialization.py": 4,
     "protocols_modules.py": 1,
-    "qualifiers_annotated.py": 6,
-    "qualifiers_final_annotation.py": 5
+    "qualifiers_final_annotation.py": 3
   },
   "comment": "@generated"
 }

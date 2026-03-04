@@ -256,6 +256,8 @@ pub enum ErrorKind {
     UnexpectedKeyword,
     /// An error caused by passing a positional argument for a keyword-only parameter.
     UnexpectedPositionalArgument,
+    /// Attempting to use a type checker directive without importing it from `typing`.
+    UnimportedDirective,
     /// Attempting to use a name that is not defined.
     UnknownName,
     /// Identity comparison (`is` or `is not`) between types that are provably disjoint
@@ -265,6 +267,8 @@ pub enum ErrorKind {
     /// This occurs when a return/yield follows a statement that always exits,
     /// such as return, raise, break, or continue.
     Unreachable,
+    /// `__all__` is defined but cannot be statically analyzed.
+    UnresolvableDunderAll,
     /// Protocols decorated with `@runtime_checkable` can be used in `isinstance` checks
     /// The runtime only checks that an attribute with that name is present, so the
     /// type checker must warn if the types are not compatible.
@@ -339,6 +343,7 @@ impl ErrorKind {
             ErrorKind::OpenUnpacking => Severity::Ignore,
             ErrorKind::NonExhaustiveMatch => Severity::Warn,
             ErrorKind::UnusedIgnore => Severity::Ignore,
+            ErrorKind::UnresolvableDunderAll => Severity::Warn,
             ErrorKind::VarianceMismatch => Severity::Warn,
             _ => Severity::Error,
         }

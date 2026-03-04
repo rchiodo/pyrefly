@@ -720,6 +720,7 @@ impl FlowStyle {
 pub struct ClassIndices {
     pub def_index: ClassDefIndex,
     pub class_idx: Idx<KeyClass>,
+    pub class_object_idx: Idx<Key>,
     pub base_type_idx: Idx<KeyClassBaseType>,
     pub metadata_idx: Idx<KeyClassMetadata>,
     pub mro_idx: Idx<KeyClassMro>,
@@ -1123,6 +1124,13 @@ impl Scope {
             _ => None,
         }
     }
+
+    fn class_object_idx(&self) -> Option<Idx<Key>> {
+        match &self.kind {
+            ScopeKind::Class(class_scope) => Some(class_scope.indices.class_object_idx),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1221,6 +1229,10 @@ impl Scopes {
             .any(|scope| matches!(scope.kind, ScopeKind::Function(_) | ScopeKind::Method(_)))
     }
 
+    pub fn current_static_contains(&self, name: &Name) -> bool {
+        self.current().stat.0.contains_key(name)
+    }
+
     /// Enter a with block.
     pub fn enter_with(&mut self) {
         self.current_mut().with_depth += 1;
@@ -1274,6 +1286,17 @@ impl Scopes {
         for scope in self.iter_rev() {
             if let Some(class_and_metadata) = scope.class_and_metadata_keys() {
                 return Some(class_and_metadata);
+            }
+        }
+        None
+    }
+
+    /// Are we anywhere inside a class? If so, return the class object idx.
+    /// This function looks at enclosing scopes.
+    pub fn enclosing_class_object_idx(&self) -> Option<Idx<Key>> {
+        for scope in self.iter_rev() {
+            if let Some(class_object_idx) = scope.class_object_idx() {
+                return Some(class_object_idx);
             }
         }
         None
@@ -1745,6 +1768,22 @@ impl Scopes {
         None
     }
 
+    /// Check if `name` was imported from a module with the given name.
+    /// Traverses all enclosing scopes to find the import.
+    pub fn is_imported_from_module(&self, name: &Name, module_name: &str) -> bool {
+        if let Some(flow_info) = self.get_flow_info(name)
+            && let Some(value) = flow_info.value()
+        {
+            return match &value.style {
+                FlowStyle::Import(m, _)
+                | FlowStyle::ImportAs(m)
+                | FlowStyle::MergeableImport(m) => m.as_str() == module_name,
+                _ => false,
+            };
+        }
+        false
+    }
+
     /// Get the flow style for `name` in the current scope.
     ///
     /// Returns `None` if there is no current flow (which may mean the
@@ -1956,6 +1995,18 @@ impl Scopes {
         )
     }
 
+    /// Add a name to the current static scope.
+    ///
+    /// Callers must always define the name via a `Key::Definition` immediately
+    /// afterward or downstream lookups may panic.
+    pub fn add_name_to_current_static(&mut self, name: &Identifier) {
+        self.current_mut().stat.upsert(
+            Hashed::new(name.id.clone()),
+            name.range,
+            StaticStyle::SingleDef(None),
+        );
+    }
+
     /// Add an adhoc name - if it does not already exist - to the current static
     /// scope. If the name already exists, nothing happens.
     ///
@@ -2145,6 +2196,25 @@ impl Scopes {
             }
         };
         self.pop(); // Also pop the annotation scope that wrapped the class body.
+
+        // Collect method-defined attributes up front so we can compute which class-body fields
+        // are initialized in a recognized instance method (e.g. `__init__`) before building
+        // field definitions — a Final field is legally uninitialized in the class body if it
+        // appears in such a method.
+        let method_attrs: Vec<_> = class_scope.method_defined_attributes().collect();
+        let recognized_instance_attrs: SmallSet<Name> = method_attrs
+            .iter()
+            .filter_map(|(name, method, _)| {
+                if method.recognized_attribute_defining_method
+                    && matches!(method.instance_or_class, MethodSelfKind::Instance)
+                {
+                    Some(name.key().clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         class_body.stat.0.iter_hashed().for_each(
             |(name, static_info)| {
             if matches!(static_info.style, StaticStyle::MutableCapture(..)) {
@@ -2190,6 +2260,8 @@ impl Scopes {
                         annotation: static_info.annotation().unwrap_or_else(
                             || panic!("A class field known in the body but uninitialized always has an annotation.")
                         ),
+                        initialized_in_recognized_method: recognized_instance_attrs
+                            .contains(name.key().as_str()),
                     },
                     _ => ClassFieldDefinition::DefinedWithoutAssign {
                         definition: value.idx,
@@ -2198,7 +2270,7 @@ impl Scopes {
                 field_definitions.insert_hashed(name.owned(), (definition, static_info.range));
             }
         });
-        class_scope.method_defined_attributes().for_each(
+        method_attrs.into_iter().for_each(
             |(name, method, InstanceAttribute(value, annotation, range, _))| {
                 if !field_definitions.contains_key_hashed(name.as_ref()) {
                     field_definitions.insert_hashed(

@@ -378,7 +378,7 @@ impl<'a> BindingsBuilder<'a> {
                 if is_special_name(name.id.as_str()) {
                     self.error(
                         name.range,
-                        ErrorInfo::Kind(ErrorKind::UnknownName),
+                        ErrorInfo::Kind(ErrorKind::UnimportedDirective),
                         format!(
                             "`{}` must be imported from `typing` for runtime usage",
                             name
@@ -454,6 +454,20 @@ impl<'a> BindingsBuilder<'a> {
     }
 
     pub fn bind_lambda(&mut self, lambda: &mut ExprLambda, usage: &mut Usage) {
+        // Process default values in the enclosing scope before pushing the lambda scope,
+        // because default values are evaluated at function definition time.
+        if let Some(parameters) = &mut lambda.parameters {
+            for x in parameters
+                .posonlyargs
+                .iter_mut()
+                .chain(parameters.args.iter_mut())
+                .chain(parameters.kwonlyargs.iter_mut())
+            {
+                if let Some(default) = x.default.as_deref_mut() {
+                    self.ensure_expr(default, usage);
+                }
+            }
+        }
         self.scopes.push(Scope::lambda(lambda.range, false));
         if let Some(parameters) = &lambda.parameters {
             for x in parameters {
@@ -941,6 +955,18 @@ impl<'a> BindingsBuilder<'a> {
                 for e in tup.elts[1..].iter_mut() {
                     self.ensure_expr(e, &mut Usage::StaticTypeInformation);
                 }
+            }
+            // Jaxtyping annotations: Float[Tensor, "batch channels"].
+            // The second argument is a shape string, not a forward reference.
+            Expr::Subscript(ExprSubscript { value, slice, .. })
+                if self.tensor_shapes()
+                    && matches!(&**value, Expr::Name(n) if self.scopes.is_imported_from_module(&n.id, "jaxtyping"))
+                    && matches!(&**slice, Expr::Tuple(tup) if tup.elts.len() == 2) =>
+            {
+                self.ensure_type_impl(&mut *value, tparams_builder, in_string_literal, usage);
+                let tup = slice.as_tuple_expr_mut().unwrap();
+                self.ensure_type_impl(&mut tup.elts[0], tparams_builder, in_string_literal, usage);
+                self.ensure_expr(&mut tup.elts[1], &mut Usage::StaticTypeInformation);
             }
             Expr::Subscript(ExprSubscript { value, slice, .. }) => {
                 self.ensure_type_impl(&mut *value, tparams_builder, in_string_literal, usage);

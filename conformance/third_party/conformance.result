@@ -18,7 +18,11 @@
     "Line 87: Unexpected errors ['Expected a type form, got instance of `(self: Self@ClassD) -> None`']",
     "Line 96: Unexpected errors ['assert_type(Any, int) failed']"
   ],
-  "annotations_generators.py": [],
+  "annotations_generators.py": [
+    "Line 140: Unexpected errors ['This `yield` expression is unreachable']",
+    "Line 145: Unexpected errors ['This `yield` expression is unreachable']",
+    "Line 190: Unexpected errors ['This `yield` expression is unreachable']"
+  ],
   "annotations_methods.py": [],
   "annotations_typeexpr.py": [],
   "callables_annotation.py": [
@@ -131,12 +135,7 @@
   "generics_typevartuple_callable.py": [],
   "generics_typevartuple_concat.py": [],
   "generics_typevartuple_overloads.py": [],
-  "generics_typevartuple_specialization.py": [
-    "Line 51: Unexpected errors ['assert_type(tuple[int, *tuple[Any, ...]], tuple[int]) failed']",
-    "Line 94: Unexpected errors ['assert_type(tuple[float, *tuple[Any, ...]], tuple[float]) failed']",
-    "Line 153: Unexpected errors ['Unpacked argument cannot be used for type parameter T1']",
-    "Line 157: Unexpected errors ['assert_type(tuple[Any], tuple[*tuple[int, ...], int]) failed']"
-  ],
+  "generics_typevartuple_specialization.py": [],
   "generics_typevartuple_unpack.py": [],
   "generics_upper_bound.py": [],
   "generics_variance.py": [],
@@ -169,17 +168,8 @@
   "protocols_self.py": [],
   "protocols_subtyping.py": [],
   "protocols_variance.py": [],
-  "qualifiers_annotated.py": [
-    "Line 71: Expected 1 errors",
-    "Line 72: Expected 1 errors",
-    "Line 79: Expected 1 errors",
-    "Line 80: Expected 1 errors",
-    "Line 87: Expected 1 errors",
-    "Line 88: Expected 1 errors"
-  ],
+  "qualifiers_annotated.py": [],
   "qualifiers_final_annotation.py": [
-    "Line 34: Expected 1 errors",
-    "Line 38: Expected 1 errors",
     "Line 107: Expected 1 errors",
     "Line 131: Unexpected errors ['Expected first item to be a string literal', 'Expected first item to be a string literal']",
     "Line 133: Unexpected errors ['Unexpected keyword argument `x` in function `N.__new__`', 'Unexpected keyword argument `y` in function `N.__new__`']"

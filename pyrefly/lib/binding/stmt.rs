@@ -420,6 +420,7 @@ impl<'a> BindingsBuilder<'a> {
         let key_type_alias = KeyTypeAlias(self.type_alias_index());
         let binding_type_alias = BindingTypeAlias::TypeAliasType {
             name: name.id.clone(),
+            range: name.range,
             annotation: ann,
             expr: value.map(Box::new),
         };
@@ -851,6 +852,7 @@ impl<'a> BindingsBuilder<'a> {
                     let key_type_alias = KeyTypeAlias(self.type_alias_index());
                     let binding_type_alias = BindingTypeAlias::Scoped {
                         name: name.id.clone(),
+                        range: name.range,
                         expr: x.value,
                     };
                     let idx_type_alias = self.insert_binding(key_type_alias, binding_type_alias);

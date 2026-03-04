@@ -24,6 +24,7 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::display::LspDisplayMode;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::types::Union;
+use pyrefly_util::thread_pool::ThreadPool;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ExprContext;
 use ruff_python_ast::Identifier;
@@ -508,7 +509,7 @@ impl Transaction<'_> {
         let Some(actual_type) = actual_type else {
             return false;
         };
-        self.ad_hoc_solve(handle, |solver| {
+        self.ad_hoc_solve(handle, "completion_type_compat", |solver| {
             solver.is_subset_eq(actual_type, expected_type)
         })
         .map(|compatible| !compatible)
@@ -563,7 +564,7 @@ impl Transaction<'_> {
 
                 let is_deprecated = ty.as_ref().is_some_and(|t| {
                     if let Type::ClassDef(cls) = t {
-                        self.ad_hoc_solve(handle, |solver| {
+                        self.ad_hoc_solve(handle, "completion_deprecation", |solver| {
                             solver.get_metadata_for_class(cls).deprecation().is_some()
                         })
                         .unwrap_or(false)
@@ -641,6 +642,7 @@ impl Transaction<'_> {
         completions: &mut Vec<RankedCompletion>,
         import_format: ImportFormat,
         supports_completion_item_details: bool,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
         // Auto-import can be slow. Let's only return results if there are no local
         // results for now. TODO: re-enable it once we no longer have perf issues.
@@ -665,7 +667,8 @@ impl Transaction<'_> {
             if identifier_text.len() < MIN_CHARACTERS_TYPED_AUTOIMPORT {
                 return;
             }
-            for (handle_to_import_from, name, export) in self.search_exports_fuzzy(identifier_text)
+            for (handle_to_import_from, name, export) in
+                self.search_exports_fuzzy(identifier_text, custom_thread_pool)
             {
                 // Using handle itself doesn't always work because handles can be made separately and have different hashes
                 if handle_to_import_from.module() == handle.module()
@@ -728,6 +731,33 @@ impl Transaction<'_> {
                 }
                 let module_name_str = module_name.as_str().to_owned();
                 let source = autoimport_source(&module_name_str);
+                if let Some((submodule_name, position, insert_text, imported_module)) =
+                    self.submodule_autoimport_edit(handle, &ast, module_name, import_format)
+                {
+                    let import_text_edit = TextEdit {
+                        range: module_info.to_lsp_range(TextRange::at(position, TextSize::new(0))),
+                        new_text: insert_text.clone(),
+                    };
+                    let additional_text_edits = Some(vec![import_text_edit]);
+                    let auto_import_label_detail = format!(" (import {imported_module})");
+                    completions.push(RankedCompletion {
+                        item: CompletionItem {
+                            label: submodule_name,
+                            detail: Some(insert_text),
+                            kind: Some(CompletionItemKind::MODULE),
+                            additional_text_edits,
+                            label_details: supports_completion_item_details.then_some(
+                                CompletionItemLabelDetails {
+                                    detail: Some(auto_import_label_detail),
+                                    description: Some(module_name_str.clone()),
+                                },
+                            ),
+                            ..Default::default()
+                        },
+                        source,
+                        is_incompatible: false,
+                    });
+                }
                 if let Some(module_handle) = self.import_handle(handle, module_name, None).finding()
                 {
                     let (import_text, additional_text_edits) = {
@@ -813,6 +843,7 @@ impl Transaction<'_> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mut mru_index: Option<F>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -888,7 +919,7 @@ impl Transaction<'_> {
                 if let Some(answers) = self.get_answers(handle)
                     && let Some(base_type) = answers.get_type_trace(base_range)
                 {
-                    self.ad_hoc_solve(handle, |solver| {
+                    self.ad_hoc_solve(handle, "completion_attributes", |solver| {
                         solver
                             .completions(base_type, None, true)
                             .iter()
@@ -973,6 +1004,7 @@ impl Transaction<'_> {
                         &mut result,
                         import_format,
                         supports_completion_item_details,
+                        custom_thread_pool,
                     );
                 }
                 // Mark results as incomplete in the following cases so clients keep asking
@@ -1015,13 +1047,20 @@ impl Transaction<'_> {
                         &mut result,
                         in_string_literal,
                     );
-                    self.add_literal_completions(handle, position, &mut result, in_string_literal);
-                    self.add_dict_key_completions(
+                    let dict_key_claimed = self.add_dict_key_completions(
                         handle,
                         mod_module.as_ref(),
                         position,
                         &mut result,
                     );
+                    if !dict_key_claimed {
+                        self.add_literal_completions(
+                            handle,
+                            position,
+                            &mut result,
+                            in_string_literal,
+                        );
+                    }
                     // in foo(x=<>, y=2<>), the first containing node is AnyNodeRef::Arguments(_)
                     // in foo(<>), the first containing node is AnyNodeRef::ExprCall
                     if let Some(first) = nodes.first()

@@ -108,10 +108,8 @@ pub struct ConfigBase {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infer_with_first_use: Option<bool>,
 
-    /// Whether to enable tensor shape type inference.
-    /// When enabled, integer literals can be used as type arguments (e.g., Tensor[2, 3]),
-    /// and type variables can participate in dimension arithmetic.
-    /// By default this is disabled.
+    /// (Experimental) Enable tensor shape type inference.
+    /// Supports both native (Tensor[N, M]) and jaxtyping (Float[Tensor, "batch channels"]) syntax.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tensor_shapes: Option<bool>,
 

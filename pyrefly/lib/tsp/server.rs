@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use lsp_server::RequestId;
 use lsp_types::InitializeParams;
+use pyrefly_util::telemetry::QueueName;
 use pyrefly_util::telemetry::Telemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
 use pyrefly_util::telemetry::TelemetryEventKind;
@@ -21,6 +22,8 @@ use crate::commands::lsp::IndexingMode;
 use crate::lsp::non_wasm::protocol::Request;
 use crate::lsp::non_wasm::protocol::Response;
 use crate::lsp::non_wasm::queue::LspEvent;
+use crate::lsp::non_wasm::server::InitializeInfo;
+use crate::lsp::non_wasm::server::MessageReader;
 use crate::lsp::non_wasm::server::ProcessEvent;
 use crate::lsp::non_wasm::server::ServerCapabilitiesWithTypeHierarchy;
 use crate::lsp::non_wasm::server::TspInterface;
@@ -46,7 +49,7 @@ impl<T: TspInterface> TspServer<T> {
         &'a self,
         ide_transaction_manager: &mut TransactionManager<'a>,
         canceled_requests: &mut HashSet<RequestId>,
-        telemetry: &impl Telemetry,
+        telemetry: &'a impl Telemetry,
         telemetry_event: &mut TelemetryEvent,
         subsequent_mutation: bool,
         event: LspEvent,
@@ -141,7 +144,8 @@ impl<T: TspInterface> TspServer<T> {
 
 pub fn tsp_loop(
     lsp_server: impl TspInterface,
-    _initialization_params: InitializeParams,
+    mut reader: MessageReader,
+    _initialization: InitializeInfo,
     telemetry: &impl Telemetry,
 ) -> anyhow::Result<()> {
     eprintln!("Reading TSP messages");
@@ -152,7 +156,7 @@ pub fn tsp_loop(
         scope.spawn(|| server.inner.run_recheck_queue(telemetry));
 
         scope.spawn(|| {
-            server.inner.dispatch_lsp_events();
+            server.inner.dispatch_lsp_events(&mut reader);
         });
 
         let mut ide_transaction_manager = TransactionManager::default();
@@ -163,6 +167,7 @@ pub fn tsp_loop(
                 TelemetryEventKind::LspEvent(event.describe()),
                 enqueued_at,
                 server.inner.telemetry_state(),
+                QueueName::LspQueue,
             );
             let event_description = event.describe();
 

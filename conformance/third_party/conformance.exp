@@ -1715,8 +1715,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from `Generator[A, None, None]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
-      "description": "Cannot yield from `Generator[A, None, None]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
+      "concise_description": "Cannot yield from `Generator[A]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
+      "description": "Cannot yield from `Generator[A]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
       "line": 118,
       "name": "invalid-yield",
       "severity": "error",
@@ -1726,8 +1726,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from `Generator[int, None, None]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
-      "description": "Cannot yield from `Generator[int, None, None]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
+      "concise_description": "Cannot yield from `Generator[int]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
+      "description": "Cannot yield from `Generator[int]`, which is not assignable to declared return type `Generator[B, None, Unknown]`",
       "line": 119,
       "name": "invalid-yield",
       "severity": "error",
@@ -1737,13 +1737,46 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "Cannot yield from `Generator[None, int, None]`, which is not assignable to declared return type `Generator[None, str, Unknown]`",
-      "description": "Cannot yield from `Generator[None, int, None]`, which is not assignable to declared return type `Generator[None, str, Unknown]`",
+      "concise_description": "Cannot yield from `Generator[None, int]`, which is not assignable to declared return type `Generator[None, str, Unknown]`",
+      "description": "Cannot yield from `Generator[None, int]`, which is not assignable to declared return type `Generator[None, str, Unknown]`",
       "line": 135,
       "name": "invalid-yield",
       "severity": "error",
       "stop_column": 29,
       "stop_line": 135
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "This `yield` expression is unreachable",
+      "description": "This `yield` expression is unreachable",
+      "line": 140,
+      "name": "unreachable",
+      "severity": "error",
+      "stop_column": 13,
+      "stop_line": 140
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "This `yield` expression is unreachable",
+      "description": "This `yield` expression is unreachable",
+      "line": 145,
+      "name": "unreachable",
+      "severity": "error",
+      "stop_column": 13,
+      "stop_line": 145
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "This `yield` expression is unreachable",
+      "description": "This `yield` expression is unreachable",
+      "line": 190,
+      "name": "unreachable",
+      "severity": "error",
+      "stop_column": 10,
+      "stop_line": 190
     }
   ],
   "annotations_methods.py": [
@@ -3666,8 +3699,8 @@
     {
       "code": -2,
       "column": 12,
-      "concise_description": "revealed type: (x: list[@_], y: list[@_]) -> Class9",
-      "description": "revealed type: (x: list[@_], y: list[@_]) -> Class9",
+      "concise_description": "revealed type: (x: list[Unknown], y: list[Unknown]) -> Class9",
+      "description": "revealed type: (x: list[Unknown], y: list[Unknown]) -> Class9",
       "line": 195,
       "name": "reveal-type",
       "severity": "info",
@@ -4944,30 +4977,7 @@
       "stop_line": 14
     }
   ],
-  "directives_version_platform.py": [
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "`Literal['']` is not assignable to `int`",
-      "description": "`Literal['']` is not assignable to `int`",
-      "line": 40,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 19,
-      "stop_line": 40
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "`Literal['']` is not assignable to `int`",
-      "description": "`Literal['']` is not assignable to `int`",
-      "line": 45,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 19,
-      "stop_line": 45
-    }
-  ],
+  "directives_version_platform.py": [],
   "enums_behaviors.py": [
     {
       "code": -2,
@@ -7059,10 +7069,10 @@
     {
       "code": -2,
       "column": 6,
-      "concise_description": "Unpacked argument `tuple[Literal[1]]` is not assignable to parameter `*args` with type `tuple[int, str]` in function `func3`",
-      "description": "Unpacked argument `tuple[Literal[1]]` is not assignable to parameter `*args` with type `tuple[int, str]` in function `func3`",
+      "concise_description": "Expected 1 more positional argument in function `func3`",
+      "description": "Expected 1 more positional argument in function `func3`",
       "line": 67,
-      "name": "bad-argument-type",
+      "name": "bad-argument-count",
       "severity": "error",
       "stop_column": 9,
       "stop_line": 67
@@ -7286,28 +7296,6 @@
   "generics_typevartuple_specialization.py": [
     {
       "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(tuple[int, *tuple[Any, ...]], tuple[int]) failed",
-      "description": "assert_type(tuple[int, *tuple[Any, ...]], tuple[int]) failed",
-      "line": 51,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 31,
-      "stop_line": 51
-    },
-    {
-      "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(tuple[float, *tuple[Any, ...]], tuple[float]) failed",
-      "description": "assert_type(tuple[float, *tuple[Any, ...]], tuple[float]) failed",
-      "line": 94,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 33,
-      "stop_line": 94
-    },
-    {
-      "code": -2,
       "column": 1,
       "concise_description": "Unpacked argument cannot be used for type parameter T",
       "description": "Unpacked argument cannot be used for type parameter T",
@@ -7360,28 +7348,6 @@
       "severity": "error",
       "stop_column": 13,
       "stop_line": 127
-    },
-    {
-      "code": -2,
-      "column": 8,
-      "concise_description": "Unpacked argument cannot be used for type parameter T1",
-      "description": "Unpacked argument cannot be used for type parameter T1",
-      "line": 153,
-      "name": "bad-unpacking",
-      "severity": "error",
-      "stop_column": 29,
-      "stop_line": 153
-    },
-    {
-      "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(tuple[Any], tuple[*tuple[int, ...], int]) failed",
-      "description": "assert_type(tuple[Any], tuple[*tuple[int, ...], int]) failed",
-      "line": 157,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 49,
-      "stop_line": 157
     },
     {
       "code": -2,
@@ -10129,6 +10095,50 @@
     },
     {
       "code": -2,
+      "column": 24,
+      "concise_description": "`Annotated[int]` is not assignable to `type[Any]`",
+      "description": "`Annotated[int]` is not assignable to `type[Any]`",
+      "line": 71,
+      "name": "bad-assignment",
+      "severity": "error",
+      "stop_column": 42,
+      "stop_line": 71
+    },
+    {
+      "code": -2,
+      "column": 24,
+      "concise_description": "`TypeAlias[SmallInt, Annotated[int]]` is not assignable to `type[Any]`",
+      "description": "`TypeAlias[SmallInt, Annotated[int]]` is not assignable to `type[Any]`",
+      "line": 72,
+      "name": "bad-assignment",
+      "severity": "error",
+      "stop_column": 32,
+      "stop_line": 72
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Argument `Annotated[str]` is not assignable to parameter `x` with type `type[@_]` in function `func4`",
+      "description": "Argument `Annotated[str]` is not assignable to parameter `x` with type `type[@_]` in function `func4`",
+      "line": 79,
+      "name": "bad-argument-type",
+      "severity": "error",
+      "stop_column": 25,
+      "stop_line": 79
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Argument `TypeAlias[SmallInt, Annotated[int]]` is not assignable to parameter `x` with type `type[@_]` in function `func4`",
+      "description": "Argument `TypeAlias[SmallInt, Annotated[int]]` is not assignable to parameter `x` with type `type[@_]` in function `func4`",
+      "line": 80,
+      "name": "bad-argument-type",
+      "severity": "error",
+      "stop_column": 15,
+      "stop_line": 80
+    },
+    {
+      "code": -2,
       "column": 1,
       "concise_description": "Expected a callable, got `type[Annotated]`",
       "description": "Expected a callable, got `type[Annotated]`",
@@ -10137,6 +10147,28 @@
       "severity": "error",
       "stop_column": 10,
       "stop_line": 86
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Expected a callable, got `Annotated[int]`",
+      "description": "Expected a callable, got `Annotated[int]`",
+      "line": 87,
+      "name": "not-callable",
+      "severity": "error",
+      "stop_column": 19,
+      "stop_line": 87
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "Expected a callable, got `TypeAlias[SmallInt, Annotated[int]]`",
+      "description": "Expected a callable, got `TypeAlias[SmallInt, Annotated[int]]`",
+      "line": 88,
+      "name": "not-callable",
+      "severity": "error",
+      "stop_column": 9,
+      "stop_line": 88
     }
   ],
   "qualifiers_final_annotation.py": [
@@ -10161,6 +10193,28 @@
       "severity": "error",
       "stop_column": 22,
       "stop_line": 18
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Final attribute declared in class body must be initialized with a value or in `__init__`",
+      "description": "Final attribute declared in class body must be initialized with a value or in `__init__`",
+      "line": 34,
+      "name": "invalid-annotation",
+      "severity": "error",
+      "stop_column": 8,
+      "stop_line": 34
+    },
+    {
+      "code": -2,
+      "column": 5,
+      "concise_description": "Final attribute declared in class body must be initialized with a value or in `__init__`",
+      "description": "Final attribute declared in class body must be initialized with a value or in `__init__`",
+      "line": 38,
+      "name": "invalid-annotation",
+      "severity": "error",
+      "stop_column": 8,
+      "stop_line": 38
     },
     {
       "code": -2,

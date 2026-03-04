@@ -52,6 +52,7 @@ use starlark_map::small_set::SmallSet;
 use tracing::debug;
 use tracing::info;
 
+use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::files::FilesArgs;
 use crate::commands::util::CommandExitStatus;
 use crate::config::error_kind::Severity;
@@ -95,9 +96,12 @@ pub struct FullCheckArgs {
 }
 
 impl FullCheckArgs {
-    pub async fn run(self) -> anyhow::Result<CommandExitStatus> {
+    pub async fn run(
+        self,
+        wrapper: Option<ConfigConfigurerWrapper>,
+    ) -> anyhow::Result<CommandExitStatus> {
         self.config_override.validate()?;
-        let (files_to_check, config_finder) = self.files.resolve(self.config_override)?;
+        let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
         run_check(self.args, self.watch, files_to_check, config_finder).await
     }
 }
@@ -176,8 +180,12 @@ pub struct SnippetCheckArgs {
 }
 
 impl SnippetCheckArgs {
-    pub async fn run(self) -> anyhow::Result<CommandExitStatus> {
-        let (_, config_finder) = FilesArgs::get(vec![], self.config, self.config_override)?;
+    pub async fn run(
+        self,
+        wrapper: Option<ConfigConfigurerWrapper>,
+    ) -> anyhow::Result<CommandExitStatus> {
+        let (_, config_finder) =
+            FilesArgs::get(vec![], self.config, self.config_override, wrapper)?;
         let check_args = CheckArgs {
             output: self.output,
             behavior: BehaviorArgs {
@@ -809,7 +817,7 @@ impl CheckArgs {
         if self.output.summary != Summary::None {
             transaction.set_subscriber(Some(Box::new(ProgressBarSubscriber::new())));
         }
-        transaction.run(handles, require);
+        transaction.run(handles, require, None);
         if self.output.summary != Summary::None {
             transaction.set_subscriber(None);
         }
@@ -960,7 +968,7 @@ impl CheckArgs {
             fs_anyhow::create_dir_all(glean)?;
             for handle in handles {
                 // Generate a safe filename using hash to avoid OS filename length limits
-                let module_hash = blake3::hash(handle.module().to_string().as_bytes());
+                let module_hash = blake3::hash(handle.path().to_string().as_bytes());
                 fs_anyhow::write(
                     &glean.join(format!("{}.json", &module_hash)),
                     report::glean::glean(transaction, handle),

@@ -28,13 +28,18 @@ use pyrefly_graph::index::Idx;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::heap::TypeHeap;
+use pyrefly_types::quantified::Quantified;
+use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::type_alias::TypeAlias;
 use pyrefly_types::type_alias::TypeAliasData;
+use pyrefly_types::type_var::PreInferenceVariance;
+use pyrefly_types::type_var::Restriction;
 use pyrefly_types::types::Union;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::recurser::Guard;
 use pyrefly_util::uniques::UniqueFactory;
 use pyrefly_util::visit::VisitMut;
+use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
@@ -51,6 +56,7 @@ use crate::alt::traits::Solve;
 use crate::binding::binding::AnyIdx;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Exported;
+use crate::binding::binding::Key;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::KeyTypeAlias;
 use crate::binding::bindings::BindingEntry;
@@ -1129,6 +1135,11 @@ pub struct ThreadState {
     recursion_limit_config: Option<RecursionLimitConfig>,
     /// How SCC participants store answers during solving.
     scc_solving_mode: SccSolvingMode,
+    /// Partial answers for inline first-use pinning, keyed by (NameAssign def_idx, CalcStack height).
+    /// The height ensures that only ForwardToFirstUse bindings at the same CalcStack depth
+    /// as the NameAssign's solve_binding can see the partial answer (offset 0 in get_idx,
+    /// which checks before pushing its own frame).
+    partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
 }
 
 /// Internal SCC-solving modes controlled via `PYREFLY_SCC_SOLVING_MODE`.
@@ -1148,6 +1159,7 @@ impl ThreadState {
             debug: RefCell::new(false),
             recursion_limit_config,
             scc_solving_mode: SccSolvingMode::from_env(),
+            partial_answers: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -1186,6 +1198,11 @@ pub struct AnswersSolver<'a, Ans: LookupAnswer> {
     pub recurser: &'a VarRecurser,
     pub stdlib: &'a Stdlib,
     pub heap: &'a TypeHeap,
+    /// Cache for jaxtyping dimension name → Quantified type mappings.
+    /// Module-scoped: the same dimension name always maps to the same Quantified,
+    /// which is correct because each function independently wraps its signature
+    /// in a Forall (just like legacy TypeVars defined at module scope).
+    jaxtyping_dims: RefCell<FxHashMap<Name, Quantified>>,
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
@@ -1212,6 +1229,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             current,
             thread_state,
             heap,
+            jaxtyping_dims: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -1224,6 +1242,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     #[allow(dead_code)]
     pub fn set_debug(&self, value: bool) {
         *self.thread_state.debug.borrow_mut() = value;
+    }
+
+    /// Get or create a Quantified type for a jaxtyping dimension name.
+    /// Cached per module: the same name always returns the same Quantified.
+    pub fn get_or_create_jaxtyping_dim(&self, name: Name, kind: QuantifiedKind) -> Quantified {
+        let mut dims = self.jaxtyping_dims.borrow_mut();
+        dims.entry(name.clone())
+            .or_insert_with(|| match kind {
+                QuantifiedKind::TypeVar => Quantified::type_var(
+                    name,
+                    self.uniques,
+                    None,
+                    Restriction::Unrestricted,
+                    PreInferenceVariance::Invariant,
+                ),
+                QuantifiedKind::TypeVarTuple => {
+                    Quantified::type_var_tuple(name, self.uniques, None)
+                }
+                QuantifiedKind::ParamSpec => {
+                    unreachable!("jaxtyping dimensions cannot be ParamSpec")
+                }
+            })
+            .clone()
+    }
+
+    /// Check if a Quantified type was created by jaxtyping dimension parsing.
+    pub fn is_jaxtyping_dim(&self, q: &Quantified) -> bool {
+        self.jaxtyping_dims.borrow().values().any(|v| v == q)
     }
 
     pub fn current(&self) -> &Answers {
@@ -1244,6 +1290,55 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn stack(&self) -> &CalcStack {
         &self.thread_state.stack
+    }
+
+    /// Store a partial answer for inline first-use pinning.
+    /// `def_idx` is the Key::Definition idx of the NameAssign.
+    /// Keyed by (def_idx, current CalcStack height).
+    pub(crate) fn store_partial_answer(&self, def_idx: Idx<Key>, type_info: Arc<TypeInfo>) {
+        let height = self.stack().len();
+        self.thread_state
+            .partial_answers
+            .borrow_mut()
+            .insert((def_idx, height), type_info);
+    }
+
+    /// Remove the partial answer for a NameAssign at the current height.
+    pub(crate) fn clear_partial_answer(&self, def_idx: Idx<Key>) {
+        let height = self.stack().len();
+        self.thread_state
+            .partial_answers
+            .borrow_mut()
+            .remove(&(def_idx, height));
+    }
+
+    /// Check for a matching partial answer at the current CalcStack height.
+    ///
+    /// The height check ensures that only a ForwardToFirstUse resolved at the same
+    /// CalcStack depth as the NameAssign's solve_binding can see the partial answer.
+    /// This is offset 0 because the check runs in `get_idx` BEFORE pushing the
+    /// ForwardToFirstUse's own frame. Bindings at deeper heights (e.g., a ClassField
+    /// that indirectly depends on the same variable) correctly miss the partial answer
+    /// and go through normal resolution.
+    pub(crate) fn check_partial_answer(&self, def_idx: Idx<Key>) -> Option<Arc<TypeInfo>> {
+        let height = self.stack().len();
+        self.thread_state
+            .partial_answers
+            .borrow()
+            .get(&(def_idx, height))
+            .cloned()
+    }
+
+    /// Given the target idx of a ForwardToFirstUse binding, find the NameAssign's
+    /// def_idx for partial answer lookup.
+    ///
+    /// ForwardToFirstUse always points to a NameAssign with `def_idx.is_some()`.
+    pub(crate) fn def_idx_for_forward_to_first_use(&self, target: Idx<Key>) -> Option<Idx<Key>> {
+        let binding = self.bindings().get(target);
+        match binding {
+            Binding::NameAssign(na) if na.def_idx.is_some() => Some(target),
+            _ => None,
+        }
     }
 
     fn recursion_limit_config(&self) -> Option<RecursionLimitConfig> {
@@ -1274,6 +1369,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
+        // Check for a partial answer shortcut before pushing to the CalcStack.
+        // This is used by ForwardToFirstUse during inline first-use pinning to
+        // return the raw type without caching it in shared Answers and without
+        // triggering cycle detection against the NameAssign's CalcStack frame.
+        let binding = self.bindings().get(idx);
+        if let Some(answer) = K::check_shortcut(self, binding) {
+            return answer;
+        }
+
         let current = CalcId(self.bindings().dupe(), K::to_anyidx(idx));
         let calculation = self.get_calculation(idx);
 
@@ -1334,7 +1438,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Note that we intentionally do not pass in the key when solving the binding,
         // as the result of a binding should not depend on the key it was bound to.
         // We use the range for error reporting.
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
 
         let local_errors = self.error_collector();
         let raw_answer = K::solve(self, binding, range, &local_errors);
@@ -1534,7 +1638,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
         let final_answer = K::record_recursive(self, range, answer, var, errors);
         if var != Var::ZERO {
             self.solver().force_var(var);
@@ -1611,7 +1715,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        let range = self.bindings().idx_to_key(idx).range();
+        let range = K::range_with(idx, self.bindings());
         self.base_errors.add(
             range,
             ErrorInfo::Kind(ErrorKind::InternalError),
@@ -1655,7 +1759,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         eprintln!("\n--- Triggering Idx Details ---");
         let key = self.bindings().idx_to_key(idx);
-        let range = key.range();
+        let range = K::range_with(idx, self.bindings());
         let display_range = self.bindings().module().display_range(range);
         eprintln!("  Module: {}", self.module().name());
         eprintln!("  Range: {}", display_range);

@@ -73,6 +73,13 @@ fn join_names(base_name: &str, name: &str) -> String {
     }
 }
 
+fn find_preference_glean() -> FindPreference {
+    FindPreference {
+        prefer_pyi: false, // Similar to Pyrefly behavior, we prefer py over pyi files
+        ..Default::default()
+    }
+}
+
 fn all_modules_with_range(
     module_name: ModuleName,
     position: TextSize,
@@ -104,6 +111,8 @@ fn to_span(range: TextRange) -> src::ByteSpan {
     }
 }
 
+/// Create a Glean file fact from module info, using forward slashes for
+/// cross-platform consistency regardless of the OS path separator.
 fn file_fact(module_info: &ModuleInfo) -> src::File {
     let file_path = module_info.path().as_path();
     let relative_path = file_path
@@ -112,7 +121,8 @@ fn file_fact(module_info: &ModuleInfo) -> src::File {
         .to_str()
         .unwrap();
 
-    src::File::new(relative_path.to_owned())
+    // Normalize to forward slashes so Glean keys are consistent across platforms.
+    src::File::new(relative_path.replace('\\', "/"))
 }
 
 fn gather_nonlocal_variables(body: &[Stmt]) -> (Arc<SmallSet<Name>>, Arc<SmallSet<Name>>) {
@@ -170,7 +180,8 @@ struct Facts {
     callee_to_callers: Vec<python::CalleeToCaller>,
     containing_top_level_declarations: Vec<python::ContainingTopLevelDeclaration>,
     xrefs_via_name: Vec<python::XRefViaName>,
-    xrefs_by_target: HashMap<python::Name, Vec<src::ByteSpan>>,
+    xrefs_via_name_by_target: HashMap<python::Name, Vec<src::ByteSpan>>,
+    xrefs: Vec<python_xrefs::XRef>,
     declaration_docstrings: Vec<python::DeclarationDocstring>,
     name_to_sname: Vec<python::NameToSName>,
 }
@@ -212,7 +223,8 @@ impl Facts {
             callee_to_callers: vec![],
             containing_top_level_declarations: vec![],
             xrefs_via_name: vec![],
-            xrefs_by_target: HashMap::new(),
+            xrefs: vec![],
+            xrefs_via_name_by_target: HashMap::new(),
             declaration_docstrings: vec![],
             name_to_sname: vec![],
         }
@@ -551,7 +563,7 @@ impl GleanState<'_> {
         let definition = self.transaction.find_definition_for_name_use(
             self.handle,
             &identifier,
-            FindPreference::default(),
+            find_preference_glean(),
         );
 
         let additional_definitions = self.get_additional_definitions(identifier.range());
@@ -573,7 +585,7 @@ impl GleanState<'_> {
         let definition = self.transaction.find_definition_for_name_use(
             self.handle,
             &identifier,
-            FindPreference::default(),
+            find_preference_glean(),
         );
         let additional_definitions = if definition.is_some() || self.names.contains(&fqname) {
             self.get_additional_definitions(range)
@@ -640,7 +652,7 @@ impl GleanState<'_> {
             && let Some(base_type) = answers.get_type_trace(base_expr.range())
         {
             self.transaction
-                .ad_hoc_solve(self.handle, |solver| {
+                .ad_hoc_solve(self.handle, "glean_attribute_definition", |solver| {
                     let name = attr_name.id();
                     let completions = |ty| solver.completions(ty, Some(name), false);
 
@@ -655,7 +667,7 @@ impl GleanState<'_> {
                             self.transaction
                                 .find_definition_for_base_type(
                                     self.handle,
-                                    FindPreference::default(),
+                                    find_preference_glean(),
                                     completions(ty.clone()),
                                     name,
                                 )
@@ -803,17 +815,24 @@ impl GleanState<'_> {
 
     fn add_xref(&mut self, definition_location: DefinitionLocation, range: TextRange) {
         let source = to_span(range);
-        let target = python::Name::new(definition_location.name);
-        if let Some(spans) = self.facts.xrefs_by_target.get_mut(&target) {
+        let target_name = python::Name::new(definition_location.name);
+        let target = python_xrefs::XRefDefinitionLocation {
+            name: target_name.clone(),
+            file: definition_location.file,
+        };
+        if let Some(spans) = self.facts.xrefs_via_name_by_target.get_mut(&target_name) {
             spans.push(source.clone());
         } else {
             self.facts
-                .xrefs_by_target
-                .insert(target.clone(), vec![source.clone()]);
+                .xrefs_via_name_by_target
+                .insert(target_name.clone(), vec![source.clone()]);
         }
-        self.facts
-            .xrefs_via_name
-            .push(python::XRefViaName { target, source });
+        self.facts.xrefs_via_name.push(python::XRefViaName {
+            target: target_name,
+            source: source.clone(),
+        });
+
+        self.facts.xrefs.push(python_xrefs::XRef { target, source });
     }
 
     fn xrefs_for_type_info(
@@ -1055,7 +1074,7 @@ impl GleanState<'_> {
     fn find_definition(&self, position: TextSize) -> Vec<DefinitionLocation> {
         let definitions =
             self.transaction
-                .find_definition(self.handle, position, FindPreference::default());
+                .find_definition(self.handle, position, find_preference_glean());
 
         definitions
             .into_iter()
@@ -1069,10 +1088,7 @@ impl GleanState<'_> {
         let definition = self.transaction.find_definition_for_imported_module(
             self.handle,
             module,
-            FindPreference {
-                prefer_pyi: false, // Similar to Pyrefly behavior, we prefer py over pyi files
-                ..Default::default()
-            },
+            find_preference_glean(),
         );
 
         definition.map_or(
@@ -1230,16 +1246,17 @@ impl GleanState<'_> {
                     .map_or(from_name.id().to_string(), |x| {
                         join_names(x, from_name.id())
                     });
+                let from_name_definition = DefinitionLocation {
+                    name: from_name_string.clone(),
+                    file: None, // TODO: default to module file
+                };
                 let as_name = import.asname.as_ref().unwrap_or(from_name);
 
                 let definition = self
                     .find_definition(from_name.range.start())
                     .first()
                     .cloned()
-                    .unwrap_or(DefinitionLocation {
-                        name: from_name_string.clone(),
-                        file: None, // TODO: default to module file
-                    });
+                    .unwrap_or(from_name_definition.clone());
 
                 let from_name_id = Identifier::new(Name::new(from_name_string), from_name.range);
                 decl_infos.push(self.make_import_fact(
@@ -1248,7 +1265,12 @@ impl GleanState<'_> {
                     Some(&definition.name),
                     top_level_declaration,
                 ));
-                self.add_xref(definition, from_name.range);
+
+                let range = from_name.range;
+                if definition.name != from_name_definition.name {
+                    self.add_xref(from_name_definition, range)
+                }
+                self.add_xref(definition, range);
             }
         }
 
@@ -1531,8 +1553,8 @@ impl Glean {
         let xrefs_via_name_by_file_fact =
             python::XRefsViaNameByFile::new(file_fact.clone(), facts.xrefs_via_name.to_owned());
 
-        let xrefs_by_target: Vec<python::XRefsViaNameByTarget> = facts
-            .xrefs_by_target
+        let xrefs_via_name_by_target: Vec<python::XRefsViaNameByTarget> = facts
+            .xrefs_via_name_by_target
             .into_iter()
             .map(|(target, spans)| {
                 python::XRefsViaNameByTarget::new(
@@ -1542,6 +1564,8 @@ impl Glean {
                 )
             })
             .collect();
+
+        let xrefs_by_file = python_xrefs::XRefsByFile::new(file_fact.clone(), facts.xrefs);
 
         let entries = vec![
             GleanEntry::SchemaId {
@@ -1559,7 +1583,8 @@ impl Glean {
             facts.callee_to_callers.glean_entry(),
             facts.containing_top_level_declarations.glean_entry(),
             xrefs_via_name_by_file_fact.glean_entry(),
-            xrefs_by_target.glean_entry(),
+            xrefs_via_name_by_target.glean_entry(),
+            xrefs_by_file.glean_entry(),
             facts.declaration_docstrings.glean_entry(),
             facts.name_to_sname.glean_entry(),
             gencode_fact.glean_entry(),

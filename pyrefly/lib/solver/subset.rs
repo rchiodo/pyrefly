@@ -41,6 +41,7 @@ use crate::alt::callable::CallArg;
 use crate::alt::expr::TypeOrExpr;
 use crate::solver::solver::OpenTypedDictSubsetError;
 use crate::solver::solver::Subset;
+use crate::solver::solver::SubsetCacheEntry;
 use crate::solver::solver::SubsetError;
 use crate::solver::solver::TypedDictSubsetError;
 use crate::types::callable::Function;
@@ -1111,21 +1112,53 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     }
 
     /// Implementation of subset equality for Type, other than Var.
+    ///
+    /// For potentially-recursive checks (protocols and recursive type aliases),
+    /// this uses `subset_cache` to both detect cycles (coinductive reasoning) and
+    /// memoize results (preventing exponential blowup). On failure, entries added
+    /// during the failing computation are rolled back by popping the map back to
+    /// the saved size, invalidating intermediate results that may have relied on
+    /// a coinductive assumption that turned out to be false.
     pub fn is_subset_eq_impl(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
-        let recursive_check = if self.can_be_recursive(got, want) {
-            Some((got.clone(), want.clone()))
+        let cache_key = if self.can_be_recursive(got, want) {
+            let key = (got.clone(), want.clone());
+            if let Some(entry) = self.subset_cache.get(&key) {
+                return match entry {
+                    SubsetCacheEntry::InProgress | SubsetCacheEntry::Ok => Ok(()),
+                    SubsetCacheEntry::Err(err) => Err(err.clone()),
+                };
+            }
+            Some(key)
         } else {
             None
         };
-        if let Some(check) = &recursive_check
-            && !self.recursive_assumptions.insert(check.clone())
-        {
-            // Assume recursive checks are true
-            return Ok(());
-        }
+        let cache_size = if let Some(key) = &cache_key {
+            let size = self.subset_cache.len();
+            self.subset_cache
+                .insert(key.clone(), SubsetCacheEntry::InProgress);
+            Some(size)
+        } else {
+            None
+        };
         let res = self.is_subset_eq_no_recursive_check(got, want);
-        if let Some(check) = &recursive_check {
-            self.recursive_assumptions.shift_remove(check);
+        if let Some(key) = cache_key {
+            match &res {
+                Ok(()) => {
+                    self.subset_cache.insert(key, SubsetCacheEntry::Ok);
+                }
+                Err(err) => {
+                    // Roll back entries added during our computation. These entries
+                    // may have depended on a coinductive assumption (our InProgress
+                    // entry being treated as Ok) that this failure invalidates.
+                    // Entries from before our computation are preserved — they are
+                    // independent and not tainted by our failure.
+                    while self.subset_cache.len() > cache_size.unwrap() {
+                        self.subset_cache.pop();
+                    }
+                    self.subset_cache
+                        .insert(key, SubsetCacheEntry::Err(err.clone()));
+                }
+            }
         }
         res
     }
@@ -1404,6 +1437,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             {
                 self.is_subset_eq(&l_no_self, &u_no_self)
             }
+            (Type::BoundMethod(l), Type::BoundMethod(u)) => {
+                self.is_subset_eq(&l.func.clone().as_type(), &u.func.clone().as_type())
+            }
             (
                 Type::Callable(box l)
                 | Type::Function(box Function {
@@ -1593,6 +1629,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 self.type_order.has_superclass(got, want),
                 SubsetError::Other,
             ),
+            // Annotated[T, ...] is not a class object; it cannot be assigned to type[T].
+            (Type::Annotated(_), Type::Type(_)) => Err(SubsetError::Other),
             // Although the object created by a NewType call behaves like a class for type-checking
             // purposes, it isn't one at runtime, so don't allow it to match `type`.
             (Type::ClassDef(got), Type::Type(_)) if self.type_order.is_new_type(got) => {

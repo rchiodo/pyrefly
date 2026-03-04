@@ -90,7 +90,7 @@ fn get_test_report(
             ..
         } in state
             .transaction()
-            .completion(handle, position, import_format, true)
+            .completion(handle, position, import_format, true, None)
         {
             let is_deprecated = if let Some(tags) = tags {
                 tags.contains(&lsp_types::CompletionItemTag::DEPRECATED)
@@ -138,7 +138,7 @@ fn get_test_report(
 }
 
 fn dict_field_labels(txn: &Transaction<'_>, handle: &Handle, position: TextSize) -> Vec<String> {
-    txn.completion(handle, position, ImportFormat::Absolute, true)
+    txn.completion(handle, position, ImportFormat::Absolute, true, None)
         .into_iter()
         .filter(|item| item.kind == Some(CompletionItemKind::FIELD))
         .map(|item| item.label)
@@ -290,9 +290,6 @@ dim.get("")
         report.contains(
             r#"
 Completion Results:
-- (Value) 'x': Literal['x'] inserting `x`
-- (Value) 'y': Literal['y'] inserting `y`
-- (Value) 'z': Literal['z'] inserting `z`
 - (Field) x: int
 - (Field) y: int
 - (Field) z: int
@@ -324,9 +321,6 @@ dim.get(key="")
         report.contains(
             r#"
 Completion Results:
-- (Value) 'x': Literal['x'] inserting `x`
-- (Value) 'y': Literal['y'] inserting `y`
-- (Value) 'z': Literal['z'] inserting `z`
 - (Field) x: int
 - (Field) y: int
 - (Field) z: int
@@ -1910,7 +1904,7 @@ T = spio
     let completions =
         state
             .transaction()
-            .completion(handle, position, ImportFormat::Absolute, true);
+            .completion(handle, position, ImportFormat::Absolute, true, None);
     let autoimport = completions
         .iter()
         .find(|item| item.label == "spio")
@@ -1952,7 +1946,7 @@ T = np
     let completions =
         state
             .transaction()
-            .completion(handle, position, ImportFormat::Absolute, true);
+            .completion(handle, position, ImportFormat::Absolute, true, None);
     let autoimport = completions
         .iter()
         .find(|item| item.label == "np")
@@ -2097,7 +2091,7 @@ T = foooooo
     let completions =
         state
             .transaction()
-            .completion(handle, position, ImportFormat::Absolute, true);
+            .completion(handle, position, ImportFormat::Absolute, true, None);
     let autoimport = completions
         .into_iter()
         .find(|item| item.label == "foooooo")
@@ -2112,7 +2106,7 @@ T = foooooo
     let completions =
         state
             .transaction()
-            .completion(handle, position, ImportFormat::Absolute, false);
+            .completion(handle, position, ImportFormat::Absolute, false, None);
     completions
         .into_iter()
         .find(|item| item.label == "foooooo")
@@ -2787,7 +2781,8 @@ x = sys.version
     let txn = state.transaction();
 
     // Position 0: inside comment - should return empty
-    let comment_completions = txn.completion(handle, positions[0], ImportFormat::Absolute, true);
+    let comment_completions =
+        txn.completion(handle, positions[0], ImportFormat::Absolute, true, None);
     assert!(
         comment_completions.is_empty(),
         "Expected no completions in comment, but got {} completions",
@@ -2795,7 +2790,8 @@ x = sys.version
     );
 
     // Position 1: normal code - should return completions
-    let normal_completions = txn.completion(handle, positions[1], ImportFormat::Absolute, true);
+    let normal_completions =
+        txn.completion(handle, positions[1], ImportFormat::Absolute, true, None);
     assert!(
         !normal_completions.is_empty(),
         "Expected completions in normal code but got none"
@@ -2829,7 +2825,7 @@ needs_base(val)
     let handle = handles.get("main").unwrap();
     let position = extract_cursors_for_test(code)[0];
     let txn = state.transaction();
-    let completions = txn.completion(handle, position, ImportFormat::Absolute, true);
+    let completions = txn.completion(handle, position, ImportFormat::Absolute, true, None);
 
     let exact_index = completions
         .iter()
@@ -2919,7 +2915,7 @@ class Constraint:
     let handle = handles.get("main").unwrap();
     let position = extract_cursors_for_test(code)[0];
     let txn = state.transaction();
-    let completions = txn.completion(handle, position, ImportFormat::Absolute, true);
+    let completions = txn.completion(handle, position, ImportFormat::Absolute, true, None);
 
     let completion_labels: Vec<_> = completions.iter().map(|c| c.label.as_str()).collect();
 

@@ -5,7 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-#![cfg(test)]
+#![feature(box_patterns)]
+#![feature(closure_lifetime_binder)]
+#![feature(if_let_guard)]
+
+mod init;
 
 mod basic;
 mod call_hierarchy;
@@ -42,5 +46,6 @@ mod type_hierarchy;
 mod unsaved_file;
 mod util;
 mod will_rename_files;
+mod workspace_diagnostics;
 mod workspace_folders;
 mod workspace_symbol;

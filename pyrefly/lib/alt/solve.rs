@@ -93,7 +93,6 @@ use crate::binding::binding::EmptyAnswer;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::FirstUse;
 use crate::binding::binding::FunctionParameter;
-use crate::binding::binding::FunctionStubOrImpl;
 use crate::binding::binding::IsAsync;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
@@ -135,7 +134,6 @@ use crate::types::annotation::Annotation;
 use crate::types::annotation::Qualifier;
 use crate::types::callable::Callable;
 use crate::types::callable::Function;
-use crate::types::callable::FunctionKind;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
 use crate::types::callable::Required;
@@ -158,7 +156,6 @@ use crate::types::type_var::TypeVar;
 use crate::types::type_var::Variance;
 use crate::types::type_var_tuple::TypeVarTuple;
 use crate::types::types::AnyStyle;
-use crate::types::types::CalleeKind;
 use crate::types::types::Forallable;
 use crate::types::types::SuperObj;
 use crate::types::types::TParams;
@@ -1128,7 +1125,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 seen_param_specs,
                 tparams,
             ),
-            Type::Type(t) => self.tvars_to_tparams_for_type_alias(
+            Type::Type(t) | Type::Annotated(t) => self.tvars_to_tparams_for_type_alias(
                 t,
                 seen_type_vars,
                 seen_type_var_tuples,
@@ -1151,6 +1148,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if !self.has_valid_annotation_syntax(expr, errors) {
             return TypeAlias::error(name.clone(), style);
         }
+        // Check whether the original type was Annotated before it gets rebound below.
+        // We use this later to decide whether to wrap the stored type in Annotated.
+        let original_was_annotated = matches!(ty, Type::Annotated(_));
         let untyped = self.untype_opt(ty.clone(), range, errors);
         let ty = if let Some(untyped) = untyped {
             let validated =
@@ -1174,12 +1174,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .iter()
             .map(|e| self.expr_infer(e, &self.error_swallower()))
             .collect();
-        TypeAlias::new(
-            name.clone(),
-            self.heap.mk_type_form(ty),
-            style,
-            annotated_metadata,
-        )
+        // If the original type was Annotated[T, ...], preserve the wrapper so that
+        // the alias is not callable and not assignable to type[T] in value position.
+        let stored_ty = if original_was_annotated {
+            Type::Annotated(Box::new(ty))
+        } else {
+            self.heap.mk_type_form(ty)
+        };
+        TypeAlias::new(name.clone(), stored_ty, style, annotated_metadata)
     }
 
     /// Check whether a type alias body contains a cyclic self-reference.
@@ -1872,25 +1874,95 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Arc<TypeInfo> {
-        // Special case for forward, as we don't want to re-expand the type
-        if let Binding::Forward(fwd) = binding {
+        // Special case for forward, as we don't want to re-expand the type.
+        // ForwardToFirstUse is handled here too: the partial answer shortcut
+        // lives in get_idx (before push), so by the time we reach solve_binding
+        // the shortcut didn't match and we fall through to normal resolution.
+        if let Binding::Forward(fwd) | Binding::ForwardToFirstUse(fwd) = binding {
             return self.get_idx(*fwd);
         }
-        let mut type_info = self.binding_to_type_info(binding, errors);
+        // Inline first-use pinning for NameAssign.
+        let mut type_info = if let Binding::NameAssign(na) = binding
+            && self.solver().infer_with_first_use
+            && na.def_idx.is_some()
+            && na.annotation.is_none()
+            && let FirstUse::UsedBy(first_use_idx) = &na.first_use
+        {
+            self.solve_binding_with_first_use_pinning(
+                binding,
+                na.def_idx.unwrap(),
+                *first_use_idx,
+                errors,
+            )
+        } else {
+            self.binding_to_type_info(binding, errors)
+        };
         type_info.visit_mut(&mut |ty| {
-            // Skip pinning for NameAssign and PartialTypeWithUpstreamsCompleted bindings
-            // when infer_with_first_use is enabled, as these bindings can contain partial
-            // types that should be pinned by first use. When infer_with_first_use is disabled,
-            // we pin immediately since there's no first-use inference mechanism.
-            let pin_partial_types = !self.solver().infer_with_first_use
-                || !matches!(
-                    binding,
-                    Binding::NameAssign(..) | Binding::PartialTypeWithUpstreamsCompleted(..)
-                );
-            self.pin_all_placeholder_types(ty, pin_partial_types, range, errors);
+            self.pin_all_placeholder_types(ty, true, range, errors);
             self.expand_vars_mut(ty);
         });
         Arc::new(type_info)
+    }
+
+    /// Compute the TypeInfo for a NameAssign that participates in first-use pinning.
+    ///
+    /// This evaluates the raw binding, checks for partial types (placeholder Vars),
+    /// and if present, stores a partial answer that the first-use binding can read
+    /// to constrain the placeholders via side effects before pinning occurs.
+    fn solve_binding_with_first_use_pinning(
+        &self,
+        binding: &Binding,
+        def_idx: Idx<Key>,
+        first_use_idx: Idx<Key>,
+        errors: &ErrorCollector,
+    ) -> TypeInfo {
+        // Step 1: Compute raw TypeInfo (Vars unpinned)
+        let type_info = self.binding_to_type_info(binding, errors);
+
+        // Step 2: Check whether the type actually contains partial types that
+        // need pinning. If not, skip the inline first-use evaluation entirely
+        // to avoid triggering unnecessary cycles through the binding graph.
+        let has_partial_types = {
+            let solver = self.solver();
+            let mut found = false;
+            type_info.visit(&mut |ty| {
+                if !found {
+                    // Use the same recursive traversal as pin_all_placeholder_types
+                    fn check(t: &Type, vars: &mut Vec<Var>) {
+                        match t {
+                            Type::Var(v) => vars.push(*v),
+                            _ => t.recurse(&mut |t| check(t, vars)),
+                        }
+                    }
+                    let mut vars = vec![];
+                    check(ty, &mut vars);
+                    found = vars.iter().any(|v| solver.var_is_partial(*v));
+                }
+            });
+            found
+        };
+
+        if !has_partial_types {
+            return type_info;
+        }
+
+        // Step 3: Store partial answer that the first-use solve will read and potentially pin.
+        self.store_partial_answer(def_idx, Arc::new(type_info.clone()));
+
+        // Step 4: Evaluate the first-use; throw away both the result and errors, this is
+        // *purely* for side-effects.
+        //
+        // Note that if the first use is a NameAssign, this will *not* recursively trigger
+        // first-use, because we're using `binding_to_type_info` which is a lower layer and
+        // the first-use pin is in `solve_binding`. This is good - we don't want to consume
+        // length-of-chain stack space.
+        let first_use_binding = self.bindings().get(first_use_idx);
+        let _ = self.binding_to_type_info(first_use_binding, &self.error_swallower());
+
+        // Step 5: Remove the partial answer, we've finished with it, and proceed to
+        // pinning as usual before we expose this result as an answer.
+        self.clear_partial_answer(def_idx);
+        type_info
     }
 
     /// Force the outermost type, without deep-forcing. Without this, narrowing behavior
@@ -2170,6 +2242,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 annotation: annot_key,
                 expr,
                 is_explicit,
+                ..
             } => {
                 let (annot, ty) = self.name_assign_infer(name, annot_key.as_ref(), expr, errors);
                 if let Some(annot) = &annot
@@ -2189,7 +2262,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     errors,
                 ))
             }
-            BindingTypeAlias::Scoped { name, expr } => {
+            BindingTypeAlias::Scoped { name, expr, .. } => {
                 let ty = self.expr_infer(expr, errors);
                 Arc::new(self.as_type_alias(name, TypeAliasStyle::Scoped, ty, expr, errors))
             }
@@ -2197,6 +2270,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 name,
                 annotation,
                 expr,
+                ..
             } => {
                 let ta = if let Some(expr) = expr {
                     let mut ty = self.expr_infer(expr, errors);
@@ -2826,7 +2900,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) {
-        if annot.annotation.is_final() {
+        // Skip when `AnnAssignHasValue::No`: that assignment is the initialization, not a
+        // reassignment.  The "must be initialized" error is handled in `Binding::AnnotatedType`.
+        if annot.annotation.is_final()
+            && !matches!(
+                annot.target,
+                AnnotationTarget::Assign(_, AnnAssignHasValue::No)
+            )
+        {
             self.error(
                 errors,
                 range,
@@ -3061,8 +3142,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ReturnTypeKind::ShouldValidateAnnotation {
                 range,
                 annotation,
-                stub_or_impl,
-                decorators,
                 implicit_return,
                 is_generator,
                 has_explicit_return,
@@ -3071,28 +3150,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // It will result in an implicit Any type, which is reasonable, but we should
                 // at least error here.
                 let ty = self.get_idx(*annotation).annotation.get_type().clone();
-                // If the function body is stubbed out or if the function is decorated with
-                // `@abstractmethod`, we blindly accept the return type annotation.
-                if *stub_or_impl != FunctionStubOrImpl::Stub
-                    && !decorators.iter().any(|k| {
-                        let decorator = self.get_idx(*k);
-                        match decorator.ty.callee_kind() {
-                            Some(CalleeKind::Function(FunctionKind::AbstractMethod)) => true,
-                            _ => false,
-                        }
-                    })
-                {
-                    let implicit_return = self.get_idx(*implicit_return);
-                    self.check_implicit_return_against_annotation(
-                        implicit_return,
-                        &ty,
-                        x.is_async,
-                        *is_generator,
-                        *has_explicit_return,
-                        *range,
-                        errors,
-                    );
-                }
+                let implicit_return = self.get_idx(*implicit_return);
+                self.check_implicit_return_against_annotation(
+                    implicit_return,
+                    &ty,
+                    x.is_async,
+                    *is_generator,
+                    *has_explicit_return,
+                    *range,
+                    errors,
+                );
                 self.return_type_from_annotation(ty, x.is_async, *is_generator)
             }
             ReturnTypeKind::ShouldTrustAnnotation {
@@ -3116,8 +3183,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 implicit_return,
                 yields,
                 yield_froms,
-                body_is_trivial,
-                class_metadata_key,
             } => {
                 let is_generator = !(yields.is_empty() && yield_froms.is_empty());
                 let returns = returns.iter().map(|k| self.get_idx(*k).arc_clone_ty());
@@ -3135,13 +3200,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             .collect(),
                     )
                 };
-                // If this is a method with a trivial body (e.g., `raise NotImplementedError()`)
-                // in a class that extends ABC, treat it as an abstract method and return Any
-                // instead of Never. This handles transitive ABC inheritance.
-                let is_abstract_method = *body_is_trivial
-                    && return_ty.is_never()
-                    && class_metadata_key.is_some_and(|key| self.get_idx(key).extends_abc());
-                let return_ty = if is_abstract_method {
+                // Cap excessively wide inferred return types to Any. During iterative
+                // SCC solving, mutual recursion can cause union widths to grow
+                // exponentially across iterations (e.g. 74 → 1247 → 1M in sympy).
+                // Capping at 20 covers 99%+ of naturally-occurring unions while
+                // preventing pathological blowup.
+                const MAX_INFERRED_RETURN_UNION_WIDTH: usize = 20;
+                let return_ty = if return_ty.union_width() > MAX_INFERRED_RETURN_UNION_WIDTH {
                     self.heap.mk_any_implicit()
                 } else {
                     return_ty
@@ -3712,14 +3777,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         finalize(&annotation.target, self.heap.mk_any_implicit())
                     })
             }
-            FunctionParameter::Unannotated(var, function_idx, target) => {
-                // It's important that we force the undecorated function binding before reading
-                // from this var. Solving the undecorated function binding pins the type of the var,
-                // either to a concrete type or to any. Without this we can have non-determinism
-                // where the reader can observe an unresolved var or a resolved type, depending on
-                // the order of solved bindings.
-                self.get_idx(*function_idx);
-                let ty = self.solver().force_var(*var);
+            FunctionParameter::Unannotated(function_idx, target, param_name) => {
+                // Get the resolved UndecoratedFunction - this ensures the function has been solved
+                // and resolved_param_types has been populated.
+                let undecorated = self.get_idx(*function_idx);
+                // Look up the type from resolved_param_types. This should always succeed since
+                // we populate it for all unannotated parameters during function solving.
+                let ty = undecorated
+                    .resolved_param_types
+                    .get(param_name)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // Fallback to Any for safety, though this should never happen
+                        self.heap.mk_any_implicit()
+                    });
                 finalize(target, ty)
             }
         }
@@ -4062,6 +4133,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn binding_to_type_info(&self, binding: &Binding, errors: &ErrorCollector) -> TypeInfo {
         match binding {
             Binding::Forward(k) => self.get_idx(*k).arc_clone(),
+            Binding::ForwardToFirstUse(k) => {
+                if let Some(def_idx) = self.def_idx_for_forward_to_first_use(*k)
+                    && let Some(type_info) = self.check_partial_answer(def_idx)
+                {
+                    return TypeInfo::arc_clone(type_info);
+                }
+                self.get_idx(*k).arc_clone()
+            }
             Binding::Narrow(k, op, range) => {
                 self.narrow(self.get_idx(*k).as_ref(), op, range.range(), errors)
             }
@@ -4087,15 +4166,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range_if_scoped_params_exist,
                     errors,
                 ),
-            Binding::PartialTypeWithUpstreamsCompleted(raw_idx, first_used_by) => {
-                // Force all of the upstream `Pin`s for which this was the first use.
-                for idx in first_used_by {
-                    self.get_idx(*idx);
-                }
-                // Recursively get the TypeInfo from the raw binding to preserve facets
-                // (e.g., dict literal key completions).
-                self.get_idx(*raw_idx).arc_clone()
-            }
             _ => {
                 // All other Bindings model `Type` level operations where we do not
                 // propagate any attribute narrows.
@@ -4398,7 +4468,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // when there is no annotation, so that `mylist = list` is treated
         // like a value assignment rather than a type alias?
         match ty {
-            Type::Type(_) | Type::TypeVar(_) | Type::ParamSpec(_) | Type::TypeVarTuple(_) => true,
+            Type::Type(_)
+            | Type::TypeVar(_)
+            | Type::ParamSpec(_)
+            | Type::TypeVarTuple(_)
+            | Type::Annotated(_) => true,
             Type::TypeAlias(ta) => {
                 self.check_type_form(&self.get_type_alias(ta).as_type(), allow_none)
             }
@@ -4433,6 +4507,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ty_range: TextRange,
         errors: &ErrorCollector,
     ) {
+        // NOTE: the traversal logic should match `solve_binding_with_first_use_pinning`
+        //
         // Expand the type, in case unexpanded `Vars` are hiding further `Var`s that
         // need to be pinned.
         self.solver().expand_vars_mut(ty);
@@ -4486,6 +4562,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn binding_to_type(&self, binding: &Binding, errors: &ErrorCollector) -> Type {
         match binding {
             Binding::Forward(..)
+            | Binding::ForwardToFirstUse(..)
             | Binding::Phi(..)
             | Binding::LoopPhi(..)
             | Binding::Narrow(..)
@@ -4507,24 +4584,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 x.subject_range,
                 &x.exhaustiveness_info,
             ),
-            Binding::CompletedPartialType(unpinned_idx, first_use) => {
-                // Calculate the first use for its side-effects (it might pin `Var`s)
-                match first_use {
-                    FirstUse::UsedBy(idx) => {
-                        self.get_idx(*idx);
-                    }
-                    FirstUse::Undetermined | FirstUse::DoesNotPin => {}
-                }
-                self.get_idx(*unpinned_idx).arc_clone().into_ty()
-            }
-            Binding::PartialTypeWithUpstreamsCompleted(raw_idx, first_used_by) => {
-                // Force all of the upstream `Pin`s for which was the first use. This ensures
-                // that any `Var` in the result originated directly from `raw_idx`.
-                for idx in first_used_by {
-                    self.get_idx(*idx);
-                }
-                self.get_idx(*raw_idx).arc_clone().into_ty()
-            }
             Binding::Expr(ann, e) => self.binding_to_type_expr(*ann, e, errors),
             Binding::StmtExpr(e, special_export) => {
                 self.binding_to_type_stmt_expr(e, *special_export, errors)
@@ -4659,11 +4718,33 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.heap.mk_class_def(cls.dupe())
                 }
             },
-            Binding::AnnotatedType(ann, val) => match self.get_idx(*ann).ty(self.heap, self.stdlib)
-            {
-                Some(ty) => self.wrap_callable_legacy_typevars(ty),
-                None => self.binding_to_type(val, errors),
-            },
+            Binding::AnnotatedType(ann, val) => {
+                let annot = self.get_idx(*ann);
+                // `Binding::AnnotatedType` is the active binding for annotation-only declarations
+                // (`x: Final[int]`).  Fire the "must be initialized" error unless the name is
+                // subsequently initialized via a non-annotated assignment (tuple unpacking, walrus,
+                // `with … as`), which is tracked in `subsequently_initialized` at bind time.
+                if annot.annotation.is_final()
+                    && annot.annotation.ty.is_some()
+                    && matches!(
+                        annot.target,
+                        AnnotationTarget::Assign(_, AnnAssignHasValue::No)
+                    )
+                    && !self.module().path().is_interface()
+                    && !self.bindings().subsequently_initialized(*ann)
+                {
+                    self.error(
+                        errors,
+                        self.bindings().idx_to_key(*ann).range(),
+                        ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                        "Final name must be initialized with a value".to_owned(),
+                    );
+                }
+                match annot.ty(self.heap, self.stdlib) {
+                    Some(ty) => self.wrap_callable_legacy_typevars(ty),
+                    None => self.binding_to_type(val, errors),
+                }
+            }
             Binding::None => self.heap.mk_none(),
             Binding::Any(style) => self.heap.mk_any(*style),
             Binding::Global(global) => global.as_type(self.stdlib, self.heap),
@@ -4740,6 +4821,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Arc<UndecoratedFunction> {
         self.undecorated_function(
             &x.def,
+            x.def_index,
             x.stub_or_impl,
             x.class_key.as_ref(),
             &x.decorators,
@@ -4973,6 +5055,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     return Some(TensorType::shapeless(cls.clone()).to_type());
                 }
+                // Normalize type[NoneType] as None
+                if let Type::ClassType(cls) = t.as_ref()
+                    && cls.has_qname("types", "NoneType")
+                {
+                    return Some(self.heap.mk_none());
+                }
                 Some(*t)
             }
             Type::None => Some(self.heap.mk_none()), // Both a value and a type
@@ -5014,6 +5102,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.canonicalize_all_class_types(Type::ClassDef(cls), range, errors);
                 self.untype_opt(canonicalized, range, errors)
             }
+            // Annotated[T, meta] in annotation/type-alias context unwraps to T
+            Type::Annotated(t) => Some(*t),
             _ => None,
         }
     }
@@ -5360,7 +5450,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .collect();
                 Type::ParamSpecValue(ParamList::new(elts))
             }
-            // Special case: integer literals in type argument context with tensor shapes enabled
+            // Special case: integer literals in type argument context with native tensor shapes
             // These can be used for Dim-bounded parameters (e.g., LinearLayer[6, 9])
             // We convert them directly to Type::Size to distinguish from Literal[6]
             Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. })

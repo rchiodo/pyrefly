@@ -208,6 +208,18 @@ impl TArgs {
         self.0.1.is_empty()
     }
 
+    /// Returns the number of type arguments to display, stripping trailing args
+    /// that match their parameter defaults (WYSIWYG display per issue #2461).
+    pub fn display_count(&self) -> usize {
+        let mut last_non_default = 0;
+        for (i, (param, arg)) in self.iter_paired().enumerate() {
+            if param.default().is_none() || arg != &param.as_gradual_type() {
+                last_non_default = i + 1;
+            }
+        }
+        last_non_default
+    }
+
     /// Apply a substitution to type arguments.
     ///
     /// This is useful mainly to re-express ancestors (which, in the MRO, are in terms of class
@@ -626,6 +638,10 @@ pub enum Type {
     ElementOfTypeVarTuple(Box<Quantified>),
     TypeGuard(Box<Type>),
     TypeIs(Box<Type>),
+    /// Used for special form `Annotated[T, ...]`.
+    /// This is transparent when resolving annotations, but is not callable and
+    /// cannot be assigned to `type[T]`.
+    Annotated(Box<Type>),
     Unpack(Box<Type>),
     TypeVar(TypeVar),
     ParamSpec(ParamSpec),
@@ -712,6 +728,7 @@ impl Visit for Type {
             Type::ElementOfTypeVarTuple(x) => x.visit(f),
             Type::TypeGuard(x) => x.visit(f),
             Type::TypeIs(x) => x.visit(f),
+            Type::Annotated(x) => x.visit(f),
             Type::Unpack(x) => x.visit(f),
             Type::TypeVar(x) => x.visit(f),
             Type::ParamSpec(x) => x.visit(f),
@@ -764,6 +781,7 @@ impl VisitMut for Type {
             Type::ElementOfTypeVarTuple(x) => x.visit_mut(f),
             Type::TypeGuard(x) => x.visit_mut(f),
             Type::TypeIs(x) => x.visit_mut(f),
+            Type::Annotated(x) => x.visit_mut(f),
             Type::Unpack(x) => x.visit_mut(f),
             Type::TypeVar(x) => x.visit_mut(f),
             Type::ParamSpec(x) => x.visit_mut(f),
@@ -819,6 +837,14 @@ impl Type {
 
     pub fn is_union(&self) -> bool {
         matches!(self, Type::Union(_))
+    }
+
+    /// Returns the number of top-level alternatives in a union, or 1 for non-union types.
+    pub fn union_width(&self) -> usize {
+        match self {
+            Type::Union(u) => u.members.len(),
+            _ => 1,
+        }
     }
 
     pub fn is_never(&self) -> bool {
@@ -932,6 +958,9 @@ impl Type {
                 //   when visiting Vars. See https://github.com/facebook/pyrefly/issues/2016.
                 Type::ClassType(cls) => recurse_targs(cls.targs()),
                 Type::TypedDict(TypedDict::TypedDict(td)) => recurse_targs(td.targs()),
+                // `Self` is a keyword, not a user-written type variable reference, so we don't
+                // recurse into it when looking for type variable references.
+                Type::SelfType(_) => {}
                 _ => ty.recurse(&mut |ty| visit(ty, f)),
             }
         }
@@ -1003,6 +1032,8 @@ impl Type {
             match ty {
                 Type::ClassType(cls) => recurse_targs(cls.targs_mut()),
                 Type::TypedDict(TypedDict::TypedDict(td)) => recurse_targs(td.targs_mut()),
+                // `Self` is a keyword, not a user-written type variable reference.
+                Type::SelfType(_) => {}
                 _ => ty.recurse_mut(&mut |ty| visit(ty, f)),
             }
         }
@@ -1311,9 +1342,9 @@ impl Type {
         }
     }
 
-    /// Apply `f` to this type if it is a callable. Note that we do *not* recurse into the type to
+    /// Transform this type if it is a callable. Note that we do *not* recurse into the type to
     /// find nested callable types.
-    pub fn visit_toplevel_callable_mut<'a>(&'a mut self, mut f: impl FnMut(&'a mut Callable)) {
+    pub fn transform_toplevel_callable<'a>(&'a mut self, mut f: impl FnMut(&'a mut Callable)) {
         match self {
             Type::Callable(callable) => f(callable),
             Type::Forall(box Forall {
@@ -1353,44 +1384,6 @@ impl Type {
         let mut is_callable = false;
         self.visit_toplevel_callable(&mut |_| is_callable = true);
         is_callable
-    }
-
-    /// Transform this type if it is a callable. Note that we do *not* recurse into the type to
-    /// find nested callable types.
-    fn transform_toplevel_callable(&mut self, mut f: impl FnMut(&mut Callable)) {
-        match self {
-            Type::Callable(callable) => f(callable),
-            Type::Forall(box Forall {
-                body: Forallable::Callable(callable),
-                ..
-            }) => f(callable),
-            Type::Function(box func)
-            | Type::Forall(box Forall {
-                body: Forallable::Function(func),
-                ..
-            })
-            | Type::BoundMethod(box BoundMethod {
-                func: BoundMethodType::Function(func),
-                ..
-            })
-            | Type::BoundMethod(box BoundMethod {
-                func: BoundMethodType::Forall(Forall { body: func, .. }),
-                ..
-            }) => f(&mut func.signature),
-            Type::Overload(overload)
-            | Type::BoundMethod(box BoundMethod {
-                func: BoundMethodType::Overload(overload),
-                ..
-            }) => {
-                for x in overload.signatures.iter_mut() {
-                    match x {
-                        OverloadType::Function(function) => f(&mut function.signature),
-                        OverloadType::Forall(forall) => f(&mut forall.body.signature),
-                    }
-                }
-            }
-            _ => {}
-        }
     }
 
     // This doesn't handle generics currently
@@ -1499,6 +1492,16 @@ impl Type {
         self.transform(&mut |ty| {
             if let Type::Never(style) = ty {
                 *style = NeverStyle::Never;
+            }
+        })
+    }
+
+    pub fn nonetype_to_none(self) -> Self {
+        self.transform(&mut |ty| {
+            if let Type::ClassType(cls) = ty
+                && cls.has_qname("types", "NoneType")
+            {
+                *ty = Type::None;
             }
         })
     }
