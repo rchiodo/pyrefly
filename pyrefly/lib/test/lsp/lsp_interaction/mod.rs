@@ -46,5 +46,6 @@ mod type_hierarchy;
 mod unsaved_file;
 mod util;
 mod will_rename_files;
+mod workspace_diagnostics;
 mod workspace_folders;
 mod workspace_symbol;
