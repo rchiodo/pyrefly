@@ -40,6 +40,7 @@ fn get_test_report(state: &State, handle: &Handle, position: TextSize) -> String
             handle,
             TextRange::new(position, position),
             ImportFormat::Absolute,
+            None,
         )
         .unwrap_or_default()
     {
@@ -725,6 +726,7 @@ np
             handle,
             TextRange::new(position, position),
             ImportFormat::Absolute,
+            None,
         )
         .unwrap_or_default();
     let (_, _, _, insert_text) = actions
@@ -1020,6 +1022,7 @@ fn redundant_cast_action_after(code: &str, cursor_offset: usize) -> Option<Strin
             handle,
             TextRange::new(position, position),
             ImportFormat::Absolute,
+            None,
         )
         .unwrap_or_default();
     let (_, module, range, patch) = actions

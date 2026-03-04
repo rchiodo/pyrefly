@@ -24,6 +24,7 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::display::LspDisplayMode;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::types::Union;
+use pyrefly_util::thread_pool::ThreadPool;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ExprContext;
 use ruff_python_ast::Identifier;
@@ -641,6 +642,7 @@ impl Transaction<'_> {
         completions: &mut Vec<RankedCompletion>,
         import_format: ImportFormat,
         supports_completion_item_details: bool,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
         // Auto-import can be slow. Let's only return results if there are no local
         // results for now. TODO: re-enable it once we no longer have perf issues.
@@ -665,7 +667,8 @@ impl Transaction<'_> {
             if identifier_text.len() < MIN_CHARACTERS_TYPED_AUTOIMPORT {
                 return;
             }
-            for (handle_to_import_from, name, export) in self.search_exports_fuzzy(identifier_text)
+            for (handle_to_import_from, name, export) in
+                self.search_exports_fuzzy(identifier_text, custom_thread_pool)
             {
                 // Using handle itself doesn't always work because handles can be made separately and have different hashes
                 if handle_to_import_from.module() == handle.module()
@@ -813,6 +816,7 @@ impl Transaction<'_> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mut mru_index: Option<F>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -973,6 +977,7 @@ impl Transaction<'_> {
                         &mut result,
                         import_format,
                         supports_completion_item_details,
+                        custom_thread_pool,
                     );
                 }
                 // Mark results as incomplete in the following cases so clients keep asking

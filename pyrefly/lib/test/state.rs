@@ -219,9 +219,9 @@ fn test_crash_on_search() {
     // Now we run two searches, this used to crash
     let t = state.new_transaction(REQUIRE, None);
     eprintln!("First search");
-    t.search_exports_exact("x");
+    t.search_exports_exact("x", None);
     eprintln!("Second search");
-    t.search_exports_exact("x");
+    t.search_exports_exact("x", None);
 }
 
 #[test]

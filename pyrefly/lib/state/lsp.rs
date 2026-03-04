@@ -35,6 +35,7 @@ use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::Cancelled;
+use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Alias;
 use ruff_python_ast::AnyNodeRef;
@@ -1970,6 +1971,7 @@ impl<'a> Transaction<'a> {
         handle: &Handle,
         range: TextRange,
         import_format: ImportFormat,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Option<Vec<(String, Module, TextRange, String)>> {
         let module_info = self.get_module_info(handle)?;
         let ast = self.get_ast(handle)?;
@@ -1984,7 +1986,7 @@ impl<'a> Transaction<'a> {
                     if error_range.contains_range(range) {
                         let unknown_name = module_info.code_at(error_range);
                         for (handle_to_import_from, export) in
-                            self.search_exports_exact(unknown_name)
+                            self.search_exports_exact(unknown_name, custom_thread_pool)
                         {
                             self.create_quickfix_action_for_export(
                                 handle,
@@ -2847,6 +2849,7 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         import_format: ImportFormat,
         supports_completion_item_details: bool,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Vec<CompletionItem> {
         self.completion_with_incomplete(
             handle,
@@ -2856,6 +2859,7 @@ impl<'a> Transaction<'a> {
                 supports_completion_item_details,
                 ..Default::default()
             },
+            custom_thread_pool,
         )
         .0
     }
@@ -2867,6 +2871,7 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         import_format: ImportFormat,
         options: CompletionOptions,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool) {
         self.completion_with_incomplete_impl(
             handle,
@@ -2874,6 +2879,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             None::<fn(&CompletionItem) -> Option<usize>>,
+            custom_thread_pool,
         )
     }
 
@@ -2884,6 +2890,7 @@ impl<'a> Transaction<'a> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mru_index: F,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -2894,6 +2901,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             Some(mru_index),
+            custom_thread_pool,
         )
     }
 
@@ -2904,6 +2912,7 @@ impl<'a> Transaction<'a> {
         import_format: ImportFormat,
         options: CompletionOptions,
         mru_index: Option<F>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> (Vec<CompletionItem>, bool)
     where
         F: FnMut(&CompletionItem) -> Option<usize>,
@@ -2922,6 +2931,7 @@ impl<'a> Transaction<'a> {
             import_format,
             options,
             mru_index,
+            custom_thread_pool,
         );
         results.sort_by(|item1, item2| {
             item1
@@ -3010,59 +3020,73 @@ impl<'a> Transaction<'a> {
         false
     }
 
-    pub fn search_exports_exact(&self, name: &str) -> Vec<(Handle, Export)> {
-        self.search_exports(|handle, exports_data, exports| {
-            let name = Name::new(name);
-            match exports.get(&name) {
-                Some(location) => {
-                    if let Some((canonical_handle, export)) =
-                        self.export_from_location(handle, &name, location)
-                    {
-                        let mut results = vec![(canonical_handle.dupe(), export.clone())];
-                        if canonical_handle != *handle
-                            && (Self::should_include_reexport(handle, &canonical_handle)
-                                || (exports_data.is_explicit_reexport(&name)
-                                    && Self::allows_explicit_reexport(handle)))
+    pub fn search_exports_exact(
+        &self,
+        name: &str,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Vec<(Handle, Export)> {
+        self.search_exports(
+            |handle, exports_data, exports| {
+                let name = Name::new(name);
+                match exports.get(&name) {
+                    Some(location) => {
+                        if let Some((canonical_handle, export)) =
+                            self.export_from_location(handle, &name, location)
                         {
-                            results.push((handle.dupe(), export));
+                            let mut results = vec![(canonical_handle.dupe(), export.clone())];
+                            if canonical_handle != *handle
+                                && (Self::should_include_reexport(handle, &canonical_handle)
+                                    || (exports_data.is_explicit_reexport(&name)
+                                        && Self::allows_explicit_reexport(handle)))
+                            {
+                                results.push((handle.dupe(), export));
+                            }
+                            results
+                        } else {
+                            Vec::new()
                         }
-                        results
-                    } else {
-                        Vec::new()
                     }
+                    None => Vec::new(),
                 }
-                None => Vec::new(),
-            }
-        })
+            },
+            custom_thread_pool,
+        )
     }
 
-    pub fn search_exports_fuzzy(&self, pattern: &str) -> Vec<(Handle, String, Export)> {
-        let mut res = self.search_exports(|handle, exports_data, exports| {
-            let matcher = SkimMatcherV2::default().smart_case();
-            let mut results = Vec::new();
-            for (name, location) in exports.iter() {
-                let name_str = name.as_str();
-                if let Some(score) = matcher.fuzzy_match(name_str, pattern)
-                    && let Some((canonical_handle, export)) =
-                        self.export_from_location(handle, name, location)
-                {
-                    results.push((
-                        score,
-                        canonical_handle.dupe(),
-                        name_str.to_owned(),
-                        export.clone(),
-                    ));
-                    if canonical_handle != *handle
-                        && (Self::should_include_reexport(handle, &canonical_handle)
-                            || (exports_data.is_explicit_reexport(name)
-                                && Self::allows_explicit_reexport(handle)))
+    pub fn search_exports_fuzzy(
+        &self,
+        pattern: &str,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Vec<(Handle, String, Export)> {
+        let mut res = self.search_exports(
+            |handle, exports_data, exports| {
+                let matcher = SkimMatcherV2::default().smart_case();
+                let mut results = Vec::new();
+                for (name, location) in exports.iter() {
+                    let name_str = name.as_str();
+                    if let Some(score) = matcher.fuzzy_match(name_str, pattern)
+                        && let Some((canonical_handle, export)) =
+                            self.export_from_location(handle, name, location)
                     {
-                        results.push((score, handle.dupe(), name_str.to_owned(), export));
+                        results.push((
+                            score,
+                            canonical_handle.dupe(),
+                            name_str.to_owned(),
+                            export.clone(),
+                        ));
+                        if canonical_handle != *handle
+                            && (Self::should_include_reexport(handle, &canonical_handle)
+                                || (exports_data.is_explicit_reexport(name)
+                                    && Self::allows_explicit_reexport(handle)))
+                        {
+                            results.push((score, handle.dupe(), name_str.to_owned(), export));
+                        }
                     }
                 }
-            }
-            results
-        });
+                results
+            },
+            custom_thread_pool,
+        );
         res.sort_by_key(|(score, _, _, _)| Reverse(*score));
         res.into_map(|(_, handle, name, export)| (handle, name, export))
     }

@@ -308,7 +308,7 @@ impl InferArgs {
                                 let error_range = error.range();
                                 let unknown_name = module_info.code_at(error_range);
                                 let imports: Vec<(TextSize, String, String)> = transaction
-                                    .search_exports_exact(unknown_name)
+                                    .search_exports_exact(unknown_name, None)
                                     .into_iter()
                                     .map(|(handle_to_import_from, _)| {
                                         insert_import_edit_with_forced_import_format(

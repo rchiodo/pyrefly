@@ -3690,6 +3690,7 @@ impl Server {
                             mru_snapshot.index_for(label, auto_import_text)
                         }
                     },
+                    Some(&self.lsp_thread_pool),
                 )
             })
             .unwrap_or_default();
@@ -3737,8 +3738,12 @@ impl Server {
         // instead of always targeting cell 1 (position 0 of the combined AST).
         let triggered_cell_index = self.maybe_get_cell_index(uri);
         if allow_quickfix
-            && let Some(quickfixes) =
-                transaction.local_quickfix_code_actions_sorted(&handle, range, import_format)
+            && let Some(quickfixes) = transaction.local_quickfix_code_actions_sorted(
+                &handle,
+                range,
+                import_format,
+                Some(&self.lsp_thread_pool),
+            )
         {
             actions.extend(quickfixes.into_iter().filter_map(
                 |(title, info, range, insert_text)| {
@@ -4365,7 +4370,7 @@ impl Server {
         query: &str,
     ) -> Vec<SymbolInformation> {
         transaction
-            .workspace_symbols(query)
+            .workspace_symbols(query, Some(&self.lsp_thread_pool))
             .unwrap_or_default()
             .into_iter()
             .filter_map(|(name, kind, location)| {

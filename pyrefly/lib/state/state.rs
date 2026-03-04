@@ -652,6 +652,7 @@ impl<'a> Transaction<'a> {
     pub fn search_exports<V: Send + Sync>(
         &self,
         searcher: impl Fn(&Handle, &Exports, &SmallMap<Name, ExportLocation>) -> Vec<V> + Sync,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Vec<V> {
         // Make sure all the modules are in updated_modules.
         // We have to get a mutable module data to do the lookup we need anyway.
@@ -669,7 +670,8 @@ impl<'a> Transaction<'a> {
         for chunk in &self.data.updated_modules.iter_unordered().chunks(1000) {
             tasks.push((), chunk.collect_vec(), false);
         }
-        self.data.state.threads.spawn_many(|| {
+        let pool = custom_thread_pool.unwrap_or(&self.data.state.threads);
+        pool.spawn_many(|| {
             tasks.work_without_cancellation(|_, modules| {
                 let mut thread_local_results = Vec::new();
                 for (handle, module_data) in modules {
