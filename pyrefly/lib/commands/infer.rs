@@ -245,7 +245,7 @@ impl InferArgs {
             return Err(anyhow::anyhow!("Failed to query sourcedb."));
         }
         for handle in handles {
-            transaction.run(&[handle.dupe()], Require::Everything);
+            transaction.run(&[handle.dupe()], Require::Everything, None);
             let stdlib = transaction.get_stdlib(&handle);
             let inferred_types: Option<Vec<(ruff_text_size::TextSize, Type, AnnotationKind)>> =
                 transaction.inferred_types(&handle, flags.return_types(), flags.containers());

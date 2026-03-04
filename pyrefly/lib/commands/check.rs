@@ -817,7 +817,7 @@ impl CheckArgs {
         if self.output.summary != Summary::None {
             transaction.set_subscriber(Some(Box::new(ProgressBarSubscriber::new())));
         }
-        transaction.run(handles, require);
+        transaction.run(handles, require, None);
         if self.output.summary != Summary::None {
             transaction.set_subscriber(None);
         }

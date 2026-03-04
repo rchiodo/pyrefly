@@ -1471,7 +1471,12 @@ impl<'a> Transaction<'a> {
         })
     }
 
-    fn run_step(&mut self, handles: &[Handle], require: Require) -> Result<(), Cancelled> {
+    fn run_step(
+        &mut self,
+        handles: &[Handle],
+        require: Require,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Result<(), Cancelled> {
         let run_start = Instant::now();
 
         self.data.now.next();
@@ -1505,7 +1510,8 @@ impl<'a> Transaction<'a> {
         if todo_count == 0 {
             cancelled.fetch_or(self.work().is_err(), Ordering::Relaxed);
         } else {
-            self.data.state.threads.spawn_many(|| {
+            let pool = custom_thread_pool.unwrap_or(&self.data.state.threads);
+            pool.spawn_many(|| {
                 cancelled.fetch_or(self.work().is_err(), Ordering::Relaxed);
             });
         }
@@ -1564,7 +1570,12 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn run_internal(&mut self, handles: &[Handle], require: Require) -> Result<(), Cancelled> {
+    fn run_internal(
+        &mut self,
+        handles: &[Handle],
+        require: Require,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Result<(), Cancelled> {
         let run_number = self.data.state.run_count.fetch_add(1, Ordering::SeqCst);
         // Compute stdlib once before the epoch loop. Stdlib is deterministic for a
         // given SysInfo and does not depend on user code, so it only needs to run once.
@@ -1611,7 +1622,7 @@ impl<'a> Transaction<'a> {
 
         for i in 1..=MAX_EPOCHS {
             debug!("Running epoch {i} of run {run_number}");
-            self.run_step(handles, require)?;
+            self.run_step(handles, require, custom_thread_pool)?;
             let changed = mem::take(&mut *self.data.changed.lock());
             if changed.is_empty() {
                 return Ok(());
@@ -1634,7 +1645,7 @@ impl<'a> Transaction<'a> {
                 // Just invalidate everything in the cycle and recompute it all.
                 // Use coarse-grained invalidation to ensure all cyclic modules reach stable state
                 self.invalidate_rdeps(changed.into_map(|(m, _)| m));
-                return self.run_step(handles, require);
+                return self.run_step(handles, require, custom_thread_pool);
             }
 
             // No cycle detected. Merge the new deps into our tracking set.
@@ -1658,11 +1669,16 @@ impl<'a> Transaction<'a> {
         );
         let changed = mem::take(&mut *self.data.changed.lock());
         self.invalidate_rdeps(changed.into_map(|(m, _)| m));
-        self.run_step(handles, require)
+        self.run_step(handles, require, custom_thread_pool)
     }
 
-    pub fn run(&mut self, handles: &[Handle], require: Require) {
-        let _ = self.run_internal(handles, require);
+    pub fn run(
+        &mut self,
+        handles: &[Handle],
+        require: Require,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) {
+        let _ = self.run_internal(handles, require, custom_thread_pool);
     }
 
     pub(crate) fn ad_hoc_solve<R: Sized, F: FnOnce(AnswersSolver<TransactionHandle>) -> R>(
@@ -2385,8 +2401,13 @@ impl<'a> AsRef<Transaction<'a>> for CommittingTransaction<'a> {
 pub struct CancellableTransaction<'a>(Transaction<'a>);
 
 impl CancellableTransaction<'_> {
-    pub fn run(&mut self, handles: &[Handle], require: Require) -> Result<(), Cancelled> {
-        self.0.run_internal(handles, require)
+    pub fn run(
+        &mut self,
+        handles: &[Handle],
+        require: Require,
+        custom_thread_pool: Option<&ThreadPool>,
+    ) -> Result<(), Cancelled> {
+        self.0.run_internal(handles, require, custom_thread_pool)
     }
 
     pub fn get_cancellation_handle(&self) -> CancellationHandle {
@@ -2602,9 +2623,12 @@ impl State {
         require: RequireLevels,
         subscriber: Option<Box<dyn Subscriber>>,
         telemetry: Option<&mut TelemetryEvent>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
         let mut transaction = self.new_committable_transaction(require.default, subscriber);
-        transaction.transaction.run(handles, require.specified);
+        transaction
+            .transaction
+            .run(handles, require.specified, custom_thread_pool);
         self.commit_transaction(transaction, telemetry);
     }
 
@@ -2614,8 +2638,11 @@ impl State {
         handles: &[Handle],
         require: Require,
         telemetry: Option<&mut TelemetryEvent>,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
-        transaction.transaction.run(handles, require);
+        transaction
+            .transaction
+            .run(handles, require, custom_thread_pool);
         self.commit_transaction(transaction, telemetry);
     }
 }

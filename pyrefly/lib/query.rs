@@ -962,7 +962,7 @@ impl Query {
             .new_committable_transaction(Require::Exports, None);
         let new_transaction_mut = transaction.as_mut();
         new_transaction_mut.invalidate_events(events);
-        new_transaction_mut.run(&[], Require::Exports);
+        new_transaction_mut.run(&[], Require::Exports, None);
         self.state.commit_transaction(transaction, None);
         let all_files = self.files.lock().iter().cloned().collect::<Vec<_>>();
         self.add_files(all_files);
@@ -975,7 +975,9 @@ impl Query {
             .state
             .new_committable_transaction(Require::Exports, None);
         let handles = files.into_map(|(name, file)| self.make_handle(name, file));
-        transaction.as_mut().run(&handles, Require::Everything);
+        transaction
+            .as_mut()
+            .run(&handles, Require::Everything, None);
         let errors = transaction.as_mut().get_errors(&handles);
         self.state.commit_transaction(transaction, None);
         let project_root = PathBuf::new();
@@ -1283,7 +1285,7 @@ impl Query {
             path.clone(),
             Some(Arc::new(FileContents::from_source(code))),
         )]);
-        t.run(&[handle.dupe()], Require::Everything);
+        t.run(&[handle.dupe()], Require::Everything, None);
         let errors = t.get_errors([handle]).collect_errors();
         if !errors.shown.is_empty() {
             let mut res = Vec::new();

@@ -1443,6 +1443,7 @@ impl Server {
                 self.validate_in_memory_and_commit_if_possible(
                     ide_transaction_manager,
                     telemetry_event,
+                    Some(&self.lsp_thread_pool),
                 );
             }
             LspEvent::CancelRequest(id) => {
@@ -1663,7 +1664,11 @@ impl Server {
                 //
                 // Validating in-memory files is relatively cheap, since we only actually recheck open files which have
                 // changed file contents, so it's simpler to just always do it.
-                self.validate_in_memory_for_transaction(&mut transaction, telemetry_event);
+                self.validate_in_memory_for_transaction(
+                    &mut transaction,
+                    telemetry_event,
+                    Some(&self.lsp_thread_pool),
+                );
                 info!("Handling non-canceled request {} ({})", x.method, &x.id);
                 if let Some(params) = as_request::<GotoDefinition>(&x) {
                     if let Some(params) = self
@@ -2330,6 +2335,7 @@ impl Server {
         &self,
         transaction: &mut Transaction<'_>,
         telemetry: &mut TelemetryEvent,
+        custom_thread_pool: Option<&ThreadPool>,
     ) -> Vec<Handle> {
         let validate_start = Instant::now();
         let handles = self.get_open_file_handles();
@@ -2340,7 +2346,7 @@ impl Server {
                 .map(|x| (x.0.clone(), Some(Arc::new(x.1.to_file_contents()))))
                 .collect::<Vec<_>>(),
         );
-        transaction.run(&handles, Require::Everything);
+        transaction.run(&handles, Require::Everything, custom_thread_pool);
         telemetry.set_validate_duration(validate_start.elapsed());
         handles
     }
@@ -2463,6 +2469,7 @@ impl Server {
         &'a self,
         ide_transaction_manager: &mut TransactionManager<'a>,
         telemetry: &mut TelemetryEvent,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
         let possibly_committable_transaction =
             ide_transaction_manager.get_possibly_committable_transaction(&self.state);
@@ -2470,6 +2477,7 @@ impl Server {
             ide_transaction_manager,
             possibly_committable_transaction,
             telemetry,
+            custom_thread_pool,
         );
     }
 
@@ -2569,12 +2577,14 @@ impl Server {
         ide_transaction_manager: &mut TransactionManager<'a>,
         mut possibly_committable_transaction: Result<CommittingTransaction<'a>, Transaction<'a>>,
         telemetry: &mut TelemetryEvent,
+        custom_thread_pool: Option<&ThreadPool>,
     ) {
         let transaction = match &mut possibly_committable_transaction {
             Ok(transaction) => transaction.as_mut(),
             Err(transaction) => transaction,
         };
-        let handles = self.validate_in_memory_for_transaction(transaction, telemetry);
+        let handles =
+            self.validate_in_memory_for_transaction(transaction, telemetry, custom_thread_pool);
         match possibly_committable_transaction {
             Ok(transaction) => {
                 self.state.commit_transaction(transaction, Some(telemetry));
@@ -2763,7 +2773,11 @@ impl Server {
                 telemetry_event.set_invalidate_duration(invalidate_start.elapsed());
 
                 // Run transaction prioritizing currently-open files, sending diagnostics as soon as they are available via the subscriber
-                server.validate_in_memory_for_transaction(transaction.as_mut(), telemetry_event);
+                server.validate_in_memory_for_transaction(
+                    transaction.as_mut(),
+                    telemetry_event,
+                    None,
+                );
 
                 // Wait in a loop while do_not_commit_recheck flag is set (testing only)
                 while server.do_not_commit_recheck.load(Ordering::SeqCst) {
@@ -2782,6 +2796,7 @@ impl Server {
                     &[],
                     Require::Everything,
                     Some(telemetry_event),
+                    None,
                 );
                 *server.currently_streaming_diagnostics_for_handles.write() = None;
                 // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
@@ -2826,7 +2841,7 @@ impl Server {
             .state
             .new_committable_transaction(Require::Exports, None);
         let validate_start = Instant::now();
-        transaction.as_mut().run(&handles, Require::Indexing);
+        transaction.as_mut().run(&handles, Require::Indexing, None);
         telemetry.set_validate_duration(validate_start.elapsed());
         self.state.commit_transaction(transaction, Some(telemetry));
         // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
@@ -2866,7 +2881,7 @@ impl Server {
                 .state
                 .new_committable_transaction(Require::Exports, None);
             let validate_start = Instant::now();
-            transaction.as_mut().run(&handles, Require::Indexing);
+            transaction.as_mut().run(&handles, Require::Indexing, None);
             telemetry.set_validate_duration(validate_start.elapsed());
             self.state.commit_transaction(transaction, Some(telemetry));
             // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
@@ -2978,6 +2993,7 @@ impl Server {
             self.validate_in_memory_and_commit_if_possible(
                 ide_transaction_manager,
                 telemetry_event,
+                Some(&self.lsp_thread_pool),
             );
         }
         // Skip background indexing if we're still waiting for the initial workspace config.
@@ -3043,7 +3059,11 @@ impl Server {
                     .as_mut()
                     .map(|handles| handles.shift_remove(&handle));
             }
-            self.validate_in_memory_and_commit_if_possible(ide_transaction_manager, telemetry);
+            self.validate_in_memory_and_commit_if_possible(
+                ide_transaction_manager,
+                telemetry,
+                Some(&self.lsp_thread_pool),
+            );
         }
         Ok(())
     }
@@ -3196,7 +3216,11 @@ impl Server {
                 "Notebook {} changed, prepare to validate open files.",
                 file_path.display()
             );
-            self.validate_in_memory_and_commit_if_possible(ide_transaction_manager, telemetry);
+            self.validate_in_memory_and_commit_if_possible(
+                ide_transaction_manager,
+                telemetry,
+                Some(&self.lsp_thread_pool),
+            );
         }
         Ok(())
     }
@@ -3342,8 +3366,11 @@ impl Server {
                     .state
                     .new_committable_transaction(Require::Exports, None);
                 transaction.as_mut().set_memory(vec![(path, None)]);
-                let _ = server
-                    .validate_in_memory_for_transaction(transaction.as_mut(), telemetry_event);
+                let _ = server.validate_in_memory_for_transaction(
+                    transaction.as_mut(),
+                    telemetry_event,
+                    None,
+                );
                 server
                     .state
                     .commit_transaction(transaction, Some(telemetry_event));
@@ -4039,7 +4066,11 @@ impl Server {
                     .cancellation_handles
                     .lock()
                     .insert(request_id.clone(), transaction.get_cancellation_handle());
-                server.validate_in_memory_for_transaction(transaction.as_mut(), telemetry_event);
+                server.validate_in_memory_for_transaction(
+                    transaction.as_mut(),
+                    telemetry_event,
+                    None,
+                );
                 match find_fn(&mut transaction, &handle, definition) {
                     Ok(results) => {
                         server.cancellation_handles.lock().remove(&request_id);
@@ -4781,7 +4812,11 @@ impl Server {
                 let invalidate_start = Instant::now();
                 transaction.as_mut().invalidate_config();
                 telemetry_event.set_invalidate_duration(invalidate_start.elapsed());
-                server.validate_in_memory_for_transaction(transaction.as_mut(), telemetry_event);
+                server.validate_in_memory_for_transaction(
+                    transaction.as_mut(),
+                    telemetry_event,
+                    None,
+                );
                 // Commit will be blocked until there are no ongoing reads.
                 // If we have some long running read jobs that can be cancelled, we should cancel them
                 // to unblock committing transactions.
@@ -4794,6 +4829,7 @@ impl Server {
                     &[],
                     Require::Everything,
                     Some(telemetry_event),
+                    None,
                 );
                 *server.currently_streaming_diagnostics_for_handles.write() = None;
                 // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
@@ -5213,7 +5249,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             move |transaction, handle, definition| {
-                transaction.run(&[handle.dupe()], Require::Everything)?;
+                transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
                 else {
@@ -5268,7 +5304,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             move |transaction, handle, definition| {
-                transaction.run(&[handle.dupe()], Require::Everything)?;
+                transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
                 else {
@@ -5280,7 +5316,7 @@ impl Server {
                     &definition,
                     &target,
                 )?;
-                transaction.run(&handles, Require::Everything)?;
+                transaction.run(&handles, Require::Everything, None)?;
                 Ok(Self::type_hierarchy_subtype_items(
                     transaction,
                     &target,

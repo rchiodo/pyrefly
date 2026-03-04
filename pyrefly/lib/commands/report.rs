@@ -695,7 +695,7 @@ impl ReportArgs {
         }
 
         let mut report: HashMap<String, FileReport> = HashMap::new();
-        transaction.run(handles.as_slice(), Require::Everything);
+        transaction.run(handles.as_slice(), Require::Everything, None);
 
         let shadowed = if prefer_stubs {
             Self::py_paths_shadowed_by_pyi(&handles)

@@ -75,7 +75,7 @@ else:
     ];
     let mut transaction = state.new_transaction(Require::Exports, None);
     transaction.set_memory(test_env.get_memory());
-    transaction.run(&handles, Require::Everything);
+    transaction.run(&handles, Require::Everything, None);
     transaction
         .get_errors(&handles)
         .check_against_expectations()
@@ -121,7 +121,7 @@ fn test_multiple_path() {
             Some(Arc::new(FileContents::from_source((*contents).to_owned()))),
         )
     }));
-    transaction.run(&handles, Require::Everything);
+    transaction.run(&handles, Require::Everything, None);
     let loads = transaction.get_errors(handles.iter());
     let project_root = PathBuf::new();
     print_errors(project_root.as_path(), &loads.collect_errors().shown);
@@ -141,7 +141,7 @@ fn test_change_require() {
 
     let mut t = state.new_committable_transaction(Require::Exports, None);
     t.as_mut().set_memory(env.get_memory());
-    t.as_mut().run(&[handle.dupe()], Require::Exports);
+    t.as_mut().run(&[handle.dupe()], Require::Exports, None);
     state.commit_transaction(t, None);
 
     assert_eq!(
@@ -162,6 +162,7 @@ fn test_change_require() {
         },
         None,
         None,
+        None,
     );
     assert_eq!(
         state
@@ -179,6 +180,7 @@ fn test_change_require() {
             specified: Require::Everything,
             default: Require::Exports,
         },
+        None,
         None,
         None,
     );
@@ -208,12 +210,12 @@ fn test_crash_on_search() {
         PathBuf::from("foo.py"),
         Some(Arc::new(FileContents::from_source("x = 3".to_owned()))),
     )]);
-    t.as_mut().run(&[], Require::Everything); // This run breaks reproduction (but is now required)
+    t.as_mut().run(&[], Require::Everything, None); // This run breaks reproduction (but is now required)
     state.commit_transaction(t, None);
 
     // Now we need to increment the step counter.
     let mut t = state.new_committable_transaction(REQUIRE, None);
-    t.as_mut().run(&[], Require::Everything);
+    t.as_mut().run(&[], Require::Everything, None);
     state.commit_transaction(t, None);
 
     // Now we run two searches, this used to crash
@@ -291,7 +293,7 @@ x: int = 1
         PathBuf::from("test_module.py"),
         Some(Arc::new(FileContents::from_source(test_code.to_owned()))),
     )]);
-    transaction.run(&[handle.dupe()], Require::Everything);
+    transaction.run(&[handle.dupe()], Require::Everything, None);
 
     let errors = transaction.get_errors([&handle]).collect_errors();
 
@@ -418,7 +420,7 @@ fn test_notebook_reload_after_parse_failure() {
 
     // First run: malformed notebook produces load error
     let mut t = state.new_committable_transaction(Require::Exports, None);
-    t.as_mut().run(&[handle.dupe()], Require::Errors);
+    t.as_mut().run(&[handle.dupe()], Require::Errors, None);
     state.commit_transaction(t, None);
     assert_eq!(
         1,
@@ -443,7 +445,7 @@ fn test_notebook_reload_after_parse_failure() {
     let mut t = state.new_committable_transaction(Require::Exports, None);
     t.as_mut()
         .invalidate_disk(std::slice::from_ref(&notebook_path));
-    t.as_mut().run(&[handle.dupe()], Require::Errors);
+    t.as_mut().run(&[handle.dupe()], Require::Errors, None);
     state.commit_transaction(t, None);
 
     assert_eq!(
@@ -514,7 +516,7 @@ fn test_crash_on_cross_module_type_alias_ref() {
 
     let state = State::new(finder);
     let mut transaction = state.new_transaction(Require::Exports, None);
-    transaction.run(&[handle], Require::Everything);
+    transaction.run(&[handle], Require::Everything, None);
 }
 
 /// Verify that stdlib computation is cached across transaction runs.
