@@ -42,6 +42,7 @@ use crate::binding::binding::BindingUndecoratedFunctionRange;
 use crate::binding::binding::BindingYield;
 use crate::binding::binding::BindingYieldFrom;
 use crate::binding::binding::ExhaustivenessKind;
+use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::FunctionDefData;
 use crate::binding::binding::FunctionStubOrImpl;
 use crate::binding::binding::IsAsync;
@@ -171,7 +172,7 @@ impl<'a> SelfAttrNames<'a> {
                 (
                     n,
                     InstanceAttribute(
-                        super::binding::ExprOrBinding::Binding(Binding::Any(AnyStyle::Implicit)),
+                        ExprOrBinding::Binding(Binding::Any(AnyStyle::Implicit)),
                         None,
                         r,
                         MethodSelfKind::Instance,
