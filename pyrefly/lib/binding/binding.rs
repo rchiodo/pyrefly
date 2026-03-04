@@ -492,7 +492,7 @@ impl Keyed for KeyClassBaseType {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassBaseType(self.clone()))
@@ -580,7 +580,7 @@ impl Keyed for KeyVarianceCheck {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         None
@@ -684,7 +684,7 @@ impl Keyed for KeyClassMetadata {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassMetadata(self.clone()))
@@ -706,7 +706,7 @@ impl Keyed for KeyClassMro {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassMro(self.clone()))
@@ -728,7 +728,7 @@ impl Keyed for KeyAbstractClassCheck {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyAbstractClassCheck(self.clone()))
