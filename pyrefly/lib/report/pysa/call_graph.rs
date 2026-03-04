@@ -61,6 +61,7 @@ use serde::Serialize;
 use starlark_map::Hashed;
 use vec1::Vec1;
 
+use crate::alt::call::CallTarget;
 use crate::alt::call::CallTargetLookup;
 use crate::alt::types::decorated_function::DecoratedFunction;
 use crate::binding::binding::KeyDecoratedFunction;
@@ -68,6 +69,9 @@ use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::error::collector::ErrorCollector;
 use crate::error::style::ErrorStyle;
 use crate::report::pysa::ast_visitor::AstScopedVisitor;
+use crate::report::pysa::ast_visitor::ExportClassDecorators;
+use crate::report::pysa::ast_visitor::ExportDefaultArguments;
+use crate::report::pysa::ast_visitor::ExportFunctionDecorators;
 use crate::report::pysa::ast_visitor::ScopeExportedFunctionFlags;
 use crate::report::pysa::ast_visitor::Scopes;
 use crate::report::pysa::ast_visitor::visit_module_ast;
@@ -2306,7 +2310,7 @@ impl<'a> CallGraphVisitor<'a> {
 
     fn resolve_pyrefly_target(
         &self,
-        pyrefly_target: Option<crate::alt::call::CallTargetLookup>,
+        pyrefly_target: Option<CallTargetLookup>,
         callee_expr: Option<AnyNodeRef>,
         callee_type: Option<&Type>,
         return_type: ScalarTypeProperties,
@@ -2315,10 +2319,7 @@ impl<'a> CallGraphVisitor<'a> {
         exclude_object_methods: bool,
     ) -> CallCallees<FunctionRef> {
         match pyrefly_target {
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::BoundMethod(
-                type_,
-                target,
-            ))) => {
+            Some(CallTargetLookup::Ok(box CallTarget::BoundMethod(type_, target))) => {
                 // Calling a method on a class instance.
                 self.call_targets_from_method_name(
                     &method_name_from_function(&target.1),
@@ -2335,11 +2336,7 @@ impl<'a> CallGraphVisitor<'a> {
                 )
                 .into_call_callees()
             }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::BoundMethodOverload(
-                type_,
-                targets,
-                ..,
-            ))) => {
+            Some(CallTargetLookup::Ok(box CallTarget::BoundMethodOverload(type_, targets, ..))) => {
                 targets
                     .map(|target| {
                         self.call_targets_from_method_name(
@@ -2364,8 +2361,8 @@ impl<'a> CallGraphVisitor<'a> {
                     })
                     .unwrap()
             }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::Function(function))) => {
-                self.call_targets_from_callable_type(
+            Some(CallTargetLookup::Ok(box CallTarget::Function(function))) => self
+                .call_targets_from_callable_type(
                     &function.1,
                     callee_type,
                     callee_expr,
@@ -2374,12 +2371,8 @@ impl<'a> CallGraphVisitor<'a> {
                     unknown_callee_as_direct_call,
                     exclude_object_methods,
                 )
-                .into_call_callees()
-            }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::FunctionOverload(
-                functions,
-                ..,
-            ))) => {
+                .into_call_callees(),
+            Some(CallTargetLookup::Ok(box CallTarget::FunctionOverload(functions, ..))) => {
                 functions
                     .map(|function| {
                         self.call_targets_from_method_name(
@@ -2404,11 +2397,7 @@ impl<'a> CallGraphVisitor<'a> {
                     })
                     .unwrap()
             }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::Class(
-                class_type,
-                _,
-                _,
-            ))) => {
+            Some(CallTargetLookup::Ok(box CallTarget::Class(class_type, _, _))) => {
                 // Constructing a class instance.
                 let (init_method, new_method) = self
                     .module_context
@@ -2437,9 +2426,7 @@ impl<'a> CallGraphVisitor<'a> {
                     exclude_object_methods,
                 )
             }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::TypedDict(
-                typed_dict_inner,
-            ))) => {
+            Some(CallTargetLookup::Ok(box CallTarget::TypedDict(typed_dict_inner))) => {
                 let init_method = self.module_context.transaction.ad_hoc_solve(
                     &self.module_context.handle,
                     "call_graph_typed_dict_init",
@@ -2455,7 +2442,7 @@ impl<'a> CallGraphVisitor<'a> {
                     exclude_object_methods,
                 )
             }
-            Some(CallTargetLookup::Ok(box crate::alt::call::CallTarget::Union(targets)))
+            Some(CallTargetLookup::Ok(box CallTarget::Union(targets)))
             | Some(CallTargetLookup::Error(targets)) => {
                 if targets.is_empty() {
                     debug_println!(
@@ -4247,10 +4234,9 @@ impl<'a> AstScopedVisitor for CallGraphVisitor<'a> {
             &ScopeExportedFunctionFlags {
                 include_top_level: true,
                 include_class_top_level: true,
-                include_function_decorators:
-                    super::ast_visitor::ExportFunctionDecorators::InDecoratedTarget,
-                include_class_decorators: super::ast_visitor::ExportClassDecorators::InParentScope,
-                include_default_arguments: super::ast_visitor::ExportDefaultArguments::InFunction,
+                include_function_decorators: ExportFunctionDecorators::InDecoratedTarget,
+                include_class_decorators: ExportClassDecorators::InParentScope,
+                include_default_arguments: ExportDefaultArguments::InFunction,
             },
         );
         if let Some(current_function) = &self.current_function {
@@ -4315,11 +4301,9 @@ impl<'a> AstScopedVisitor for CallGraphVisitor<'a> {
                     &ScopeExportedFunctionFlags {
                         include_top_level: false,
                         include_class_top_level: false,
-                        include_function_decorators:
-                            super::ast_visitor::ExportFunctionDecorators::Ignore,
-                        include_class_decorators: super::ast_visitor::ExportClassDecorators::Ignore,
-                        include_default_arguments:
-                            super::ast_visitor::ExportDefaultArguments::Ignore,
+                        include_function_decorators: ExportFunctionDecorators::Ignore,
+                        include_class_decorators: ExportClassDecorators::Ignore,
+                        include_default_arguments: ExportDefaultArguments::Ignore,
                     },
                 )
                 .and_then(|function_ref| function_ref.get_decorated_target());

@@ -26,6 +26,9 @@ use starlark_map::small_set::SmallSet;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Key;
 use crate::report::pysa::ast_visitor::AstScopedVisitor;
+use crate::report::pysa::ast_visitor::ExportClassDecorators;
+use crate::report::pysa::ast_visitor::ExportDefaultArguments;
+use crate::report::pysa::ast_visitor::ExportFunctionDecorators;
 use crate::report::pysa::ast_visitor::ScopeExportedFunctionFlags;
 use crate::report::pysa::ast_visitor::Scopes;
 use crate::report::pysa::ast_visitor::visit_module_ast;
@@ -109,9 +112,9 @@ impl WholeProgramCapturedVariables {
 static SCOPE_EXPORTED_FUNCTION_FLAGS: ScopeExportedFunctionFlags = ScopeExportedFunctionFlags {
     include_top_level: true,
     include_class_top_level: true,
-    include_function_decorators: super::ast_visitor::ExportFunctionDecorators::InParentScope,
-    include_class_decorators: super::ast_visitor::ExportClassDecorators::InParentScope,
-    include_default_arguments: super::ast_visitor::ExportDefaultArguments::InParentScope,
+    include_function_decorators: ExportFunctionDecorators::InParentScope,
+    include_class_decorators: ExportClassDecorators::InParentScope,
+    include_default_arguments: ExportDefaultArguments::InParentScope,
 };
 
 struct DefinitionToFunctionMapVisitor<'a> {
