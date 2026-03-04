@@ -443,7 +443,7 @@ impl Keyed for KeyConsistentOverrideCheck {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_key).range()
     }
 }
 impl Keyed for KeyClass {
@@ -536,7 +536,7 @@ impl Keyed for KeyClassSynthesizedFields {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).0).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyClassSynthesizedFields(self.clone()))
@@ -558,7 +558,7 @@ impl Keyed for KeyVariance {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.idx_to_key(bindings.get(idx).class_key).range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyVariance(self.clone()))
