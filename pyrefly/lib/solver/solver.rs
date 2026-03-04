@@ -391,6 +391,19 @@ impl Solver {
         }
     }
 
+    /// Check whether a Var represents a partial/placeholder type that would be
+    /// pinned by `pin_placeholder_type` with `pin_partial_types=true`.
+    /// This excludes Quantified (which represents an error case, not a normal partial type)
+    /// and focuses on the types created specifically for first-use inference.
+    pub fn var_is_partial(&self, var: Var) -> bool {
+        let variables = self.variables.lock();
+        let variable = variables.get(var);
+        matches!(
+            &*variable,
+            Variable::PartialQuantified(_) | Variable::PartialContained(_) | Variable::Unwrap
+        )
+    }
+
     /// Finish the type returned from a function call. This entails expanding solved variables and
     /// erasing unsolved variables without defaults from unions.
     pub fn finish_function_return(&self, mut t: Type) -> Type {

@@ -103,13 +103,13 @@ ERROR Returned type `Tensor[(M * N)]` is not assignable to declared return type 
    |            ^
    |
   Size mismatch: expected K, got (M * N)
- INFO revealed type: Dim[@_] [reveal-type]
+ INFO revealed type: Dim [reveal-type]
   --> *test_check_symbolic_binding.py:64:16 (glob)
    |
 64 |     reveal_type(n)
    |                ---
    |
- INFO revealed type: Tensor[@_] [reveal-type]
+ INFO revealed type: Tensor[Unknown] [reveal-type]
   --> *test_check_symbolic_binding.py:71:16 (glob)
    |
 71 |     reveal_type(t)

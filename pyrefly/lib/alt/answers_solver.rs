@@ -1255,8 +1255,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Store a partial answer for inline first-use pinning.
     /// `def_idx` is the Key::Definition idx of the NameAssign.
-    #[expect(dead_code)]
-    fn store_partial_answer(&self, def_idx: Idx<Key>, type_info: Arc<TypeInfo>) {
+    /// Keyed by (def_idx, current CalcStack height).
+    pub(crate) fn store_partial_answer(&self, def_idx: Idx<Key>, type_info: Arc<TypeInfo>) {
         let height = self.stack().len();
         self.thread_state
             .partial_answers
@@ -1265,8 +1265,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Remove the partial answer for a NameAssign at the current height.
-    #[expect(dead_code)]
-    fn clear_partial_answer(&self, def_idx: Idx<Key>) {
+    pub(crate) fn clear_partial_answer(&self, def_idx: Idx<Key>) {
         let height = self.stack().len();
         self.thread_state
             .partial_answers

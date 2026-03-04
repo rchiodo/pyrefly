@@ -3699,8 +3699,8 @@
     {
       "code": -2,
       "column": 12,
-      "concise_description": "revealed type: (x: list[@_], y: list[@_]) -> Class9",
-      "description": "revealed type: (x: list[@_], y: list[@_]) -> Class9",
+      "concise_description": "revealed type: (x: list[Unknown], y: list[Unknown]) -> Class9",
+      "description": "revealed type: (x: list[Unknown], y: list[Unknown]) -> Class9",
       "line": 195,
       "name": "reveal-type",
       "severity": "info",

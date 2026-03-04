@@ -1875,23 +1875,76 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Arc<TypeInfo> {
         // Special case for forward, as we don't want to re-expand the type.
-        // ForwardToFirstUse is handled identically here; the partial answer
-        // shortcut is checked in get_idx before pushing to the CalcStack.
+        // ForwardToFirstUse is handled here too: the partial answer shortcut
+        // lives in get_idx (before push), so by the time we reach solve_binding
+        // the shortcut didn't match and we fall through to normal resolution.
         if let Binding::Forward(fwd) | Binding::ForwardToFirstUse(fwd) = binding {
             return self.get_idx(*fwd);
         }
-        let mut type_info = self.binding_to_type_info(binding, errors);
+        // Inline first-use pinning for NameAssign.
+        let mut type_info = if let Binding::NameAssign(na) = binding
+            && self.solver().infer_with_first_use
+            && na.pinned_idx.is_some()
+            && na.annotation.is_none()
+            && let FirstUse::UsedBy(first_use_idx) = &na.first_use
+        {
+            let pinned_idx = na.pinned_idx.unwrap();
+            // Derive def_idx from pinned_idx (CompletedPartialType -> PTWUC -> NameAssign)
+            let def_idx = self
+                .def_idx_for_forward_to_first_use(pinned_idx)
+                .expect("pinned_idx should resolve to def_idx via CompletedPartialType chain");
+
+            // Step 1: Compute raw TypeInfo (Vars unpinned)
+            let type_info = self.binding_to_type_info(binding, errors);
+
+            // Step 2: Check whether the type actually contains partial types that
+            // need pinning. If not, skip the inline first-use evaluation entirely
+            // to avoid triggering unnecessary cycles through the binding graph.
+            let has_partial_types = {
+                let solver = self.solver();
+                let mut found = false;
+                type_info.visit(&mut |ty| {
+                    if !found {
+                        // Use the same recursive traversal as pin_all_placeholder_types
+                        fn check(t: &Type, vars: &mut Vec<Var>) {
+                            match t {
+                                Type::Var(v) => vars.push(*v),
+                                _ => t.recurse(&mut |t| check(t, vars)),
+                            }
+                        }
+                        let mut vars = vec![];
+                        check(ty, &mut vars);
+                        found = vars.iter().any(|v| solver.var_is_partial(*v));
+                    }
+                });
+                found
+            };
+
+            if !has_partial_types {
+                // No partial types to pin — skip inline first-use evaluation.
+                type_info
+            } else {
+                // Step 3: Store partial answer that the first-use solve will read and potentially pin.
+                self.store_partial_answer(def_idx, Arc::new(type_info.clone()));
+
+                // Step 4: Evaluate the first-use; throw away both the result and errors, this is *purely* for side-effects
+                //
+                // Note that if the first use is a NameAssign, this will *not* recursively trigger first-use, because
+                // we're using `binding_to_type_info` which is a lower layer and the first-use pin is in `solve_binding`.
+                // This is good - we don't want to consume length-of-chain stack space.
+                let first_use_binding = self.bindings().get(*first_use_idx);
+                let _ = self.binding_to_type_info(first_use_binding, &self.error_swallower());
+
+                // Step 5: remove the partial answer, we've finished with it, and proceed to pinning as usual before
+                // we expose this result as an answer.
+                self.clear_partial_answer(def_idx);
+                type_info
+            }
+        } else {
+            self.binding_to_type_info(binding, errors)
+        };
         type_info.visit_mut(&mut |ty| {
-            // Skip pinning for NameAssign and PartialTypeWithUpstreamsCompleted bindings
-            // when infer_with_first_use is enabled, as these bindings can contain partial
-            // types that should be pinned by first use. When infer_with_first_use is disabled,
-            // we pin immediately since there's no first-use inference mechanism.
-            let pin_partial_types = !self.solver().infer_with_first_use
-                || !matches!(
-                    binding,
-                    Binding::NameAssign(..) | Binding::PartialTypeWithUpstreamsCompleted(..)
-                );
-            self.pin_all_placeholder_types(ty, pin_partial_types, range, errors);
+            self.pin_all_placeholder_types(ty, true, range, errors);
             self.expand_vars_mut(ty);
         });
         Arc::new(type_info)
