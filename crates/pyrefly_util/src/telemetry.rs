@@ -138,6 +138,8 @@ pub struct TelemetryTransactionStats {
     pub search_exports_time: Duration,
     /// Max time a thread waited before starting work in `search_exports`.
     pub search_exports_dispatch_time: Duration,
+    /// Whether the transaction was cancelled before completing.
+    pub cancelled: bool,
 }
 
 #[derive(Default)]

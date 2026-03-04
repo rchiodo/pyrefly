@@ -545,7 +545,9 @@ impl<'a> Transaction<'a> {
             readable,
         } = self;
         drop(readable);
-        telemetry.set_transaction_stats(stats.into_inner());
+        let mut stats = stats.into_inner();
+        stats.cancelled = data.todo.get_cancellation_handle().is_cancelled();
+        telemetry.set_transaction_stats(stats);
         data
     }
 
