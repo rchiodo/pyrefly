@@ -101,7 +101,7 @@ pub struct ModuleStateMut {
     checked: AtomicEpoch,
     computed_dirty: AtomicComputedDirty,
     require: AtomicRequire,
-    compute_lock: ExclusiveLock<Step>,
+    compute_lock: ExclusiveLock,
 }
 
 impl ModuleStateMut {
@@ -160,19 +160,19 @@ impl ModuleStateMut {
     // --- Compute Guards ---
 
     /// Try to start computing a step. Returns `None` if another thread is
-    /// already computing the same step (or this step is being cleaned).
-    pub fn try_start_compute(&self, step: Step) -> Option<ComputeGuard<'_>> {
-        let exclusive = self.compute_lock.lock(step)?;
+    /// already computing (or cleaning) this module.
+    pub fn try_start_compute(&self) -> Option<ComputeGuard<'_>> {
+        let exclusive = self.compute_lock.lock()?;
         Some(ComputeGuard {
             state: self,
             _exclusive: exclusive,
         })
     }
 
-    /// Try to start clean. Uses `Step::first()` as the exclusive key,
+    /// Try to start clean. Uses the same exclusive lock as compute,
     /// preventing concurrent computation from starting while clean is in progress.
     pub fn try_start_clean(&self) -> Option<CleanGuard<'_>> {
-        let exclusive = self.compute_lock.lock(Step::first())?;
+        let exclusive = self.compute_lock.lock()?;
         Some(CleanGuard {
             state: self,
             _exclusive: exclusive,
@@ -234,13 +234,14 @@ impl ModuleStateMut {
 // ---------------------------------------------------------------------------
 
 /// Guard held while computing a step. The `ExclusiveLock` ensures only one
-/// thread computes a given step at a time.
+/// thread computes at a time. After `compute()`, call `finish()` to release
+/// the lock and get a `PostComputeGuard` for diffing and eviction.
 pub struct ComputeGuard<'a> {
     state: &'a ModuleStateMut,
-    _exclusive: ExclusiveLockGuard<'a, Step>,
+    _exclusive: ExclusiveLockGuard<'a>,
 }
 
-impl ComputeGuard<'_> {
+impl<'a> ComputeGuard<'a> {
     /// Re-check the next step under exclusive access. Another thread may have
     /// computed it between our initial check and acquiring the lock.
     pub fn next_step(&self) -> Option<Step> {
@@ -251,11 +252,35 @@ impl ComputeGuard<'_> {
         self.state.require()
     }
 
-    /// Compute a step under exclusive access, delegating to `StepsMut::compute`.
-    pub fn compute<Lookup: LookupExport + LookupAnswer>(&self, step: Step, ctx: &Context<Lookup>) {
-        self.state.steps.compute(step, ctx)
+    /// Compute a step under exclusive access, then release the lock and
+    /// return a `PostComputeGuard` for diffing and eviction.
+    pub fn compute<Lookup: LookupExport + LookupAnswer>(
+        self,
+        step: Step,
+        ctx: &Context<Lookup>,
+    ) -> PostComputeGuard<'a> {
+        self.state.steps.compute(step, ctx);
+        let ComputeGuard {
+            state, _exclusive, ..
+        } = self;
+        drop(_exclusive);
+        PostComputeGuard { state }
     }
+}
 
+// ---------------------------------------------------------------------------
+// PostComputeGuard — held after computing, lock released
+// ---------------------------------------------------------------------------
+
+/// Guard returned by `ComputeGuard::finish()`. The exclusive lock has been
+/// released, so other threads can proceed. Provides access to diffing and
+/// eviction operations that are safe without the lock (step data is in
+/// ArcSwap, old data slots are only written during clean).
+pub struct PostComputeGuard<'a> {
+    state: &'a ModuleStateMut,
+}
+
+impl PostComputeGuard<'_> {
     /// Take old exports saved before rebuild for diffing. Clears the slot.
     pub fn take_old_exports(&self) -> Option<Arc<Exports>> {
         self.state.steps.old_exports.swap(None)
@@ -294,11 +319,11 @@ impl ComputeGuard<'_> {
 // CleanGuard — held while cleaning a module
 // ---------------------------------------------------------------------------
 
-/// Guard held while cleaning a module. Uses `Step::first()` as the exclusive key,
+/// Guard held while cleaning a module. Uses the same exclusive lock as compute,
 /// preventing concurrent computation from starting while clean is in progress.
 pub struct CleanGuard<'a> {
     state: &'a ModuleStateMut,
-    _exclusive: ExclusiveLockGuard<'a, Step>,
+    _exclusive: ExclusiveLockGuard<'a>,
 }
 
 impl CleanGuard<'_> {

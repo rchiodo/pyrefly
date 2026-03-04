@@ -1001,13 +1001,13 @@ impl<'a> Transaction<'a> {
             }
 
             // Check if next step needs computing.
-            let todo = match module_data.state.next_step() {
-                Some(todo) if todo <= step => todo,
+            match module_data.state.next_step() {
+                Some(todo) if todo <= step => {}
                 _ => break,
             };
 
             // Try to acquire exclusive compute access for this step.
-            let guard = match module_data.state.try_start_compute(todo) {
+            let guard = match module_data.state.try_start_compute() {
                 Some(guard) => guard,
                 None => {
                     // Another thread is computing this step; check again.
@@ -1045,7 +1045,12 @@ impl<'a> Transaction<'a> {
                 recursion_limit_config: config.recursion_limit_config(),
             };
 
-            guard.compute(todo, &ctx);
+            // Compute the step, consuming the guard and releasing the lock.
+            // Post-compute work (diffing, invalidation, eviction) runs without
+            // the lock. This is safe because step data lives in ArcSwap
+            // (thread-safe) and old_exports/old_answers/old_solutions are only
+            // written during clean (which can't run concurrently in the same epoch).
+            let post = guard.compute(todo, &ctx);
             {
                 let mut load_result = None;
                 // Compute which exports changed for fine-grained invalidation.
@@ -1054,9 +1059,9 @@ impl<'a> Transaction<'a> {
                 let mut changed = ModuleChanges::default();
                 if todo == Step::Solutions {
                     // Take old data saved during reset_for_rebuild (swap clears slot).
-                    let old_exports = guard.take_old_exports();
-                    let old_answers = guard.take_old_answers();
-                    let old_solutions = guard.take_old_solutions();
+                    let old_exports = post.take_old_exports();
+                    let old_answers = post.take_old_answers();
+                    let old_solutions = post.take_old_solutions();
 
                     // Exports diffing: compare old vs new exports.
                     if let Some(old_exp) = old_exports {
@@ -1095,11 +1100,11 @@ impl<'a> Transaction<'a> {
                 if todo == Step::Answers && !require.keep_ast() {
                     // We have captured the Ast, and must have already built Exports (we do it serially),
                     // so won't need the Ast again.
-                    guard.evict_ast();
+                    post.evict_ast();
                 } else if todo == Step::Solutions {
                     if !require.keep_bindings() && !require.keep_answers() {
                         // From now on we can use the answers directly, so evict the bindings/answers.
-                        guard.evict_answers();
+                        post.evict_answers();
                     }
                     load_result = module_data.state.get_load();
                 }

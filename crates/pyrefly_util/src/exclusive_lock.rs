@@ -5,24 +5,27 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Define exclusive locks, where only one thread can hold the lock at a time.
+//! A blocking exclusive lock.
+//!
+//! Only one thread can hold the lock at a time. Any thread that attempts
+//! to acquire a held lock will block until the holder releases it, then
+//! receive `None` (indicating the work was already done). Callers are
+//! expected to re-check whether the work still needs doing after `None`.
 
 use std::sync::Arc;
 use std::sync::Once;
 
-use dupe::Dupe;
-
 use crate::lock::Mutex;
 
-/// Like a normal lock, but anyone who attempts to take the lock will block until the lock is
-/// released, and then not take the lock. They are expected to retry (after checking they
-/// still need the lock).
+/// A blocking exclusive lock. If the lock is unheld, `lock()` acquires it
+/// and returns `Some(guard)`. If held, `lock()` blocks until release,
+/// then returns `None`.
 #[derive(Debug)]
-pub struct ExclusiveLock<T> {
-    exclusive: Mutex<Option<Arc<(T, Once)>>>,
+pub struct ExclusiveLock {
+    exclusive: Mutex<Option<Arc<Once>>>,
 }
 
-impl<T> Default for ExclusiveLock<T> {
+impl Default for ExclusiveLock {
     fn default() -> Self {
         Self {
             exclusive: Mutex::new(None),
@@ -30,39 +33,38 @@ impl<T> Default for ExclusiveLock<T> {
     }
 }
 
-pub struct ExclusiveLockGuard<'a, T> {
-    inner: Option<&'a ExclusiveLock<T>>,
+pub struct ExclusiveLockGuard<'a> {
+    inner: Option<&'a ExclusiveLock>,
 }
 
-impl<'a, T> Drop for ExclusiveLockGuard<'a, T> {
+impl Drop for ExclusiveLockGuard<'_> {
     fn drop(&mut self) {
         if let Some(inner) = self.inner.take() {
             let mut lock = inner.exclusive.lock();
             if let Some(once) = &*lock {
-                once.1.call_once(|| ());
+                once.call_once(|| ());
                 *lock = None;
             }
         }
     }
 }
 
-impl<T: PartialEq> ExclusiveLock<T> {
-    /// If the lock is not held, take it and return a guard.
-    /// If the lock is held, and the value matches, wait for the lock to be released then return None.
-    /// If the lock is held, and the value does not match, return None immediately.
-    pub fn lock(&self, value: T) -> Option<ExclusiveLockGuard<'_, T>> {
+impl ExclusiveLock {
+    /// Attempt to acquire the lock.
+    ///
+    /// - If unheld: acquires and returns `Some(guard)`.
+    /// - If held: blocks until released, then returns `None`.
+    pub fn lock(&self) -> Option<ExclusiveLockGuard<'_>> {
         let mut exclusive = self.exclusive.lock();
         match &*exclusive {
             None => {
-                *exclusive = Some(Arc::new((value, Once::new())));
+                *exclusive = Some(Arc::new(Once::new()));
                 Some(ExclusiveLockGuard { inner: Some(self) })
             }
-            Some(m) => {
-                let m = m.dupe();
+            Some(once) => {
+                let once = Arc::clone(once);
                 drop(exclusive);
-                if m.0 == value {
-                    m.1.wait();
-                }
+                once.wait();
                 None
             }
         }
