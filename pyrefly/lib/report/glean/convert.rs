@@ -111,6 +111,8 @@ fn to_span(range: TextRange) -> src::ByteSpan {
     }
 }
 
+/// Create a Glean file fact from module info, using forward slashes for
+/// cross-platform consistency regardless of the OS path separator.
 fn file_fact(module_info: &ModuleInfo) -> src::File {
     let file_path = module_info.path().as_path();
     let relative_path = file_path
@@ -119,7 +121,8 @@ fn file_fact(module_info: &ModuleInfo) -> src::File {
         .to_str()
         .unwrap();
 
-    src::File::new(relative_path.to_owned())
+    // Normalize to forward slashes so Glean keys are consistent across platforms.
+    src::File::new(relative_path.replace('\\', "/"))
 }
 
 fn gather_nonlocal_variables(body: &[Stmt]) -> (Arc<SmallSet<Name>>, Arc<SmallSet<Name>>) {
