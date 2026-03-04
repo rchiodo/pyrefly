@@ -197,6 +197,41 @@ assert_type(y, Literal[1])
 );
 
 testcase!(
+    test_shadow_builtin_zip,
+    r#"
+from typing import assert_type
+
+def zip(*args) -> list[int]:
+    return []
+
+def f(a: list[int], b: list[int]):
+    return zip(a, b)
+
+assert_type(f([1], [2]), list[int])
+"#,
+);
+
+testcase!(
+    test_conditional_shadow_builtin_zip,
+    r#"
+from typing import assert_type
+import random
+
+cond = random.randint(0, 1)
+if cond:
+    def zip(*args) -> list[int]:
+        return []
+
+def f(a: list[int], b: list[int]):
+    return zip(a, b)
+
+# Note that we completely ignore the builtin `zip` here even though it is conditionally shadowed.
+# This matches the behavior of pyright, mypy, and ty.
+assert_type(f([1], [2]), list[int])
+"#,
+);
+
+testcase!(
     test_unordered_defs,
     r#"
 def f() -> int:
