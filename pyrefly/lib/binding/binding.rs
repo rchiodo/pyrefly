@@ -470,7 +470,7 @@ impl Keyed for KeyTParams {
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(idx).range()
+        bindings.get(idx).name.range()
     }
     fn try_to_anykey(&self) -> Option<AnyExportedKey> {
         Some(AnyExportedKey::KeyTParams(self.clone()))
