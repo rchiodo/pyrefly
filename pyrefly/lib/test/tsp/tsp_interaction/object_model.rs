@@ -177,8 +177,13 @@ impl TestTspServer {
             id,
             method: "typeServer/getComputedType".to_owned(),
             params: serde_json::json!({
-                "uri": uri,
-                "position": { "line": line, "character": character },
+                "arg": {
+                    "uri": uri,
+                    "range": {
+                        "start": { "line": line, "character": character },
+                        "end": { "line": line, "character": character }
+                    }
+                },
                 "snapshot": snapshot
             }),
             activity_key: None,
@@ -191,8 +196,13 @@ impl TestTspServer {
             id,
             method: "typeServer/getDeclaredType".to_owned(),
             params: serde_json::json!({
-                "uri": uri,
-                "position": { "line": line, "character": character },
+                "arg": {
+                    "uri": uri,
+                    "range": {
+                        "start": { "line": line, "character": character },
+                        "end": { "line": line, "character": character }
+                    }
+                },
                 "snapshot": snapshot
             }),
             activity_key: None,
@@ -205,8 +215,13 @@ impl TestTspServer {
             id,
             method: "typeServer/getExpectedType".to_owned(),
             params: serde_json::json!({
-                "uri": uri,
-                "position": { "line": line, "character": character },
+                "arg": {
+                    "uri": uri,
+                    "range": {
+                        "start": { "line": line, "character": character },
+                        "end": { "line": line, "character": character }
+                    }
+                },
                 "snapshot": snapshot
             }),
             activity_key: None,

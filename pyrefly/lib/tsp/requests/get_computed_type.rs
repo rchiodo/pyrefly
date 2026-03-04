@@ -21,16 +21,12 @@ impl<T: TspInterface> TspServer<T> {
     /// The computed type reflects the type checker's analysis of the code
     /// flow — e.g. after narrowing inside an `isinstance` guard the computed
     /// type of a variable may be more specific than its declared annotation.
-    pub fn handle_get_computed_type(&self, params: GetTypeParams) -> Result<Type, ResponseError> {
+    pub fn handle_get_computed_type(&self, params: GetTypeParams) -> Result<Option<Type>, ResponseError> {
         self.validate_snapshot(params.snapshot)?;
+        let position = params.position();
         let ty = self
             .inner
-            .get_type_at_position(&params.uri, params.position.line, params.position.character)
-            .ok_or_else(|| lsp_server::ResponseError {
-                code: lsp_server::ErrorCode::InvalidParams as i32,
-                message: "No type found at position".to_owned(),
-                data: None,
-            })?;
-        Ok(convert_type(&ty))
+            .get_type_at_position(params.uri(), position.line, position.character);
+        Ok(ty.map(|t| convert_type(&t)))
     }
 }

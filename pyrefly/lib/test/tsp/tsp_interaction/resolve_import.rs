@@ -132,12 +132,8 @@ fn test_tsp_resolve_import_not_found() {
 
     tsp.client.expect_response(Response {
         id: RequestId::from(2),
-        result: None,
-        error: Some(lsp_server::ResponseError {
-            code: lsp_server::ErrorCode::InvalidParams as i32,
-            message: "Module not found".to_owned(),
-            data: None,
-        }),
+        result: Some(serde_json::Value::Null),
+        error: None,
     });
 
     tsp.shutdown();

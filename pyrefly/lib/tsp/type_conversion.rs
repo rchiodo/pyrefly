@@ -33,6 +33,7 @@ use tsp_types::BuiltInType;
 use tsp_types::ClassType as TspClassType;
 use tsp_types::Declaration;
 use tsp_types::DeclarationCategory;
+use tsp_types::DeclarationKind;
 use tsp_types::FunctionType as TspFunctionType;
 use tsp_types::LiteralValue;
 use tsp_types::ModuleType as TspModuleType;
@@ -44,6 +45,7 @@ use tsp_types::SynthesizedType;
 use tsp_types::SynthesizedTypeMetadata;
 use tsp_types::Type as TspType;
 use tsp_types::TypeFlags;
+use tsp_types::TypeKind;
 use tsp_types::UnionType;
 
 use crate::lsp::module_helpers::to_real_path;
@@ -66,7 +68,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         PyreflyType::Ellipsis => builtin("ellipsis"),
 
         // --- Class instances (int, str, list[int], user-defined classes, etc.) ---
-        PyreflyType::ClassType(ct) => convert_class_type(ct, TypeFlags::Instance),
+        PyreflyType::ClassType(ct) => convert_class_type(ct, TypeFlags::INSTANCE),
 
         // --- Class definitions (the class object itself, e.g. `type[int]`) ---
         PyreflyType::ClassDef(cls) => convert_class_def(cls),
@@ -96,9 +98,9 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         PyreflyType::Union(u) => {
             let sub_types: Vec<TspType> = u.members.iter().map(convert_type).collect();
             TspType::Union(UnionType {
-                flags: TypeFlags::None,
+                flags: TypeFlags::NONE,
                 id: next_id(),
-                kind: "Union".to_owned(),
+                kind: TypeKind::Union,
                 sub_types,
                 type_alias_info: None,
             })
@@ -106,9 +108,9 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
 
         // --- Modules ---
         PyreflyType::Module(m) => TspType::Module(TspModuleType {
-            flags: TypeFlags::None,
+            flags: TypeFlags::NONE,
             id: next_id(),
-            kind: "Module".to_owned(),
+            kind: TypeKind::Module,
             module_name: m.to_string(),
             type_alias_info: None,
             uri: String::new(),
@@ -137,7 +139,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
             // Return the inner type but mark it as instantiable
             match inner_tsp {
                 TspType::Class(mut c) => {
-                    c.flags = TypeFlags::Instantiable;
+                    c.flags = TypeFlags::INSTANTIABLE;
                     TspType::Class(c)
                 }
                 other => other,
@@ -145,7 +147,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         }
 
         // --- SelfType is a class type ---
-        PyreflyType::SelfType(ct) => convert_class_type(ct, TypeFlags::Instance),
+        PyreflyType::SelfType(ct) => convert_class_type(ct, TypeFlags::INSTANCE),
 
         // --- Fallback: emit a SynthesizedType with the Display string ---
         _other => synthesized(ty),
@@ -153,7 +155,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
 }
 
 /// Convert a pyrefly `ClassType` (an instantiated class) to a TSP `ClassType`.
-fn convert_class_type(ct: &PyreflyClassType, flags: TypeFlags) -> TspType {
+fn convert_class_type(ct: &PyreflyClassType, flags: u32) -> TspType {
     let cls = ct.class_object();
     let declaration = make_class_declaration(cls);
     let type_args: Option<Vec<TspType>> = {
@@ -170,7 +172,7 @@ fn convert_class_type(ct: &PyreflyClassType, flags: TypeFlags) -> TspType {
         declaration: Declaration::Regular(declaration),
         flags,
         id: next_id(),
-        kind: "Class".to_owned(),
+        kind: TypeKind::Class,
         literal_value: None,
         type_alias_info: None,
         type_args,
@@ -184,9 +186,9 @@ fn convert_class_def(cls: &Class) -> TspType {
 
     TspType::Class(TspClassType {
         declaration: Declaration::Regular(declaration),
-        flags: TypeFlags::Instantiable,
+        flags: TypeFlags::INSTANTIABLE,
         id: next_id(),
-        kind: "Class".to_owned(),
+        kind: TypeKind::Class,
         literal_value: None,
         type_alias_info: None,
         type_args: None,
@@ -202,9 +204,9 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
             let declaration = make_class_declaration(cls);
             TspType::Class(TspClassType {
                 declaration: Declaration::Regular(declaration),
-                flags: TypeFlags::Literal,
+                flags: TypeFlags::LITERAL,
                 id: next_id(),
-                kind: "Class".to_owned(),
+                kind: TypeKind::Class,
                 literal_value: None,
                 type_alias_info: None,
                 type_args: None,
@@ -220,12 +222,12 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
             if let Some(lv) = literal_value {
                 TspType::Class(TspClassType {
                     declaration: Declaration::Synthesized(SynthesizedDeclaration {
-                        kind: "Synthesized".to_owned(),
+                        kind: DeclarationKind::Synthesized,
                         uri: "builtins".to_owned(),
                     }),
-                    flags: TypeFlags::Literal,
+                    flags: TypeFlags::LITERAL,
                     id: next_id(),
-                    kind: "Class".to_owned(),
+                    kind: TypeKind::Class,
                     literal_value: Some(lv),
                     type_alias_info: None,
                     type_args: None,
@@ -249,16 +251,16 @@ fn convert_function(kind: &FunctionKind, bound_to_type: Option<TspType>) -> TspT
         // SynthesizedDeclaration with the module URI. A future improvement
         // could look up the actual range from the module's AST.
         let declaration = Declaration::Synthesized(SynthesizedDeclaration {
-            kind: "Synthesized".to_owned(),
+            kind: DeclarationKind::Synthesized,
             uri: uri.clone(),
         });
 
         TspType::Function(TspFunctionType {
             bound_to_type: bound_to_type.map(Box::new),
             declaration,
-            flags: TypeFlags::Callable,
+            flags: TypeFlags::CALLABLE,
             id: next_id(),
-            kind: "Function".to_owned(),
+            kind: TypeKind::Function,
             return_type: None, // Would require inspecting the Callable signature
             specialized_types: None,
             type_alias_info: None,
@@ -266,9 +268,9 @@ fn convert_function(kind: &FunctionKind, bound_to_type: Option<TspType>) -> TspT
     } else {
         // Non-Def function kinds (IsInstance, Cast, etc.) — use synthesized
         TspType::Synthesized(SynthesizedType {
-            flags: TypeFlags::Callable,
+            flags: TypeFlags::CALLABLE,
             id: next_id(),
-            kind: "Synthesized".to_owned(),
+            kind: TypeKind::Synthesized,
             metadata: empty_synthesized_metadata(),
             stub_content: format!("{kind:?}"),
             type_alias_info: None,
@@ -288,7 +290,7 @@ fn make_class_declaration(cls: &Class) -> RegularDeclaration {
 
     RegularDeclaration {
         category: DeclarationCategory::Class,
-        kind: "Regular".to_owned(),
+        kind: DeclarationKind::Regular,
         name: Some(cls.name().to_string()),
         node: Node {
             range: lsp_range_to_tsp(lsp_range),
@@ -326,9 +328,9 @@ fn lsp_range_to_tsp(r: lsp_types::Range) -> TspRange {
 fn builtin(name: &str) -> TspType {
     TspType::BuiltInType(BuiltInType {
         declaration: None,
-        flags: TypeFlags::None,
+        flags: TypeFlags::NONE,
         id: next_id(),
-        kind: "BuiltIn".to_owned(),
+        kind: TypeKind::Builtin,
         name: name.to_owned(),
         possible_type: None,
         type_alias_info: None,
@@ -340,9 +342,9 @@ fn builtin(name: &str) -> TspType {
 fn synthesized(ty: &PyreflyType) -> TspType {
     let display = ty.to_string();
     TspType::Synthesized(SynthesizedType {
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         id: next_id(),
-        kind: "Synthesized".to_owned(),
+        kind: TypeKind::Synthesized,
         metadata: empty_synthesized_metadata(),
         stub_content: display,
         type_alias_info: None,
@@ -353,9 +355,9 @@ fn synthesized(ty: &PyreflyType) -> TspType {
 fn empty_synthesized_metadata() -> SynthesizedTypeMetadata {
     SynthesizedTypeMetadata {
         module: TspModuleType {
-            flags: TypeFlags::None,
+            flags: TypeFlags::NONE,
             id: 0,
-            kind: "Module".to_owned(),
+            kind: TypeKind::Module,
             module_name: String::new(),
             type_alias_info: None,
             uri: String::new(),

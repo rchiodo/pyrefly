@@ -49,12 +49,12 @@ fn test_tsp_get_computed_type_basic() {
             // The result should be a TSP Type JSON object with a "kind" field
             let kind = result
                 .get("kind")
-                .and_then(|v| v.as_str())
+                .and_then(|v| v.as_u64())
                 .expect("Expected 'kind' field in Type response");
-            // For `int`, we expect a ClassType with a declaration
+            // For `int`, we expect a ClassType (kind=3) with a declaration
             assert_eq!(
-                kind, "Class",
-                "Expected Class kind for int type, got: {kind}"
+                kind, 3,
+                "Expected Class kind (3) for int type, got: {kind}"
             );
             // Should have a declaration with the class name
             let decl = result
@@ -142,9 +142,9 @@ fn test_tsp_get_computed_type_none() {
             let result = resp.result.expect("Expected result in response");
             let kind = result
                 .get("kind")
-                .and_then(|v| v.as_str())
+                .and_then(|v| v.as_u64())
                 .expect("Expected 'kind' field");
-            assert_eq!(kind, "BuiltIn", "Expected BuiltIn type for None");
+            assert_eq!(kind, 0, "Expected BuiltIn type (0) for None");
             let name = result
                 .get("name")
                 .and_then(|v| v.as_str())

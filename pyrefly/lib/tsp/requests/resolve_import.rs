@@ -24,18 +24,12 @@ impl<T: TspInterface> TspServer<T> {
     pub fn handle_resolve_import(
         &self,
         params: ResolveImportParams,
-    ) -> Result<ResolveImportResponse, ResponseError> {
+    ) -> Result<Option<ResolveImportResponse>, ResponseError> {
         self.validate_snapshot(params.snapshot)?;
-        self.inner
-            .resolve_import(
-                &params.source_uri,
-                params.module_descriptor.leading_dots,
-                &params.module_descriptor.name_parts,
-            )
-            .ok_or_else(|| lsp_server::ResponseError {
-                code: lsp_server::ErrorCode::InvalidParams as i32,
-                message: "Module not found".to_owned(),
-                data: None,
-            })
+        Ok(self.inner.resolve_import(
+            &params.source_uri,
+            params.module_descriptor.leading_dots,
+            &params.module_descriptor.name_parts,
+        ))
     }
 }

@@ -25,16 +25,12 @@ impl<T: TspInterface> TspServer<T> {
     /// Currently, this piggy-backs on `get_type_at_position` which returns
     /// the computed type. A future improvement can separate the annotation
     /// type from the inferred type in the binding infrastructure.
-    pub fn handle_get_declared_type(&self, params: GetTypeParams) -> Result<Type, ResponseError> {
+    pub fn handle_get_declared_type(&self, params: GetTypeParams) -> Result<Option<Type>, ResponseError> {
         self.validate_snapshot(params.snapshot)?;
+        let position = params.position();
         let ty = self
             .inner
-            .get_type_at_position(&params.uri, params.position.line, params.position.character)
-            .ok_or_else(|| lsp_server::ResponseError {
-                code: lsp_server::ErrorCode::InvalidParams as i32,
-                message: "No type found at position".to_owned(),
-                data: None,
-            })?;
-        Ok(convert_type(&ty))
+            .get_type_at_position(params.uri(), position.line, position.character);
+        Ok(ty.map(|t| convert_type(&t)))
     }
 }

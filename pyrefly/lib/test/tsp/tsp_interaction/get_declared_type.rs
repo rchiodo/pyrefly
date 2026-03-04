@@ -46,12 +46,12 @@ fn test_tsp_get_declared_type_basic() {
             let result = resp.result.expect("Expected result in response");
             let kind = result
                 .get("kind")
-                .and_then(|v| v.as_str())
+                .and_then(|v| v.as_u64())
                 .expect("Expected 'kind' field in Type response");
-            // For `str`, we expect a ClassType with a declaration
+            // For `str`, we expect a ClassType (kind=3) with a declaration
             assert_eq!(
-                kind, "Class",
-                "Expected Class kind for str type, got: {kind}"
+                kind, 3,
+                "Expected Class kind (3) for str type, got: {kind}"
             );
             let decl = result
                 .get("declaration")

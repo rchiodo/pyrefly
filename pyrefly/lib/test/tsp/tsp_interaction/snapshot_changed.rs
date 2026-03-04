@@ -34,9 +34,11 @@ version = "1.0.0"
     tsp.server.did_open("test.py");
 
     let params = tsp.client.expect_notification("typeServer/snapshotChanged");
-    // The notification params should contain the new snapshot value.
-    let snapshot = params["snapshot"].as_i64().expect("snapshot should be an integer");
-    assert!(snapshot > 0, "snapshot should be positive after recheck");
+    // The notification params should contain old and new snapshot values.
+    let old_snapshot = params["old"].as_i64().expect("old should be an integer");
+    let new_snapshot = params["new"].as_i64().expect("new should be an integer");
+    assert_eq!(old_snapshot, 0, "old snapshot should be 0 for first change");
+    assert!(new_snapshot > 0, "new snapshot should be positive after recheck");
 
     tsp.shutdown();
 }
@@ -67,8 +69,8 @@ version = "1.0.0"
     tsp.server.did_change("change.py", "x = 2\n", 2);
 
     let params = tsp.client.expect_notification("typeServer/snapshotChanged");
-    let snapshot = params["snapshot"].as_i64().expect("snapshot should be an integer");
-    assert!(snapshot > 1, "snapshot should be > 1 after second change");
+    let new_snapshot = params["new"].as_i64().expect("new should be an integer");
+    assert!(new_snapshot > 1, "new snapshot should be > 1 after second change");
 
     tsp.shutdown();
 }

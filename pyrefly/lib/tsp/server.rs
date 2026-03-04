@@ -61,14 +61,19 @@ impl<T: TspInterface> TspServer<T> {
     ) -> anyhow::Result<ProcessEvent> {
         // Remember if this event should increment the snapshot after processing
         let should_increment_snapshot = match &event {
-            LspEvent::RecheckFinished => true,
+            LspEvent::RecheckFinished => {
+                eprintln!("TSP event: RecheckFinished (will increment snapshot)");
+                true
+            }
             // Increment on DidChange since it affects type checker state via synchronous validation
-            LspEvent::DidChangeTextDocument(_) => true,
-            // Don't increment on DidChangeWatchedFiles directly since it triggers RecheckFinished
-            // LspEvent::DidChangeWatchedFiles => true,
-            // Don't increment on DidOpen since it triggers RecheckFinished events that will increment
-            // LspEvent::DidOpenTextDocument(_) => true,
-            _ => false,
+            LspEvent::DidChangeTextDocument(_) => {
+                eprintln!("TSP event: DidChangeTextDocument (will increment snapshot)");
+                true
+            }
+            _ => {
+                eprintln!("TSP event: {:?} (no snapshot increment)", event.describe());
+                false
+            }
         };
 
         // For TSP requests, handle them specially
@@ -97,10 +102,11 @@ impl<T: TspInterface> TspServer<T> {
 
         // Increment snapshot after the inner server has processed the event
         if should_increment_snapshot && let Ok(mut current) = self.current_snapshot.lock() {
+            let old_snapshot = *current;
             *current += 1;
-            let snapshot = *current;
+            let new_snapshot = *current;
             drop(current); // Release the lock before sending the notification
-            self.send_snapshot_changed_notification(snapshot);
+            self.send_snapshot_changed_notification(old_snapshot, new_snapshot);
         }
 
         Ok(result)
@@ -121,7 +127,7 @@ impl<T: TspInterface> TspServer<T> {
     ///
     /// Called whenever the snapshot counter increments, so the client knows
     /// any previously-returned types are stale.
-    fn send_snapshot_changed_notification(&self, snapshot: i32) {
+    fn send_snapshot_changed_notification(&self, old_snapshot: i32, new_snapshot: i32) {
         let method = serde_json::to_value(TSPNotificationMethods::TypeServerSnapshotChanged)
             .expect("TSPNotificationMethods serialization is infallible");
         let method_str = method
@@ -134,7 +140,7 @@ impl<T: TspInterface> TspServer<T> {
             .sender()
             .send(Message::Notification(Notification {
                 method: method_str,
-                params: serde_json::json!({ "snapshot": snapshot }),
+                params: serde_json::json!({ "old": old_snapshot, "new": new_snapshot }),
                 activity_key: None,
             }));
     }
@@ -144,6 +150,7 @@ impl<T: TspInterface> TspServer<T> {
         _ide_transaction_manager: &mut TransactionManager<'a>,
         request: &Request,
     ) -> anyhow::Result<bool> {
+        eprintln!("TSP handle_tsp_request: method={}, params={}", request.method, serde_json::to_string(&request.params).unwrap_or_default());
         // Convert the request into a TSPRequests enum
         let wrapper = serde_json::json!({
             "method": request.method,
@@ -153,6 +160,7 @@ impl<T: TspInterface> TspServer<T> {
 
         let Ok(msg) = serde_json::from_value::<TSPRequests>(wrapper) else {
             // Not a TSP request
+            eprintln!("TSP: not a TSP request, skipping");
             return Ok(false);
         };
 
@@ -179,6 +187,7 @@ impl<T: TspInterface> TspServer<T> {
                 Ok(true)
             }
             TSPRequests::ResolveImportRequest { params, .. } => {
+                eprintln!("TSP: ResolveImport params={:?}", params);
                 let response = match self.handle_resolve_import(params) {
                     Ok(result) => Response::new_ok(request.id.clone(), result),
                     Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
@@ -187,16 +196,29 @@ impl<T: TspInterface> TspServer<T> {
                 Ok(true)
             }
             TSPRequests::GetComputedTypeRequest { params, .. } => {
+                eprintln!("TSP: GetComputedType params={}", serde_json::to_string(&params).unwrap_or_default());
                 let response = match serde_json::from_value::<tsp_types::GetTypeParams>(params) {
-                    Ok(typed_params) => match self.handle_get_computed_type(typed_params) {
-                        Ok(result) => Response::new_ok(request.id.clone(), result),
-                        Err(e) => Response::new_err(request.id.clone(), e.code, e.message),
-                    },
-                    Err(e) => Response::new_err(
-                        request.id.clone(),
-                        lsp_server::ErrorCode::InvalidParams as i32,
-                        format!("Invalid params for getComputedType: {e}"),
-                    ),
+                    Ok(typed_params) => {
+                        eprintln!("TSP: GetComputedType uri={}, position=({}, {}), snapshot={}", typed_params.uri(), typed_params.position().line, typed_params.position().character, typed_params.snapshot);
+                        match self.handle_get_computed_type(typed_params) {
+                            Ok(result) => {
+                                eprintln!("TSP: GetComputedType OK: {:?}", serde_json::to_string(&result).unwrap_or_default());
+                                Response::new_ok(request.id.clone(), result)
+                            }
+                            Err(e) => {
+                                eprintln!("TSP: GetComputedType handler error: {}", e.message);
+                                Response::new_err(request.id.clone(), e.code, e.message)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("TSP: GetComputedType params deserialization error: {}", e);
+                        Response::new_err(
+                            request.id.clone(),
+                            lsp_server::ErrorCode::InvalidParams as i32,
+                            format!("Invalid params for getComputedType: {e}"),
+                        )
+                    }
                 };
                 self.inner.send_response(response);
                 Ok(true)

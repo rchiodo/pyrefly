@@ -88,21 +88,74 @@ where
     }
 }
 
+/// The `arg` field in a getComputedType/getDeclaredType/getExpectedType request.
+///
+/// This can be either a `Node` (just `uri` + `range`) or a `Declaration`
+/// (which contains a nested `node` with `uri` + `range`, plus extra fields).
+/// We use `#[serde(untagged)]` so serde tries each variant in order.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(untagged)]
+pub enum GetTypeArg {
+    /// A Declaration with a nested `node` field containing the location.
+    /// Must come first so serde tries the more-specific shape before the less-specific one.
+    Declaration {
+        node: GetTypeArgNode,
+        #[serde(flatten)]
+        _extra: serde_json::Value,
+    },
+    /// A simple Node with `uri` and `range`.
+    Node(GetTypeArgNode),
+}
+
+/// The location fields shared by both Node and Declaration.node.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct GetTypeArgNode {
+    pub uri: String,
+    pub range: tsp::Range,
+}
+
+impl GetTypeArg {
+    /// Extract the URI from whichever variant we have.
+    pub fn uri(&self) -> &str {
+        match self {
+            GetTypeArg::Declaration { node, .. } => &node.uri,
+            GetTypeArg::Node(n) => &n.uri,
+        }
+    }
+
+    /// Extract the start position of the range (used as the query position).
+    pub fn position(&self) -> tsp::Position {
+        match self {
+            GetTypeArg::Declaration { node, .. } => node.range.start.clone(),
+            GetTypeArg::Node(n) => n.range.start.clone(),
+        }
+    }
+}
+
 /// Parameters for getComputedType, getDeclaredType, and getExpectedType requests.
 ///
-/// The generated protocol uses `Option<serde_json::Value>` for these request
-/// params, so we define a concrete params type here for handler convenience.
+/// Pylance sends `{ "arg": Node | Declaration, "snapshot": number }`.
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct GetTypeParams {
-    /// URI of the source file containing the node to query.
-    pub uri: String,
-
-    /// Zero-based line and character position identifying the node.
-    pub position: tsp::Position,
+    /// The node or declaration to query for type information.
+    pub arg: GetTypeArg,
 
     /// Snapshot version — the server returns `ServerCancelled` when stale.
     pub snapshot: i32,
+}
+
+impl GetTypeParams {
+    /// Convenience: extract the URI from the arg.
+    pub fn uri(&self) -> &str {
+        self.arg.uri()
+    }
+
+    /// Convenience: extract the start position from the arg's range.
+    pub fn position(&self) -> tsp::Position {
+        self.arg.position()
+    }
 }
 
 /// Helper to build a JSON-RPC error response for TSP handlers
