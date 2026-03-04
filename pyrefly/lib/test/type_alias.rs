@@ -1223,3 +1223,20 @@ LoggerLike = logging.Logger | logging.LoggerAdapter[Any]
 def f(x: LoggerLike | None = None): ...  # E: Expected a type form, got instance of `UnionType | type[Logger | None] | Any`
     "#,
 );
+
+testcase!(
+    test_annotated_type_alias,
+    r#"
+from typing import Annotated
+X = Annotated[int, "metadata"]
+Y = Annotated[X, "more metadata"]
+
+class C:
+    y: Y
+
+class D:
+    x: X
+    def __init__(self, c: C):
+        self.x = c.y
+"#,
+);
