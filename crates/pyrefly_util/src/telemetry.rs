@@ -67,6 +67,7 @@ pub enum TelemetryEventKind {
     InvalidateOnClose,
     PopulateProjectFiles,
     PopulateWorkspaceFiles,
+    WorkspaceDiagnosticsRepopulation,
     SourceDbRebuild,
     SourceDbRebuildInstance,
     FindFromDefinition,

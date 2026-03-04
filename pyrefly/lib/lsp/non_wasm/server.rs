@@ -1446,6 +1446,11 @@ impl Server {
                     telemetry_event,
                     Some(&self.lsp_thread_pool),
                 );
+                // After revalidating open files, publish workspace diagnostics
+                // for non-open indexed files.
+                // This does mean that iterating handles + sending diagnostics would become blocking.
+                // But in practice though the operations are usually cheap so it's OK.
+                self.publish_workspace_diagnostics_if_enabled();
             }
             LspEvent::CancelRequest(id) => {
                 info!("We should cancel request {id:?}");
@@ -2825,6 +2830,7 @@ impl Server {
                     None,
                 );
                 *server.currently_streaming_diagnostics_for_handles.write() = None;
+
                 // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
                 // the main event loop of the server. As a result, the server can do a revalidation of
                 // all the in-memory files based on the fresh main State as soon as possible.
@@ -2870,7 +2876,8 @@ impl Server {
         transaction.as_mut().run(&handles, Require::Indexing, None);
         telemetry.set_validate_duration(validate_start.elapsed());
         self.state.commit_transaction(transaction, Some(telemetry));
-        // After we finished a recheck asynchronously, we immediately send `RecheckFinished` to
+
+        // After committing project population, send RecheckFinished to
         // the main event loop of the server. As a result, the server can do a revalidation of
         // all the in-memory files based on the fresh main State as soon as possible.
         info!("Populated all files in the project path, prepare to recheck open files.");
@@ -2916,6 +2923,57 @@ impl Server {
             info!("Populated all files in the workspace, prepare to recheck open files.");
             let _ = self.lsp_queue.send(LspEvent::RecheckFinished);
         }
+    }
+
+    /// Collect and publish diagnostics for all indexed non-open Python files
+    /// in workspaces with `DiagnosticMode::Workspace`. This reads already-computed
+    /// errors from committed state (no recomputation) and publishes them for
+    /// non-open files. Filtering by workspace diagnostic mode is handled
+    /// downstream by `publish_for_handles` and `get_diag_if_shown`.
+    fn publish_workspace_diagnostics_if_enabled(&self) {
+        if !self.has_workspace_diagnostic_mode() {
+            return;
+        }
+
+        let transaction = self.state.transaction();
+        let open_files = self.open_files.read();
+
+        let handles: Vec<Handle> = transaction
+            .handles()
+            .into_iter()
+            .filter(|handle| {
+                let path = handle.path().as_path();
+                // Skip open files — they get diagnostics through the normal path
+                if open_files.contains_key(&path.to_path_buf()) {
+                    return false;
+                }
+                // Only include .py/.pyi files
+                path.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+            })
+            .collect();
+        drop(open_files);
+
+        if handles.is_empty() {
+            return;
+        }
+
+        info!(
+            "Publishing workspace diagnostics for {} non-open files.",
+            handles.len()
+        );
+
+        self.publish_for_handles(
+            &transaction,
+            &handles,
+            DiagnosticSource::CommittingTransaction,
+        );
+    }
+
+    /// Returns true if any workspace root has `DiagnosticMode::Workspace` enabled.
+    fn has_workspace_diagnostic_mode(&self) -> bool {
+        !self.workspaces.workspace_diagnostic_roots().is_empty()
     }
 
     /// Attempts to requery any open sourced_dbs for open files, and if there are changes,
@@ -3468,6 +3526,41 @@ impl Server {
         if modified {
             self.invalidate_config_and_validate_in_memory();
         }
+
+        // Sync workspace diagnostics with the current diagnostic mode.
+        // Each configuration response contains the mode value regardless of
+        // whether it actually changed, so we always re-evaluate.
+        self.recheck_queue.queue_task(
+            TelemetryEventKind::WorkspaceDiagnosticsRepopulation,
+            Box::new(move |server, _telemetry, _telemetry_event, _, _| {
+                if server.has_workspace_diagnostic_mode() {
+                    server.publish_workspace_diagnostics_if_enabled();
+                } else {
+                    // Mode is off — clear diagnostics for non-open indexed files.
+                    let transaction = server.state.transaction();
+                    let open_files = server.open_files.read();
+                    for handle in transaction.handles() {
+                        let path = handle.path().as_path();
+                        if !open_files.contains_key(&path.to_path_buf())
+                            && path
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                            && let Ok(uri) = Url::from_file_path(path)
+                        {
+                            server.connection.publish_diagnostics_for_uri(
+                                uri,
+                                Vec::new(),
+                                None,
+                                DiagnosticSource::DidClose,
+                                server.diagnostic_markdown_support,
+                            );
+                        }
+                    }
+                }
+            }),
+        );
+
         if was_awaiting_initial_config && self.indexing_mode != IndexingMode::None {
             // We need to resolve configs after invalidation completes, so enqueue that
             // calculation in the recheck queue to ensure ordering.

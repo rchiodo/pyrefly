@@ -643,7 +643,6 @@ impl Workspaces {
     }
 
     /// Returns the workspace roots that have `DiagnosticMode::Workspace` enabled.
-    #[expect(dead_code)] // Used by server.rs in a later diff.
     pub fn workspace_diagnostic_roots(&self) -> Vec<PathBuf> {
         self.workspaces
             .read()
