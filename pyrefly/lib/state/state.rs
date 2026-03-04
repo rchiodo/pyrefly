@@ -102,7 +102,6 @@ use crate::module::bundled::BundledStub;
 use crate::module::finder::find_import_prefixes;
 use crate::module::typeshed::BundledTypeshedStdlib;
 use crate::solver::solver::VarRecurser;
-use crate::state::dirty::AtomicDirty;
 use crate::state::epoch::Epoch;
 use crate::state::errors::Errors;
 use crate::state::load::FileContents;
@@ -1540,7 +1539,7 @@ impl<'a> Transaction<'a> {
         let mut dirty_set: std::sync::MutexGuard<'_, SmallSet<ArcId<ModuleDataMut>>> =
             self.data.dirty.lock();
         for x in dirty.into_values() {
-            x.state.dirty.set_deps();
+            x.state.set_dirty_deps();
             dirty_set.insert(x);
         }
     }
@@ -1664,21 +1663,21 @@ impl<'a> Transaction<'a> {
         Some(result)
     }
 
-    fn invalidate(&mut self, pred: impl Fn(&Handle) -> bool, dirty: impl Fn(&AtomicDirty)) {
+    fn invalidate(&mut self, pred: impl Fn(&Handle) -> bool, dirty: impl Fn(&ModuleStateMut)) {
         let mut dirty_set = self.data.dirty.lock();
         // We need to mark as dirty all those in updated_modules, and lift those in readable.modules up if they are dirty.
         // Most things in updated are also in readable, so we are likely to set them twice - but it's not too expensive.
         // Make sure we do updated first, as doing readable will cause them all to move to dirty.
         for (handle, module_data) in self.data.updated_modules.iter_unordered() {
             if pred(handle) {
-                dirty(&module_data.state.dirty);
+                dirty(&module_data.state);
                 dirty_set.insert(module_data.dupe());
             }
         }
         for handle in self.readable.modules.keys() {
             if pred(handle) {
                 let module_data = self.get_module(handle);
-                dirty(&module_data.state.dirty);
+                dirty(&module_data.state);
                 dirty_set.insert(module_data.dupe());
             }
         }
@@ -1717,7 +1716,7 @@ impl<'a> Transaction<'a> {
         }
         self.data.updated_loaders = new_loaders;
 
-        self.invalidate(|_| true, |dirty| dirty.set_find());
+        self.invalidate(|_| true, |state| state.set_dirty_find());
     }
 
     /// The data returned by the ConfigFinder might have changed. Note: invalidate find is not also required to run. When
@@ -1734,7 +1733,7 @@ impl<'a> Transaction<'a> {
             let config2 = self.data.state.get_config(handle);
             if config2 != *module_data.config.read() {
                 *module_data.config.write() = config2;
-                module_data.state.dirty.set_find();
+                module_data.state.set_dirty_find();
                 dirty_set.insert(module_data.dupe());
             }
         }
@@ -1744,7 +1743,7 @@ impl<'a> Transaction<'a> {
                 if module_data.config != config2 {
                     let module_data = self.get_module(handle);
                     *module_data.config.write() = config2;
-                    module_data.state.dirty.set_find();
+                    module_data.state.set_dirty_find();
                     dirty_set.insert(module_data.dupe());
                 }
             }
@@ -1781,7 +1780,7 @@ impl<'a> Transaction<'a> {
         let mut dirty_set = self.data.dirty.lock();
         for module_data in self.data.updated_modules.values() {
             if configs.contains(&*module_data.config.read()) {
-                module_data.state.dirty.set_find();
+                module_data.state.set_dirty_find();
                 dirty_set.insert(module_data.dupe());
             }
         }
@@ -1790,7 +1789,7 @@ impl<'a> Transaction<'a> {
                 && configs.contains(&module_data.config)
             {
                 let module_data = self.get_module(handle);
-                module_data.state.dirty.set_find();
+                module_data.state.set_dirty_find();
                 dirty_set.insert(module_data.dupe());
             }
         }
@@ -1812,7 +1811,7 @@ impl<'a> Transaction<'a> {
         }
         self.invalidate(
             |handle| changed.contains(handle.path()),
-            |dirty| dirty.set_load(),
+            |state| state.set_dirty_load(),
         );
     }
 
@@ -1831,7 +1830,7 @@ impl<'a> Transaction<'a> {
             .collect::<SmallSet<_>>();
         self.invalidate(
             |handle| files.contains(handle.path()),
-            |dirty| dirty.set_load(),
+            |state| state.set_dirty_load(),
         );
     }
 
