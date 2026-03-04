@@ -458,3 +458,53 @@ fn test_workspace_diagnostics_cleared_on_mode_switch() {
 
     interaction.shutdown().unwrap();
 }
+
+/// Test 9: Deleting a non-open file clears its workspace diagnostics.
+///
+/// When a non-open file with workspace diagnostics is deleted from disk and
+/// a `DidChangeWatchedFiles` notification fires with `FileChangeType::Deleted`,
+/// the server should clear the stale diagnostics. Without explicit handling,
+/// the deleted file's handle disappears from the committed state after the
+/// recheck, so `publish_workspace_diagnostics_if_enabled` never sees it and
+/// never sends empty diagnostics — leaving stale errors in the editor.
+#[test]
+fn test_workspace_diagnostics_cleared_on_file_delete() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("workspace_diagnostics");
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
+    interaction.set_root(root_path.clone());
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![(
+                "workspace_diagnostics".to_owned(),
+                Url::from_file_path(root_path.clone()).unwrap(),
+            )]),
+            configuration: Some(Some(
+                json!([{"pyrefly": {"diagnosticMode": "workspace", "displayTypeErrors": "force-on"}}]),
+            )),
+            ..Default::default()
+        })
+        .expect("Failed to initialize");
+
+    // Open clean.py to trigger project indexing. This causes errors.py to be
+    // indexed and receive workspace diagnostics.
+    interaction.client.did_open("clean.py");
+
+    let errors_path = root_path.join("errors.py");
+    interaction
+        .client
+        .expect_publish_diagnostics_eventual_error_count(errors_path.clone(), 1)
+        .expect("Expected 1 diagnostic for non-open errors.py in workspace mode");
+
+    // Delete errors.py from disk and notify the server.
+    std::fs::remove_file(&errors_path).unwrap();
+    interaction.client.file_deleted("errors.py");
+
+    // The server should clear diagnostics for the deleted file.
+    interaction
+        .client
+        .expect_publish_diagnostics_eventual_error_count(errors_path, 0)
+        .expect("Diagnostics should be cleared for deleted errors.py");
+
+    interaction.shutdown().unwrap();
+}

@@ -2938,6 +2938,7 @@ impl Server {
         let transaction = self.state.transaction();
         let open_files = self.open_files.read();
 
+        let mut deleted_uris: Vec<Url> = Vec::new();
         let handles: Vec<Handle> = transaction
             .handles()
             .into_iter()
@@ -2948,27 +2949,50 @@ impl Server {
                     return false;
                 }
                 // Only include .py/.pyi files
-                path.extension()
+                if !path
+                    .extension()
                     .and_then(|e| e.to_str())
                     .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                {
+                    return false;
+                }
+                // Files deleted from disk may linger as handles with stale load
+                // errors. Collect their URIs so we can send empty diagnostics
+                // to clear any previously-published errors.
+                if !path.exists() {
+                    if let Ok(uri) = Url::from_file_path(path) {
+                        deleted_uris.push(uri);
+                    }
+                    return false;
+                }
+                true
             })
             .collect();
         drop(open_files);
 
-        if handles.is_empty() {
-            return;
+        if !handles.is_empty() {
+            info!(
+                "Publishing workspace diagnostics for {} non-open files.",
+                handles.len()
+            );
+
+            self.publish_for_handles(
+                &transaction,
+                &handles,
+                DiagnosticSource::CommittingTransaction,
+            );
         }
 
-        info!(
-            "Publishing workspace diagnostics for {} non-open files.",
-            handles.len()
-        );
-
-        self.publish_for_handles(
-            &transaction,
-            &handles,
-            DiagnosticSource::CommittingTransaction,
-        );
+        // Clear stale diagnostics for files that were deleted from disk.
+        for uri in deleted_uris {
+            self.connection.publish_diagnostics_for_uri(
+                uri,
+                Vec::new(),
+                None,
+                DiagnosticSource::DidClose,
+                self.diagnostic_markdown_support,
+            );
+        }
     }
 
     /// Returns true if any workspace root has `DiagnosticMode::Workspace` enabled.
