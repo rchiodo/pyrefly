@@ -12,6 +12,7 @@ use std::collections::hash_map::Entry;
 use std::io::BufReader;
 use std::io::Stdin;
 use std::iter::once;
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -214,6 +215,7 @@ use pyrefly_util::telemetry::TelemetryEventKind;
 use pyrefly_util::telemetry::TelemetryFileStats;
 use pyrefly_util::telemetry::TelemetryFileWatcherStats;
 use pyrefly_util::telemetry::TelemetryServerState;
+use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::watch_pattern::WatchPattern;
 use ruff_text_size::Ranged;
@@ -742,6 +744,9 @@ pub struct Server {
     /// we rely on file watchers to catch up.
     indexed_workspaces: Mutex<HashSet<PathBuf>>,
     cancellation_handles: Mutex<HashMap<RequestId, CancellationHandle>>,
+    /// A thread pool for transactions run in the lsp_loop to avoid possibly waiting on thread pool
+    /// operations in another thread.
+    lsp_thread_pool: ThreadPool,
     /// URIs we have received a didClose notification for, mapped to the number of didClose
     /// operations we have yet to process.
     uris_pending_close: Mutex<HashMap<String, usize>>,
@@ -2232,6 +2237,9 @@ impl Server {
             indexed_configs: Mutex::new(HashSet::new()),
             indexed_workspaces: Mutex::new(HashSet::new()),
             cancellation_handles: Mutex::new(HashMap::new()),
+            lsp_thread_pool: ThreadPool::with_thread_count(ThreadCount::NumThreads(
+                NonZeroUsize::new(8).unwrap(),
+            )),
             uris_pending_close: Mutex::new(HashMap::new()),
             workspaces,
             completion_mru: Mutex::new(CompletionMru::default()),
