@@ -1021,9 +1021,6 @@ impl<'a> BindingsBuilder<'a> {
                 Binding::CompletedPartialType(inner_idx, _) => {
                     idx = *inner_idx;
                 }
-                Binding::PartialTypeWithUpstreamsCompleted(inner_idx, _) => {
-                    idx = *inner_idx;
-                }
                 Binding::Forward(inner_idx) | Binding::ForwardToFirstUse(inner_idx) => {
                     idx = *inner_idx;
                 }
@@ -1149,61 +1146,14 @@ impl<'a> BindingsBuilder<'a> {
         // Take the deferred bindings to avoid borrow issues
         let deferred = std::mem::take(&mut self.deferred_bound_names);
 
-        // Build an index from Definition idx -> PartialTypeWithUpstreamsCompleted idx,
-        // and create a map of the first-use graph to minimize allocations.
-        let def_to_upstreams: SmallMap<Idx<Key>, Idx<Key>> =
-            self.build_definition_to_upstreams_index();
-        let mut first_uses_to_add: SmallMap<Idx<Key>, Vec<Idx<Key>>> = SmallMap::new();
-
-        // Process each deferred binding, tracking what we find in the first-use graph.
+        // Process each deferred binding.
         for deferred_binding in deferred {
-            self.finalize_bound_name(deferred_binding, &def_to_upstreams, &mut first_uses_to_add);
-        }
-
-        // Bulk update all PartialTypeWithUpstreamsCompleted bindings using the first-use graph.
-        for (upstreams_idx, new_first_uses) in first_uses_to_add {
-            self.extend_first_uses_of_partial_type(upstreams_idx, new_first_uses);
-        }
-    }
-
-    /// Build an index from Key::Definition idx to Key::PartialTypeWithUpstreamsCompleted idx.
-    fn build_definition_to_upstreams_index(&self) -> SmallMap<Idx<Key>, Idx<Key>> {
-        let mut index = SmallMap::new();
-        for (idx, _) in self.table.types.0.items() {
-            if let Some(Binding::PartialTypeWithUpstreamsCompleted(def_idx, _)) =
-                self.idx_to_binding(idx)
-            {
-                index.insert(*def_idx, idx);
-            }
-        }
-        index
-    }
-
-    /// Extend the first_uses list of a PartialTypeWithUpstreamsCompleted binding.
-    fn extend_first_uses_of_partial_type(
-        &mut self,
-        partial_type_idx: Idx<Key>,
-        additional_first_uses: Vec<Idx<Key>>,
-    ) {
-        if additional_first_uses.is_empty() {
-            return;
-        }
-        if let Some(Binding::PartialTypeWithUpstreamsCompleted(_, first_uses)) =
-            self.idx_to_binding_mut(partial_type_idx)
-        {
-            let mut vec: Vec<_> = std::mem::take(first_uses).into_vec();
-            vec.extend(additional_first_uses);
-            *first_uses = vec.into_boxed_slice();
+            self.finalize_bound_name(deferred_binding);
         }
     }
 
     /// Finalize a single deferred BoundName binding.
-    fn finalize_bound_name(
-        &mut self,
-        deferred: DeferredBoundName,
-        def_to_upstreams: &SmallMap<Idx<Key>, Idx<Key>>,
-        first_uses_to_add: &mut SmallMap<Idx<Key>, Vec<Idx<Key>>>,
-    ) {
+    fn finalize_bound_name(&mut self, deferred: DeferredBoundName) {
         // For TypeAliasRhs usage, check if the name resolves to a type
         // alias and produce a TypeAliasRef binding. This covers both
         // self-references and cross-references to other aliases in the
@@ -1228,7 +1178,7 @@ impl<'a> BindingsBuilder<'a> {
         let (default_idx, partial_type_info) =
             self.follow_to_partial_type(deferred.lookup_result_idx);
 
-        if let Some((pinned_idx, unpinned_idx, first_use)) = partial_type_info {
+        if let Some((pinned_idx, _def_idx, first_use)) = partial_type_info {
             let is_narrowing = matches!(deferred.usage, Usage::Narrowing(_));
 
             if matches!(
@@ -1249,25 +1199,21 @@ impl<'a> BindingsBuilder<'a> {
                     FirstUse::Undetermined => {
                         if let Some(current_idx) = deferred.usage.current_idx() {
                             self.mark_first_use(pinned_idx, current_idx);
-                            if let Some(&current_upstreams_idx) = def_to_upstreams.get(&current_idx)
-                            {
-                                first_uses_to_add
-                                    .entry(current_upstreams_idx)
-                                    .or_default()
-                                    .push(pinned_idx);
-                            }
                         }
+                        // Forward to def_idx (raw NameAssign) to skip CPT's first-use
+                        // evaluation, since this binding IS the first use.
                         self.insert_binding_idx(
                             deferred.bound_name_idx,
-                            Binding::ForwardToFirstUse(unpinned_idx),
+                            Binding::ForwardToFirstUse(_def_idx),
                         );
                     }
                     FirstUse::UsedBy(other_idx) => {
                         let same_context = deferred.usage.current_idx() == Some(other_idx);
                         if same_context {
+                            // Same context as the first use — skip CPT's first-use evaluation.
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(unpinned_idx),
+                                Binding::ForwardToFirstUse(_def_idx),
                             );
                         } else {
                             self.insert_binding_idx(
@@ -1284,8 +1230,8 @@ impl<'a> BindingsBuilder<'a> {
                     }
                 }
             } else if let Usage::Narrowing(Some(enclosing_idx)) = deferred.usage {
-                // Narrowing reads cannot pin partial types directly, but they *might* use an unpinned
-                // upstream; this is used to prevent cycles when a narrow is neseted inside a larger
+                // Narrowing reads cannot pin partial types directly, but they *might* use the
+                // raw def_idx; this is used to prevent cycles when a narrow is nested inside a larger
                 // expression (e.g. `x = []; y = x.append(1) if x else x.append('foo')` ... if we tried to
                 // use the pinned version of `x` in the narrow we would get a cycle from the narrow to the
                 // entire definition of `y` to the pin of `x`.
@@ -1301,7 +1247,7 @@ impl<'a> BindingsBuilder<'a> {
                         if enclosing_idx == other_idx {
                             self.insert_binding_idx(
                                 deferred.bound_name_idx,
-                                Binding::ForwardToFirstUse(unpinned_idx),
+                                Binding::ForwardToFirstUse(_def_idx),
                             );
                         } else {
                             self.insert_binding_idx(
@@ -1334,6 +1280,9 @@ impl<'a> BindingsBuilder<'a> {
     }
 
     /// Follow Forward chains to find a CompletedPartialType.
+    ///
+    /// Returns (default_idx, Some((pinned_idx, def_idx, first_use))) if a
+    /// CompletedPartialType is found, or (default_idx, None) otherwise.
     fn follow_to_partial_type(
         &self,
         start_idx: Idx<Key>,
@@ -1351,8 +1300,8 @@ impl<'a> BindingsBuilder<'a> {
                 Some(Binding::Forward(target) | Binding::ForwardToFirstUse(target)) => {
                     current = *target;
                 }
-                Some(Binding::CompletedPartialType(unpinned_idx, first_use)) => {
-                    return (current, Some((current, *unpinned_idx, first_use.clone())));
+                Some(Binding::CompletedPartialType(def_idx, first_use)) => {
+                    return (current, Some((current, *def_idx, first_use.clone())));
                 }
                 _ => {
                     return (current, None);
@@ -1387,17 +1336,11 @@ impl<'a> BindingsBuilder<'a> {
     /// Mark a CompletedPartialType as used by a specific binding,
     /// and mirror the first_use on the corresponding NameAssign.
     fn mark_first_use(&mut self, partial_type_idx: Idx<Key>, user_idx: Idx<Key>) {
-        // First, read the chain immutably to find the NameAssign def_idx.
-        let def_idx = if let Some(Binding::CompletedPartialType(unpinned_idx, _)) =
+        // Read def_idx from CompletedPartialType immutably first.
+        let def_idx = if let Some(Binding::CompletedPartialType(def_idx, _)) =
             self.idx_to_binding(partial_type_idx)
         {
-            if let Some(Binding::PartialTypeWithUpstreamsCompleted(def_idx, _)) =
-                self.idx_to_binding(*unpinned_idx)
-            {
-                Some(*def_idx)
-            } else {
-                None
-            }
+            Some(*def_idx)
         } else {
             None
         };
@@ -1421,19 +1364,12 @@ impl<'a> BindingsBuilder<'a> {
     /// This is used when looking up names in static type contexts or for narrowing,
     /// where we don't want to pin partial types. Should be called after `lookup_name`.
     pub fn mark_does_not_pin_if_first_use(&mut self, partial_type_idx: Idx<Key>) {
-        // First, read the chain immutably to find the NameAssign def_idx, but only
-        // if the CompletedPartialType is still Undetermined.
-        let def_idx = if let Some(Binding::CompletedPartialType(unpinned_idx, first_use)) =
+        // Read def_idx from CompletedPartialType, only if still Undetermined.
+        let def_idx = if let Some(Binding::CompletedPartialType(def_idx, first_use)) =
             self.idx_to_binding(partial_type_idx)
             && matches!(first_use, FirstUse::Undetermined)
         {
-            if let Some(Binding::PartialTypeWithUpstreamsCompleted(def_idx, _)) =
-                self.idx_to_binding(*unpinned_idx)
-            {
-                Some(*def_idx)
-            } else {
-                None
-            }
+            Some(*def_idx)
         } else {
             None
         };
@@ -1884,7 +1820,6 @@ impl<'a> BindingsBuilder<'a> {
             Binding::Forward(fwd_idx)
             | Binding::ForwardToFirstUse(fwd_idx)
             | Binding::CompletedPartialType(fwd_idx, _)
-            | Binding::PartialTypeWithUpstreamsCompleted(fwd_idx, _)
             | Binding::Phi(JoinStyle::NarrowOf(fwd_idx), _),
         ) = original_binding
         {

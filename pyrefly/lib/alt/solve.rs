@@ -4144,15 +4144,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range_if_scoped_params_exist,
                     errors,
                 ),
-            Binding::PartialTypeWithUpstreamsCompleted(raw_idx, first_used_by) => {
-                // Force all of the upstream `Pin`s for which this was the first use.
-                for idx in first_used_by {
-                    self.get_idx(*idx);
-                }
-                // Recursively get the TypeInfo from the raw binding to preserve facets
-                // (e.g., dict literal key completions).
-                self.get_idx(*raw_idx).arc_clone()
-            }
             _ => {
                 // All other Bindings model `Type` level operations where we do not
                 // propagate any attribute narrows.
@@ -4578,14 +4569,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     FirstUse::Undetermined | FirstUse::DoesNotPin => {}
                 }
                 self.get_idx(*unpinned_idx).arc_clone().into_ty()
-            }
-            Binding::PartialTypeWithUpstreamsCompleted(raw_idx, first_used_by) => {
-                // Force all of the upstream `Pin`s for which was the first use. This ensures
-                // that any `Var` in the result originated directly from `raw_idx`.
-                for idx in first_used_by {
-                    self.get_idx(*idx);
-                }
-                self.get_idx(*raw_idx).arc_clone().into_ty()
             }
             Binding::Expr(ann, e) => self.binding_to_type_expr(*ann, e, errors),
             Binding::StmtExpr(e, special_export) => {

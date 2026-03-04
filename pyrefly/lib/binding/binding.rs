@@ -28,7 +28,6 @@ use pyrefly_util::assert_bytes;
 use pyrefly_util::assert_words;
 use pyrefly_util::display::DisplayWith;
 use pyrefly_util::display::DisplayWithCtx;
-use pyrefly_util::display::commas_iter;
 use pyrefly_util::display::intersperse_iter;
 use pyrefly_util::uniques::Unique;
 use pyrefly_util::visit::VisitMut;
@@ -840,10 +839,6 @@ pub enum Key {
     ///
     /// See [Binding::CompletedPartialType] for more details.
     CompletedPartialType(ShortIdentifier),
-    /// I am a wrapper around a assignment that is also a first use of some other name assign.
-    ///
-    /// See [Binding::PartialTypeWithUpstreamCompleted] for more details.
-    PartialTypeWithUpstreamsCompleted(ShortIdentifier),
     /// I am a name with possible attribute/subscript narrowing coming from an assignment at this location.
     FacetAssign(ShortIdentifier),
     /// The type at a specific return point.
@@ -913,7 +908,6 @@ impl Ranged for Key {
             Self::ImplicitGlobal(_) => TextRange::default(),
             Self::Definition(x) => x.range(),
             Self::MutableCapture(x) => x.range(),
-            Self::PartialTypeWithUpstreamsCompleted(x) => x.range(),
             Self::CompletedPartialType(x) => x.range(),
             Self::FacetAssign(x) => x.range(),
             Self::ReturnExplicit(r) => *r,
@@ -949,9 +943,6 @@ impl DisplayWith<ModuleInfo> for Key {
             Self::Definition(x) => write!(f, "Key::Definition({})", short(x)),
             Self::MutableCapture(x) => write!(f, "Key::MutableCapture({})", short(x)),
             Self::CompletedPartialType(x) => write!(f, "Key::CompletedPartialType({})", short(x)),
-            Self::PartialTypeWithUpstreamsCompleted(x) => {
-                write!(f, "Key::PartialTypeWithUpstreamsCompleted({})", short(x))
-            }
             Self::FacetAssign(x) => write!(f, "Key::FacetAssign({})", short(x)),
             Self::BoundName(x) => write!(f, "Key::BoundName({})", short(x)),
             Self::Anon(r) => write!(f, "Key::Anon({})", ctx.display(r)),
@@ -2194,24 +2185,6 @@ pub enum Binding {
     /// - the `Pin` for `z` will have an empty `FirstUse`, so as with `y` it will
     ///   simply force the placeholder and produce list[`Any`]
     CompletedPartialType(Idx<Key>, FirstUse),
-    /// Binding used to pin any *upstream* placeholder types for a NameAssign that is also
-    /// a first use. Any first use of the name defined here depend on this binding rather
-    /// than directly on the `NameAssign` so that upstream `Var`s cannot leak into the
-    /// partial type into them but `Var`s originating from this assignment can.
-    ///
-    /// The Idx is the upstream raw `NameAssign`, and the slice has `Idx`s that point at
-    /// all the `Pin`s for which that raw `NameAssign` was the first use.
-    ///
-    /// For example:
-    /// ```python
-    /// x = []
-    /// y = [], x
-    /// ```
-    /// the raw `NameAssign` for `y` will produce `tuple[list[@0], list[@1]]`,
-    /// but the `PartialTypeWithUpstreamsCompleted` for `y` will use the "completed"
-    /// partial type of `x` (which it achieves by forcing the `Binding::Pin` for
-    /// `x` before expanding types) and result in `tuple[list[@_], Any]`.
-    PartialTypeWithUpstreamsCompleted(Idx<Key>, Box<[Idx<Key>]>),
     /// `del` statement
     Delete(Box<Expr>),
     /// A name in the class body that wasn't found in the static scope
@@ -2479,14 +2452,6 @@ impl DisplayWith<Bindings> for Binding {
                 }
                 write!(f, ")")
             }
-            Self::PartialTypeWithUpstreamsCompleted(k, first_used_by) => {
-                write!(
-                    f,
-                    "PartialTypeWithUpstreamsCompleted({}, [{}])",
-                    ctx.display(*k),
-                    commas_iter(|| first_used_by.iter().map(|x| ctx.display(*x)))
-                )
-            }
             Self::Delete(x) => write!(f, "Delete({})", m.display(x)),
             Self::ClassBodyUnknownName(x) => {
                 let (class_key, name, suggestion) = x.as_ref();
@@ -2585,7 +2550,6 @@ impl Binding {
             | Binding::SelfTypeLiteral(..)
             | Binding::AssignToSubscript(_)
             | Binding::CompletedPartialType(..)
-            | Binding::PartialTypeWithUpstreamsCompleted(..)
             | Binding::Delete(_)
             | Binding::ClassBodyUnknownName(_)
             | Binding::Exhaustive(_) => None,

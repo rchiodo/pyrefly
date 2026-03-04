@@ -1294,20 +1294,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// graph to find the originating NameAssign's def_idx.
     ///
     /// A ForwardToFirstUse(target_idx) can point to either:
-    /// - PartialTypeWithUpstreamsCompleted(def_idx, _) — one hop to def_idx
-    /// - CompletedPartialType(unpinned_idx, _) — two hops: first to unpinned_idx,
-    ///   then to PartialTypeWithUpstreamsCompleted(def_idx, _)
+    /// - CompletedPartialType(def_idx, _) — one hop to def_idx
+    /// - A NameAssign directly (the def_idx itself) — target IS def_idx
     pub(crate) fn def_idx_for_forward_to_first_use(&self, target: Idx<Key>) -> Option<Idx<Key>> {
         let binding = self.bindings().get(target);
         match binding {
-            Binding::PartialTypeWithUpstreamsCompleted(def_idx, _) => Some(*def_idx),
-            Binding::CompletedPartialType(unpinned_idx, _) => {
-                let inner = self.bindings().get(*unpinned_idx);
-                match inner {
-                    Binding::PartialTypeWithUpstreamsCompleted(def_idx, _) => Some(*def_idx),
-                    _ => None,
-                }
-            }
+            Binding::CompletedPartialType(def_idx, _) => Some(*def_idx),
+            Binding::NameAssign(na) if na.pinned_idx.is_some() => Some(target),
             _ => None,
         }
     }

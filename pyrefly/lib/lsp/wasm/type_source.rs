@@ -143,7 +143,6 @@ mod impl_ {
                 | Binding::ForwardToFirstUse(next)
                 | Binding::Narrow(next, ..)
                 | Binding::CompletedPartialType(next, ..)
-                | Binding::PartialTypeWithUpstreamsCompleted(next, ..)
                 | Binding::LoopPhi(next, ..) => current = *next,
                 // All branches of a Phi node originate from the same variable definition,
                 // so any branch will lead to the same Key::Definition. We follow the first.

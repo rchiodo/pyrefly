@@ -228,8 +228,7 @@ impl<'a> CapturedVariableVisitor<'a> {
         match binding {
             Binding::Forward(definition_idx)
             | Binding::ForwardToFirstUse(definition_idx)
-            | Binding::CompletedPartialType(definition_idx, _)
-            | Binding::PartialTypeWithUpstreamsCompleted(definition_idx, _) => {
+            | Binding::CompletedPartialType(definition_idx, _) => {
                 self.get_definition_from_idx(
                     *definition_idx,
                     /* seen */ SmallSet::new(),
@@ -277,8 +276,7 @@ impl<'a> CapturedVariableVisitor<'a> {
                 }
                 None
             }
-            Binding::CompletedPartialType(idx, _)
-            | Binding::PartialTypeWithUpstreamsCompleted(idx, _) => {
+            Binding::CompletedPartialType(idx, _) => {
                 self.get_definition_from_idx(*idx, seen, depth)
             }
             _ => None,
