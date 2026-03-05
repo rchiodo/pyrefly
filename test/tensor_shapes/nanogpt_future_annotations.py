@@ -12,10 +12,12 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
 
+from __future__ import annotations
+
 import inspect
 import math
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING, TypedDict
+from typing import Any, assert_type, TYPE_CHECKING, TypedDict
 
 import torch
 import torch.nn as nn
@@ -34,7 +36,9 @@ class LayerNorm[M](nn.Module):
     def __init__(self, ndim: Dim[M], bias: bool):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(ndim))
+        assert_type(self.weight, Tensor[M])
         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+        assert_type(self.bias, Tensor[M] | None)
 
     def forward[*Bs](self, input: Tensor[*Bs, M]) -> Tensor[*Bs, M]:
         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
@@ -67,8 +71,10 @@ class CausalSelfAttention[NEmbedding, NHead, BlockSize](nn.Module):
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
         self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        assert_type(self.c_attn, nn.Linear[NEmbedding, (3 * NEmbedding)])
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+        assert_type(self.c_proj, nn.Linear[NEmbedding, NEmbedding])
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
@@ -87,23 +93,46 @@ class CausalSelfAttention[NEmbedding, NHead, BlockSize](nn.Module):
                     1, 1, config.block_size, config.block_size
                 )
             )
+            assert_type(self.bias, Tensor[1, 1, BlockSize, BlockSize])
 
     def forward[B, T](self, x: Tensor[B, T, NEmbedding]) -> Tensor[B, T, NEmbedding]:
         b, t, c = (
             x.size()
         )  # batch size, sequence length, embedding dimensionality (n_embd)
+        assert_type(b, Dim[B])
+        assert_type(t, Dim[T])
+        assert_type(c, Dim[NEmbedding])
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+        assert_type(x, Tensor[B, T, NEmbedding])
+        c_attn = self.c_attn(x)
+        assert_type(c_attn, Tensor[B, T, (3 * NEmbedding)])
+        split = c_attn.split(self.n_embd, dim=2)
+        assert_type(self.n_embd, Dim[NEmbedding])
+        assert_type(
+            split,
+            tuple[
+                Tensor[B, T, NEmbedding],
+                Tensor[B, T, NEmbedding],
+                Tensor[B, T, NEmbedding],
+            ],
+        )
+        q, k, v = split
+        assert_type(q, Tensor[B, T, NEmbedding])
+        assert_type(k, Tensor[B, T, NEmbedding])
+        assert_type(v, Tensor[B, T, NEmbedding])
         k = k.view(b, t, self.n_head, c // self.n_head).transpose(
             1, 2
         )  # (B, nh, T, hs)
+        assert_type(k, Tensor[B, NHead, T, (NEmbedding // NHead)])
         q = q.view(b, t, self.n_head, c // self.n_head).transpose(
             1, 2
         )  # (B, nh, T, hs)
+        assert_type(q, Tensor[B, NHead, T, (NEmbedding // NHead)])
         v = v.view(b, t, self.n_head, c // self.n_head).transpose(
             1, 2
         )  # (B, nh, T, hs)
+        assert_type(v, Tensor[B, NHead, T, (NEmbedding // NHead)])
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -116,19 +145,31 @@ class CausalSelfAttention[NEmbedding, NHead, BlockSize](nn.Module):
                 dropout_p=self.dropout if self.training else 0,
                 is_causal=True,
             )
+            assert_type(y, Tensor[B, NHead, T, (NEmbedding // NHead)])
         else:
             # manual implementation of attention
             att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            att = att.masked_fill(self.bias[:, :, :t, :t] == 0, float("-inf"))
+            assert_type(att, Tensor[B, NHead, T, T])
+            mask = self.bias[:, :, :t, :t] == 0
+            assert_type(mask, Tensor[1, 1, T, T])
+            att = att.masked_fill(mask, float("-inf"))
+            assert_type(att, Tensor[B, NHead, T, T])
             att = F.softmax(att, dim=-1)
+            assert_type(att, Tensor[B, NHead, T, T])
             att = self.attn_dropout(att)
+            assert_type(att, Tensor[B, NHead, T, T])
             y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+            assert_type(y, Tensor[B, NHead, T, (NEmbedding // NHead)])
+
+        assert_type(y, Tensor[B, NHead, T, (NEmbedding // NHead)])
         y = (
             y.transpose(1, 2).contiguous().view(b, t, c)
         )  # re-assemble all head outputs side by side
+        assert_type(y, Tensor[B, T, NEmbedding])
 
         # output projection
         y = self.resid_dropout(self.c_proj(y))
+        assert_type(y, Tensor[B, T, NEmbedding])
         return y
 
 
@@ -138,15 +179,21 @@ class MLP[NEmbedding](nn.Module):
     def __init__(self, config: GPTConfig[Any, Any, NEmbedding, Any, Any]):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        assert_type(self.c_fc, nn.Linear[NEmbedding, (4 * NEmbedding)])
         self.gelu = nn.GELU()
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        assert_type(self.c_proj, nn.Linear[(4 * NEmbedding), NEmbedding])
         self.dropout = nn.Dropout(config.dropout)
 
     def forward[B, T](self, x: Tensor[B, T, NEmbedding]) -> Tensor[B, T, NEmbedding]:
         h = self.c_fc(x)
+        assert_type(h, Tensor[B, T, (4 * NEmbedding)])
         h = self.gelu(h)
+        assert_type(h, Tensor[B, T, (4 * NEmbedding)])
         x = self.c_proj(h)
+        assert_type(x, Tensor[B, T, NEmbedding])
         x = self.dropout(x)
+        assert_type(x, Tensor[B, T, NEmbedding])
         return x
 
 
@@ -156,9 +203,13 @@ class Block[NEmbedding, NHead, BlockSize](nn.Module):
     def __init__(self, config: GPTConfig[Any, BlockSize, NEmbedding, NHead, Any]):
         super().__init__()
         self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+        assert_type(self.ln_1, LayerNorm[NEmbedding])
         self.attn = CausalSelfAttention(config)
+        assert_type(self.attn, CausalSelfAttention[NEmbedding, NHead, BlockSize])
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+        assert_type(self.ln_2, LayerNorm[NEmbedding])
         self.mlp = MLP(config)
+        assert_type(self.mlp, MLP[NEmbedding])
 
     def forward[B, T](self, x: Tensor[B, T, NEmbedding]) -> Tensor[B, T, NEmbedding]:
         x = x + self.attn(self.ln_1(x))
@@ -215,7 +266,12 @@ class GPT[VocabSize, BlockSize, NEmbedding, NHead, NLayer](nn.Module):
             ln_f=LayerNorm(config.n_embd, bias=config.bias),
         )
         self.transformer = nn.ModuleDict(transformer_modules)
+        assert_type(
+            self.transformer,
+            nn.ModuleDict[TransformerModules[VocabSize, BlockSize, NEmbedding, NHead]],
+        )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        assert_type(self.lm_head, nn.Linear[NEmbedding, VocabSize])
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -261,31 +317,45 @@ class GPT[VocabSize, BlockSize, NEmbedding, NHead, NLayer](nn.Module):
     ) -> tuple[Tensor[B, T, VocabSize] | Tensor[B, 1, VocabSize], Tensor[()] | None]:
         device = idx.device
         b, t = idx.size()
+        assert_type(b, Dim[B])
+        assert_type(t, Dim[T])
         assert t <= self.config.block_size, (
             f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         )
         pos = torch.arange(0, t, dtype=torch.long, device=device)  # shape (t)
+        assert_type(pos, Tensor[T])
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
+        assert_type(tok_emb, Tensor[B, T, NEmbedding])
         pos_emb = self.transformer.wpe(pos)  # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        assert_type(pos_emb, Tensor[T, NEmbedding])
+        tok_pos_emb = tok_emb + pos_emb
+        assert_type(tok_pos_emb, Tensor[B, T, NEmbedding])
+        x = self.transformer.drop(tok_pos_emb)
+        assert_type(x, Tensor[B, T, NEmbedding])
         for block in self.transformer.h:
             _x: Tensor[B, T, NEmbedding] = x
             x = block(_x)
+        assert_type(x, Tensor[B, T, NEmbedding])
+
         x = self.transformer.ln_f(x)
+        assert_type(x, Tensor[B, T, NEmbedding])
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
             logits = self.lm_head(x)
+            assert_type(logits, Tensor[B, T, VocabSize])
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
             )
+            assert_type(loss, Tensor[()])
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(
                 x[:, (-1,), :]
             )  # note: using list [-1] to preserve the time dim
+            assert_type(logits, Tensor[B, 1, VocabSize])
             loss = None
 
         return logits, loss
@@ -361,51 +431,7 @@ class GPT[VocabSize, BlockSize, NEmbedding, NHead, NLayer](nn.Module):
         # create a from-scratch initialized minGPT model
         config = GPTConfig(**config_args)
         model = GPT(config)
-        model.state_dict()
-
-        """
-        sd_keys = sd.keys()
-        sd_keys = [
-            k for k in sd_keys if not k.endswith(".attn.bias")
-        ]  # discard this mask / buffer, not a param
-
-        # init a huggingface/transformers model
-        from transformers import GPT2LMHeadModel
-
-        model_hf = GPT2LMHeadModel.from_pretrained(model_type)
-        sd_hf = model_hf.state_dict()
-
-        # copy while ensuring all of the parameters are aligned and match in names and shapes
-        sd_keys_hf = sd_hf.keys()
-        sd_keys_hf = [
-            k for k in sd_keys_hf if not k.endswith(".attn.masked_bias")
-        ]  # ignore these, just a buffer
-        sd_keys_hf = [
-            k for k in sd_keys_hf if not k.endswith(".attn.bias")
-        ]  # same, just the mask (buffer)
-        transposed = [
-            "attn.c_attn.weight",
-            "attn.c_proj.weight",
-            "mlp.c_fc.weight",
-            "mlp.c_proj.weight",
-        ]
-        # basically the openai checkpoints use a "Conv1D" module, but we only want to use a vanilla Linear
-        # this means that we have to transpose these weights when we import them
-        assert len(sd_keys_hf) == len(
-            sd_keys
-        ), f"mismatched keys: {len(sd_keys_hf)} != {len(sd_keys)}"
-        for k in sd_keys_hf:
-            if any(k.endswith(w) for w in transposed):
-                # special treatment for the Conv1D weights we need to transpose
-                assert sd_hf[k].shape[::-1] == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k].t())
-            else:
-                # vanilla copy over the other parameters
-                assert sd_hf[k].shape == sd[k].shape
-                with torch.no_grad():
-                    sd[k].copy_(sd_hf[k])
-        """
+        # skipped copying weights into model.state_dict() to avoid external dependencies
         return model
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
@@ -478,20 +504,27 @@ class GPT[VocabSize, BlockSize, NEmbedding, NHead, NLayer](nn.Module):
                 if idx.size(1) <= self.config.block_size
                 else idx[:, -self.config.block_size :]
             )
+            assert_type(idx_cond, Tensor[B, Any])
             # forward the model to get the logits for the index in the sequence
             logits, _ = self(idx_cond)
+            assert_type(logits, Tensor[B, 1, VocabSize] | Tensor[B, Any, VocabSize])
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
+            assert_type(logits, Tensor[B, VocabSize])
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float("Inf")
             # apply softmax to convert logits to (normalized) probabilities
+            assert_type(logits, Tensor[B, VocabSize])
             probs = F.softmax(logits, dim=-1)
+            assert_type(probs, Tensor[B, VocabSize])
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
+            assert_type(idx_next, Tensor[B, 1])
             # append sampled index to the running sequence and continue
             _idx: Tensor[B, Any] = idx
             idx = torch.cat((_idx, idx_next), dim=1)
 
+        assert_type(idx, Tensor[B, Any])
         return idx
