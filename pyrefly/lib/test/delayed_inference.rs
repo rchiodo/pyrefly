@@ -449,3 +449,31 @@ def f(a):
     assert_type(z, dict[Any, Any])  # E: assert_type(dict[str, int], dict[Any, Any])
     "#,
 );
+
+testcase!(
+    test_partial_quantified_in_function,
+    r#"
+from typing import assert_type
+
+def f[T](x: T | None) -> list[T]: ...
+
+x = f(None)
+x.append(5)
+assert_type(x, list[int])
+    "#,
+);
+
+testcase!(
+    test_partial_quantified_in_class_constructor,
+    r#"
+from typing import assert_type
+
+class A[T]:
+    def __new__[T2](cls, x: T2 | None) -> A[T2]: ...
+    def add(self, x: T): ...
+
+a = A(None)
+a.add(5)
+assert_type(a, A[int])
+    "#,
+);
