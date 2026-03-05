@@ -1146,15 +1146,12 @@ impl GleanState<'_> {
         }
     }
 
-    fn add_xrefs_for_module(&mut self, module_name: ModuleName, position: TextSize) {
+    fn add_xrefs_for_module(&mut self, module_name: ModuleName, position: TextSize, prefix: &str) {
         for (module, range) in all_modules_with_range(module_name, position) {
-            let mut defs = self.find_definition(range.start());
-            if defs.is_empty() {
-                defs = vec![DefinitionLocation {
-                    name: module,
-                    file: None,
-                }]
-            }
+            let resolved_name = join_names(prefix, &module);
+            let defs =
+                self.find_definition_for_imported_module(ModuleName::from_str(&resolved_name));
+
             for def in defs {
                 self.record_name(def.name.clone());
                 self.add_xref(def, range);
@@ -1174,7 +1171,7 @@ impl GleanState<'_> {
                 let from_name = &import.name;
                 let module_name = ModuleName::from_name(from_name.id());
                 let position = from_name.range.start();
-                self.add_xrefs_for_module(module_name, position);
+                self.add_xrefs_for_module(module_name, position, "");
 
                 if let Some(as_name) = &import.asname {
                     vec![self.make_import_fact(from_name, as_name, None, top_level_declaration)]
@@ -1191,47 +1188,57 @@ impl GleanState<'_> {
             .collect()
     }
 
-    fn get_from_module(&mut self, import_from: &StmtImportFrom) -> Option<String> {
-        let module_name_id = import_from.module.as_ref().map(|x| x.id());
-        let module_name = module_name_id.map(ModuleName::from_name);
-        let resolved_module_name = if import_from.level > 0 {
-            self.module_name
-                .new_maybe_relative(
-                    self.module.path().is_init(),
-                    import_from.level,
-                    module_name_id,
-                )
-                .or(module_name)
+    fn get_from_module(&mut self, import_from: &StmtImportFrom) -> String {
+        let resolved_module_prefix = if import_from.level > 0 {
+            self.module_name.new_maybe_relative(
+                self.module.path().is_init(),
+                import_from.level,
+                None,
+            )
         } else {
-            module_name
+            None
         };
-
-        if let Some(module) = &import_from.module {
-            let position = module.range.start();
-            self.add_xrefs_for_module(module_name.unwrap(), position);
-        } else {
-            let dots_range = self
-                .module
-                .code_at(import_from.range())
-                .match_indices(['.'])
-                .next()
-                .map(|(s, _)| {
+        let dots_range = self
+            .module
+            .code_at(import_from.range())
+            .match_indices(['.'])
+            .next()
+            .and_then(|(s, _)| {
+                let len = import_from.level;
+                if len > 0 {
                     let offset = TextSize::try_from(s).unwrap();
-                    let len = TextSize::from(import_from.level);
-                    TextRange::at(import_from.range().start() + offset, len)
-                });
-
-            if let Some(range) = dots_range {
-                let defs = resolved_module_name.map_or(vec![], |module| {
-                    self.find_definition_for_imported_module(module)
-                });
-                for def in defs {
-                    self.add_xref(def, range);
+                    let len = TextSize::from(len);
+                    Some(TextRange::at(import_from.range().start() + offset, len))
+                } else {
+                    None
                 }
+            });
+
+        let module_prefix_str = resolved_module_prefix
+            .as_ref()
+            .map_or("", |module| module.as_str());
+
+        if let Some(range) = dots_range
+            && let Some(module_prefix) = resolved_module_prefix
+            && !module_prefix_str.is_empty()
+        {
+            let defs = self.find_definition_for_imported_module(module_prefix);
+            for def in defs {
+                self.add_xref(def, range);
             }
         }
 
-        resolved_module_name.map(|name| name.to_string())
+        let module_str = import_from
+            .module
+            .as_ref()
+            .map_or("", |module| module.as_str());
+
+        if let Some(module_id) = &import_from.module {
+            let position = module_id.range.start();
+            self.add_xrefs_for_module(ModuleName::from_str(module_id), position, module_prefix_str);
+        }
+
+        join_names(module_prefix_str, module_str)
     }
 
     fn import_from_facts(
@@ -1248,7 +1255,7 @@ impl GleanState<'_> {
 
             if *from_name.id.as_str() == *star_import {
                 let import_star = python::ImportStarStatement::new(
-                    python::Name::new(from_module.clone().unwrap_or_default()),
+                    python::Name::new(from_module.clone()),
                     self.facts.module.clone(),
                 );
                 self.facts
@@ -1259,11 +1266,7 @@ impl GleanState<'_> {
                         to_span(import_from.range),
                     ));
             } else {
-                let from_name_string = from_module
-                    .as_deref()
-                    .map_or(from_name.id().to_string(), |x| {
-                        join_names(x, from_name.id())
-                    });
+                let from_name_string = join_names(&from_module, from_name.id());
                 let from_name_definition = DefinitionLocation {
                     name: from_name_string.clone(),
                     file: None, // TODO: default to module file
