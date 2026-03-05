@@ -1065,7 +1065,9 @@ impl GleanState<'_> {
         next: Option<&Stmt>,
         def_infos: &mut Vec<DeclarationInfo>,
     ) {
-        if let Some(name) = expr.as_name_expr() {
+        if let Some(name) = expr.as_name_expr()
+            && name.ctx.is_store()
+        {
             let scope_type = if ctx.globals.contains(&name.id) {
                 ScopeType::Global
             } else if ctx.nonlocals.contains(&name.id) {
@@ -1461,6 +1463,7 @@ impl GleanState<'_> {
                 assign.targets.visit(&mut |target| {
                     self.variable_facts(target, &info, context, next, &mut decl_infos)
                 });
+                self.visit_exprs(&assign.targets, container);
                 self.visit_exprs(&assign.value, container);
             }
             Stmt::AnnAssign(assign) => {
@@ -1469,6 +1472,7 @@ impl GleanState<'_> {
                     annotation: Some(&assign.annotation),
                 };
                 self.variable_facts(&assign.target, &info, context, next, &mut decl_infos);
+                self.visit_exprs(&assign.target, container);
                 self.visit_exprs(&assign.annotation, container);
                 self.visit_exprs(&assign.value, container);
             }
@@ -1478,6 +1482,7 @@ impl GleanState<'_> {
                     annotation: None,
                 };
                 self.variable_facts(&assign.target, &info, context, next, &mut decl_infos);
+                self.visit_exprs(&assign.target, container);
                 self.visit_exprs(&assign.value, container);
             }
             Stmt::Import(import) => {
