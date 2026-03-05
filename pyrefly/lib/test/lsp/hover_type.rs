@@ -74,7 +74,6 @@ Hover Result: `(x: list[int], y: str, z: Literal[42]) -> list[int]`
     );
 }
 
-// TODO(kylei): redefinitions should work. they are especially common in try/except blocks
 #[test]
 fn redefinition_test() {
     let code = r#"
@@ -89,11 +88,11 @@ def f(): ...
 # main.py
 2 | def f(): ...
         ^
-Hover Result: None
+Hover Result: `() -> None`
 
 4 | def f(): ...
         ^
-Hover Result: None
+Hover Result: `() -> None`
 "#
         .trim(),
         report.trim(),

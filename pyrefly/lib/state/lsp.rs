@@ -912,48 +912,72 @@ impl<'a> Transaction<'a> {
                 self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context:
                     IdentifierContext::FunctionDef { docstring_range: _ }
                     | IdentifierContext::MethodDef { docstring_range: _ },
             }) => {
-                // TODO(grievejia): Handle definitions of functions
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context: IdentifierContext::ClassDef { docstring_range: _ },
             }) => {
-                // TODO(grievejia): Handle definitions of classes
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context: IdentifierContext::Parameter,
             }) => {
-                // TODO(grievejia): Handle definitions of params
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context: IdentifierContext::TypeParameter,
             }) => {
-                // TODO(grievejia): Handle definitions of type params
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context: IdentifierContext::ExceptionHandler,
             }) => {
-                // TODO(grievejia): Handle definitions of exception names
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
-                identifier: _,
+                identifier,
                 context: IdentifierContext::PatternMatch(_),
             }) => {
-                // TODO(grievejia): Handle definitions of pattern-introduced names
-                None
+                let key = Key::Definition(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
             }
             Some(IdentifierWithContext {
                 identifier,
