@@ -655,8 +655,8 @@ fn test_goto_def_dunder_all_submodule() {
 }
 
 /// Go-to-definition on the module name part of a relative import
-/// (e.g., clicking on `bar` in `from .bar import value`) does not resolve
-/// because `find_definition` does not resolve relative imports.
+/// (e.g., clicking on `bar` in `from .bar import value`) should resolve
+/// to the target module file.
 #[test]
 fn definition_relative_import_with_nested_config() {
     let root = get_test_files_root();
@@ -676,11 +676,10 @@ fn definition_relative_import_with_nested_config() {
     interaction.client.did_open("main.py");
     interaction.client.did_open("pkg/foo.py");
     // Go-to-definition on `bar` module in `from .bar import value` (line 5, char 6)
-    // BUG: returns null because find_definition doesn't resolve relative imports.
     interaction
         .client
         .definition("pkg/foo.py", 5, 6)
-        .expect_response(json!([]))
+        .expect_definition_response_from_root("pkg/bar.py", 0, 0, 0, 0)
         .unwrap();
     interaction.shutdown().unwrap();
 }
@@ -705,11 +704,10 @@ fn definition_relative_import_with_nested_config_workspace_at_root() {
     interaction.client.did_open("src/main.py");
     interaction.client.did_open("src/pkg/foo.py");
     // Go-to-definition on `bar` module in `from .bar import value` (line 5, char 6)
-    // BUG: returns empty because find_definition doesn't resolve relative imports.
     interaction
         .client
         .definition("src/pkg/foo.py", 5, 6)
-        .expect_response(json!([]))
+        .expect_definition_response_from_root("src/pkg/bar.py", 0, 0, 0, 0)
         .unwrap();
     interaction.shutdown().unwrap();
 }

@@ -1756,19 +1756,37 @@ impl<'a> Transaction<'a> {
                 identifier,
                 context:
                     IdentifierContext::ImportedModule {
-                        name: module_name, ..
+                        name: module_name,
+                        dots,
                     },
             }) => {
+                // For relative imports (dots > 0), resolve the module name using
+                // the current file's module name as context.
+                let resolved_module_name = if dots > 0 {
+                    let is_init = handle.path().is_init();
+                    let suffix = if module_name.as_str().is_empty() {
+                        None
+                    } else {
+                        Some(&Name::new(module_name.as_str()))
+                    };
+                    handle
+                        .module()
+                        .new_maybe_relative(is_init, dots, suffix)
+                        .unwrap_or(module_name)
+                } else {
+                    module_name
+                };
+
                 // Build the module name for lookup based on identifier position.
-                let components = module_name.components();
+                let components = resolved_module_name.components();
 
                 let target_module_name =
                     if let Some(idx) = components.iter().position(|c| c == &identifier.id) {
                         // Identifier matches a module component.
                         ModuleName::from_parts(&components[..=idx])
-                    } else if identifier.as_str() == module_name.as_str() {
+                    } else if identifier.as_str() == resolved_module_name.as_str() {
                         // Identifier matches full module name; decide which component based on position offset.
-                        let module_str = module_name.as_str();
+                        let module_str = resolved_module_name.as_str();
                         let offset = (position - identifier.range.start())
                             .to_usize()
                             .min(module_str.len());
@@ -1776,7 +1794,7 @@ impl<'a> Transaction<'a> {
                         ModuleName::from_parts(&components[..=idx])
                     } else {
                         // Fallback: use the whole module name.
-                        module_name
+                        resolved_module_name
                     };
                 self.find_definition_for_imported_module(handle, target_module_name, preference)
                     .map_or(vec![], |item| vec![item])
