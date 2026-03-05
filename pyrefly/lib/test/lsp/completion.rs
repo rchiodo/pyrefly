@@ -698,18 +698,18 @@ from foo imp
                ^
 Completion Results:
 - (Variable) imperial_guard
-- (Variable) __annotations__
-- (Variable) __builtins__
-- (Variable) __cached__
-- (Variable) __debug__
-- (Variable) __dict__
-- (Variable) __doc__
-- (Variable) __file__
-- (Variable) __loader__
-- (Variable) __name__
-- (Variable) __package__
-- (Variable) __path__
-- (Variable) __spec__
+- (Constant) __annotations__
+- (Constant) __builtins__
+- (Constant) __cached__
+- (Constant) __debug__
+- (Constant) __dict__
+- (Constant) __doc__
+- (Constant) __file__
+- (Constant) __loader__
+- (Constant) __name__
+- (Constant) __package__
+- (Constant) __path__
+- (Constant) __spec__
 
 
 # foo.py
@@ -777,20 +777,20 @@ Completion Results:
                         ^
 Completion Results:
 - (Variable) deprecated
-- (Variable) func_ok
-- (Variable) __annotations__
-- (Variable) __builtins__
-- (Variable) __cached__
-- (Variable) __debug__
-- (Variable) __dict__
-- (Variable) __doc__
-- (Variable) __file__
-- (Variable) __loader__
-- (Variable) __name__
-- (Variable) __package__
-- (Variable) __path__
-- (Variable) __spec__
-- (Variable) [DEPRECATED] func_not_ok
+- (Function) func_ok
+- (Constant) __annotations__
+- (Constant) __builtins__
+- (Constant) __cached__
+- (Constant) __debug__
+- (Constant) __dict__
+- (Constant) __doc__
+- (Constant) __file__
+- (Constant) __loader__
+- (Constant) __name__
+- (Constant) __package__
+- (Constant) __path__
+- (Constant) __spec__
+- (Function) [DEPRECATED] func_not_ok
 
 
 # foo.py
@@ -824,18 +824,18 @@ Completion Results:
                            ^
 Completion Results:
 - (Variable) imperial_guard
-- (Variable) __annotations__
-- (Variable) __builtins__
-- (Variable) __cached__
-- (Variable) __debug__
-- (Variable) __dict__
-- (Variable) __doc__
-- (Variable) __file__
-- (Variable) __loader__
-- (Variable) __name__
-- (Variable) __package__
-- (Variable) __path__
-- (Variable) __spec__
+- (Constant) __annotations__
+- (Constant) __builtins__
+- (Constant) __cached__
+- (Constant) __debug__
+- (Constant) __dict__
+- (Constant) __doc__
+- (Constant) __file__
+- (Constant) __loader__
+- (Constant) __name__
+- (Constant) __package__
+- (Constant) __path__
+- (Constant) __spec__
 
 
 # foo.py
@@ -865,18 +865,18 @@ from .foo import imperial
                             ^
 Completion Results:
 - (Variable) imperial_guard
-- (Variable) __annotations__
-- (Variable) __builtins__
-- (Variable) __cached__
-- (Variable) __debug__
-- (Variable) __dict__
-- (Variable) __doc__
-- (Variable) __file__
-- (Variable) __loader__
-- (Variable) __name__
-- (Variable) __package__
-- (Variable) __path__
-- (Variable) __spec__
+- (Constant) __annotations__
+- (Constant) __builtins__
+- (Constant) __cached__
+- (Constant) __debug__
+- (Constant) __dict__
+- (Constant) __doc__
+- (Constant) __file__
+- (Constant) __loader__
+- (Constant) __name__
+- (Constant) __package__
+- (Constant) __path__
+- (Constant) __spec__
 
 
 # foo.py
@@ -2440,20 +2440,20 @@ class Foo: pass
 2 | from lib imp
                ^
 Completion Results:
-- (Variable) Foo
+- (Class) Foo
 - (Keyword) import
-- (Variable) __annotations__
-- (Variable) __builtins__
-- (Variable) __cached__
-- (Variable) __debug__
-- (Variable) __dict__
-- (Variable) __doc__
-- (Variable) __file__
-- (Variable) __loader__
-- (Variable) __name__
-- (Variable) __package__
-- (Variable) __path__
-- (Variable) __spec__
+- (Constant) __annotations__
+- (Constant) __builtins__
+- (Constant) __cached__
+- (Constant) __debug__
+- (Constant) __dict__
+- (Constant) __doc__
+- (Constant) __file__
+- (Constant) __loader__
+- (Constant) __name__
+- (Constant) __package__
+- (Constant) __path__
+- (Constant) __spec__
 
 
 # lib.py

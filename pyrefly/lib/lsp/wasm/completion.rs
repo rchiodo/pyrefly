@@ -878,10 +878,17 @@ impl Transaction<'_> {
                             ExportLocation::ThisModule(export) => export.deprecation.is_some(),
                             ExportLocation::OtherModule(_, _) => false,
                         };
+                        let kind = match export {
+                            ExportLocation::ThisModule(export) => export
+                                .symbol_kind
+                                .map_or(CompletionItemKind::VARIABLE, |k| {
+                                    k.to_lsp_completion_item_kind()
+                                }),
+                            ExportLocation::OtherModule(_, _) => CompletionItemKind::VARIABLE,
+                        };
                         result.push(RankedCompletion::new(CompletionItem {
                             label: name.to_string(),
-                            // todo(kylei): completion kind for exports
-                            kind: Some(CompletionItemKind::VARIABLE),
+                            kind: Some(kind),
                             tags: if is_deprecated {
                                 Some(vec![CompletionItemTag::DEPRECATED])
                             } else {
