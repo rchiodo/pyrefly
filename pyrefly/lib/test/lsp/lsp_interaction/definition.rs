@@ -742,14 +742,20 @@ fn definition_relative_import_outside_search_path() {
     let init_file = "site_packages/mypkg/__init__.py";
     interaction.client.did_open(init_file);
 
-    // BUG: Hover on `MyClass` in `from .helpers import MyClass` (line 0, char 21)
-    // shows Unknown because the module name is `__unknown__` and the relative
-    // import can't be resolved.
+    // Go-to-definition on `helpers` in `from .helpers import MyClass` (line 0, char 6).
+    interaction
+        .client
+        .definition(init_file, 0, 6)
+        .expect_definition_response_from_root("site_packages/mypkg/helpers.py", 0, 0, 0, 0)
+        .unwrap();
+
+    // Hover on `MyClass` in `from .helpers import MyClass` (line 0, char 21).
+    // Verify the type is resolved (not Unknown).
     interaction
         .client
         .hover(init_file, 0, 21)
         .expect_hover_response_with_markup(|value| {
-            value.is_some_and(|text| text.contains("MyClass") && text.contains("Unknown"))
+            value.is_some_and(|text| text.contains("(class) MyClass: type[MyClass]"))
         })
         .unwrap();
 
