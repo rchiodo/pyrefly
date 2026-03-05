@@ -162,24 +162,11 @@ impl AtomicComputedDirty {
         }
     }
 
-    /// Update the epoch portion, preserving dirty flags.
+    /// Set the epoch and clear all dirty flags.
     /// Uses Relaxed ordering — relies on a subsequent release-store of
     /// `checked` for synchronization.
-    pub fn store_computed_relaxed(&self, epoch: Epoch) {
-        let new_epoch = epoch.as_u32() as u64;
-        let mut packed = self.0.load(Ordering::Relaxed);
-        loop {
-            let new_packed = (packed & !EPOCH_MASK) | new_epoch;
-            match self.0.compare_exchange_weak(
-                packed,
-                new_packed,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => return,
-                Err(x) => packed = x,
-            }
-        }
+    pub fn store_computed_and_clear_dirty_relaxed(&self, epoch: Epoch) {
+        self.0.store(epoch.as_u32() as u64, Ordering::Relaxed);
     }
 
     // --- Helper functions ---

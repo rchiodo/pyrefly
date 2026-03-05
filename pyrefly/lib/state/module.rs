@@ -329,7 +329,26 @@ impl CleanGuard<'_> {
     /// `clear_ast`: if true, also clear the AST (e.g., load contents changed).
     pub fn rebuild(&self, clear_ast: bool, now: Epoch) {
         self.state.steps.reset_for_rebuild(clear_ast);
-        self.state.computed_dirty.store_computed_relaxed(now);
+
+        // Atomically set computed = now and clear all dirty flags.
+        //
+        // This closes a race window between `take_dirty()` at the start of
+        // `clean` and this `rebuild` call: another thread computing a
+        // dependency's Solutions step can call `try_mark_deps_dirty`, which
+        // checks `computed != now` and sets the DEPS flag. Without clearing
+        // here, that DEPS flag would persist and cause a redundant recheck
+        // in the next epoch.
+        //
+        // Clearing DEPS is safe because we are rebuilding: the module will
+        // re-demand all its dependencies and get fresh data, making any
+        // concurrent DEPS notification redundant.
+        //
+        // Clearing LOAD, FIND, and REQUIRE is safe because those flags are
+        // only set during invalidation (set_memory, config changes, etc.),
+        // which happens before transactions run and never races with clean.
+        self.state
+            .computed_dirty
+            .store_computed_and_clear_dirty_relaxed(now);
 
         // Release-store checked: this is the synchronization point.
         // Any reader that subsequently observes `checked == now` via
