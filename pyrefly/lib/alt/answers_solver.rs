@@ -201,7 +201,6 @@ impl CalcStack {
     }
 
     /// Returns true when the SCC solving mode is `Iterative`.
-    #[allow(dead_code)]
     fn is_iterative(&self) -> bool {
         self.scc_solving_mode == SccSolvingMode::Iterative
     }
@@ -539,7 +538,7 @@ impl CalcStack {
             }
         }
 
-        if let Some(first_idx) = first_merge_idx {
+        let result = if let Some(first_idx) = first_merge_idx {
             // Merge all SCCs from first_idx to end, plus the new SCC
             let sccs_from_stack: Vec<Scc> = scc_stack.drain(first_idx..).collect();
             let sccs_to_merge = Vec1::from_vec_push(sccs_from_stack, new_scc);
@@ -567,7 +566,16 @@ impl CalcStack {
             };
             scc_stack.push(new_scc);
             result
+        };
+
+        // Iterative mode never uses min-idx breaking: every back-edge breaks
+        // immediately. This ensures Phase 0 is purely membership discovery and
+        // that no frame continues past its own cycle detection point.
+        if self.is_iterative() {
+            return SccDetectedResult::BreakHere;
         }
+
+        result
     }
 
     /// Check the SCC state for a node before calculating it.
