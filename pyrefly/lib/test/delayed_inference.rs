@@ -394,3 +394,58 @@ for i in range(5):
 assert_type(x, list[int])
 "#,
 );
+
+testcase!(
+    test_empty_container_constructor_call,
+    r#"
+from typing import assert_type
+
+x = list()
+x.append(1)
+assert_type(x, list[int])
+
+y = set()
+y.add(2)
+assert_type(y, set[int])
+
+z = dict()
+z['k'] = 3
+assert_type(z, dict[str, int])
+    "#,
+);
+
+testcase!(
+    bug = "Container contents should be promoted",
+    test_redundant_empty_container_constructor_call,
+    r#"
+from typing import assert_type
+
+x = list([])
+x.append(1)
+assert_type(x, list[int])  # E: assert_type(list[Literal[1]], list[int])
+
+y = dict({})
+y['k'] = 3
+assert_type(y, dict[str, int])  # E: assert_type(dict[Literal['k'], Literal[3]], dict[str, int])
+    "#,
+);
+
+testcase!(
+    bug = "Unwanted infer-on-first-use when container is non-empty",
+    test_container_of_unknown_function_parameter,
+    r#"
+from typing import Any, assert_type
+def f(a):
+    x = list(a)
+    x.append(1)
+    assert_type(x, list[Any])  # E: assert_type(list[int], list[Any])
+
+    y = set(a)
+    y.add(2)
+    assert_type(y, set[Any])  # E: assert_type(set[int], set[Any])
+
+    z = dict(a)
+    z['k'] = 3
+    assert_type(z, dict[Any, Any])  # E: assert_type(dict[str, int], dict[Any, Any])
+    "#,
+);
