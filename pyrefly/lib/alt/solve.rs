@@ -161,7 +161,6 @@ use crate::types::types::SuperObj;
 use crate::types::types::TParams;
 use crate::types::types::TParamsSource;
 use crate::types::types::Type;
-use crate::types::types::Var;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TypeFormContext {
@@ -1930,15 +1929,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let mut found = false;
             type_info.visit(&mut |ty| {
                 if !found {
-                    // Use the same recursive traversal as pin_all_placeholder_types
-                    fn check(t: &Type, vars: &mut Vec<Var>) {
-                        match t {
-                            Type::Var(v) => vars.push(*v),
-                            _ => t.recurse(&mut |t| check(t, vars)),
-                        }
-                    }
-                    let mut vars = vec![];
-                    check(ty, &mut vars);
+                    let vars = ty.collect_all_vars();
                     found = vars.iter().any(|v| solver.var_is_partial(*v));
                 }
             });
@@ -4508,20 +4499,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ty_range: TextRange,
         errors: &ErrorCollector,
     ) {
-        // NOTE: the traversal logic should match `solve_binding_with_first_use_pinning`
-        //
         // Expand the type, in case unexpanded `Vars` are hiding further `Var`s that
         // need to be pinned.
         self.solver().expand_vars_mut(ty);
-        // Collect all the vars we may need to pin
-        fn f(t: &Type, vars: &mut Vec<Var>) {
-            match t {
-                Type::Var(v) => vars.push(*v),
-                _ => t.recurse(&mut |t| f(t, vars)),
-            }
-        }
-        let mut vars = vec![];
-        f(ty, &mut vars);
+        let vars = ty.collect_all_vars();
         // Pin all relevant vars and collect ranges of PartialContained vars
         for var in vars {
             match self.solver().pin_placeholder_type(var, pin_partial_types) {
