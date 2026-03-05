@@ -556,6 +556,10 @@ pub struct BuiltInType {
     /// Optional declaration information for built-in types (usually undefined for true built-ins). Example: Some built-ins like __class__ have synthesized declarations.
     pub declaration: Option<Declaration>,
 
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -605,6 +609,10 @@ pub struct FunctionType {
     /// Declaration node information (source location, category, name). Points to where this type was declared in the source code. Example: For a function, this contains the node pointing to the 'def' keyword and function name.
     pub declaration: Declaration,
 
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -631,6 +639,10 @@ pub struct ClassType {
     /// Declaration node information (source location, category, name). Points to where this type was declared in the source code. Example: For a function, this contains the node pointing to the 'def' keyword and function name.
     pub declaration: Declaration,
 
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -654,6 +666,10 @@ pub struct ClassType {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UnionType {
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -674,6 +690,10 @@ pub struct UnionType {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModuleType {
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -697,6 +717,10 @@ pub struct ModuleType {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OverloadedType {
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 
@@ -729,6 +753,10 @@ pub struct SynthesizedTypeMetadata {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SynthesizedType {
+    /// Human-readable display string for this type, used as a fallback when declaration URIs can't be resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+
     /// Bitfield of TypeFlags that describe characteristics of the type. Common flags: Instantiable (can create instances), Instance (is an instance), Callable (has __call__), Literal (is a literal value), Generic (has type parameters). Example: Check if type is callable: `(flags & TypeFlags.Callable) !== 0`
     pub flags: u32,
 

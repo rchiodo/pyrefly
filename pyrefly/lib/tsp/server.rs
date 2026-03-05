@@ -8,9 +8,16 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicI32;
+use std::sync::atomic::Ordering;
 
 use lsp_server::RequestId;
+use lsp_types::DocumentDiagnosticParams;
 use lsp_types::InitializeParams;
+use lsp_types::Registration;
+use lsp_types::RegistrationParams;
+use lsp_types::request::DocumentDiagnosticRequest;
+use lsp_types::request::RegisterCapability;
 use pyrefly_util::telemetry::QueueName;
 use pyrefly_util::telemetry::Telemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
@@ -40,6 +47,8 @@ pub struct TspServer<T: TspInterface> {
     pub inner: T,
     /// Current snapshot version, updated on RecheckFinished events
     pub(crate) current_snapshot: Arc<Mutex<i32>>,
+    /// Monotonic counter for outgoing request IDs (e.g. client/registerCapability)
+    outgoing_request_id: AtomicI32,
 }
 
 impl<T: TspInterface> TspServer<T> {
@@ -47,6 +56,7 @@ impl<T: TspInterface> TspServer<T> {
         Self {
             inner: lsp_server,
             current_snapshot: Arc::new(Mutex::new(0)), // Start at 0, increments on RecheckFinished
+            outgoing_request_id: AtomicI32::new(1000), // Start high to avoid collisions with incoming IDs
         }
     }
 
@@ -81,7 +91,12 @@ impl<T: TspInterface> TspServer<T> {
             if self.handle_tsp_request(ide_transaction_manager, request)? {
                 return Ok(ProcessEvent::Continue);
             }
-            // If it's not a TSP request, let the LSP server reject it since TSP server shouldn't handle LSP requests
+            // Handle textDocument/diagnostic (standard LSP pull diagnostics)
+            if request.method == <DocumentDiagnosticRequest as lsp_types::request::Request>::METHOD {
+                self.handle_document_diagnostic(request);
+                return Ok(ProcessEvent::Continue);
+            }
+            // If it's not a TSP request or a supported LSP request, reject it
             self.inner.send_response(Response::new_err(
                 request.id.clone(),
                 lsp_server::ErrorCode::MethodNotFound as i32,
@@ -255,6 +270,54 @@ impl<T: TspInterface> TspServer<T> {
             }
         }
     }
+
+    /// Handle a `textDocument/diagnostic` (pull diagnostics) request.
+    fn handle_document_diagnostic(&self, request: &Request) {
+        let response = match serde_json::from_value::<DocumentDiagnosticParams>(request.params.clone()) {
+            Ok(params) => {
+                let uri_str = params.text_document.uri.as_str();
+                let report = self.inner.get_document_diagnostics(uri_str);
+                match serde_json::to_value(report) {
+                    Ok(value) => Response {
+                        id: request.id.clone(),
+                        result: Some(value),
+                        error: None,
+                    },
+                    Err(e) => Response::new_err(
+                        request.id.clone(),
+                        lsp_server::ErrorCode::InternalError as i32,
+                        format!("Failed to serialize diagnostics: {e}"),
+                    ),
+                }
+            }
+            Err(e) => Response::new_err(
+                request.id.clone(),
+                lsp_server::ErrorCode::InvalidParams as i32,
+                format!("Invalid params for textDocument/diagnostic: {e}"),
+            ),
+        };
+        self.inner.send_response(response);
+    }
+
+    /// Send `client/registerCapability` to register `textDocument/diagnostic`
+    /// with the client so it uses the pull diagnostics model.
+    fn register_document_diagnostics(&self) {
+        let id = RequestId::from(self.outgoing_request_id.fetch_add(1, Ordering::SeqCst));
+        let params = RegistrationParams {
+            registrations: vec![Registration {
+                id: "tsp-document-diagnostics".to_owned(),
+                method: <DocumentDiagnosticRequest as lsp_types::request::Request>::METHOD.to_owned(),
+                register_options: None,
+            }],
+        };
+        let request = Request {
+            id,
+            method: <RegisterCapability as lsp_types::request::Request>::METHOD.to_owned(),
+            params: serde_json::to_value(params).unwrap(),
+            activity_key: None,
+        };
+        let _ = self.inner.sender().send(Message::Request(request));
+    }
 }
 
 pub fn tsp_loop(
@@ -265,6 +328,10 @@ pub fn tsp_loop(
 ) -> anyhow::Result<()> {
     eprintln!("Reading TSP messages");
     let server = TspServer::new(lsp_server);
+
+    // Register pull diagnostics capability with the client so it sends
+    // textDocument/diagnostic requests instead of relying on push only.
+    server.register_document_diagnostics();
 
     std::thread::scope(|scope| {
         // Start the recheck queue thread to process async tasks

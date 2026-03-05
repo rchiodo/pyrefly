@@ -415,6 +415,14 @@ pub trait TspInterface: Send + Sync {
         line: u32,
         character: u32,
     ) -> Option<pyrefly_types::types::Type>;
+
+    /// Get pull-model diagnostics for a document.
+    ///
+    /// Used by the TSP server to handle `textDocument/diagnostic` requests.
+    fn get_document_diagnostics(
+        &self,
+        uri: &str,
+    ) -> lsp_types::DocumentDiagnosticReport;
 }
 
 pub struct Connection {
@@ -5419,5 +5427,49 @@ impl TspInterface for Server {
             /* notebook_cell */ None,
         );
         transaction.get_type_at(&handle, position)
+    }
+
+    fn get_document_diagnostics(
+        &self,
+        uri: &str,
+    ) -> lsp_types::DocumentDiagnosticReport {
+        let empty_report = || {
+            lsp_types::DocumentDiagnosticReport::Full(
+                lsp_types::RelatedFullDocumentDiagnosticReport {
+                    full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
+                        items: Vec::new(),
+                        result_id: None,
+                    },
+                    related_documents: None,
+                },
+            )
+        };
+        let url = match Url::parse(uri).or_else(|_| Url::from_file_path(uri)) {
+            Ok(url) => url,
+            Err(_) => return empty_report(),
+        };
+        let Some(path) = self.path_for_uri(&url) else {
+            return empty_report();
+        };
+        let transaction = self.state.transaction();
+        let handle = make_open_handle(&self.state, &path);
+        // For TSP, return all shown errors without LSP workspace filtering
+        // (project_includes/excludes, type_error_status, etc.)
+        let items: Vec<_> = transaction
+            .get_errors(std::iter::once(&handle))
+            .collect_errors()
+            .shown
+            .into_iter()
+            .map(|e| e.to_diagnostic())
+            .collect();
+        lsp_types::DocumentDiagnosticReport::Full(
+            lsp_types::RelatedFullDocumentDiagnosticReport {
+                full_document_diagnostic_report: lsp_types::FullDocumentDiagnosticReport {
+                    items,
+                    result_id: None,
+                },
+                related_documents: None,
+            },
+        )
     }
 }
