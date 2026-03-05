@@ -65,6 +65,7 @@ use crate::binding::bindings::Bindings;
 use crate::binding::table::TableKeyed;
 use crate::config::base::RecursionLimitConfig;
 use crate::config::base::RecursionOverflowHandler;
+use crate::config::base::SccMode;
 use crate::config::error_kind::ErrorKind;
 use crate::dispatch_anyidx;
 use crate::error::collector::ErrorCollector;
@@ -1150,6 +1151,10 @@ enum SccSolvingMode {
     CyclesDualWrite,
     /// Thread-local SCC solving with batch commits to Calculation.
     CyclesThreadLocal,
+    /// Iterative fixpoint: re-solve SCC members until answers converge.
+    /// Not yet wired up; currently behaves like `CyclesThreadLocal`.
+    #[allow(dead_code)]
+    Iterative,
 }
 
 impl ThreadState {
@@ -1169,6 +1174,31 @@ impl ThreadState {
 }
 
 impl SccSolvingMode {
+    /// Resolve the SCC solving mode from a config enum, with an env var override.
+    ///
+    /// The `PYREFLY_SCC_SOLVING_MODE` env var takes precedence over the config
+    /// value, allowing runtime experimentation without config changes.
+    #[allow(dead_code)]
+    fn resolve(mode: SccMode) -> Self {
+        match env::var("PYREFLY_SCC_SOLVING_MODE") {
+            Ok(value) => match value.as_str() {
+                "cycles-dual-write" => Self::CyclesDualWrite,
+                "cycles-thread-local" => Self::CyclesThreadLocal,
+                "iterative-fixpoint" => Self::Iterative,
+                _ => panic!(
+                    "$PYREFLY_SCC_SOLVING_MODE must be one of \
+                     `cycles-dual-write`, `cycles-thread-local`, \
+                     or `iterative-fixpoint`, got `{value}`"
+                ),
+            },
+            Err(_) => match mode {
+                SccMode::CyclesDualWrite => Self::CyclesDualWrite,
+                SccMode::CyclesThreadLocal => Self::CyclesThreadLocal,
+                SccMode::IterativeFixpoint => Self::Iterative,
+            },
+        }
+    }
+
     fn from_env() -> Self {
         match env::var("PYREFLY_SCC_SOLVING_MODE") {
             Ok(value) => match value.as_str() {
