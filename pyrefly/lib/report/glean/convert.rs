@@ -63,13 +63,41 @@ fn hash(x: &[u8]) -> String {
     blake3::hash(x).to_string()
 }
 
-fn join_names(base_name: &str, name: &str) -> String {
+pub(crate) fn join_names(base_name: &str, name: &str) -> String {
     if base_name.is_empty() {
         name.to_owned()
     } else if name.is_empty() {
         base_name.to_owned()
     } else {
         base_name.to_owned() + "." + name
+    }
+}
+
+/// Compute the scope prefix for a Glean qualified name.
+///
+/// This is the single source of truth for how Glean scopes are determined
+/// from the container hierarchy. The full qualified name is
+/// `join_names(&scope, declaration_name)`.
+pub(crate) fn compute_scope(
+    container_fq_name: &str,
+    is_function_container: bool,
+    scope_type: &ScopeType,
+    module_name: &str,
+) -> String {
+    match scope_type {
+        ScopeType::Global => module_name.to_owned(),
+        ScopeType::Nonlocal => {
+            let mut parts: Vec<&str> = container_fq_name.split('.').collect();
+            parts.pop();
+            parts.join(".")
+        }
+        ScopeType::Local => {
+            if is_function_container {
+                container_fq_name.to_owned() + ".<locals>"
+            } else {
+                container_fq_name.to_owned()
+            }
+        }
     }
 }
 
@@ -155,7 +183,7 @@ fn create_sname(name: &str) -> python::SName {
 
     parent.unwrap()
 }
-enum ScopeType {
+pub(crate) enum ScopeType {
     Global,
     Nonlocal,
     Local,
@@ -442,27 +470,17 @@ impl GleanState<'_> {
         container: &python::DeclarationContainer,
         scope_type: ScopeType,
     ) -> python::Name {
-        let container_name = match container {
-            python::DeclarationContainer::module(module) => &module.key.name,
-            python::DeclarationContainer::cls(cls) => &cls.key.name,
-            python::DeclarationContainer::func(func) => &func.key.name,
+        let (container_fq_name, is_function_container) = match container {
+            python::DeclarationContainer::module(module) => (module.key.name.key.as_str(), false),
+            python::DeclarationContainer::cls(cls) => (cls.key.name.key.as_str(), false),
+            python::DeclarationContainer::func(func) => (func.key.name.key.as_str(), true),
         };
-        let container_str = container_name.key.as_str();
-        let scope = match scope_type {
-            ScopeType::Global => self.module_name.to_string(),
-            ScopeType::Nonlocal => {
-                let mut parts: Vec<&str> = container_str.split(".").collect();
-                parts.pop();
-                parts.join(".")
-            }
-            ScopeType::Local => {
-                if let python::DeclarationContainer::func(_) = container {
-                    container_str.to_owned() + ".<locals>"
-                } else {
-                    container_str.to_owned()
-                }
-            }
-        };
+        let scope = compute_scope(
+            container_fq_name,
+            is_function_container,
+            &scope_type,
+            &self.module_name.to_string(),
+        );
         if !self.names.contains(&scope) {
             self.record_name(scope.clone());
         }
@@ -1590,5 +1608,50 @@ impl Glean {
             gencode_fact.glean_entry(),
         ];
         Glean { entries }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_scope_module() {
+        assert_eq!(
+            compute_scope("mymod", false, &ScopeType::Local, "mymod"),
+            "mymod"
+        );
+    }
+
+    #[test]
+    fn test_compute_scope_class() {
+        assert_eq!(
+            compute_scope("mymod.Foo", false, &ScopeType::Local, "mymod"),
+            "mymod.Foo"
+        );
+    }
+
+    #[test]
+    fn test_compute_scope_function() {
+        assert_eq!(
+            compute_scope("mymod.foo", true, &ScopeType::Local, "mymod"),
+            "mymod.foo.<locals>"
+        );
+    }
+
+    #[test]
+    fn test_compute_scope_global() {
+        assert_eq!(
+            compute_scope("mymod.foo", true, &ScopeType::Global, "mymod"),
+            "mymod"
+        );
+    }
+
+    #[test]
+    fn test_compute_scope_nonlocal() {
+        assert_eq!(
+            compute_scope("mymod.foo.bar", true, &ScopeType::Nonlocal, "mymod"),
+            "mymod.foo"
+        );
     }
 }
