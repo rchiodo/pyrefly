@@ -11,6 +11,7 @@ use lsp_server::RequestId;
 use lsp_types::GotoDefinitionResponse;
 use lsp_types::Location;
 use lsp_types::Url;
+use pyrefly::commands::lsp::IndexingMode;
 use pyrefly::lsp::non_wasm::protocol::Message;
 use pyrefly::lsp::non_wasm::protocol::Request;
 use serde_json::json;
@@ -649,6 +650,66 @@ fn test_goto_def_dunder_all_submodule() {
         .client
         .definition("pkg/__init__.py", 5, 12)
         .expect_definition_response_from_root("pkg/sub.py", 0, 0, 0, 0)
+        .unwrap();
+    interaction.shutdown().unwrap();
+}
+
+/// Go-to-definition on the module name part of a relative import
+/// (e.g., clicking on `bar` in `from .bar import value`) does not resolve
+/// because `find_definition` does not resolve relative imports.
+#[test]
+fn definition_relative_import_with_nested_config() {
+    let root = get_test_files_root();
+    let root_path = root
+        .path()
+        .join("nested_config_relative_import/src")
+        .to_path_buf();
+    let scope_uri = Url::from_file_path(&root_path).unwrap();
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
+    interaction.set_root(root_path);
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![("test".to_owned(), scope_uri)]),
+            ..Default::default()
+        })
+        .unwrap();
+    interaction.client.did_open("main.py");
+    interaction.client.did_open("pkg/foo.py");
+    // Go-to-definition on `bar` module in `from .bar import value` (line 5, char 6)
+    // BUG: returns null because find_definition doesn't resolve relative imports.
+    interaction
+        .client
+        .definition("pkg/foo.py", 5, 6)
+        .expect_response(json!([]))
+        .unwrap();
+    interaction.shutdown().unwrap();
+}
+
+/// Same as above but with workspace root above src/.
+#[test]
+fn definition_relative_import_with_nested_config_workspace_at_root() {
+    let root = get_test_files_root();
+    let root_path = root
+        .path()
+        .join("nested_config_relative_import")
+        .to_path_buf();
+    let scope_uri = Url::from_file_path(&root_path).unwrap();
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
+    interaction.set_root(root_path);
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![("test".to_owned(), scope_uri)]),
+            ..Default::default()
+        })
+        .unwrap();
+    interaction.client.did_open("src/main.py");
+    interaction.client.did_open("src/pkg/foo.py");
+    // Go-to-definition on `bar` module in `from .bar import value` (line 5, char 6)
+    // BUG: returns empty because find_definition doesn't resolve relative imports.
+    interaction
+        .client
+        .definition("src/pkg/foo.py", 5, 6)
+        .expect_response(json!([]))
         .unwrap();
     interaction.shutdown().unwrap();
 }

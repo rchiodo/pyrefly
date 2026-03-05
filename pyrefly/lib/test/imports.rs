@@ -1272,3 +1272,20 @@ assert_type(x, int)
 assert_type(y, str)
 "#,
 );
+
+fn env_relative_import_in_subdirectory() -> TestEnv {
+    let mut t = TestEnv::new();
+    t.add_with_path("test.foo", "test/foo.py", "from .foo2 import bar");
+    t.add_with_path("test.foo2", "test/foo2.py", "bar: int = 100");
+    t
+}
+
+testcase!(
+    test_relative_import_in_subdirectory,
+    env_relative_import_in_subdirectory(),
+    r#"
+from typing import assert_type
+from test.foo import bar
+assert_type(bar, int)
+"#,
+);
