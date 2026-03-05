@@ -862,9 +862,27 @@ impl Transaction<'_> {
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier,
-                context: IdentifierContext::ImportedName { module_name, .. },
+                context:
+                    IdentifierContext::ImportedName {
+                        module_name, dots, ..
+                    },
             }) => {
-                if let Some(handle) = self.import_handle(handle, module_name, None).finding() {
+                // For relative imports (dots > 0), resolve to an absolute module name.
+                let resolved = if dots > 0 {
+                    let is_init = handle.path().is_init();
+                    let suffix = if module_name.as_str().is_empty() {
+                        None
+                    } else {
+                        Some(&Name::new(module_name.as_str()))
+                    };
+                    handle
+                        .module()
+                        .new_maybe_relative(is_init, dots, suffix)
+                        .unwrap_or(module_name)
+                } else {
+                    module_name
+                };
+                if let Some(handle) = self.import_handle(handle, resolved, None).finding() {
                     if "import".starts_with(identifier.as_str()) {
                         result.push(RankedCompletion::new(CompletionItem {
                             label: "import".to_owned(),
@@ -899,25 +917,56 @@ impl Transaction<'_> {
                     }
                 }
             }
-            // TODO: Handle relative import (via ModuleName::new_maybe_relative)
             Some(IdentifierWithContext {
                 identifier,
-                context: IdentifierContext::ImportedModule { .. },
-            }) => self
-                .import_prefixes(handle, ModuleName::from_name(identifier.id()))
-                .iter()
-                .for_each(|module_name| {
-                    result.push(RankedCompletion::new(CompletionItem {
-                        label: module_name
-                            .components()
-                            .last()
-                            .unwrap_or(&Name::empty())
-                            .to_string(),
-                        detail: Some(module_name.to_string()),
-                        kind: Some(CompletionItemKind::MODULE),
-                        ..Default::default()
-                    }))
-                }),
+                context: IdentifierContext::ImportedModule { name, dots },
+            }) => {
+                if dots > 0 {
+                    // For relative imports, resolve the base package and form an absolute prefix.
+                    let is_init = handle.path().is_init();
+                    if let Some(base) = handle.module().new_maybe_relative(is_init, dots, None) {
+                        let prefix = if name.as_str().is_empty() {
+                            base
+                        } else {
+                            ModuleName::from_str(&format!("{}.{}", base.as_str(), name.as_str()))
+                        };
+                        let base_prefix = format!("{}.", base.as_str());
+                        self.import_prefixes(handle, prefix)
+                            .iter()
+                            .for_each(|module_name| {
+                                let relative_name = module_name
+                                    .as_str()
+                                    .strip_prefix(&base_prefix)
+                                    .unwrap_or(module_name.as_str());
+                                result.push(RankedCompletion::new(CompletionItem {
+                                    label: module_name
+                                        .components()
+                                        .last()
+                                        .unwrap_or(&Name::empty())
+                                        .to_string(),
+                                    detail: Some(relative_name.to_owned()),
+                                    kind: Some(CompletionItemKind::MODULE),
+                                    ..Default::default()
+                                }));
+                            });
+                    }
+                } else {
+                    self.import_prefixes(handle, ModuleName::from_name(identifier.id()))
+                        .iter()
+                        .for_each(|module_name| {
+                            result.push(RankedCompletion::new(CompletionItem {
+                                label: module_name
+                                    .components()
+                                    .last()
+                                    .unwrap_or(&Name::empty())
+                                    .to_string(),
+                                detail: Some(module_name.to_string()),
+                                kind: Some(CompletionItemKind::MODULE),
+                                ..Default::default()
+                            }))
+                        });
+                }
+            }
             Some(IdentifierWithContext {
                 identifier: _,
                 context: IdentifierContext::Attribute { base_range, .. },

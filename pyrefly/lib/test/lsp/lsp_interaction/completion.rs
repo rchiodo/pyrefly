@@ -1050,3 +1050,83 @@ fn test_deep_submodule_chain_reexport_completion() {
 
     interaction.shutdown().unwrap();
 }
+
+#[test]
+fn test_relative_import_module_completion() {
+    let root = get_test_files_root();
+    let mut interaction = LspInteraction::new();
+    interaction.set_root(root.path().join("relative_import_completion"));
+    interaction
+        .initialize(InitializeSettings::default())
+        .unwrap();
+
+    interaction.client.did_open("pkg/main.py");
+    interaction.client.did_change("pkg/main.py", "from .fo\n");
+
+    // Complete the module name in `from .fo` (parser recovery produces ImportedModule context)
+    interaction
+        .client
+        .completion("pkg/main.py", 0, 8)
+        .expect_completion_response_with(|list| {
+            list.items.iter().any(|item| {
+                item.label == "foo"
+                    && item.kind == Some(CompletionItemKind::MODULE)
+                    && item.detail.as_deref() == Some("foo")
+            })
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
+
+#[test]
+fn test_relative_import_name_completion() {
+    let root = get_test_files_root();
+    let mut interaction = LspInteraction::new();
+    interaction.set_root(root.path().join("relative_import_completion"));
+    interaction
+        .initialize(InitializeSettings::default())
+        .unwrap();
+
+    interaction.client.did_open("pkg/main.py");
+    interaction
+        .client
+        .did_change("pkg/main.py", "from .foo import imperial");
+
+    // Complete the imported name from a relative module
+    interaction
+        .client
+        .completion("pkg/main.py", 0, 24)
+        .expect_completion_response_with(|list| {
+            list.items.iter().any(|item| item.label == "imperial_guard")
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
+
+#[test]
+fn test_relative_import_double_dot_name_completion() {
+    let root = get_test_files_root();
+    let mut interaction = LspInteraction::new();
+    interaction.set_root(root.path().join("relative_import_completion"));
+    interaction
+        .initialize(InitializeSettings::default())
+        .unwrap();
+
+    interaction.client.did_open("pkg/sub/main.py");
+    interaction
+        .client
+        .did_change("pkg/sub/main.py", "from ..foo import imperial");
+
+    // Complete the imported name from a double-dot relative module
+    interaction
+        .client
+        .completion("pkg/sub/main.py", 0, 25)
+        .expect_completion_response_with(|list| {
+            list.items.iter().any(|item| item.label == "imperial_guard")
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}

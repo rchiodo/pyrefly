@@ -290,7 +290,6 @@ pub(crate) enum IdentifierContext {
         name: ModuleName,
         /// Keeps track of how many leading dots there are for the imported module.
         /// ex: `x.y` in `import x.y` has 0 dots, and `x` in `from ..x.y import z` has 2 dot.
-        #[allow(dead_code)]
         dots: u32,
     },
     /// An identifier appeared as the name of a from...import statement.
@@ -300,7 +299,6 @@ pub(crate) enum IdentifierContext {
         module_name: ModuleName,
         /// Keeps track of how many leading dots there are for the imported module.
         /// ex: `x.y` in `import x.y` has 0 dots, and `x` in `from ..x.y import z` has 2 dot.
-        #[allow(dead_code)]
         dots: u32,
         /// Name of the imported entity in the current module. If there's no as-rename, this will be
         /// the same as the identifier. If there is as-rename, this will be the name after the `as`.
