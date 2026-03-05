@@ -449,7 +449,7 @@ dependencies = [
  "cfg-if",
  "itoa 1.0.17",
  "rustversion",
- "ryu 1.0.17",
+ "ryu 1.0.23",
  "static_assertions",
 ]
 
@@ -463,7 +463,7 @@ dependencies = [
  "cfg-if",
  "itoa 1.0.17",
  "rustversion",
- "ryu 1.0.17",
+ "ryu 1.0.23",
  "serde",
  "static_assertions",
 ]
@@ -2810,9 +2810,9 @@ checksum = "b96a9549dc8d48f2c283938303c4b5a77aa29bfbc5b54b084fb1630408899a8f"
 
 [[package]]
 name = "ryu"
-version = "1.0.17"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e86697c916019a8588c99b5fac3cead74ec0b4b819707a682fd4d23fa0ce1ba1"
+checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "same-file"
