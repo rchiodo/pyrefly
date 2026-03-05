@@ -890,6 +890,104 @@ enum BindingAction<T> {
     SccLocalAnswer(Arc<dyn Any + Send + Sync>),
 }
 
+/// Per-SCC iteration state for iterative fixpoint solving.
+///
+/// This tracks the current iteration number, per-node progress within the
+/// iteration, warm-start answers from the previous iteration, and flags
+/// for demotion (membership expansion) and convergence (answer stability).
+///
+/// Iteration state is SCC-scoped so that disjoint SCCs can iterate
+/// independently.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SccIterationState {
+    /// Current iteration number (starts at 1).
+    pub iteration: u32,
+    /// Per-node iteration tracking. Membership is `node_states.keys()`.
+    pub node_states: BTreeMap<CalcId, IterationNodeState>,
+    /// Answers from the prior iteration, used for warm-start on back-edges.
+    /// Empty on iteration 1 (cold start).
+    pub previous_answers: BTreeMap<CalcId, Arc<dyn Any + Send + Sync>>,
+    /// Whether SCC membership expanded during this iteration (requires
+    /// restarting at iteration 1 with fresh state).
+    pub demoted: bool,
+    /// Whether any answer changed compared to `previous_answers` during
+    /// this iteration. When `false` after iteration >= 2, the SCC has
+    /// converged.
+    pub has_changed: bool,
+}
+
+/// Tracks the state of a node within a single iteration of iterative SCC solving.
+///
+/// This is separate from the legacy `NodeState` used during Phase 0 discovery.
+/// State transitions within one iteration:
+/// - `Fresh` -> `InProgress` (when we start solving this node)
+/// - `InProgress` -> `Done` (when the node's calculation completes)
+///
+/// The `placeholder` in `InProgress` is set when a cold-start back-edge
+/// allocates a recursive variable for cycle breaking.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub enum IterationNodeState {
+    /// Not yet processed in this iteration.
+    Fresh,
+    /// Currently being solved; may have a placeholder for cycle breaking.
+    InProgress {
+        /// Placeholder variable allocated for cold-start cycle breaking.
+        /// `None` until a back-edge triggers `NeedsColdPlaceholder`.
+        placeholder: Option<Var>,
+    },
+    /// Solved in this iteration. Stores the type-erased answer.
+    Done {
+        /// The computed answer for this node in this iteration.
+        answer: Arc<dyn Any + Send + Sync>,
+    },
+}
+
+/// Lightweight summary of an `IterationNodeState` for borrow-safe read-then-act
+/// patterns.
+///
+/// Reading the full `IterationNodeState` requires borrowing the SCC, but we
+/// often need to drop that borrow before mutating. This enum captures just
+/// enough information to decide what action to take.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IterationNodeStateKind {
+    /// Node has not been processed yet in this iteration.
+    Fresh,
+    /// Node is in progress and a previous answer is available for warm-start.
+    InProgressWithPreviousAnswer,
+    /// Node is in progress and a placeholder variable exists for cycle breaking.
+    InProgressWithPlaceholder,
+    /// Node is in progress with neither a previous answer nor a placeholder
+    /// (cold start, first encounter).
+    InProgressCold,
+    /// Node has been solved in this iteration.
+    Done,
+}
+
+#[allow(dead_code)]
+impl IterationNodeState {
+    /// Compute the lightweight summary kind from this state plus whether a
+    /// previous answer exists for the same node.
+    pub fn kind(&self, has_previous_answer: bool) -> IterationNodeStateKind {
+        match self {
+            IterationNodeState::Fresh => IterationNodeStateKind::Fresh,
+            IterationNodeState::InProgress {
+                placeholder: Some(_),
+            } => IterationNodeStateKind::InProgressWithPlaceholder,
+            IterationNodeState::InProgress { placeholder: None } => {
+                if has_previous_answer {
+                    IterationNodeStateKind::InProgressWithPreviousAnswer
+                } else {
+                    IterationNodeStateKind::InProgressCold
+                }
+            }
+            IterationNodeState::Done { .. } => IterationNodeStateKind::Done,
+        }
+    }
+}
+
 /// Represent an SCC (Strongly Connected Component) we are currently solving.
 ///
 /// This simplified model tracks SCC participants with explicit state rather than
@@ -924,6 +1022,11 @@ pub struct Scc {
     /// This is the count of stack frames that belong to this SCC.
     /// Initially the cycle size; grows on merge.
     segment_size: usize,
+    /// Iteration state for iterative fixpoint solving.
+    /// `None` during Phase 0 discovery (legacy SCC tracking).
+    /// `Some(...)` when the SCC is being iteratively solved.
+    #[allow(dead_code)]
+    iterative: Option<SccIterationState>,
 }
 
 impl Display for Scc {
@@ -969,6 +1072,7 @@ impl Scc {
             detected_at,
             anchor_pos,
             segment_size,
+            iterative: None,
         }
     }
 
@@ -1089,6 +1193,14 @@ impl Scc {
 
     /// Merge two SCCs into one, preserving all break points and taking the
     /// most advanced state for each participant.
+    ///
+    /// If either SCC has iteration state (`iterative: Some(...)`), the merged
+    /// SCC restarts at iteration 1 with fresh node states, cleared previous
+    /// answers, and `demoted = true`. The members of the merged iteration state
+    /// come from the already-merged `node_state.keys()` (the legacy SCC
+    /// membership), which is the union of both SCCs' members. This is
+    /// important because a non-iterating SCC has `iterative: None` but still
+    /// has members in `node_state`.
     #[allow(clippy::mutable_key_type)]
     fn merge(mut self, other: Scc) -> Self {
         // Union break_at sets
@@ -1111,6 +1223,33 @@ impl Scc {
         // Note: segment_size is NOT updated here. After a merge, everything from
         // the merged anchor to the current stack top is part of this single SCC.
         // The caller must recompute segment_size = stack.len() - anchor_pos.
+
+        // Merge iteration state: if either SCC is iterating, the merged SCC
+        // restarts at iteration 1 with all members fresh and demoted = true.
+        // Members come from self.node_state.keys() (the already-merged legacy
+        // membership), NOT from iterative.node_states.keys(), because a
+        // non-iterating SCC has iterative: None but still has members.
+        self.iterative = match (self.iterative.take(), other.iterative) {
+            (None, None) => None,
+            (Some(_), _) | (_, Some(_)) => {
+                // At least one SCC is iterating. Build fresh iteration state
+                // with ALL members from the merged node_state map.
+                let all_members: BTreeMap<CalcId, IterationNodeState> = self
+                    .node_state
+                    .keys()
+                    .duped()
+                    .map(|k| (k, IterationNodeState::Fresh))
+                    .collect();
+                Some(SccIterationState {
+                    iteration: 1,
+                    node_states: all_members,
+                    previous_answers: BTreeMap::new(),
+                    demoted: true,
+                    has_changed: false,
+                })
+            }
+        };
+
         self
     }
 
@@ -2158,6 +2297,7 @@ mod scc_tests {
             detected_at,
             anchor_pos,
             segment_size,
+            iterative: None,
         }
     }
 
