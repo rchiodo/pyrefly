@@ -325,25 +325,25 @@ impl ErrorKind {
     pub fn default_severity(self) -> Severity {
         // IMPORTANT: When updating these, also update error-kinds.mdx in the docs
         match self {
-            ErrorKind::RevealType => Severity::Info,
             ErrorKind::Deprecated => Severity::Warn,
-            ErrorKind::RedundantCast => Severity::Warn,
-            ErrorKind::UnnecessaryComparison => Severity::Warn,
-            // TODO: up severity to Warn when https://github.com/facebook/pyrefly/issues/1950 is fixed
-            ErrorKind::UntypedImport => Severity::Ignore,
-            ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
-            ErrorKind::ImplicitlyDefinedAttribute => Severity::Ignore,
             ErrorKind::ImplicitAbstractClass => Severity::Ignore,
             ErrorKind::ImplicitAny => Severity::Ignore,
+            ErrorKind::ImplicitlyDefinedAttribute => Severity::Ignore,
+            ErrorKind::MissingOverrideDecorator => Severity::Ignore,
+            ErrorKind::MissingSource => Severity::Ignore,
+            ErrorKind::NonExhaustiveMatch => Severity::Warn,
+            ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
+            ErrorKind::OpenUnpacking => Severity::Ignore,
+            ErrorKind::RedundantCast => Severity::Warn,
+            ErrorKind::RevealType => Severity::Info,
+            ErrorKind::UnannotatedAttribute => Severity::Ignore,
             ErrorKind::UnannotatedParameter => Severity::Ignore,
             ErrorKind::UnannotatedReturn => Severity::Ignore,
-            ErrorKind::UnannotatedAttribute => Severity::Ignore,
-            ErrorKind::MissingSource => Severity::Ignore,
-            ErrorKind::MissingOverrideDecorator => Severity::Ignore,
-            ErrorKind::OpenUnpacking => Severity::Ignore,
-            ErrorKind::NonExhaustiveMatch => Severity::Warn,
-            ErrorKind::UnusedIgnore => Severity::Ignore,
+            ErrorKind::UnnecessaryComparison => Severity::Warn,
             ErrorKind::UnresolvableDunderAll => Severity::Warn,
+            // TODO: up severity to Warn when https://github.com/facebook/pyrefly/issues/1950 is fixed
+            ErrorKind::UntypedImport => Severity::Ignore,
+            ErrorKind::UnusedIgnore => Severity::Ignore,
             ErrorKind::VarianceMismatch => Severity::Warn,
             _ => Severity::Error,
         }
