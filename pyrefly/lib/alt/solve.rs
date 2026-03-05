@@ -2940,12 +2940,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return self.heap.mk_none();
         };
 
-        let subject_info = self.get_idx(subject_idx);
-        let mut subject_ty = subject_info.ty().clone();
-        self.expand_vars_mut(&mut subject_ty);
+        let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(subject_idx));
 
         // Check if this type should have exhaustiveness checked
-        if !self.should_check_exhaustiveness(&subject_ty) {
+        if !self.should_check_exhaustiveness(subject_info.ty()) {
             return self.heap.mk_none(); // Not exhaustible, assume fall-through
         }
 
@@ -2957,7 +2955,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     return self.heap.mk_none();
                 };
                 let type_info = TypeInfo::of_ty(self.heap.mk_any_implicit());
-                &type_info.with_narrow(resolved_chain.facets(), subject_ty.clone())
+                &type_info.with_narrow(resolved_chain.facets(), subject_info.into_ty())
             }
         };
 

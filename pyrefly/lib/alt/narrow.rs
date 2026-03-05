@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::sync::Arc;
+
 use num_traits::ToPrimitive;
 use pyrefly_config::error_kind::ErrorKind;
 use pyrefly_graph::index::Idx;
@@ -1639,11 +1641,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .is_some_and(|meta| meta.is_flag)
     }
 
+    pub(crate) fn with_type_for_exhaustiveness_check(&self, info: Arc<TypeInfo>) -> TypeInfo {
+        info.arc_clone().map_ty(|mut ty| {
+            self.expand_vars_mut(&mut ty);
+            match ty {
+                Type::SelfType(cls) => Type::ClassType(cls),
+                ty => ty,
+            }
+        })
+    }
+
     /// Determines if a type should be checked for match exhaustiveness.
     /// We check exhaustiveness when the type has a finite, known set of possible values.
     pub(crate) fn should_check_exhaustiveness(&self, ty: &Type) -> bool {
         match ty {
-            Type::ClassType(cls) | Type::SelfType(cls) => {
+            Type::ClassType(cls) => {
                 // Final classes can't have subclasses, so they are exhaustible, with the exception
                 // of Flag enums, whose members can be combined into new members via bitwise ops
                 !self.is_flag_enum(cls) && self.is_final(cls.class_object())
@@ -1701,11 +1713,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) {
         let (op, narrow_range) = narrow_ops_for_fall_through;
-        let subject_info = self.get_idx(*subject_idx);
-        let mut subject_ty = subject_info.ty().clone();
-        self.expand_vars_mut(&mut subject_ty);
+        let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(*subject_idx));
         // We only check match exhaustiveness if the subject is an enum or a union of enum literals
-        if !self.should_check_exhaustiveness(&subject_ty) {
+        if !self.should_check_exhaustiveness(subject_info.ty()) {
             return;
         }
         let ignore_errors = self.error_swallower();
@@ -1723,7 +1733,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // We need to make a `TypeInfo` rooted at `x` using the type of `x.foo`
                 let type_info = TypeInfo::of_ty(self.heap.mk_any_implicit());
                 let narrowing_subject_info =
-                    type_info.with_narrow(resolved_chain.facets(), subject_ty.clone());
+                    type_info.with_narrow(resolved_chain.facets(), subject_info.ty().clone());
                 let narrowed = self.narrow(
                     &narrowing_subject_info,
                     op.as_ref(),
@@ -1738,7 +1748,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if remaining_ty.is_never() || remaining_ty.is_any() {
             return;
         }
-        let subject_display = self.for_display(subject_ty);
+        let subject_display = self.for_display(subject_info.into_ty());
         let remaining_display = self.for_display(remaining_ty.clone());
         let ctx = TypeDisplayContext::new(&[&subject_display, &remaining_display]);
         let mut msg = vec1![format!(

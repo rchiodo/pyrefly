@@ -633,6 +633,29 @@ def process(x: A | B | C):
 );
 
 testcase!(
+    test_exhaustiveness_in_enum_method,
+    r#"
+from enum import Enum
+
+class E(Enum):
+    X = 1
+    Y = 2
+
+    def f_exhaustive(self) -> str:
+        match self:
+            case E.X:
+                return "X"
+            case E.Y:
+                return "Y"
+
+    def f_nonexhaustive(self) -> str:  # E: missing an explicit `return`
+        match self:  # E: Missing cases: E.Y
+            case E.X:
+                return "X"
+    "#,
+);
+
+testcase!(
     test_match_mapping_after_none,
     r#"
 from typing import Any, assert_type
