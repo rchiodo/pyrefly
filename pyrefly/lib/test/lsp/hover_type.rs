@@ -581,3 +581,65 @@ Hover Result: None"#
         report.trim(),
     );
 }
+
+#[test]
+fn class_def_hover() {
+    let code = r#"
+class Foo:
+#     ^
+    pass
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+2 | class Foo:
+          ^
+Hover Result: `type[Foo]`
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn parameter_hover() {
+    let code = r#"
+def f(x: int):
+#     ^
+    pass
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+2 | def f(x: int):
+          ^
+Hover Result: `int`
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn exception_handler_hover() {
+    let code = r#"
+try:
+    pass
+except ValueError as e:
+#                    ^
+    pass
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+4 | except ValueError as e:
+                         ^
+Hover Result: `ValueError`
+"#
+        .trim(),
+        report.trim(),
+    );
+}
