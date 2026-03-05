@@ -33,7 +33,6 @@ pub mod args;
 pub mod assert_size;
 pub mod display;
 pub mod events;
-pub mod exclusive_lock;
 pub mod forgetter;
 pub mod fs_anyhow;
 pub mod gas;
