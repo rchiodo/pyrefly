@@ -181,16 +181,27 @@ pub struct CalcStack {
     /// SCCs that completed during `on_calculation_finished` but haven't been
     /// batch-committed yet. Drained by `get_idx` after each frame completes.
     pending_completed_sccs: RefCell<Vec<Scc>>,
+    /// The SCC solving mode, propagated from `ThreadState` at construction time.
+    /// This makes the mode accessible during SCC operations without needing a
+    /// back-reference to `ThreadState`.
+    scc_solving_mode: SccSolvingMode,
 }
 
 impl CalcStack {
-    pub fn new() -> Self {
+    fn new(scc_solving_mode: SccSolvingMode) -> Self {
         Self {
             stack: RefCell::new(Vec::new()),
             scc_stack: RefCell::new(Vec::new()),
             position_of: RefCell::new(FxHashMap::default()),
             pending_completed_sccs: RefCell::new(Vec::new()),
+            scc_solving_mode,
         }
+    }
+
+    /// Returns true when the SCC solving mode is `Iterative`.
+    #[allow(dead_code)]
+    fn is_iterative(&self) -> bool {
+        self.scc_solving_mode == SccSolvingMode::Iterative
     }
 
     /// Pop the current frame and drain any SCCs that completed during it.
@@ -1159,11 +1170,12 @@ enum SccSolvingMode {
 
 impl ThreadState {
     pub fn new(recursion_limit_config: Option<RecursionLimitConfig>) -> Self {
+        let scc_solving_mode = SccSolvingMode::resolve(SccMode::default());
         Self {
-            stack: CalcStack::new(),
+            stack: CalcStack::new(scc_solving_mode),
             debug: RefCell::new(false),
             recursion_limit_config,
-            scc_solving_mode: SccSolvingMode::from_env(),
+            scc_solving_mode,
             partial_answers: RefCell::new(FxHashMap::default()),
         }
     }
@@ -1178,7 +1190,6 @@ impl SccSolvingMode {
     ///
     /// The `PYREFLY_SCC_SOLVING_MODE` env var takes precedence over the config
     /// value, allowing runtime experimentation without config changes.
-    #[allow(dead_code)]
     fn resolve(mode: SccMode) -> Self {
         match env::var("PYREFLY_SCC_SOLVING_MODE") {
             Ok(value) => match value.as_str() {
@@ -1196,20 +1207,6 @@ impl SccSolvingMode {
                 SccMode::CyclesThreadLocal => Self::CyclesThreadLocal,
                 SccMode::IterativeFixpoint => Self::Iterative,
             },
-        }
-    }
-
-    fn from_env() -> Self {
-        match env::var("PYREFLY_SCC_SOLVING_MODE") {
-            Ok(value) => match value.as_str() {
-                "cycles-thread-local" => Self::CyclesThreadLocal,
-                "cycles-dual-write" => Self::CyclesDualWrite,
-                _ => panic!(
-                    "$PYREFLY_SCC_SOLVING_MODE must be one of \
-                     `cycles-thread-local` or `cycles-dual-write`, got `{value}`"
-                ),
-            },
-            Err(_) => Self::default(),
         }
     }
 }
@@ -2128,7 +2125,7 @@ mod scc_tests {
 
     /// Helper to create a CalcStack for testing.
     fn make_calc_stack(entries: &[CalcId]) -> CalcStack {
-        let stack = CalcStack::new();
+        let stack = CalcStack::new(SccSolvingMode::default());
         for entry in entries {
             stack.push_for_test(entry.dupe());
         }
@@ -2194,7 +2191,7 @@ mod scc_tests {
 
     #[test]
     fn test_current_cycle_empty_stack() {
-        let calc_stack = CalcStack::new();
+        let calc_stack = CalcStack::new(SccSolvingMode::default());
         assert!(calc_stack.current_cycle().is_none());
     }
 
@@ -2471,7 +2468,7 @@ mod scc_tests {
         }
 
         // 2. Create a fresh stack (simulating a new request/thread reuse).
-        let stack = CalcStack::new();
+        let stack = CalcStack::new(SccSolvingMode::default());
 
         // 3. Push the same calculation.
         // This should NOT panic.
