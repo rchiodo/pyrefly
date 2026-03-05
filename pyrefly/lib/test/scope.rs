@@ -956,5 +956,89 @@ def test_unannotated():
         for b in bs:
             break
         return x
+def test_walrus():
+    x = {}
+    def nested(a: int, bs: list[int]):
+        if not (y := x)[0]:
+            return None
+        for b in bs:
+            break
+        return (z := x)
+"#,
+);
+
+testcase!(
+    test_captured_var_pins_outer,
+    r#"
+from typing import assert_type, Any
+
+def test():
+    x = []
+    def nested():
+        x.append(1)
+    x.append("")  # E: Argument `Literal['']` is not assignable to parameter `object` with type `int` in function `list.append`
+
+def test2():
+    x = []
+    def nested():
+        x.append(1)
+    assert_type(x[0], int)
+"#,
+);
+
+testcase!(
+    test_captured_var_narrow,
+    r#"
+from typing import assert_type
+def test():
+    x: int | None = 1
+    def nested() -> int:
+        if x is not None:
+            assert_type(x, int)
+            return x
+        else:
+            assert_type(x, None)
+            return 0
+"#,
+);
+
+testcase!(
+    test_no_capture_class_var,
+    r#"
+# We should not capture variables from the class body
+from typing import assert_type
+x: int
+class C:
+    x: str
+    def test(self):
+        assert_type(x, int)
+"#,
+);
+
+testcase!(
+    test_captured_var_no_uninitialized_error,
+    r#"
+# If a variable is captured from outside, we should not give an error that it's uninitialized, even if it is not
+def test():
+    x: int
+    def nested() -> int:
+        return x
+"#,
+);
+
+testcase!(
+    test_capture_var_preserves_import_flow_style,
+    r#"
+from typing import assert_type
+x: object = 1
+def test(y: object):
+    while True:
+        z: object = 1
+        if hasattr(x, "foo"):
+            x.foo
+        if hasattr(y, "foo"):
+            y.foo
+        if hasattr(z, "foo"):
+            z.foo
 "#,
 );
