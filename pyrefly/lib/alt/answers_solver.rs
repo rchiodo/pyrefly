@@ -763,6 +763,241 @@ impl CalcStack {
 
         scc_stack.push(merged);
     }
+
+    /// Find the index in `scc_stack` of an iterating SCC that contains `target`.
+    ///
+    /// Scans the SCC stack for an SCC with `iterative: Some(...)` whose
+    /// `node_state` (legacy membership map) contains the target. Returns the index in the stack
+    /// (not the SCC's `anchor_pos`). Used for membership-based back-edge
+    /// detection: a request for a CalcId in a non-top iterating SCC is a
+    /// back-edge that must trigger merge + demotion.
+    #[allow(dead_code)]
+    fn find_iterating_scc_containing(&self, target: &CalcId) -> Option<usize> {
+        let scc_stack = self.scc_stack.borrow();
+        for (i, scc) in scc_stack.iter().enumerate() {
+            if scc.iterative.is_some() && scc.node_state.contains_key(target) {
+                return Some(i);
+            }
+        }
+        None
+    }
+
+    /// Returns true if `target` is a member of any iterating SCC on the stack.
+    #[allow(dead_code)]
+    fn is_iterating_member(&self, target: &CalcId) -> bool {
+        self.find_iterating_scc_containing(target).is_some()
+    }
+
+    /// Returns true if the top SCC is iterating at iteration 1 (cold start).
+    ///
+    /// During cold-start iteration, back-edges allocate placeholders rather
+    /// than reusing previous answers.
+    #[allow(dead_code)]
+    fn is_cold_iteration(&self) -> bool {
+        let scc_stack = self.scc_stack.borrow();
+        scc_stack
+            .last()
+            .and_then(|scc| scc.iterative.as_ref())
+            .is_some_and(|iter_state| iter_state.iteration == 1)
+    }
+
+    /// Returns true if the top SCC is iterating at iteration >= 2.
+    ///
+    /// This is used to decide whether to suppress errors: errors are
+    /// swallowed during iteration 1 and collected from iteration 2 onward.
+    /// The name "final" is a misnomer since more iterations may follow;
+    /// it means "past cold start."
+    #[allow(dead_code)]
+    fn is_final_iteration(&self) -> bool {
+        let scc_stack = self.scc_stack.borrow();
+        scc_stack
+            .last()
+            .and_then(|scc| scc.iterative.as_ref())
+            .is_some_and(|iter_state| iter_state.iteration >= 2)
+    }
+
+    /// Get the lightweight summary of a target's iteration node state in
+    /// the top SCC.
+    ///
+    /// Returns `None` if the top SCC is not iterating or the target is not
+    /// found in the iteration node states. The summary is safe to use for
+    /// read-then-act patterns because it does not borrow the SCC.
+    #[allow(dead_code)]
+    fn get_iteration_node_state(&self, target: &CalcId) -> Option<IterationNodeStateKind> {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last()?;
+        let iter_state = top_scc.iterative.as_ref()?;
+        let node_state = iter_state.node_states.get(target)?;
+        let has_previous_answer = iter_state.previous_answers.contains_key(target);
+        Some(node_state.kind(has_previous_answer))
+    }
+
+    /// Mark a target node as `InProgress` in the top SCC's iteration state.
+    ///
+    /// Panics if the top SCC is not iterating, the target is not a member,
+    /// or the target is not `Fresh`.
+    #[allow(dead_code)]
+    fn set_iteration_node_in_progress(&self, target: &CalcId) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
+        let iter_state = top_scc
+            .iterative
+            .as_mut()
+            .expect("top SCC is not iterating");
+        let node_state = iter_state
+            .node_states
+            .get_mut(target)
+            .expect("target is not a member of the iterating SCC");
+        assert!(
+            matches!(node_state, IterationNodeState::Fresh),
+            "set_iteration_node_in_progress called on non-Fresh node: {target:?}"
+        );
+        *node_state = IterationNodeState::InProgress { placeholder: None };
+    }
+
+    /// Set the placeholder variable on an existing `InProgress` iteration
+    /// node state for the target.
+    ///
+    /// Panics if the target is not found or is not `InProgress`.
+    #[allow(dead_code)]
+    fn set_iteration_placeholder(&self, target: &CalcId, var: Var) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
+        let iter_state = top_scc
+            .iterative
+            .as_mut()
+            .expect("top SCC is not iterating");
+        let node_state = iter_state
+            .node_states
+            .get_mut(target)
+            .expect("target is not a member of the iterating SCC");
+        match node_state {
+            IterationNodeState::InProgress { placeholder } => {
+                *placeholder = Some(var);
+            }
+            _ => panic!(
+                "set_iteration_placeholder called on a node that is not InProgress: {:?}",
+                node_state
+            ),
+        }
+    }
+
+    /// Get the placeholder variable from the target's `InProgress` state,
+    /// if one exists.
+    ///
+    /// Returns `None` if the top SCC is not iterating, the target is not
+    /// found, the target is not `InProgress`, or no placeholder has been set.
+    #[allow(dead_code)]
+    fn get_iteration_placeholder(&self, target: &CalcId) -> Option<Var> {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last()?;
+        let iter_state = top_scc.iterative.as_ref()?;
+        match iter_state.node_states.get(target)? {
+            IterationNodeState::InProgress {
+                placeholder: Some(var),
+            } => Some(*var),
+            _ => None,
+        }
+    }
+
+    /// Mark a target node as `Done` in the top SCC's iteration state.
+    ///
+    /// Panics if the top SCC is not iterating.
+    #[allow(dead_code)]
+    fn set_iteration_node_done(&self, target: &CalcId, answer: Arc<dyn Any + Send + Sync>) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
+        let iter_state = top_scc
+            .iterative
+            .as_mut()
+            .expect("top SCC is not iterating");
+        iter_state
+            .node_states
+            .insert(target.dupe(), IterationNodeState::Done { answer });
+    }
+
+    /// Set `has_changed = true` on the top SCC's iteration state.
+    ///
+    /// Called when a node's answer differs from its previous-iteration answer,
+    /// indicating the fixpoint has not yet converged.
+    ///
+    /// Panics if the top SCC is not iterating.
+    #[allow(dead_code)]
+    fn mark_iteration_changed(&self) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
+        let iter_state = top_scc
+            .iterative
+            .as_mut()
+            .expect("top SCC is not iterating");
+        iter_state.has_changed = true;
+    }
+
+    /// Look up the previous-iteration answer for a target in the top SCC.
+    ///
+    /// Returns `None` if the top SCC is not iterating or there is no
+    /// previous answer for the target (e.g., during cold-start iteration 1).
+    #[allow(dead_code)]
+    fn get_previous_answer(&self, target: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last()?;
+        let iter_state = top_scc.iterative.as_ref()?;
+        iter_state.previous_answers.get(target).cloned()
+    }
+
+    /// Find the first member in the top SCC's iteration state that is `Fresh`.
+    ///
+    /// Returns `None` if all members have been processed or the top SCC is
+    /// not iterating. BTreeMap iteration order gives deterministic results.
+    #[allow(dead_code)]
+    fn next_fresh_member(&self) -> Option<CalcId> {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last()?;
+        let iter_state = top_scc.iterative.as_ref()?;
+        for (calc_id, state) in &iter_state.node_states {
+            if matches!(state, IterationNodeState::Fresh) {
+                return Some(calc_id.dupe());
+            }
+        }
+        None
+    }
+
+    /// Extract done answers from the top SCC's iteration state.
+    ///
+    /// Iterates over `node_states`, collecting answers from `Done` variants.
+    /// Used to build `previous_answers` for the next iteration. Returns an
+    /// empty map if the top SCC is not iterating.
+    #[allow(dead_code, clippy::mutable_key_type)]
+    fn extract_previous_answers(&self) -> BTreeMap<CalcId, Arc<dyn Any + Send + Sync>> {
+        let scc_stack = self.scc_stack.borrow();
+        let Some(top_scc) = scc_stack.last() else {
+            return BTreeMap::new();
+        };
+        let Some(iter_state) = top_scc.iterative.as_ref() else {
+            return BTreeMap::new();
+        };
+        let mut answers = BTreeMap::new();
+        for (calc_id, state) in &iter_state.node_states {
+            if let IterationNodeState::Done { answer } = state {
+                answers.insert(calc_id.dupe(), answer.clone());
+            }
+        }
+        answers
+    }
+
+    /// Read the demotion and convergence flags from the top SCC's iteration state.
+    ///
+    /// Returns `(demoted, has_changed)`. Panics if the top SCC is not iterating.
+    #[allow(dead_code)]
+    fn read_iteration_outcome(&self) -> (bool, bool) {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last().expect("no SCC on the stack");
+        let iter_state = top_scc
+            .iterative
+            .as_ref()
+            .expect("top SCC is not iterating");
+        (iter_state.demoted, iter_state.has_changed)
+    }
 }
 
 /// Tracks the state of a node within an active SCC.
