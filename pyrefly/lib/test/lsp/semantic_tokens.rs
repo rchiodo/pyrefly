@@ -733,7 +733,6 @@ token-type: variable
     );
 }
 
-// todo(kylei): should be 3 semantic tokens (including after reassignment) #1033
 #[test]
 fn reassignment() {
     let code = r#"
@@ -748,6 +747,9 @@ line: 1, column: 0, length: 3, text: foo
 token-type: variable
 
 line: 2, column: 0, length: 3, text: foo
+token-type: variable
+
+line: 3, column: 0, length: 3, text: foo
 token-type: variable"#,
     );
 }

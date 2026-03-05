@@ -2482,6 +2482,7 @@ impl Binding {
             }
             Binding::IterableValue(_, _, _) => Some(SymbolKind::Variable),
             Binding::UnpackedValue(_, _, _, _) => Some(SymbolKind::Variable),
+            Binding::AugAssign(_, _) => Some(SymbolKind::Variable),
             Binding::Expr(_, _)
             | Binding::StmtExpr(_, _)
             | Binding::MultiTargetAssign(_, _, _)
@@ -2490,7 +2491,6 @@ impl Binding {
             | Binding::ReturnType(_)
             | Binding::ContextValue(_, _, _, _)
             | Binding::AnnotatedType(_, _)
-            | Binding::AugAssign(_, _)
             | Binding::None
             | Binding::Any(_)
             | Binding::Forward(_)
