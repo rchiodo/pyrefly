@@ -1131,13 +1131,15 @@ This error is used to indicate a type that's equivalent to True or False is used
 def f() -> bool:
   ...
 
-# This will throw error, as it's likely that the function needs to be invoked.
+# This is likely a mistake, as it's likely that the function needs to be invoked.
 if f:
   ...
-# This will throw error, as it's equivalent to `if True`.
+# This is likely a mistake, as it's equivalent to `if True`.
 if "abc":
   ...
 ```
+
+The default severity of this diagnostic is `warn`.
 
 ## reveal-type
 

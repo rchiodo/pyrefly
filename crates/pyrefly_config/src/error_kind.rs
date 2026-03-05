@@ -338,6 +338,7 @@ impl ErrorKind {
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
             ErrorKind::OpenUnpacking => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,
+            ErrorKind::RedundantCondition => Severity::Warn,
             ErrorKind::RevealType => Severity::Info,
             ErrorKind::UnannotatedAttribute => Severity::Ignore,
             ErrorKind::UnannotatedParameter => Severity::Ignore,
