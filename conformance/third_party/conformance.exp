@@ -1752,7 +1752,7 @@
       "description": "This `yield` expression is unreachable",
       "line": 140,
       "name": "unreachable",
-      "severity": "error",
+      "severity": "warn",
       "stop_column": 13,
       "stop_line": 140
     },
@@ -1763,7 +1763,7 @@
       "description": "This `yield` expression is unreachable",
       "line": 145,
       "name": "unreachable",
-      "severity": "error",
+      "severity": "warn",
       "stop_column": 13,
       "stop_line": 145
     },
@@ -1774,7 +1774,7 @@
       "description": "This `yield` expression is unreachable",
       "line": 190,
       "name": "unreachable",
-      "severity": "error",
+      "severity": "warn",
       "stop_column": 10,
       "stop_line": 190
     }

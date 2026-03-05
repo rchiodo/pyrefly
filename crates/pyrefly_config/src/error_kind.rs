@@ -344,6 +344,7 @@ impl ErrorKind {
             ErrorKind::UnannotatedParameter => Severity::Ignore,
             ErrorKind::UnannotatedReturn => Severity::Ignore,
             ErrorKind::UnnecessaryComparison => Severity::Warn,
+            ErrorKind::Unreachable => Severity::Warn,
             ErrorKind::UnresolvableDunderAll => Severity::Warn,
             // TODO: up severity to Warn when https://github.com/facebook/pyrefly/issues/1950 is fixed
             ErrorKind::UntypedImport => Severity::Ignore,
