@@ -21,6 +21,7 @@ mod hover_type;
 mod implementation;
 mod inlay_hint;
 mod local_find_refs;
+mod qualified_name;
 mod rename;
 mod semantic_tokens;
 mod signature_help;
