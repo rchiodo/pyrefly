@@ -146,20 +146,8 @@ impl AtomicComputedDirty {
     /// Atomically read all dirty flags and clear them, keeping the epoch.
     /// Returns a `Dirty` snapshot of the flags that were set.
     pub fn take_dirty(&self) -> Dirty {
-        let mut packed = self.0.load(Ordering::Acquire);
-        loop {
-            let dirty = Self::unpack_dirty(packed);
-            let new_packed = packed & EPOCH_MASK; // keep epoch, zero dirty bits
-            match self.0.compare_exchange_weak(
-                packed,
-                new_packed,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => return dirty,
-                Err(x) => packed = x,
-            }
-        }
+        let prev = self.0.fetch_and(EPOCH_MASK, Ordering::AcqRel);
+        Self::unpack_dirty(prev)
     }
 
     /// Set the epoch and clear all dirty flags.

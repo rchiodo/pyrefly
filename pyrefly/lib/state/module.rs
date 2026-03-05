@@ -333,7 +333,7 @@ impl CleanGuard<'_> {
         // Atomically set computed = now and clear all dirty flags.
         //
         // This closes a race window between `take_dirty()` at the start of
-        // `clean` and this `rebuild` call: another thread computing a
+        // `clean` and this `rebuild` call: another thread computing our
         // dependency's Solutions step can call `try_mark_deps_dirty`, which
         // checks `computed != now` and sets the DEPS flag. Without clearing
         // here, that DEPS flag would persist and cause a redundant recheck
