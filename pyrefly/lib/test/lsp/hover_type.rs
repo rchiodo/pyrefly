@@ -546,8 +546,8 @@ Hover Result: `int`
     );
 }
 
-// todo(kylei): go-to definition currently finds the implementation in case of overload. it needs to be made smarter
-// for us to know the hover type
+// todo(kylei): When the callee's implementation uses *args/**kwargs, we can't refine the
+// keyword argument to a specific parameter. Ideally we'd resolve through the matched overload.
 #[test]
 fn kwarg_with_overload() {
     let code = r#"

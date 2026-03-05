@@ -841,19 +841,7 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn definition_at(&self, handle: &Handle, position: TextSize) -> Option<Key> {
-        self.get_bindings(handle)?
-            .definition_at_position(position)
-            .cloned()
-    }
-
     pub fn get_type_at(&self, handle: &Handle, position: TextSize) -> Option<Type> {
-        // TODO(grievejia): Remove the usage of `definition_at()`: it doesn't reliably detect all
-        // definitions.
-        if let Some(key) = self.definition_at(handle, position) {
-            return self.get_type(handle, &key);
-        }
-
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: id,
@@ -991,8 +979,20 @@ impl<'a> Transaction<'a> {
                 )
                 .first()
                 .and_then(|item| {
-                    self.definition_at(handle, item.definition_range.start())
-                        .and_then(|key| self.get_type(handle, &key))
+                    let code_at_range = item.module.code_at(item.definition_range);
+                    // If refinement failed, definition_range points to the callee itself,
+                    // not a matching parameter. In that case, return None.
+                    if code_at_range != identifier.id.as_str() {
+                        return None;
+                    }
+                    let name = Name::new(code_at_range);
+                    let id = Identifier::new(name.clone(), item.definition_range);
+                    let key = Key::Definition(ShortIdentifier::new(&id));
+                    let bindings = self.get_bindings(handle)?;
+                    if !bindings.is_valid_key(&key) {
+                        return None;
+                    }
+                    self.get_type(handle, &key)
                 }),
             Some(IdentifierWithContext {
                 identifier: _,
