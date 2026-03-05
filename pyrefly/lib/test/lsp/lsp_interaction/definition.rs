@@ -711,3 +711,47 @@ fn definition_relative_import_with_nested_config_workspace_at_root() {
         .unwrap();
     interaction.shutdown().unwrap();
 }
+
+/// Relative imports in files not under any configured search path should
+/// resolve correctly for both go-to-definition and type resolution.
+///
+/// Files in site-packages get a fallback module name (`__unknown__`) because
+/// site-package paths are not included when computing module names from file
+/// paths. The site-packages directory is under the project root (as `.venv`
+/// typically is), so the project root search path matches first and produces a
+/// wrong module name like `site_packages.mypkg` instead of `mypkg`. This causes
+/// relative imports to resolve against the wrong base, breaking go-to-definition
+/// and hover.
+#[test]
+fn definition_relative_import_outside_search_path() {
+    let root = get_test_files_root();
+    let root_path = root
+        .path()
+        .join("relative_import_outside_search_path")
+        .to_path_buf();
+    let scope_uri = Url::from_file_path(&root_path).unwrap();
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
+    interaction.set_root(root_path);
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![("test".to_owned(), scope_uri)]),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let init_file = "site_packages/mypkg/__init__.py";
+    interaction.client.did_open(init_file);
+
+    // BUG: Hover on `MyClass` in `from .helpers import MyClass` (line 0, char 21)
+    // shows Unknown because the module name is `__unknown__` and the relative
+    // import can't be resolved.
+    interaction
+        .client
+        .hover(init_file, 0, 21)
+        .expect_hover_response_with_markup(|value| {
+            value.is_some_and(|text| text.contains("MyClass") && text.contains("Unknown"))
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
