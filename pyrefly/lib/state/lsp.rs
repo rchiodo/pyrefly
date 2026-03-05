@@ -330,6 +330,9 @@ pub(crate) enum IdentifierContext {
     /// See [`PatternMatchParameterKind`] for examples.
     #[expect(dead_code)]
     PatternMatch(PatternMatchParameterKind),
+    /// An identifier appeared in a `global` or `nonlocal` statement.
+    /// ex: `x` in `global x` or `nonlocal x`.
+    MutableCapture,
 }
 
 #[derive(Debug)]
@@ -776,6 +779,14 @@ impl<'a> Transaction<'a> {
                 // `XXX.id`
                 Some(IdentifierWithContext::from_expr_attr(id, attr))
             }
+            (Some(AnyNodeRef::Identifier(id)), Some(AnyNodeRef::StmtGlobal(_)), _, _)
+            | (Some(AnyNodeRef::Identifier(id)), Some(AnyNodeRef::StmtNonlocal(_)), _, _) => {
+                // `global id` or `nonlocal id`
+                Some(IdentifierWithContext {
+                    identifier: (*id).clone(),
+                    context: IdentifierContext::MutableCapture,
+                })
+            }
             (Some(AnyNodeRef::ExprName(name)), _, _, _) => {
                 Some(IdentifierWithContext::from_expr_name(name))
             }
@@ -977,15 +988,23 @@ impl<'a> Transaction<'a> {
                     self.get_type_trace(handle, range)
                 }
             }
+            Some(IdentifierWithContext {
+                identifier,
+                context: IdentifierContext::MutableCapture,
+            }) => {
+                let key = Key::MutableCapture(ShortIdentifier::new(&identifier));
+                let bindings = self.get_bindings(handle)?;
+                if !bindings.is_valid_key(&key) {
+                    return None;
+                }
+                self.get_type(handle, &key)
+            }
             None => self.type_from_expression_at(handle, position),
         }
     }
 
     /// If `ty` represents a callable instance (e.g., a class with `__call__`), return the
     /// bound `__call__` signature. Otherwise, return the type unchanged.
-    ///
-    /// This enables IDE features like hover and signature help to show parameter lists
-    /// when calling instances that implement `__call__`, matching Python's runtime behavior.
     ///
     /// Note that we should only use this when we already know the value is being used as a
     /// callee, since this drops the original type information in favor of a callable type.
@@ -1846,6 +1865,35 @@ impl<'a> Transaction<'a> {
                 context: IdentifierContext::Attribute { base_range, .. },
             }) => {
                 self.find_definition_for_attribute(handle, base_range, identifier.id(), preference)
+            }
+            Some(IdentifierWithContext {
+                identifier,
+                context: IdentifierContext::MutableCapture,
+            }) => {
+                // `global x` or `nonlocal x` — resolve through the MutableCapture
+                // binding, which forwards to the enclosing scope's definition.
+                let key = Key::MutableCapture(ShortIdentifier::new(&identifier));
+                self.find_export_for_key(handle, &key, preference)
+                    .and_then(
+                        |(
+                            handle,
+                            Export {
+                                location,
+                                symbol_kind,
+                                docstring_range,
+                                ..
+                            },
+                        )| {
+                            Some(vec![FindDefinitionItemWithDocstring {
+                                metadata: DefinitionMetadata::Variable(symbol_kind),
+                                definition_range: location,
+                                module: self.get_module_info(&handle)?,
+                                docstring_range,
+                                display_name: Some(identifier.id.to_string()),
+                            }])
+                        },
+                    )
+                    .unwrap_or_default()
             }
             None => {
                 // Check if this is a None literal, if so, resolve to NoneType class

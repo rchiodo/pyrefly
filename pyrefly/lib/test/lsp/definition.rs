@@ -1380,7 +1380,6 @@ Definition Result:
     );
 }
 
-// todo(kylei) go-to definition on x should go to the definition
 #[test]
 fn global_keyword() {
     let code = r#"
@@ -1395,7 +1394,33 @@ def test():
 # main.py
 4 |     global x
                ^
-Definition Result: None
+Definition Result:
+2 | x = 5
+    ^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn nonlocal_keyword() {
+    let code = r#"
+def outer():
+    x = 5
+    def inner():
+        nonlocal x
+        #        ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+5 |         nonlocal x
+                     ^
+Definition Result:
+3 |     x = 5
+        ^
 "#
         .trim(),
         report.trim(),
