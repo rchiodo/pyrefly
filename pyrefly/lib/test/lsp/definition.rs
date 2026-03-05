@@ -940,7 +940,7 @@ Definition Result:
 10 | def f(x: A[B, Path]) -> None:
                    ^
 Definition Result:
-173 | class Path(PurePath):
+182 | class Path(PurePath):
             ^^^^
 "#
         .trim(),
@@ -1182,13 +1182,13 @@ Definition Result:
 25 | dict["foo"]
             ^
 Definition Result:
-3618 |     def __getitem__(self, key: _KT, /) -> _VT:
+3632 |     def __getitem__(self, key: _KT, /) -> _VT:
                ^^^^^^^^^^^
 
 27 | dict["bar"]
             ^
 Definition Result:
-3618 |     def __getitem__(self, key: _KT, /) -> _VT:
+3632 |     def __getitem__(self, key: _KT, /) -> _VT:
                ^^^^^^^^^^^
 "#
         .trim(),

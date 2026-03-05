@@ -1453,28 +1453,28 @@ testcase!(
     r#"
 import contextlib
 import os
-from typing import AnyStr, IO, Iterator, Literal, assert_type, overload
+from typing import AnyStr, IO, Generator, Literal, assert_type, overload
 
 @overload
 @contextlib.contextmanager
 def atomic_file(
     dest: str | os.PathLike[str], mode: Literal["wb", "w+b"] = ..., **kwargs
-) -> Iterator[IO[bytes]]: ...
+) -> Generator[IO[bytes], None, None]: ...
 @overload
 @contextlib.contextmanager
 def atomic_file(
     dest: str | os.PathLike[str], mode: Literal["w", "w+", "wt", "w+t"], **kwargs
-) -> Iterator[IO[str]]: ...
+) -> Generator[IO[str], None, None]: ...
 @overload
 @contextlib.contextmanager
 def atomic_file(
     dest: str | os.PathLike[str], mode: str, **kwargs
-) -> Iterator[IO[AnyStr]]: ...
+) -> Generator[IO[AnyStr], None, None]: ...
 
 @contextlib.contextmanager
 def atomic_file(
     dest: str | os.PathLike[str], mode: str = "w+b", **kwargs
-) -> Iterator[IO]:
+) -> Generator[IO, None, None]:
     ...
 
 with atomic_file("foo", "w") as f:

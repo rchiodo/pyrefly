@@ -5129,7 +5129,7 @@ def foo():
                 (
                     "5:12-5:33",
                     regular_call_callees(vec![
-                        create_call_target("typing.Mapping.get", TargetType::Function)
+                        create_call_target("os._Environ.get", TargetType::Function)
                             .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
                             .with_receiver_class_for_test("os._Environ", context),
                     ]),
