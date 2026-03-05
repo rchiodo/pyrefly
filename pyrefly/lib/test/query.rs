@@ -401,3 +401,50 @@ def f(foos: list[Foo]) -> int:
 
     assert_eq!(expected, actual);
 }
+
+#[test]
+fn test_callees_annotated_type() {
+    let tdir = TempDir::new().unwrap();
+    let file_path = tdir.path().join("main.py");
+    // A type alias whose body is Annotated[Foo, ...] stores Type::Annotated
+    // internally. Calling the alias as a value makes callee_from_type recurse
+    // into the TypeAlias body, reaching Type::Annotated.
+    let code = r#"
+from typing import Annotated, TypeAlias
+
+class Foo:
+    def bar(self) -> int:
+        return 42
+
+MyType: TypeAlias = Annotated[Foo, "metadata"]
+
+def f() -> None:
+    MyType()
+"#;
+    fs_anyhow::write(&file_path, code).unwrap();
+
+    let query = create_query();
+    let module_name = ModuleName::from_str("main");
+    let path = ModulePath::filesystem(file_path.clone());
+
+    let errors = query.add_files(vec![(module_name, path.clone())]);
+    assert!(
+        !errors.is_empty(),
+        "Annotated[Foo, ...] is not callable, expected errors"
+    );
+    assert!(
+        errors.iter().any(|e| e.contains("not-callable")),
+        "Expected a not-callable error, got: {errors:?}",
+    );
+
+    // get_callees_with_location triggers callee_from_type which must handle
+    // Type::Annotated rather than panicking. Annotated is not callable, so
+    // MyType() should produce no callees.
+    let callees = query
+        .get_callees_with_location(module_name, path, None)
+        .unwrap();
+    assert!(
+        callees.is_empty(),
+        "Annotated is not callable, expected no callees"
+    );
+}
