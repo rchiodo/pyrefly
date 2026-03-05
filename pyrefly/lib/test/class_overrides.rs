@@ -73,6 +73,34 @@ class E(B):
 );
 
 testcase!(
+    test_override_classvar_with_nested_class,
+    r#"
+from typing import ClassVar
+
+class Endpoint: ...
+
+class Base:
+    endpoint_cls: ClassVar[type[Endpoint]] = Endpoint
+
+class Child(Base):
+    class endpoint_cls(Endpoint): ...
+"#,
+);
+
+testcase!(
+    test_override_nested_class_with_classvar,
+    r#"
+from typing import ClassVar
+
+class Base:
+    class endpoint_cls: ...
+
+class Child(Base):
+    endpoint_cls: ClassVar[type[Base.endpoint_cls]] = type("endpoint_cls", (Base.endpoint_cls,), {})
+"#,
+);
+
+testcase!(
     test_override_final_var,
     r#"
 from typing import Final

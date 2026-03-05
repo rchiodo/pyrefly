@@ -4167,9 +4167,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             (ClassAttribute::NoAccess(_), _) => return Err(Box::new(AttrSubsetError::NoAccess)),
             _ => {}
         }
-        let got_is_classvar = matches!(got, ClassAttribute::ReadOnly(_, ReadOnlyReason::ClassVar));
-        let want_is_classvar =
-            matches!(want, ClassAttribute::ReadOnly(_, ReadOnlyReason::ClassVar));
+        // Both ClassVar and ClassObjectInitializedOnBody represent class-level read-only
+        // attributes, so they are compatible for override purposes.
+        let is_classvar_compatible = |attr: &ClassAttribute| {
+            matches!(
+                attr,
+                ClassAttribute::ReadOnly(
+                    _,
+                    ReadOnlyReason::ClassVar | ReadOnlyReason::ClassObjectInitializedOnBody
+                )
+            )
+        };
+        let got_is_classvar = is_classvar_compatible(got);
+        let want_is_classvar = is_classvar_compatible(want);
         if got_is_classvar != want_is_classvar {
             return Err(Box::new(AttrSubsetError::ClassVarMismatch {
                 got_is_classvar,
