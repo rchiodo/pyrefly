@@ -77,6 +77,8 @@ use crate::module::module_info::ModuleInfo;
 use crate::solver::solver::VarRecurser;
 use crate::solver::type_order::TypeOrder;
 use crate::types::class::Class;
+use crate::types::equality::TypeEq;
+use crate::types::equality::TypeEqCtx;
 use crate::types::stdlib::Stdlib;
 use crate::types::type_info::TypeInfo;
 use crate::types::types::Type;
@@ -2083,6 +2085,42 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 "Either specify the type argument explicitly, or specify a default for the type variable.".to_owned(),
             ],
         );
+    }
+
+    /// Compare two type-erased answers for equality, dispatching through
+    /// the concrete answer type based on the `AnyIdx` variant.
+    ///
+    /// Used for convergence detection in the iterative fixpoint solver:
+    /// if answers haven't changed between iterations, the SCC has converged.
+    /// Assumes both answers have already been deep-forced (no unresolved Vars).
+    #[allow(dead_code)]
+    fn answers_equal(
+        &self,
+        idx: &AnyIdx,
+        old: &Arc<dyn Any + Send + Sync>,
+        new: &Arc<dyn Any + Send + Sync>,
+    ) -> bool {
+        dispatch_anyidx!(idx, self, answers_equal_typed, old, new)
+    }
+
+    /// Type-specialized answer comparison. Downcasts both type-erased answers
+    /// to `Arc<K::Answer>` and compares using `TypeEq`, which correctly handles
+    /// identity-based equality for `Unique`, `TypeVar`, etc.
+    #[allow(dead_code)]
+    fn answers_equal_typed<K: Solve<Ans>>(
+        &self,
+        _idx: Idx<K>,
+        old: &Arc<dyn Any + Send + Sync>,
+        new: &Arc<dyn Any + Send + Sync>,
+    ) -> bool {
+        let old_typed = old
+            .downcast_ref::<Arc<K::Answer>>()
+            .expect("answers_equal_typed: type mismatch on old answer");
+        let new_typed = new
+            .downcast_ref::<Arc<K::Answer>>()
+            .expect("answers_equal_typed: type mismatch on new answer");
+        let mut ctx = TypeEqCtx::default();
+        old_typed.type_eq(new_typed, &mut ctx)
     }
 }
 
