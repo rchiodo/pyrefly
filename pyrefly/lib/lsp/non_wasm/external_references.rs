@@ -132,7 +132,16 @@ pub(crate) fn compute_qualified_name(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use pyrefly_python::module::Module;
+    use pyrefly_python::module_path::ModulePath;
+    use ruff_text_size::TextRange;
+
     use super::*;
+    use crate::state::state::State;
+    use crate::test::util::TestEnv;
 
     fn parse_and_qname(code: &str, module: &str, position: TextSize, name: &str) -> String {
         use ruff_python_ast::PySourceType;
@@ -166,5 +175,35 @@ mod tests {
         let code = "def foo():\n    def bar(): pass";
         let result = parse_and_qname(code, "mymod", TextSize::new(19), "bar");
         assert_eq!(result, "mymod.foo.<locals>.bar");
+    }
+
+    /// Verify that `compute_qualified_name` falls back to re-parsing the
+    /// module source when the AST is not cached in the transaction (the
+    /// cross-module definition case).
+    #[test]
+    fn test_compute_qualified_name_reparse_fallback() {
+        let code = "def foo(): pass";
+        let module_name = ModuleName::from_str("defmod");
+        let module_path = ModulePath::memory(PathBuf::from("defmod.py"));
+        let module = Module::new(module_name, module_path.dupe(), Arc::new(code.to_owned()));
+
+        // Create a State with no loaded modules so that
+        // transaction.get_ast() returns None for any handle, exercising
+        // the re-parse fallback inside compute_qualified_name.
+        let env = TestEnv::one("unrelated", "");
+        let state = State::new(env.config_finder());
+        let transaction = state.transaction();
+
+        let handle = Handle::new(module_name, module_path, env.sys_info());
+        let definition = FindDefinitionItemWithDocstring {
+            metadata: DefinitionMetadata::Variable(None),
+            definition_range: TextRange::new(TextSize::new(4), TextSize::new(7)),
+            module,
+            docstring_range: None,
+            display_name: Some("foo".to_owned()),
+        };
+
+        let result = compute_qualified_name(&transaction, &handle, &definition);
+        assert_eq!(result, None);
     }
 }
