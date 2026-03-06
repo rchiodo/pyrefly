@@ -659,3 +659,27 @@ def f(cond: bool):
     assert_type(x, int)
 "#,
 );
+
+// Verify that multiple loop variables modified in the same loop are all
+// correctly inferred. Each variable produces its own LoopPhi node in the
+// SCC; the cold-start bypass must handle all of them independently, and
+// the warm-start iteration must confirm convergence for every variable.
+testcase!(
+    iterative_loop_phi_multi_var,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(cond: bool):
+    x = 0
+    y = 1.5
+    z: list[int] = []
+    while cond:
+        x = x + 1
+        y = y * 2.0
+        z = z + [x]
+    assert_type(x, int)
+    assert_type(y, float)
+    assert_type(z, list[int])
+"#,
+);
