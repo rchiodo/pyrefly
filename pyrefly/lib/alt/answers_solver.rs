@@ -429,28 +429,44 @@ impl CalcStack {
                     // Use the thread-local stack as the source of truth for
                     // cycle detection: `position_of` tells us definitively
                     // whether this CalcId has a live frame on the current stack.
-                    ProposalResult::Calculatable | ProposalResult::CycleDetected => {
+                    ProposalResult::Calculatable => {
                         if let Some(current_cycle) = self.current_cycle() {
                             match self.on_scc_detected(current_cycle) {
                                 SccDetectedResult::BreakHere => BindingAction::Unwind,
                                 SccDetectedResult::Continue => BindingAction::Calculate,
                             }
                         } else {
-                            // No cycle on the stack, proceed
+                            // No cycle on the stack: this node simply needs
+                            // computing. This is the normal case for both
+                            // iterative and legacy modes.
+                            BindingAction::Calculate
+                        }
+                    }
+                    ProposalResult::CycleDetected => {
+                        if let Some(current_cycle) = self.current_cycle() {
+                            match self.on_scc_detected(current_cycle) {
+                                SccDetectedResult::BreakHere => BindingAction::Unwind,
+                                SccDetectedResult::Continue => BindingAction::Calculate,
+                            }
+                        } else if self.is_iterative()
+                            && self.get_iteration_node_state(&current).is_some()
+                        {
+                            // In iterative mode, CycleDetected without an active
+                            // cycle means Phase 0 left stale Calculating state
+                            // (the thread started this node in a previous
+                            // iteration but the stack was unwound). Treat as a
+                            // cold-start back-edge: the caller (get_idx) will
+                            // allocate a placeholder via K::create_recursive.
+                            BindingAction::NeedsColdPlaceholder
+                        } else {
+                            // Legacy mode: CycleDetected without a stack cycle is
+                            // surprising but has been observed in LSP. The thread
+                            // started a calculation but never saved an answer, and
+                            // the stack frame is gone. Proceed with Calculate as a
+                            // best-effort fallback.
                             //
-                            // TODO: Note that the `CycleDetected` case is surprising: it means
-                            // the current thread *started* a calculation but never saved an answer,
-                            // and the stack frame that did this is gone.
-                            //
-                            // That shouldn't happen - a computation isn't supposed to be interruptible
-                            // with a persistent Answers value, and the SCC merging + batch commit
-                            // should make it so that we always get some other state whenever we're
-                            // at the point where a preliminary answer has been saved.
-                            //
-                            // It seems likely that this may indicate some bug in Scc merging, state
-                            // transition tracking, or batch commit (a bug in any of these could lead to
-                            // invalid states). As of this comment being written, we've only observed
-                            // this occur in LSP (not full check).
+                            // TODO: This may indicate a bug in SCC merging, state
+                            // transition tracking, or batch commit.
                             BindingAction::Calculate
                         }
                     }
@@ -2006,13 +2022,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
             BindingAction::NeedsColdPlaceholder => {
-                // Placeholder allocation will be implemented in a follow-up commit.
-                // This variant is only produced during iterative SCC solving, which
-                // is not yet driven by any caller.
-                unreachable!(
-                    "NeedsColdPlaceholder returned but iterative placeholder \
-                     allocation is not yet implemented"
-                )
+                // Two-step protocol: push() returned NeedsColdPlaceholder because
+                // it lacks K: Solve. We allocate the placeholder here, store it
+                // in iteration state so subsequent back-edges return CycleBroken,
+                // and return the promoted value.
+                let binding = self.bindings().get(idx);
+                let var = K::create_recursive(self, binding);
+                self.stack().set_iteration_placeholder(&current, var);
+                Arc::new(K::promote_recursive(self.heap, var))
             }
         };
         for scc in self.stack().pop_and_drain_completed_sccs() {
