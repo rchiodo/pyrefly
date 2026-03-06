@@ -2477,19 +2477,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// The member is a `CalcId` containing `(Bindings, AnyIdx)`. For same-module
     /// members (where the member's module matches this solver's module), we
     /// dispatch through `dispatch_anyidx!` to call `get_idx` with the concrete
-    /// key type. Cross-module members are not yet supported (commit 12).
+    /// key type. Cross-module members are driven via `solve_idx_erased`, which
+    /// constructs a temporary `AnswersSolver` in the target module's context
+    /// using the shared `ThreadState` (and therefore the shared `CalcStack`).
     fn drive_member(&self, calc_id: &CalcId) {
         let CalcId(ref bindings, ref any_idx) = *calc_id;
         if bindings.module().name() != self.bindings().module().name()
             || bindings.module().path() != self.bindings().module().path()
         {
-            // Cross-module member: will be supported in commit 12 via
-            // solve_idx_erased. For now, panic to surface any unexpected
-            // cross-module members.
-            panic!(
-                "drive_member: cross-module iteration member {} not yet supported",
+            // Cross-module member: drive via LookupAnswer::solve_idx_erased,
+            // which routes to the target module's Answers and constructs a
+            // temporary AnswersSolver there with the shared ThreadState.
+            assert!(
+                self.answers.solve_idx_erased(calc_id, self.thread_state),
+                "drive_member: cross-module driving failed for {}. \
+                 The target module's Answers may not be loaded.",
                 calc_id,
             );
+            return;
         }
         dispatch_anyidx!(any_idx, self, drive_member_typed);
     }
@@ -2498,6 +2503,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// concrete key type, discarding the result (the answer is stored in
     /// iteration state by `calculate_and_record_answer_iterative`).
     fn drive_member_typed<K: Solve<Ans>>(&self, idx: Idx<K>)
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+    {
+        let _ = self.get_idx(idx);
+    }
+
+    /// Type-specialized helper for `Answers::solve_idx_erased`. Calls `get_idx`
+    /// for the concrete key type, discarding the result. Used for cross-module
+    /// iterative driving where the answer is stored in iteration state on the
+    /// shared `CalcStack`.
+    pub(crate) fn solve_idx_erased_typed<K: Solve<Ans>>(&self, idx: Idx<K>)
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
@@ -2542,21 +2559,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut demotions: u32 = 0;
 
         loop {
-            // Check for cross-module members before each iteration.
-            // Cross-module driving is not yet supported (commit 12). If any
-            // member is cross-module, fall back to the legacy batch commit.
-            // This check must be inside the loop because SCC merges during
-            // iteration can introduce cross-module members via demotion.
-            let has_cross_module = scc.node_state.keys().any(|calc_id| {
-                let CalcId(ref bindings, _) = *calc_id;
-                bindings.module().name() != self.bindings().module().name()
-                    || bindings.module().path() != self.bindings().module().path()
-            });
-            if has_cross_module {
-                self.batch_commit_scc(scc);
-                return;
-            }
-
             if iteration > MAX_ITERATIONS {
                 tracing::warn!(
                     "iterative_resolve_scc: SCC {} exceeded {} iterations; \

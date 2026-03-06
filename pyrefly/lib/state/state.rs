@@ -2402,6 +2402,44 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
             false
         }
     }
+
+    fn solve_idx_erased(&self, calc_id: &CalcId, thread_state: &ThreadState) -> bool {
+        let CalcId(ref bindings, ref any_idx) = *calc_id;
+        let module = bindings.module().name();
+        let path = bindings.module().path();
+
+        // Look up the target module. Use Exists since cross-module
+        // driving doesn't establish new dependencies.
+        let module_data = match self
+            .get_module(module, Some(path), ModuleDep::Exists)
+            .finding()
+        {
+            Some(data) => data,
+            None => return false,
+        };
+
+        // Access the target module's Answers and drive the member.
+        if let Some(answers_pair) = module_data.state.get_answers() {
+            let target_bindings = answers_pair.0.dupe();
+            let target_answers = answers_pair.1.dupe();
+            let target_load = module_data.state.get_load().unwrap();
+            let stdlib = self.transaction.get_stdlib(&module_data.handle);
+            let lookup = self.transaction.lookup(module_data);
+            target_answers.solve_idx_erased(
+                any_idx,
+                &lookup,
+                &target_bindings,
+                &lookup,
+                &target_load.errors,
+                &stdlib,
+                &self.transaction.data.state.uniques,
+                thread_state,
+            );
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// A checking state that will eventually commit.
