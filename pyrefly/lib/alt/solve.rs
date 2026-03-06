@@ -416,9 +416,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.solver().is_subset_eq(got, want, self.type_order())
     }
 
-    /// Check that got and want are consistent with each other
-    pub fn is_equal(&self, got: &Type, want: &Type) -> bool {
-        self.solver().is_equal(got, want, self.type_order()).is_ok()
+    pub fn is_consistent(&self, got: &Type, want: &Type) -> bool {
+        self.solver()
+            .is_consistent(got, want, self.type_order())
+            .is_ok()
     }
 
     pub fn expr_class_keyword(&self, x: &Expr, errors: &ErrorCollector) -> Annotation {
@@ -2856,16 +2857,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Type::TypeVar(tv) => match tv.restriction() {
                         Restriction::Constraints(default_constraints) => default_constraints
                             .iter()
-                            .all(|dc| constraints.iter().any(|c| self.is_equal(c, dc))),
+                            .all(|dc| constraints.iter().any(|c| self.is_consistent(c, dc))),
                         Restriction::Bound(_) | Restriction::Unrestricted => false,
                     },
                     Type::Quantified(q) if q.is_type_var() => match q.restriction() {
                         Restriction::Constraints(default_constraints) => default_constraints
                             .iter()
-                            .all(|dc| constraints.iter().any(|c| self.is_equal(c, dc))),
+                            .all(|dc| constraints.iter().any(|c| self.is_consistent(c, dc))),
                         Restriction::Bound(_) | Restriction::Unrestricted => false,
                     },
-                    _ => constraints.iter().any(|c| self.is_equal(c, default)),
+                    _ => constraints.iter().any(|c| self.is_consistent(c, default)),
                 };
                 if !valid {
                     let formatted_constraints = constraints

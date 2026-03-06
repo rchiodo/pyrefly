@@ -813,7 +813,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 )));
             }
             // Non-ReadOnly fields are invariant
-            (false, false) => self.is_equal(&got_v.ty, &want_v.ty).map_err(|_| {
+            (false, false) => self.is_consistent(&got_v.ty, &want_v.ty).map_err(|_| {
                 SubsetError::TypedDict(Box::new(TypedDictSubsetError::InvariantFieldMismatch {
                     got: got_name.clone(),
                     got_field_ty: got_v.ty.clone(),
@@ -1925,7 +1925,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
         for (got_arg, want_arg, param) in izip!(got, want, params.iter()) {
             if param.kind() == QuantifiedKind::TypeVarTuple {
-                self.is_equal(got_arg, want_arg)?;
+                self.is_consistent(got_arg, want_arg)?;
             } else {
                 match variances.get(param.name()) {
                     Variance::Covariant => self.is_subset_eq(got_arg, want_arg)?,
@@ -1934,7 +1934,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     // subset check. However, this leads to confusing and unintuitive behavior,
                     // so we treat bivariant type parameters as invariant instead.
                     Variance::Invariant | Variance::Bivariant => {
-                        self.is_equal(got_arg, want_arg)?
+                        self.is_consistent(got_arg, want_arg)?
                     }
                 }
             }

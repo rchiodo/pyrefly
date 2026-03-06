@@ -1269,14 +1269,14 @@ impl Solver {
         subset.is_subset_eq(got, want)
     }
 
-    pub fn is_equal<Ans: LookupAnswer>(
+    pub fn is_consistent<Ans: LookupAnswer>(
         &self,
         got: &Type,
         want: &Type,
         type_order: TypeOrder<Ans>,
     ) -> Result<(), SubsetError> {
         let mut subset = self.subset(type_order);
-        subset.is_equal(got, want)
+        subset.is_consistent(got, want)
     }
 
     fn subset<'a, Ans: LookupAnswer>(&'a self, type_order: TypeOrder<'a, Ans>) -> Subset<'a, Ans> {
@@ -1538,7 +1538,7 @@ pub struct Subset<'a, Ans: LookupAnswer> {
 }
 
 impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
-    pub fn is_equal(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
+    pub fn is_consistent(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
         self.is_subset_eq(got, want)?;
         self.is_subset_eq(want, got)
     }
