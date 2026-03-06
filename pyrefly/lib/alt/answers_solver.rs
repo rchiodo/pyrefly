@@ -257,6 +257,126 @@ impl CalcStack {
             .and_modify(|positions| positions.push(position))
             .or_insert_with(|| Vec1::new(position));
 
+        // Membership back-edge detection: when iterative mode is active, check
+        // if the target is a member of a *non-top* iterating SCC. If so, this
+        // is a cross-SCC back-edge that must merge all SCCs from that index to
+        // the top and demote (restart at iteration 1).
+        //
+        // This check runs BEFORE the top-SCC iterative bypass because cross-SCC
+        // back-edges must be caught first. SCCs still in Phase 0 discovery
+        // (iterative: None) are handled by the existing `on_scc_detected` path.
+        //
+        // Borrow safety: `find_iterating_scc_containing` returns an owned
+        // `Option<usize>`, so the shared borrow on `scc_stack` is released
+        // before the exclusive borrow needed for merging.
+        if self.is_iterative()
+            && let Some(scc_idx) = self.find_iterating_scc_containing(&current)
+        {
+            let is_non_top = {
+                let scc_stack = self.scc_stack.borrow();
+                scc_idx < scc_stack.len() - 1
+            };
+            if is_non_top {
+                // Merge all SCCs from scc_idx to the top of the stack.
+                // This produces a single merged SCC with demoted = true
+                // (via Scc::merge's iteration state merge logic).
+                {
+                    let stack_len = self.stack.borrow().len();
+                    let mut scc_stack = self.scc_stack.borrow_mut();
+                    let sccs_to_merge: Vec<Scc> = scc_stack.drain(scc_idx..).collect();
+                    let sccs_to_merge = Vec1::try_from_vec(sccs_to_merge)
+                        .expect("membership back-edge: at least the found SCC must be present");
+                    let detected_at = sccs_to_merge.first().detected_at.dupe();
+                    let mut merged = Scc::merge_many(sccs_to_merge, detected_at);
+                    // Recompute segment_size after merge.
+                    merged.segment_size = stack_len - merged.anchor_pos;
+                    scc_stack.push(merged);
+                }
+                // The target is now in the top SCC's iteration state.
+                // Determine the appropriate action based on iteration state.
+                // After merge with demotion, the iteration state is fresh
+                // (iteration 1, all nodes Fresh, no previous answers), so the
+                // target will typically be Fresh. But we handle all cases for
+                // robustness.
+                if let Some(kind) = self.get_iteration_node_state(&current) {
+                    return match kind {
+                        IterationNodeStateKind::Fresh => {
+                            self.set_iteration_node_in_progress(&current);
+                            BindingAction::Calculate
+                        }
+                        IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                            let answer = self.get_previous_answer(&current).expect(
+                                "InProgressWithPreviousAnswer but no previous answer found",
+                            );
+                            BindingAction::SccLocalAnswer(answer)
+                        }
+                        IterationNodeStateKind::InProgressWithPlaceholder => {
+                            let var = self
+                                .get_iteration_placeholder(&current)
+                                .expect("InProgressWithPlaceholder but no placeholder found");
+                            BindingAction::CycleBroken(var)
+                        }
+                        IterationNodeStateKind::InProgressCold => {
+                            BindingAction::NeedsColdPlaceholder
+                        }
+                        IterationNodeStateKind::Done => {
+                            let answer = self
+                                .get_iteration_done_answer(&current)
+                                .expect("Done iteration node state but no answer found");
+                            BindingAction::SccLocalAnswer(answer)
+                        }
+                    };
+                }
+                // If we merged but the target is somehow not in iteration state,
+                // this is a bug: the merge should have included it.
+                unreachable!(
+                    "membership back-edge: target {} was in iterating SCC but \
+                     not found in merged SCC's iteration state",
+                    current,
+                );
+            }
+            // The target is now in the top SCC's iteration state.
+            // Determine the appropriate action based on iteration state.
+            // After merge with demotion, the iteration state is fresh
+            // (iteration 1, all nodes Fresh, no previous answers), so the
+            // target will typically be Fresh. But we handle all cases for
+            // robustness.
+            if let Some(kind) = self.get_iteration_node_state(&current) {
+                return match kind {
+                    IterationNodeStateKind::Fresh => {
+                        self.set_iteration_node_in_progress(&current);
+                        BindingAction::Calculate
+                    }
+                    IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                        let answer = self
+                            .get_previous_answer(&current)
+                            .expect("InProgressWithPreviousAnswer but no previous answer found");
+                        BindingAction::SccLocalAnswer(answer)
+                    }
+                    IterationNodeStateKind::InProgressWithPlaceholder => {
+                        let var = self
+                            .get_iteration_placeholder(&current)
+                            .expect("InProgressWithPlaceholder but no placeholder found");
+                        BindingAction::CycleBroken(var)
+                    }
+                    IterationNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
+                    IterationNodeStateKind::Done => {
+                        let answer = self
+                            .get_iteration_done_answer(&current)
+                            .expect("Done iteration node state but no answer found");
+                        BindingAction::SccLocalAnswer(answer)
+                    }
+                };
+            }
+            // If we merged but the target is somehow not in iteration state,
+            // this is a bug: the merge should have included it.
+            unreachable!(
+                "membership back-edge: target {} was in iterating SCC but \
+                     not found in merged SCC's iteration state",
+                current,
+            );
+        }
+
         // Iterative bypass: when iterative mode is active and the top SCC is
         // iterating, check if the target is a member of the top SCC's iteration
         // state. If so, use SCC-scoped iteration state to determine the action
@@ -825,7 +945,6 @@ impl CalcStack {
     /// (not the SCC's `anchor_pos`). Used for membership-based back-edge
     /// detection: a request for a CalcId in a non-top iterating SCC is a
     /// back-edge that must trigger merge + demotion.
-    #[allow(dead_code)]
     fn find_iterating_scc_containing(&self, target: &CalcId) -> Option<usize> {
         let scc_stack = self.scc_stack.borrow();
         for (i, scc) in scc_stack.iter().enumerate() {
