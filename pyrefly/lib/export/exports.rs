@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use pyrefly_graph::calculation::Calculation;
 use pyrefly_python::docstring::Docstring;
+use pyrefly_python::dunder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::symbol_kind::SymbolKind;
 use pyrefly_python::sys_info::SysInfo;
@@ -292,6 +293,10 @@ impl Exports {
     ) -> Vec<(TextRange, Name)> {
         // Only validate if __all__ was explicitly defined and resolvable
         if self.definitions.dunder_all.kind != DunderAllKind::Specified {
+            return Vec::new();
+        }
+        // If the module defines __getattr__, any name could be dynamically provided
+        if self.definitions.definitions.contains_key(&dunder::GETATTR) {
             return Vec::new();
         }
         let mut invalid = Vec::new();

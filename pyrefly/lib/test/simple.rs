@@ -2018,6 +2018,16 @@ x = 5
 );
 
 testcase!(
+    test_missing_name_in_dunder_all_with_getattr,
+    r#"
+from typing import Any
+__all__ = ["x", "y"]
+x = 5
+def __getattr__(name: str) -> Any: ...
+    "#,
+);
+
+testcase!(
     test_ellipsis_default_source,
     r#"
 def f(x: bool = ...):  # E: Default `Ellipsis` is not assignable to parameter `x` with type `bool`
