@@ -1879,6 +1879,35 @@ impl SccSolvingMode {
     }
 }
 
+/// Maximum number of fixpoint iterations before the iterative SCC solver
+/// gives up and commits the last answers. Exceeding this threshold logs a
+/// warning but does not panic, since the answers may still be approximately
+/// correct.
+const MAX_ITERATIONS: u32 = 5;
+
+/// Maximum number of demotion restarts (SCC membership expansions) before
+/// the iterative SCC solver panics. Exceeding this threshold almost
+/// certainly indicates an infinite membership expansion loop rather than
+/// legitimate growth.
+const MAX_DEMOTIONS: u32 = 10;
+
+/// Check whether the demotion count has exceeded `MAX_DEMOTIONS`, and panic
+/// if so. Extracted from the `iterative_resolve_scc` loop to allow direct
+/// unit testing of the safety limit.
+///
+/// Uses `Debug` formatting for `scc_identity` rather than `Display` because
+/// `CalcId::Display` requires a populated bindings table (which panics in
+/// test contexts), while `CalcId::Debug` prints the raw index safely.
+fn check_demotion_limit(demotions: u32, scc_identity: &CalcId) {
+    if demotions > MAX_DEMOTIONS {
+        panic!(
+            "iterative_resolve_scc: SCC {:?} exceeded {} demotions; \
+             likely infinite membership expansion",
+            scc_identity, MAX_DEMOTIONS,
+        );
+    }
+}
+
 pub struct AnswersSolver<'a, Ans: LookupAnswer> {
     answers: &'a Ans,
     current: &'a Answers,
@@ -2602,9 +2631,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// ancestor's iteration.
     #[allow(clippy::mutable_key_type)]
     fn iterative_resolve_scc(&self, mut scc: Scc) {
-        const MAX_ITERATIONS: u32 = 5;
-        const MAX_DEMOTIONS: u32 = 10;
-
         let scc_identity = scc.detected_at.dupe();
         let mut iteration: u32 = 1;
         let mut demotions: u32 = 0;
@@ -2658,13 +2684,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
             if demoted {
                 demotions += 1;
-                if demotions > MAX_DEMOTIONS {
-                    panic!(
-                        "iterative_resolve_scc: SCC {} exceeded {} demotions; \
-                         likely infinite membership expansion",
-                        scc_identity, MAX_DEMOTIONS,
-                    );
-                }
+                check_demotion_limit(demotions, &scc_identity);
                 iteration = 1;
                 continue;
             }
@@ -3889,5 +3909,59 @@ mod scc_tests {
             .as_ref()
             .expect("merged SCC should have iterative state");
         assert!(iter_state.demoted, "merged SCC should have demoted = true");
+    }
+
+    #[test]
+    fn test_demotion_limit_constants() {
+        // Verify the safety-limit constants have the expected values.
+        // These constants guard against infinite membership expansion in the
+        // iterative SCC solver. Changing them without updating tests should
+        // be a deliberate decision.
+        assert_eq!(
+            MAX_DEMOTIONS, 10,
+            "MAX_DEMOTIONS should be 10; changing this limit affects \
+             how many SCC membership expansions are tolerated before panic"
+        );
+        assert_eq!(
+            MAX_ITERATIONS, 5,
+            "MAX_ITERATIONS should be 5; changing this limit affects \
+             how many fixpoint iterations are attempted before giving up"
+        );
+    }
+
+    #[test]
+    fn test_check_demotion_limit_allows_demotions_at_limit() {
+        // Demotions at exactly MAX_DEMOTIONS should NOT panic.
+        // The check is `demotions > MAX_DEMOTIONS`, so 10 is the last
+        // allowed value.
+        let id = CalcId::for_test("m", 0);
+        check_demotion_limit(MAX_DEMOTIONS, &id); // should not panic
+    }
+
+    #[test]
+    fn test_check_demotion_limit_allows_demotions_below_limit() {
+        // Any demotion count below the limit should be fine.
+        let id = CalcId::for_test("m", 0);
+        for count in 0..MAX_DEMOTIONS {
+            check_demotion_limit(count, &id); // should not panic
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeded 10 demotions")]
+    fn test_check_demotion_limit_panics_above_limit() {
+        // One demotion past the limit should trigger the panic with the
+        // expected message substring.
+        let id = CalcId::for_test("m", 0);
+        check_demotion_limit(MAX_DEMOTIONS + 1, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "likely infinite membership expansion")]
+    fn test_check_demotion_limit_panic_message() {
+        // Verify the panic message contains the diagnostic hint so that
+        // developers investigating a crash can identify the root cause.
+        let id = CalcId::for_test("m", 0);
+        check_demotion_limit(MAX_DEMOTIONS + 1, &id);
     }
 }
