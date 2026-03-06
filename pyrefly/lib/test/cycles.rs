@@ -683,3 +683,25 @@ def f(cond: bool):
     assert_type(z, list[int])
 "#,
 );
+
+// Verify that a loop variable whose type widens across iterations converges
+// correctly under iterative fixpoint solving. The variable `x` starts as
+// `int` but may be reassigned to `None` inside the loop, so the LoopPhi
+// must converge to `int | None`.
+testcase!(
+    iterative_loop_phi_increment,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(cond: bool):
+    x: int | None = 0
+    while cond:
+        assert_type(x, int | None)
+        if cond:
+            x = None
+        else:
+            x = 1
+    assert_type(x, int | None)
+"#,
+);
