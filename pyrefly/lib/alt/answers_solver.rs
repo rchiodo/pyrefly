@@ -158,8 +158,6 @@ impl CalcId {
     pub fn for_test(module_name: &str, idx: usize) -> Self {
         use pyrefly_graph::index::Idx;
 
-        use crate::binding::binding::Key;
-
         let bindings = Bindings::for_test(module_name);
         // Create a fake Key index - the actual key doesn't matter for test purposes,
         // only that different idx values produce different CalcIds
@@ -2251,6 +2249,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// Called when the current CalcId is a member of the top SCC's iteration
     /// state. Unlike the legacy path, this:
+    /// - During cold-start iteration 1, bypasses `LoopPhi` bindings by
+    ///   resolving only the prior/default index. This prevents LoopPhi from
+    ///   creating its own `LoopRecursive` placeholder, which would conflict
+    ///   with the iterative placeholder system.
     /// - Uses `error_swallower()` during cold-start (iteration 1) because
     ///   cold-start answers are based on placeholders and produce spurious
     ///   errors. From iteration 2 onward, uses `error_collector()` to capture
@@ -2272,6 +2274,57 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
+        // LoopPhi cold-start bypass: during iteration 1, LoopPhi's normal
+        // solve path would resolve loop-body branches, hit cycle breaks, and
+        // create its own LoopRecursive placeholder. That conflicts with the
+        // iterative placeholder system. Instead, resolve only the prior/default
+        // value (the value from before the loop body) and use it as the answer.
+        // On warm-start iterations (>= 2), LoopPhi goes through the normal
+        // path and gets the previous iteration's answer via the iterative
+        // bypass, which converges correctly.
+        if self.stack().is_cold_iteration()
+            && let AnyIdx::Key(key_idx) = current.1
+        {
+            // Use explicit Key type parameter because `key_idx` is `Idx<Key>`
+            // (from the AnyIdx::Key match), not `Idx<K>`. The function is
+            // generic over K, but we know K = Key here; Rust's type system
+            // requires the concrete type to resolve the binding table lookup.
+            let key_binding = self.bindings().get::<Key>(key_idx);
+            if let Binding::LoopPhi(prior_idx, _) = key_binding {
+                // Resolve the prior/default index (value from above the loop).
+                // Uses get_idx::<Key> explicitly since prior_idx is Idx<Key>.
+                let prior_answer: Arc<TypeInfo> = self.get_idx::<Key>(*prior_idx);
+
+                // Deep-force to resolve all type variables, matching the
+                // invariant that all iterative answers are deep-forced.
+                let mut forced = Arc::unwrap_or_clone(prior_answer);
+                forced.visit_mut(&mut |x| self.current.solver().deep_force_mut(x));
+                let answer = Arc::new(forced);
+
+                // Type-erase for storage. The concrete type inside the outer
+                // Arc<dyn Any> is Arc<TypeInfo> (= Arc<Key::Answer>).
+                let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
+
+                // Cold start has no previous answer; always mark changed so
+                // iteration 1 never appears converged.
+                self.stack().mark_iteration_changed();
+
+                // Store as Done in iteration state. Errors are None because
+                // this is cold-start iteration 1 (errors are swallowed).
+                self.stack()
+                    .set_iteration_node_done(&current, answer_erased.clone(), None);
+
+                // Downcast back to Arc<K::Answer>. This code path only
+                // executes when K = Key (guarded by AnyIdx::Key match), so
+                // K::Answer = TypeInfo and the downcast always succeeds.
+                return Arc::unwrap_or_clone(
+                    answer_erased
+                        .downcast::<Arc<K::Answer>>()
+                        .expect("LoopPhi bypass: K must be Key when AnyIdx::Key matches"),
+                );
+            }
+        }
+
         let binding = self.bindings().get(idx);
         let range = K::range_with(idx, self.bindings());
 
