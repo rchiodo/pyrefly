@@ -256,6 +256,52 @@ impl CalcStack {
             .entry(current.dupe())
             .and_modify(|positions| positions.push(position))
             .or_insert_with(|| Vec1::new(position));
+
+        // Iterative bypass: when iterative mode is active and the top SCC is
+        // iterating, check if the target is a member of the top SCC's iteration
+        // state. If so, use SCC-scoped iteration state to determine the action
+        // instead of falling through to the legacy SCC logic.
+        //
+        // Borrow safety: `get_iteration_node_state` returns an owned
+        // `IterationNodeStateKind`, so the shared borrow on `scc_stack` is
+        // released before any exclusive borrow for mutation.
+        if self.is_iterative()
+            && let Some(kind) = self.get_iteration_node_state(&current)
+        {
+            return match kind {
+                IterationNodeStateKind::Fresh => {
+                    // First encounter in this iteration: mark InProgress
+                    // and proceed to calculate.
+                    self.set_iteration_node_in_progress(&current);
+                    BindingAction::Calculate
+                }
+                IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                    let answer = self
+                        .get_previous_answer(&current)
+                        .expect("InProgressWithPreviousAnswer but no previous answer found");
+                    BindingAction::SccLocalAnswer(answer)
+                }
+                IterationNodeStateKind::InProgressWithPlaceholder => {
+                    let var = self
+                        .get_iteration_placeholder(&current)
+                        .expect("InProgressWithPlaceholder but no placeholder found");
+                    BindingAction::CycleBroken(var)
+                }
+                IterationNodeStateKind::InProgressCold => {
+                    // Cold-start back-edge: no placeholder, no previous answer.
+                    // Return NeedsColdPlaceholder so the caller (get_idx) can
+                    // allocate via K::create_recursive.
+                    BindingAction::NeedsColdPlaceholder
+                }
+                IterationNodeStateKind::Done => {
+                    let answer = self
+                        .get_iteration_done_answer(&current)
+                        .expect("Done iteration node state but no answer found");
+                    BindingAction::SccLocalAnswer(answer)
+                }
+            };
+        }
+
         match self.pre_calculate_state(&current) {
             SccState::NotInScc | SccState::RevisitingInProgress => {
                 match calculation.propose_calculation() {
@@ -953,6 +999,22 @@ impl CalcStack {
         iter_state.previous_answers.get(target).cloned()
     }
 
+    /// Retrieve the type-erased answer from `IterationNodeState::Done` in the
+    /// top SCC's iteration state.
+    ///
+    /// Returns `None` if the top SCC is not iterating, the target is not
+    /// found, or the target is not `Done`.
+    #[allow(dead_code)]
+    fn get_iteration_done_answer(&self, target: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
+        let scc_stack = self.scc_stack.borrow();
+        let top_scc = scc_stack.last()?;
+        let iter_state = top_scc.iterative.as_ref()?;
+        match iter_state.node_states.get(target)? {
+            IterationNodeState::Done { answer } => Some(answer.clone()),
+            _ => None,
+        }
+    }
+
     /// Find the first member in the top SCC's iteration state that is `Fresh`.
     ///
     /// Returns `None` if all members have been processed or the top SCC is
@@ -1131,6 +1193,12 @@ enum BindingAction<T> {
     /// Type-erased; will be downcast to `Arc<K::Answer>` in `get_idx`.
     /// Action: downcast and return
     SccLocalAnswer(Arc<dyn Any + Send + Sync>),
+    /// An iterating SCC member is InProgress with no placeholder and no
+    /// previous answer (cold-start back-edge). Two-step protocol: `push`
+    /// returns this because it lacks `K: Solve`; the caller (`get_idx`)
+    /// allocates the placeholder via `K::create_recursive`, stores it in
+    /// iteration state, and returns `K::promote_recursive`.
+    NeedsColdPlaceholder,
 }
 
 /// Per-SCC iteration state for iterative fixpoint solving.
@@ -1816,6 +1884,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     type_erased
                         .downcast::<Arc<K::Answer>>()
                         .expect("SccLocalAnswer downcast failed: type mismatch"),
+                )
+            }
+            BindingAction::NeedsColdPlaceholder => {
+                // Placeholder allocation will be implemented in a follow-up commit.
+                // This variant is only produced during iterative SCC solving, which
+                // is not yet driven by any caller.
+                unreachable!(
+                    "NeedsColdPlaceholder returned but iterative placeholder \
+                     allocation is not yet implemented"
                 )
             }
         };
