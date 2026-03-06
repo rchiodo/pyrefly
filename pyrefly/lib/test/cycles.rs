@@ -820,3 +820,36 @@ assert_type(f(1), int)
 assert_type(g(1), int)
 "#,
 );
+
+// Verify that two disjoint SCCs (no edges between them) solve independently
+// and correctly. When the iterative solver discovers a disjoint SCC during
+// iteration, it should solve that SCC to completion, commit its results,
+// and return without disturbing the iteration state of the other SCC.
+// Here SCC1 = {f, g} (int -> int) and SCC2 = {h, k} (str -> str) are
+// completely independent mutual-recursion pairs.
+testcase!(
+    iterative_disjoint_scc_independence,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+# SCC 1: f and g call each other
+def f(x: int) -> int:
+    return g(x)
+
+def g(x: int) -> int:
+    return f(x)
+
+# SCC 2: h and k call each other (completely independent of f/g)
+def h(x: str) -> str:
+    return k(x)
+
+def k(x: str) -> str:
+    return h(x)
+
+assert_type(f(1), int)
+assert_type(g(1), int)
+assert_type(h("a"), str)
+assert_type(k("a"), str)
+"#,
+);
