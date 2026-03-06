@@ -979,6 +979,12 @@ impl<'a> BindingsBuilder<'a> {
                     let new_narrow_ops = if this_branch_chosen == Some(false) {
                         // Skip the body in this case - it typically means a check (e.g. a sys version,
                         // platform, or TYPE_CHECKING check) where the body is not statically analyzable.
+                        // However, we still need to check for `yield`/`yield from` in the skipped
+                        // body, because Python determines generator status syntactically at compile
+                        // time, regardless of reachability.
+                        if Ast::body_contains_yield(&body) {
+                            self.scopes.mark_has_yield_in_dead_code();
+                        }
                         self.abandon_branch();
                         continue;
                     } else {

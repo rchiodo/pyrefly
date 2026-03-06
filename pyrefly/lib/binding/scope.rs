@@ -871,13 +871,19 @@ fn is_test_setup_method(method_name: &Name) -> bool {
     }
 }
 
-/// Things we collect from inside a function
+/// Things we collect from inside a function.
 /// The boolean flag is set when we know for sure the statement is definitely unreachable.
 #[derive(Default, Clone, Debug)]
 pub struct YieldsAndReturns {
     pub returns: Vec<(Idx<Key>, StmtReturn, bool)>,
     pub yields: Vec<(Idx<KeyYield>, ExprYield, bool)>,
     pub yield_froms: Vec<(Idx<KeyYieldFrom>, ExprYieldFrom, bool)>,
+    /// Whether this function syntactically contains `yield` or `yield from`.
+    /// Python determines generator status at compile time regardless of
+    /// reachability, so this is set even for yields inside dead code like
+    /// `if False:`. The `yields`/`yield_froms` vectors may be empty when this
+    /// is true, because dead-code branches are not traversed during binding.
+    pub is_generator: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -2288,6 +2294,7 @@ impl Scopes {
     ) -> Result<(), ExprYield> {
         match self.current_yields_and_returns_mut() {
             Some(yields_and_returns) => {
+                yields_and_returns.is_generator = true;
                 yields_and_returns.yields.push((idx, x, is_unreachable));
                 Ok(())
             }
@@ -2306,12 +2313,21 @@ impl Scopes {
     ) -> Result<(), ExprYieldFrom> {
         match self.current_yields_and_returns_mut() {
             Some(yields_and_returns) => {
+                yields_and_returns.is_generator = true;
                 yields_and_returns
                     .yield_froms
                     .push((idx, x, is_unreachable));
                 Ok(())
             }
             None => Err(x),
+        }
+    }
+
+    /// Mark that the enclosing function contains `yield` or `yield from` in a
+    /// statically-dead branch that was not traversed during binding.
+    pub fn mark_has_yield_in_dead_code(&mut self) {
+        if let Some(yields_and_returns) = self.current_yields_and_returns_mut() {
+            yields_and_returns.is_generator = true;
         }
     }
 
