@@ -1177,17 +1177,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         got: &Type,
         want: &Type,
     ) -> Result<(), SubsetError> {
-        if matches!(got, Type::Materialization) {
-            return self.is_subset_eq(
-                &self
-                    .solver
-                    .heap
-                    .mk_class_type(self.type_order.stdlib().object().clone()),
-                want,
-            );
-        } else if matches!(want, Type::Materialization) {
-            return self.is_subset_eq(got, &self.solver.heap.mk_never());
-        }
         match (got, want) {
             (Type::Any(_), _) => {
                 for var in want.collect_maybe_quantified_vars() {

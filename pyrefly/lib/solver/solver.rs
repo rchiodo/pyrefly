@@ -1548,6 +1548,17 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // We really have no idea. Just give up for now.
             return Err(SubsetError::Other);
         }
+        if matches!(got, Type::Materialization) {
+            return self.is_subset_eq(
+                &self
+                    .solver
+                    .heap
+                    .mk_class_type(self.type_order.stdlib().object().clone()),
+                want,
+            );
+        } else if matches!(want, Type::Materialization) {
+            return self.is_subset_eq(got, &self.solver.heap.mk_never());
+        }
         let res = self.is_subset_eq_var(got, want);
         self.gas.restore();
         res

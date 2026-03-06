@@ -1559,3 +1559,18 @@ def demo_variadic(s: tuple[int, ...]):
     assert_type(ndim(s), int)
     "#,
 );
+
+// Regression test for https://github.com/facebook/pyrefly/issues/2600.
+testcase!(
+    test_materialization_does_not_leak_into_partial_contained,
+    r#"
+def f(x: None):
+    config = {}
+    # Intentionally introduce Error types.
+    for k, v in x:  # E: Type `None` is not iterable
+        config.setdefault(k, v)
+    for k in config:
+        if k == "hello":
+            pass
+    "#,
+);
