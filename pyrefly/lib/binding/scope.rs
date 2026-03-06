@@ -172,6 +172,9 @@ struct Static(SmallMap<Name, StaticInfo>);
 struct StaticInfo {
     range: TextRange,
     style: StaticStyle,
+    /// The range of the textually last assignment to this name. Used to check
+    /// whether a captured variable is reassigned after a nested function definition.
+    last_range: TextRange,
 }
 
 #[derive(Clone, Debug)]
@@ -320,13 +323,27 @@ impl StaticInfo {
 }
 
 impl Static {
-    fn upsert(&mut self, name: Hashed<Name>, range: TextRange, style: StaticStyle) {
+    fn upsert(
+        &mut self,
+        name: Hashed<Name>,
+        range: TextRange,
+        style: StaticStyle,
+        last_range: TextRange,
+    ) {
         match self.0.entry_hashed(name) {
             Entry::Vacant(e) => {
-                e.insert(StaticInfo { range, style });
+                e.insert(StaticInfo {
+                    range,
+                    style,
+                    last_range,
+                });
             }
             Entry::Occupied(mut e) => {
                 let found = e.get_mut();
+                // Track the textually last assignment site.
+                if last_range.start() > found.last_range.start() {
+                    found.last_range = last_range;
+                }
                 if matches!(style, StaticStyle::PossibleLegacyTParam) {
                     // This case is reachable when the same module has multiple attributes accessed
                     // on it, each of which produces a separate possible-legacy-tparam binding that
@@ -407,9 +424,10 @@ impl Static {
             // Note that this really is an upsert: there might already be a parameter of the
             // same name in this scope.
             let range = definition.range;
+            let last_range = definition.last_range;
             let style =
                 StaticStyle::of_definition(name.as_ref(), definition, scopes, get_annotation_idx);
-            self.upsert(name, range, style);
+            self.upsert(name, range, style, last_range);
         }
         for (module, range, wildcard) in all_wildcards {
             // Builtins are a fallback, so they should never shadow an existing definition.
@@ -420,7 +438,7 @@ impl Static {
                 if skip_existing && self.0.get_hashed(name).is_some() {
                     continue;
                 }
-                self.upsert(name.cloned(), range, StaticStyle::MergeableImport)
+                self.upsert(name.cloned(), range, StaticStyle::MergeableImport, range)
             }
         }
         implicit_captures
@@ -432,6 +450,7 @@ impl Static {
                 Hashed::new(name.id.clone()),
                 name.range,
                 StaticStyle::SingleDef(None),
+                name.range,
             )
         };
         Ast::expr_lvalue(x, &mut add);
@@ -1264,6 +1283,54 @@ impl Scopes {
             .collect()
     }
 
+    /// The range of the current (innermost) scope.
+    pub fn current_scope_range(&self) -> TextRange {
+        self.current().range
+    }
+
+    /// Get the outer scope's narrow idx for a captured variable, if the outer
+    /// scope has an active narrow and the variable is not reassigned after the
+    /// function definition.
+    ///
+    /// Walks outer scopes (skipping current and class scopes) to find the
+    /// nearest scope with a narrowed flow entry for `name`. Returns the
+    /// narrow's idx only when it is safe to propagate:
+    /// - The outer scope has an active narrow (isinstance, is not None, etc.)
+    /// - All assignments to the name precede `inner_fn_range`
+    ///
+    /// Returns `None` if there is no active narrow or the variable is
+    /// reassigned after the function definition.
+    pub fn outer_capture_narrow_idx(
+        &self,
+        name: Hashed<&Name>,
+        inner_fn_range: TextRange,
+    ) -> Option<Idx<Key>> {
+        for scope in self.iter_rev().skip(1) {
+            if matches!(scope.kind, ScopeKind::Class(_)) {
+                continue;
+            }
+            if let Some(flow_info) = scope.flow.get_info_hashed(name) {
+                // Only propagate when the outer scope has an active narrow.
+                flow_info.narrow.as_ref()?;
+                let not_reassigned_after = scope
+                    .stat
+                    .0
+                    .get_hashed(name)
+                    .map(|s| s.last_range.start() < inner_fn_range.start())
+                    .unwrap_or(true);
+                if not_reassigned_after {
+                    return Some(flow_info.idx());
+                }
+                return None;
+            }
+            // Name is in stat but not flow — possibly uninitialized, don't propagate.
+            if scope.stat.0.get_hashed(name).is_some() {
+                return None;
+            }
+        }
+        None
+    }
+
     pub fn in_class_body(&self) -> bool {
         match self.current().kind {
             ScopeKind::Class(_) => true,
@@ -1925,6 +1992,7 @@ impl Scopes {
             Hashed::new(name.id.clone()),
             name.range,
             StaticStyle::SingleDef(ann),
+            name.range,
         )
     }
 
@@ -2055,6 +2123,7 @@ impl Scopes {
             Hashed::new(name.id.clone()),
             name.range,
             StaticStyle::PossibleLegacyTParam,
+            name.range,
         )
     }
 
@@ -2067,6 +2136,7 @@ impl Scopes {
             Hashed::new(name.id.clone()),
             name.range,
             StaticStyle::SingleDef(None),
+            name.range,
         );
     }
 
