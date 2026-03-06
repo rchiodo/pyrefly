@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use crate::config::base::SccMode;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -628,5 +629,33 @@ testcase!(
     r#"
 from gen import Struct
 x = Struct().serialize()
+"#,
+);
+
+// ---- Iterative SCC solving tests ----
+//
+// Tests that verify SCC solving behavior under iterative fixpoint mode.
+// These exercise the LoopPhi cold-start bypass and iterative convergence.
+
+/// Build a TestEnv configured for iterative fixpoint SCC solving.
+fn iterative_env() -> TestEnv {
+    TestEnv::new().with_scc_mode(SccMode::IterativeFixpoint)
+}
+
+// Verify that a simple loop variable whose type is stable across iterations
+// is correctly inferred. The LoopPhi cold-start bypass resolves the prior
+// value (x = 0, type int) during iteration 1, and the warm-start iteration
+// confirms convergence.
+testcase!(
+    iterative_loop_phi_simple,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(cond: bool):
+    x = 0
+    while cond:
+        x = x + 1
+    assert_type(x, int)
 "#,
 );
