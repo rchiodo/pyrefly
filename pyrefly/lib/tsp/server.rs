@@ -129,6 +129,10 @@ impl<T: TspInterface> TspServer<T> {
                 self.handle_resolve_import(request.id.clone(), params, ide_transaction_manager);
                 Ok(true)
             }
+            TSPRequests::GetPythonSearchPathsRequest { params, .. } => {
+                self.handle_get_python_search_paths(request.id.clone(), params);
+                Ok(true)
+            }
             _ => {
                 // Recognized TSP method but not yet implemented — return MethodNotFound
                 self.inner.send_response(Response::new_err(

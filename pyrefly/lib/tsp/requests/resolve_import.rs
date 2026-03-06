@@ -25,6 +25,7 @@ use crate::lsp::non_wasm::server::TspInterface;
 use crate::lsp::non_wasm::transaction_manager::TransactionManager;
 use crate::tsp::server::TspServer;
 use crate::tsp::validation::invalid_params_error;
+use crate::tsp::validation::parse_file_uri;
 
 impl<T: TspInterface> TspServer<T> {
     /// Handle a `typeServer/resolveImport` request.
@@ -46,10 +47,10 @@ impl<T: TspInterface> TspServer<T> {
         }
 
         // --- 2. Parse source URI ---
-        let source_url = match Url::parse(&params.source_uri) {
+        let source_url = match parse_file_uri(&params.source_uri) {
             Ok(url) => url,
-            Err(_) => {
-                self.send_err(id, invalid_params_error("sourceUri is not a valid URI"));
+            Err(err) => {
+                self.send_err(id, err);
                 return;
             }
         };
