@@ -4729,7 +4729,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.binding_to_type_exception_handler(ann, *is_star, errors)
             }
             Binding::AugAssign(ann, x) => self.augassign_infer(*ann, x, errors),
-            Binding::IterableValue(ann, e, is_async) => {
+            Binding::IterableValueComprehension(e, is_async, _) => {
+                self.binding_to_type_iterable_value(None, e, *is_async, errors)
+            }
+            Binding::IterableValueLoop(ann, e, is_async) => {
                 self.binding_to_type_iterable_value(*ann, e, *is_async, errors)
             }
             Binding::ContextValue(ann, e, range, kind) => {

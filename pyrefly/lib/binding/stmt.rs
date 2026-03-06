@@ -891,7 +891,11 @@ impl<'a> BindingsBuilder<'a> {
                 // (must be done before x.iter is moved)
                 let loop_definitely_runs = is_definitely_nonempty_iterable(&x.iter);
                 self.bind_target_with_expr(&mut x.target, &mut x.iter, &|expr, ann| {
-                    Binding::IterableValue(ann, Box::new(expr.clone()), IsAsync::new(x.is_async))
+                    Binding::IterableValueLoop(
+                        ann,
+                        Box::new(expr.clone()),
+                        IsAsync::new(x.is_async),
+                    )
                 });
                 // Note that we set up the loop *after* the header is fully bound, because the
                 // loop iterator is only evaluated once before the loop begins. But the loop header
