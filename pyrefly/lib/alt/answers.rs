@@ -43,6 +43,7 @@ use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::Bindings;
 use crate::binding::table::TableKeyed;
 use crate::config::base::RecursionLimitConfig;
+use crate::config::base::SccMode;
 use crate::dispatch_anyidx;
 use crate::error::collector::ErrorCollector;
 use crate::error::style::ErrorStyle;
@@ -616,6 +617,7 @@ impl Answers {
         uniques: &UniqueFactory,
         compute_everything: bool,
         recursion_limit_config: Option<RecursionLimitConfig>,
+        scc_mode: SccMode,
     ) -> Solutions {
         let mut res = SolutionsTable::default();
 
@@ -646,7 +648,7 @@ impl Answers {
             }
         }
         let recurser = &VarRecurser::new();
-        let thread_state = &ThreadState::new(recursion_limit_config);
+        let thread_state = &ThreadState::new(recursion_limit_config, scc_mode);
         let answers_solver = AnswersSolver::new(
             answers,
             self,

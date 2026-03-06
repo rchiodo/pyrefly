@@ -1833,14 +1833,12 @@ enum SccSolvingMode {
     /// Thread-local SCC solving with batch commits to Calculation.
     CyclesThreadLocal,
     /// Iterative fixpoint: re-solve SCC members until answers converge.
-    /// Not yet wired up; currently behaves like `CyclesThreadLocal`.
-    #[allow(dead_code)]
     Iterative,
 }
 
 impl ThreadState {
-    pub fn new(recursion_limit_config: Option<RecursionLimitConfig>) -> Self {
-        let scc_solving_mode = SccSolvingMode::resolve(SccMode::default());
+    pub fn new(recursion_limit_config: Option<RecursionLimitConfig>, scc_mode: SccMode) -> Self {
+        let scc_solving_mode = SccSolvingMode::resolve(scc_mode);
         Self {
             stack: CalcStack::new(scc_solving_mode),
             debug: RefCell::new(false),
@@ -3197,7 +3195,18 @@ mod scc_tests {
 
     /// Helper to create a CalcStack for testing.
     fn make_calc_stack(entries: &[CalcId]) -> CalcStack {
-        let stack = CalcStack::new(SccSolvingMode::default());
+        make_calc_stack_with_mode(entries, SccSolvingMode::default())
+    }
+
+    /// Helper to create a CalcStack for testing in iterative mode.
+    #[allow(dead_code)]
+    fn make_iterative_calc_stack(entries: &[CalcId]) -> CalcStack {
+        make_calc_stack_with_mode(entries, SccSolvingMode::Iterative)
+    }
+
+    /// Helper to create a CalcStack for testing with a specific solving mode.
+    fn make_calc_stack_with_mode(entries: &[CalcId], mode: SccSolvingMode) -> CalcStack {
+        let stack = CalcStack::new(mode);
         for entry in entries {
             stack.push_for_test(entry.dupe());
         }

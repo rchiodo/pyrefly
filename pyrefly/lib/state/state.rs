@@ -88,6 +88,7 @@ use crate::binding::bindings::BindingEntry;
 use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::Bindings;
 use crate::binding::table::TableKeyed;
+use crate::config::base::SccMode;
 use crate::config::config::ConfigFile;
 use crate::config::error_kind::ErrorKind;
 use crate::config::finder::ConfigError;
@@ -1072,6 +1073,7 @@ impl<'a> Transaction<'a> {
                 strict_callable_subtyping: config
                     .strict_callable_subtyping(module_data.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
+                scc_mode: config.scc_mode(),
             };
 
             // Compute the step. This stores the result and advances current_step,
@@ -1469,7 +1471,7 @@ impl<'a> Transaction<'a> {
         }
         let loader = self.get_cached_loader(&BundledTypeshedStdlib::config());
         // Use defaults (disabled) for stdlib - depth limiting is for user code
-        let thread_state = ThreadState::new(None);
+        let thread_state = ThreadState::new(None, SccMode::default());
         for k in missing.into_iter_hashed() {
             self.data
                 .stdlib
@@ -1722,7 +1724,7 @@ impl<'a> Transaction<'a> {
         let stdlib = self.get_stdlib(handle);
         let recurser = VarRecurser::new();
         let config = module_data.config.read();
-        let thread_state = ThreadState::new(config.recursion_limit_config());
+        let thread_state = ThreadState::new(config.recursion_limit_config(), config.scc_mode());
         let solver = AnswersSolver::new(
             &lookup,
             &answers.1,
@@ -1963,6 +1965,7 @@ impl<'a> Transaction<'a> {
                 strict_callable_subtyping: config
                     .strict_callable_subtyping(m.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
+                scc_mode: config.scc_mode(),
             };
             while let Some(step) = alt.next_step() {
                 let start = Instant::now();
