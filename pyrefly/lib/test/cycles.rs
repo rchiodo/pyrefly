@@ -778,3 +778,45 @@ assert_type(f(1), str)
 assert_type(g(1), str)
 "#,
 );
+
+// Verify that the iterative solver handles SCCs spanning multiple modules.
+// Module `a` defines `f` which calls `g` from module `b`, and module `b`
+// defines `g` which calls `f` from module `a`. This creates a cross-module
+// cycle that exercises `solve_idx_erased` plumbing: the iterative solver
+// must detect the cross-module SCC and converge to the annotated return
+// types via cold-start placeholders followed by warm-start iterations.
+
+fn env_iterative_cross_module_cycle() -> TestEnv {
+    let mut env = iterative_env();
+    env.add(
+        "a",
+        r#"
+from b import g
+
+def f(x: int) -> int:
+    return g(x)
+"#,
+    );
+    env.add(
+        "b",
+        r#"
+from a import f
+
+def g(x: int) -> int:
+    return f(x)
+"#,
+    );
+    env
+}
+
+testcase!(
+    iterative_cross_module_scc_cycle,
+    env_iterative_cross_module_cycle(),
+    r#"
+from typing import assert_type
+from a import f
+from b import g
+assert_type(f(1), int)
+assert_type(g(1), int)
+"#,
+);
