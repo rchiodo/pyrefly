@@ -121,7 +121,15 @@ pub(crate) fn compute_qualified_name(
         definition.module.path().dupe(),
         handle.sys_info().dupe(),
     );
-    let ast = transaction.get_ast(&definition_handle)?;
+    // We may not have the AST available for the handle if it's not opened.
+    let ast = transaction.get_ast(&definition_handle).unwrap_or_else(|| {
+        Ast::parse(
+            definition.module.contents(),
+            definition.module.source_type(),
+        )
+        .0
+        .into()
+    });
     Some(qualified_name_at_position(
         &ast,
         module_name,
@@ -204,6 +212,6 @@ mod tests {
         };
 
         let result = compute_qualified_name(&transaction, &handle, &definition);
-        assert_eq!(result, None);
+        assert_eq!(result, Some("defmod.foo".to_owned()));
     }
 }
