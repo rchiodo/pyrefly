@@ -3561,4 +3561,173 @@ mod scc_tests {
             _ => panic!("Expected Calculate action to recover from stale state"),
         }
     }
+
+    #[test]
+    #[allow(clippy::mutable_key_type)]
+    fn test_membership_back_edge_merge_and_demotion() {
+        // Verify that pushing a CalcId which is a member of a non-top iterating
+        // SCC causes the SCCs to merge and the result to have demoted = true.
+        //
+        // Setup:
+        //   CalcStack = [A, B, C, D, E]
+        //   SCC0 (non-top): members {A, B}, iterating at iteration 2
+        //   SCC1 (top):     members {D, E}, iterating at iteration 1
+        //   C is between the two SCCs but not a member of either.
+        //
+        // Action: push(A, ...) -- A is a member of SCC0, the non-top SCC.
+        //
+        // Expected:
+        //   - SCCs merge into one (stack length goes from 2 to 1)
+        //   - Merged SCC has iterative.demoted == true
+        //   - Merged SCC contains members from both original SCCs {A, B, D, E}
+        //   - push returns Calculate (since after demotion all nodes are Fresh)
+        let a = CalcId::for_test("m", 0);
+        let b = CalcId::for_test("m", 1);
+        let c = CalcId::for_test("m", 2);
+        let d = CalcId::for_test("m", 3);
+        let e = CalcId::for_test("m", 4);
+
+        // Build the iterative CalcStack with [A, B, C, D, E].
+        let calc_stack =
+            make_iterative_calc_stack(&[a.dupe(), b.dupe(), c.dupe(), d.dupe(), e.dupe()]);
+
+        // Manually construct SCC0 with iterative state (iteration 2).
+        let scc0 = {
+            let mut node_state = BTreeMap::new();
+            node_state.insert(a.dupe(), NodeState::Fresh);
+            node_state.insert(b.dupe(), NodeState::Fresh);
+            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
+                (a.dupe(), IterationNodeState::Fresh),
+                (b.dupe(), IterationNodeState::Fresh),
+            ]
+            .into_iter()
+            .collect();
+            Scc {
+                break_at: [a.dupe()].into_iter().collect(),
+                node_state,
+                detected_at: a.dupe(),
+                anchor_pos: 0,
+                segment_size: 2,
+                iterative: Some(SccIterationState {
+                    iteration: 2,
+                    node_states: iter_nodes,
+                    previous_answers: BTreeMap::new(),
+                    demoted: false,
+                    has_changed: false,
+                }),
+            }
+        };
+
+        // Manually construct SCC1 with iterative state (iteration 1).
+        let scc1 = {
+            let mut node_state = BTreeMap::new();
+            node_state.insert(d.dupe(), NodeState::Fresh);
+            node_state.insert(e.dupe(), NodeState::Fresh);
+            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
+                (d.dupe(), IterationNodeState::Fresh),
+                (e.dupe(), IterationNodeState::Fresh),
+            ]
+            .into_iter()
+            .collect();
+            Scc {
+                break_at: [d.dupe()].into_iter().collect(),
+                node_state,
+                detected_at: d.dupe(),
+                anchor_pos: 3,
+                segment_size: 2,
+                iterative: Some(SccIterationState {
+                    iteration: 1,
+                    node_states: iter_nodes,
+                    previous_answers: BTreeMap::new(),
+                    demoted: false,
+                    has_changed: false,
+                }),
+            }
+        };
+
+        // Push both SCCs onto the scc_stack: SCC0 at bottom, SCC1 on top.
+        {
+            let mut scc_stack = calc_stack.scc_stack.borrow_mut();
+            scc_stack.push(scc0);
+            scc_stack.push(scc1);
+        }
+
+        // Verify initial state: two SCCs.
+        assert_eq!(calc_stack.borrow_scc_stack().len(), 2);
+
+        // Push A: A is a member of SCC0 (the non-top iterating SCC).
+        // This should trigger a membership back-edge merge.
+        let calculation: Calculation<usize> = Calculation::new();
+        let action = calc_stack.push(a.dupe(), &calculation);
+
+        // After merge, there should be exactly one SCC.
+        let scc_stack = calc_stack.borrow_scc_stack();
+        assert_eq!(
+            scc_stack.len(),
+            1,
+            "SCCs should have merged into one after membership back-edge"
+        );
+
+        let merged = &scc_stack[0];
+
+        // The merged SCC must have demoted = true.
+        let iter_state = merged
+            .iterative
+            .as_ref()
+            .expect("merged SCC should have iterative state");
+        assert!(
+            iter_state.demoted,
+            "merged SCC should have demoted = true after membership back-edge merge"
+        );
+
+        // Iteration should be reset to 1 after demotion.
+        assert_eq!(
+            iter_state.iteration, 1,
+            "merged SCC iteration should be reset to 1 after demotion"
+        );
+
+        // All members from both original SCCs should be in the merged SCC's
+        // legacy node_state.
+        assert!(
+            merged.node_state.contains_key(&a),
+            "A should be in merged SCC"
+        );
+        assert!(
+            merged.node_state.contains_key(&b),
+            "B should be in merged SCC"
+        );
+        assert!(
+            merged.node_state.contains_key(&d),
+            "D should be in merged SCC"
+        );
+        assert!(
+            merged.node_state.contains_key(&e),
+            "E should be in merged SCC"
+        );
+
+        // All members should also be in the iteration node_states.
+        assert!(
+            iter_state.node_states.contains_key(&a),
+            "A should be in iteration node_states"
+        );
+        assert!(
+            iter_state.node_states.contains_key(&b),
+            "B should be in iteration node_states"
+        );
+        assert!(
+            iter_state.node_states.contains_key(&d),
+            "D should be in iteration node_states"
+        );
+        assert!(
+            iter_state.node_states.contains_key(&e),
+            "E should be in iteration node_states"
+        );
+
+        // The push should return Calculate because after demotion all nodes
+        // are Fresh, and A (the pushed target) transitions to Calculate.
+        assert!(
+            matches!(action, BindingAction::Calculate),
+            "push should return Calculate for a Fresh member after merge"
+        );
+    }
 }
