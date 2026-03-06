@@ -386,6 +386,15 @@ impl CalcStack {
         if self.is_iterative()
             && let Some(kind) = self.get_iteration_node_state(&current)
         {
+            // The node was unconditionally pushed onto the raw CalcStack
+            // above, and pop() will decrement segment_size for any node
+            // in the top SCC's node_state. We must increment here to
+            // keep segment_size symmetric, since the early return below
+            // bypasses the segment_size += 1 in the SccState::Participant
+            // arm.
+            if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
+                top_scc.segment_size += 1;
+            }
             return match kind {
                 IterationNodeStateKind::Fresh => {
                     // First encounter in this iteration: mark InProgress
