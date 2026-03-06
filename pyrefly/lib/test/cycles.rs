@@ -730,3 +730,51 @@ assert_type(f(1), str)
 assert_type(g(1), str)
 "#,
 );
+
+// Verify that spurious errors from cold-start iteration 1 (which uses
+// placeholders via `error_swallower()`) do not leak into the final output.
+// A clean mutual recursion cycle with fully annotated signatures should
+// produce NO errors: the cold-start may temporarily see placeholder types
+// that look like mismatches, but those errors are swallowed. The warm-start
+// iterations use `error_collector()` and should see converged, correct types
+// that produce no errors.
+testcase!(
+    iterative_error_suppression_no_spurious_errors,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(x: int) -> int:
+    return g(x)
+
+def g(x: int) -> int:
+    return f(x)
+
+assert_type(f(1), int)
+assert_type(g(1), int)
+"#,
+);
+
+// Verify that real type errors ARE reported after convergence in iterative
+// mode. While cold-start (iteration 1) errors are suppressed, errors from
+// iteration >= 2 are collected and committed. Here `g` has a return type
+// annotation of `str` but returns `x` (an `int`), which is a genuine
+// incompatible-return-type error that must survive across iterations.
+testcase!(
+    iterative_error_suppression_real_errors_reported,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(x: int) -> str:
+    if x <= 0:
+        return "done"
+    return g(x - 1)
+
+def g(x: int) -> str:
+    return x  # E: Returned type `int` is not assignable to declared return type `str`
+
+assert_type(f(1), str)
+assert_type(g(1), str)
+"#,
+);
