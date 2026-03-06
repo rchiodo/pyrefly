@@ -705,3 +705,28 @@ def f(cond: bool):
     assert_type(x, int | None)
 "#,
 );
+
+// Verify that mutually recursive functions (a true SCC, not just a LoopPhi)
+// converge correctly under iterative fixpoint solving. Functions `f` and `g`
+// each call the other, creating a cycle in the binding graph. The cold-start
+// iteration uses placeholders for the unknown return types; the warm-start
+// iteration substitutes the previous answers and should converge to the
+// annotated return types.
+testcase!(
+    iterative_warm_start_mutual_recursion,
+    iterative_env(),
+    r#"
+from typing import assert_type
+
+def f(x: int) -> str:
+    if x <= 0:
+        return "done"
+    return g(x - 1)
+
+def g(x: int) -> str:
+    return f(x)
+
+assert_type(f(1), str)
+assert_type(g(1), str)
+"#,
+);
