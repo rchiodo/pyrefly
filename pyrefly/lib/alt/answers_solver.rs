@@ -396,12 +396,14 @@ impl CalcStack {
                     BindingAction::Calculate
                 }
                 IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                    // Back-edge with a warm-start answer from prior iteration.
                     let answer = self
                         .get_previous_answer(&current)
                         .expect("InProgressWithPreviousAnswer but no previous answer found");
                     BindingAction::SccLocalAnswer(answer)
                 }
                 IterationNodeStateKind::InProgressWithPlaceholder => {
+                    // Back-edge with a placeholder already allocated.
                     let var = self
                         .get_iteration_placeholder(&current)
                         .expect("InProgressWithPlaceholder but no placeholder found");
@@ -414,6 +416,7 @@ impl CalcStack {
                     BindingAction::NeedsColdPlaceholder
                 }
                 IterationNodeStateKind::Done => {
+                    // Already solved in this iteration; return the answer.
                     let answer = self
                         .get_iteration_done_answer(&current)
                         .expect("Done iteration node state but no answer found");
@@ -1093,7 +1096,12 @@ impl CalcStack {
     ///
     /// Panics if the top SCC is not iterating.
     #[allow(dead_code)]
-    fn set_iteration_node_done(&self, target: &CalcId, answer: Arc<dyn Any + Send + Sync>) {
+    fn set_iteration_node_done(
+        &self,
+        target: &CalcId,
+        answer: Arc<dyn Any + Send + Sync>,
+        errors: Option<Arc<ErrorCollector>>,
+    ) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
         let iter_state = top_scc
@@ -1102,7 +1110,7 @@ impl CalcStack {
             .expect("top SCC is not iterating");
         iter_state
             .node_states
-            .insert(target.dupe(), IterationNodeState::Done { answer });
+            .insert(target.dupe(), IterationNodeState::Done { answer, errors });
     }
 
     /// Set `has_changed = true` on the top SCC's iteration state.
@@ -1145,7 +1153,7 @@ impl CalcStack {
         let top_scc = scc_stack.last()?;
         let iter_state = top_scc.iterative.as_ref()?;
         match iter_state.node_states.get(target)? {
-            IterationNodeState::Done { answer } => Some(answer.clone()),
+            IterationNodeState::Done { answer, .. } => Some(answer.clone()),
             _ => None,
         }
     }
@@ -1183,7 +1191,7 @@ impl CalcStack {
         };
         let mut answers = BTreeMap::new();
         for (calc_id, state) in &iter_state.node_states {
-            if let IterationNodeState::Done { answer } = state {
+            if let IterationNodeState::Done { answer, .. } = state {
                 answers.insert(calc_id.dupe(), answer.clone());
             }
         }
@@ -1383,10 +1391,12 @@ pub enum IterationNodeState {
         /// `None` until a back-edge triggers `NeedsColdPlaceholder`.
         placeholder: Option<Var>,
     },
-    /// Solved in this iteration. Stores the type-erased answer.
+    /// Solved in this iteration. Stores the type-erased answer and errors.
     Done {
         /// The computed answer for this node in this iteration.
         answer: Arc<dyn Any + Send + Sync>,
+        /// Errors collected during this iteration. None for cold-start.
+        errors: Option<Arc<ErrorCollector>>,
     },
 }
 
@@ -2045,6 +2055,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// batch-committed to the `Calculation` cell when the entire SCC completes.
     /// For non-SCC nodes, the answer is written directly to `Calculation` as before.
     ///
+    /// In iterative mode, if the current CalcId is a member of the top SCC's
+    /// iteration state, we use a separate iterative path that:
+    /// - Suppresses errors during cold-start (iteration 1) and collects them
+    ///   from iteration 2 onward.
+    /// - Deep-forces the answer to avoid Var-ID inequality in convergence
+    ///   comparisons.
+    /// - Finalizes any placeholder created for this node.
+    /// - Compares to the previous iteration's answer to track convergence.
+    /// - Stores the answer in SCC-local iteration state (not in Calculation)
+    ///   until the final commit.
+    ///
     /// Completed SCCs are pushed to the `pending_completed_sccs` buffer
     /// inside `on_calculation_finished`; `get_idx` drains them after the
     /// frame completes.
@@ -2058,6 +2079,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
+        // Iterative path: when iterative mode is active and the current CalcId
+        // is in the top SCC's iteration state, use the iterative code path
+        // instead of the legacy SCC or non-SCC paths.
+        if self.stack().is_iterative() && self.stack().get_iteration_node_state(&current).is_some()
+        {
+            return self.calculate_and_record_answer_iterative(current, idx);
+        }
+
         let binding = self.bindings().get(idx);
         // Note that we intentionally do not pass in the key when solving the binding,
         // as the result of a binding should not depend on the key it was bound to.
@@ -2134,6 +2163,97 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.stack().on_calculation_finished(&current, None, None);
             answer
         }
+    }
+
+    /// Iterative path for `calculate_and_record_answer`.
+    ///
+    /// Called when the current CalcId is a member of the top SCC's iteration
+    /// state. Unlike the legacy path, this:
+    /// - Uses `error_swallower()` during cold-start (iteration 1) because
+    ///   cold-start answers are based on placeholders and produce spurious
+    ///   errors. From iteration 2 onward, uses `error_collector()` to capture
+    ///   errors that will be committed if this is the final iteration.
+    /// - Deep-forces the answer before storage to avoid Var-ID inequality
+    ///   in convergence comparisons.
+    /// - Finalizes any placeholder created for this node during cycle breaking.
+    /// - Compares the answer to `previous_answers` via `answers_equal` and
+    ///   calls `mark_iteration_changed` if they differ.
+    /// - Stores the answer in `IterationNodeState::Done` (SCC-local), NOT in
+    ///   `Calculation`. The answer is only committed to `Calculation` when
+    ///   the iteration driver commits the final converged answers.
+    fn calculate_and_record_answer_iterative<K: Solve<Ans>>(
+        &self,
+        current: CalcId,
+        idx: Idx<K>,
+    ) -> Arc<K::Answer>
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+    {
+        let binding = self.bindings().get(idx);
+        let range = K::range_with(idx, self.bindings());
+
+        // Error handling strategy:
+        // - Iteration 1 (cold): suppress all errors because cold-start answers
+        //   (from placeholders) produce spurious diagnostics.
+        // - Iteration >= 2: collect errors normally. Only the final iteration's
+        //   errors are committed.
+        let local_errors = if self.stack().is_cold_iteration() {
+            self.error_swallower()
+        } else {
+            self.error_collector()
+        };
+        let raw_answer = K::solve(self, binding, range, &local_errors);
+
+        // If a placeholder was created for this node during cycle breaking,
+        // finalize the recursive answer (unify the placeholder with the actual
+        // answer via record_recursive + force_var). This must happen BEFORE
+        // deep-forcing: finalization sets the placeholder Var's answer in the
+        // solver, so a subsequent deep-force correctly resolves it. Reversing
+        // the order would leave the placeholder Var unresolved during forcing.
+        let answer = if let Some(var) = self.stack().get_iteration_placeholder(&current) {
+            self.finalize_recursive_answer::<K>(idx, var, raw_answer, &local_errors)
+        } else {
+            raw_answer
+        };
+
+        // Deep-force the answer to resolve all type variables. This is required
+        // for convergence comparisons: without forcing, structurally identical
+        // answers can appear different due to unresolved Var IDs.
+        let mut forced = Arc::unwrap_or_clone(answer);
+        forced.visit_mut(&mut |x| self.current.solver().deep_force_mut(x));
+        let answer = Arc::new(forced);
+
+        // Type-erase the answer for storage in iteration state.
+        // Wrap in Arc::new() so the concrete type inside Arc<dyn Any> is
+        // Arc<K::Answer>, matching downcasts in answers_equal_typed and
+        // SccLocalAnswer handling.
+        let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
+
+        // Compare to the previous iteration's answer (if any) to detect
+        // convergence. If the answer has changed, the fixpoint has not yet
+        // converged and the iteration driver must run another iteration.
+        if let Some(previous) = self.stack().get_previous_answer(&current) {
+            if !self.answers_equal(&current.1, &previous, &answer_erased) {
+                self.stack().mark_iteration_changed();
+            }
+        } else {
+            // No previous answer (cold start): always mark changed so that
+            // iteration 1 never appears converged.
+            self.stack().mark_iteration_changed();
+        }
+
+        // Store in IterationNodeState::Done. Do NOT write to Calculation;
+        // that happens only when the iteration driver commits final answers.
+        let errors = if self.stack().is_cold_iteration() {
+            None
+        } else {
+            Some(Arc::new(local_errors))
+        };
+        self.stack()
+            .set_iteration_node_done(&current, answer_erased, errors);
+
+        answer
     }
 
     /// Commit a type-erased answer to the Calculation cell for a same-module binding.
