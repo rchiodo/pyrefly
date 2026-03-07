@@ -565,13 +565,10 @@ def foo():
     assert_eq!(symbols[0].name, "foo");
 
     let children = symbols[0].children.as_ref().unwrap();
-    // BUG: The empty-name symbol should be filtered out. Currently the parser
-    // error-recovers from `x = = None` by producing two assignment targets:
-    // one with name "x" and one with name "". The empty name violates the LSP
-    // spec and causes "name must not be falsy" errors in VS Code.
-    assert_eq!(children.len(), 2);
+    // Only the valid "x" assignment should appear; the empty-name target
+    // from the parser's error recovery must be filtered out.
+    assert_eq!(children.len(), 1);
     assert_eq!(children[0].name, "x");
-    assert_eq!(children[1].name, "");
 }
 
 // TODO(kylei): list comprehension document symbol
