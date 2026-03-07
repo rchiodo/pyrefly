@@ -10,7 +10,6 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::env;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -65,7 +64,6 @@ use crate::binding::bindings::Bindings;
 use crate::binding::table::TableKeyed;
 use crate::config::base::RecursionLimitConfig;
 use crate::config::base::RecursionOverflowHandler;
-use crate::config::base::SccMode;
 use crate::config::error_kind::ErrorKind;
 use crate::dispatch_anyidx;
 use crate::error::collector::ErrorCollector;
@@ -2040,45 +2038,18 @@ enum SccSolvingMode {
 }
 
 impl ThreadState {
-    pub fn new(recursion_limit_config: Option<RecursionLimitConfig>, scc_mode: SccMode) -> Self {
-        let scc_solving_mode = SccSolvingMode::resolve(scc_mode);
+    pub fn new(recursion_limit_config: Option<RecursionLimitConfig>) -> Self {
         Self {
-            stack: CalcStack::new(scc_solving_mode),
+            stack: CalcStack::new(SccSolvingMode::Iterative),
             debug: RefCell::new(false),
             recursion_limit_config,
-            scc_solving_mode,
+            scc_solving_mode: SccSolvingMode::Iterative,
             partial_answers: RefCell::new(FxHashMap::default()),
         }
     }
 
     fn scc_solving_mode(&self) -> SccSolvingMode {
         self.scc_solving_mode
-    }
-}
-
-impl SccSolvingMode {
-    /// Resolve the SCC solving mode from a config enum, with an env var override.
-    ///
-    /// The `PYREFLY_SCC_SOLVING_MODE` env var takes precedence over the config
-    /// value, allowing runtime experimentation without config changes.
-    fn resolve(mode: SccMode) -> Self {
-        match env::var("PYREFLY_SCC_SOLVING_MODE") {
-            Ok(value) => match value.as_str() {
-                "cycles-dual-write" => Self::CyclesDualWrite,
-                "cycles-thread-local" => Self::CyclesThreadLocal,
-                "iterative-fixpoint" => Self::Iterative,
-                _ => panic!(
-                    "$PYREFLY_SCC_SOLVING_MODE must be one of \
-                     `cycles-dual-write`, `cycles-thread-local`, \
-                     or `iterative-fixpoint`, got `{value}`"
-                ),
-            },
-            Err(_) => match mode {
-                SccMode::CyclesDualWrite => Self::CyclesDualWrite,
-                SccMode::CyclesThreadLocal => Self::CyclesThreadLocal,
-                SccMode::IterativeFixpoint => Self::Iterative,
-            },
-        }
     }
 }
 

@@ -5,7 +5,6 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use crate::config::base::SccMode;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -575,7 +574,7 @@ x = Struct().serialize()
 
 /// Build a TestEnv configured for iterative fixpoint SCC solving.
 fn iterative_env() -> TestEnv {
-    TestEnv::new().with_scc_mode(SccMode::IterativeFixpoint)
+    TestEnv::new()
 }
 
 // Verify that a simple loop variable whose type is stable across iterations

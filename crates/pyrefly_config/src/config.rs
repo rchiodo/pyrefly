@@ -58,7 +58,6 @@ use tracing::error;
 
 use crate::base::ConfigBase;
 use crate::base::RecursionLimitConfig;
-use crate::base::SccMode;
 use crate::base::UntypedDefBehavior;
 use crate::environment::environment::PythonEnvironment;
 use crate::environment::interpreters::Interpreters;
@@ -841,12 +840,6 @@ impl ConfigFile {
         ConfigBase::get_recursion_limit_config(&self.root)
     }
 
-    /// Get the SCC solving mode.
-    /// Returns the default (`CyclesDualWrite`) if not set.
-    pub fn scc_mode(&self) -> SccMode {
-        ConfigBase::get_scc_mode(&self.root)
-    }
-
     pub fn get_error_config(&self, path: &Path) -> ErrorConfig<'_> {
         ErrorConfig::new(
             self.errors(path),
@@ -1460,7 +1453,6 @@ mod tests {
                     enabled_ignores: None,
                     recursion_depth_limit: None,
                     recursion_overflow_handler: None,
-                    scc_mode: None,
                 },
                 source_db: Default::default(),
                 sub_configs: vec![SubConfig {
@@ -1483,7 +1475,6 @@ mod tests {
                         enabled_ignores: None,
                         recursion_depth_limit: None,
                         recursion_overflow_handler: None,
-                        scc_mode: None,
                     }
                 }],
                 typeshed_path: None,
@@ -1870,7 +1861,6 @@ baseline = "baseline.json"
                 enabled_ignores: None,
                 recursion_depth_limit: None,
                 recursion_overflow_handler: None,
-                scc_mode: None,
             },
             sub_configs: vec![
                 SubConfig {
@@ -2182,7 +2172,6 @@ baseline = "baseline.json"
                 enabled_ignores: None,
                 recursion_depth_limit: None,
                 recursion_overflow_handler: None,
-                scc_mode: None,
             },
             sub_configs: vec![],
             ..Default::default()
@@ -2219,7 +2208,6 @@ baseline = "baseline.json"
                 enabled_ignores: None,
                 recursion_depth_limit: None,
                 recursion_overflow_handler: None,
-                scc_mode: None,
             },
             sub_configs: vec![],
             ..Default::default()
