@@ -535,7 +535,7 @@ impl CalcStack {
                     ProposalResult::CycleDetected => BindingAction::Calculate,
                     ProposalResult::Calculated(v) => {
                         // Participant already computed: no data to store.
-                        self.on_calculation_finished(&current, None, None);
+                        self.on_calculation_finished(&current, None);
                         BindingAction::Calculated(v)
                     }
                 }
@@ -833,12 +833,11 @@ impl CalcStack {
         &self,
         current: &CalcId,
         answer: Option<Arc<dyn Any + Send + Sync>>,
-        errors: Option<Arc<ErrorCollector>>,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         let stack_len = self.stack.borrow().len();
         let mut scc_stack = self.scc_stack.borrow_mut();
         let canonical = if let Some(top_scc) = scc_stack.last_mut() {
-            let canonical = top_scc.on_calculation_finished(current, answer, errors);
+            let canonical = top_scc.on_calculation_finished(current, answer);
             // Debug-only check: verify the node isn't in any other SCC.
             debug_assert!(
                 scc_stack
@@ -1375,15 +1374,14 @@ enum NodeState {
     /// error collector for thread-local SCC isolation.
     ///
     /// For SCC participants, the answer is stored here until the entire SCC
-    /// completes, at which point batch_commit_scc writes all answers to
-    /// their respective Calculation cells.
+    /// completes, at which point answers are committed to their respective
+    /// Calculation cells.
     ///
     /// The data is `None` when the node was already computed by another
     /// path (e.g. a Participant revisit) and only the state transition
     /// to Done matters.
     Done {
         answer: Option<Arc<dyn Any + Send + Sync>>,
-        errors: Option<Arc<ErrorCollector>>,
     },
 }
 
@@ -1737,7 +1735,6 @@ impl Scc {
         &mut self,
         current: &CalcId,
         answer: Option<Arc<dyn Any + Send + Sync>>,
-        errors: Option<Arc<ErrorCollector>>,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         if let Some(state) = self.node_state.get_mut(current) {
             if let NodeState::Done {
@@ -1750,7 +1747,6 @@ impl Scc {
             } else {
                 *state = NodeState::Done {
                     answer: answer.clone(),
-                    errors,
                 };
                 answer
             }
@@ -1940,13 +1936,6 @@ impl Scc {
             has_changed: false,
             merge_happened: false,
         });
-    }
-
-    /// Returns true if this SCC has break_at entries, indicating a true
-    /// cycle with self-loops. A singleton SCC without self-loops has an
-    /// empty break_at set and should not be iteratively solved.
-    fn has_break_at(&self) -> bool {
-        !self.break_at.is_empty()
     }
 }
 
@@ -2276,14 +2265,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         for scc in self.stack().pop_and_drain_completed_sccs() {
-            if scc.has_break_at() {
-                // True cycle: run the iterative fixpoint driver instead of
-                // the one-shot batch commit.
-                self.iterative_resolve_scc(scc);
-            } else {
-                // Singleton without self-loop: commit directly.
-                self.batch_commit_scc(scc);
-            }
+            self.iterative_resolve_scc(scc);
         }
         // After SCC iteration, the Calculation cell may hold a newer answer
         // than what `calculate_and_record_answer` returned. This happens when
@@ -2369,13 +2351,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } else {
                 raw_answer
             };
-            let errors = Some(Arc::new(local_errors));
             // Also store in NodeState::Done for SCC-local isolation (the SCC
             // uses these answers via SccLocalAnswer without touching Calculation).
             let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
-            let canonical_erased =
-                self.stack()
-                    .on_calculation_finished(&current, Some(answer_erased), errors);
+            let canonical_erased = self
+                .stack()
+                .on_calculation_finished(&current, Some(answer_erased));
             // Use the canonical answer from thread-local state, mirroring how
             // Calculation::record_value returns the first-written answer.
             match canonical_erased {
@@ -2394,7 +2375,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if did_write {
                 self.base_errors.extend(local_errors);
             }
-            self.stack().on_calculation_finished(&current, None, None);
+            self.stack().on_calculation_finished(&current, None);
             answer
         }
     }
@@ -2636,81 +2617,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
         self.get_calculation(idx).write_unlock_empty();
-    }
-
-    /// Two-phase batch-commit all preliminary answers from a completed SCC.
-    ///
-    /// Phase 1: Lock all member Calculation cells (in CalcId order to avoid
-    /// deadlocks between threads).
-    /// Phase 2: Write all answers via `write_unlock`.
-    ///
-    /// This ensures that when two threads independently solve the same SCC,
-    /// the first thread to start committing writes ALL its answers atomically.
-    /// The second thread's writes are all no-ops (first-write-wins).
-    ///
-    /// Invariant: all SCC participants should be in `Done` state at this point.
-    /// Nodes with `answer: None` are skipped (they were already committed by
-    /// another thread via the Participant revisit path).
-    fn batch_commit_scc(&self, completed_scc: Scc) {
-        // Collect committable members. BTreeMap iteration is already sorted
-        // by CalcId, ensuring deterministic lock acquisition order.
-        let mut members: Vec<(
-            CalcId,
-            Arc<dyn Any + Send + Sync>,
-            Option<Arc<ErrorCollector>>,
-        )> = Vec::new();
-        for (calc_id, node_state) in completed_scc.node_state {
-            match node_state {
-                NodeState::Done {
-                    answer: Some(answer),
-                    errors,
-                } => {
-                    members.push((calc_id, answer, errors));
-                }
-                NodeState::Done { answer: None, .. } => {
-                    // Already committed by another thread via the Participant revisit path.
-                }
-                NodeState::HasPlaceholder(_) => {
-                    panic!(
-                        "batch_commit_scc: node {} is still HasPlaceholder at commit time. \
-                         This means its calculate_and_record_answer never completed, \
-                         which would leave its Calculation cell stuck in Calculating state.",
-                        calc_id,
-                    );
-                }
-                NodeState::Fresh | NodeState::InProgress => {
-                    panic!(
-                        "batch_commit_scc: node {} is {:?} at commit time",
-                        calc_id, node_state,
-                    );
-                }
-            }
-        }
-
-        // Phase 1: Lock all cells.
-        let mut guard = SccWriteLockGuard {
-            solver: self,
-            locked: Vec::new(),
-        };
-        for (calc_id, _, _) in &members {
-            if self.write_lock_single(calc_id) {
-                guard.locked.push(calc_id.dupe());
-            }
-        }
-
-        // Phase 2: Write answers to locked cells. Cells that weren't locked
-        // are already Calculated (write_lock returned false), so writing
-        // would be a no-op — skip them.
-        let mut locked_members = Vec::with_capacity(guard.locked.len());
-        for calc_id in &guard.locked {
-            locked_members.push(calc_id.dupe());
-        }
-        for (calc_id, answer, errors) in members {
-            if locked_members.contains(&calc_id) {
-                self.write_unlock_single(calc_id, answer, errors);
-            }
-        }
-        guard.disarm();
     }
 
     /// Commit all final converged answers from an iteratively-solved SCC
@@ -3568,10 +3474,7 @@ mod scc_tests {
 
     /// Create a dummy `NodeState::Done` for testing.
     fn done_for_test() -> NodeState {
-        NodeState::Done {
-            answer: None,
-            errors: None,
-        }
+        NodeState::Done { answer: None }
     }
 
     /// Helper to create a test Scc with given parameters.
