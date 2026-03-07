@@ -87,7 +87,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} src testing",
             deps=["attrs", "pluggy", "py", "types-setuptools"],
             expected_mypy_success=True,
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/pandas-dev/pandas",
@@ -104,7 +103,6 @@ def get_mypy_primer_projects() -> list[Project]:
             ],
             expected_mypy_success=True,
             cost={"mypy": 60},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/pycqa/pylint",
@@ -155,7 +153,6 @@ def get_mypy_primer_projects() -> list[Project]:
             deps=["numpy"],
             expected_mypy_success=True,
             cost={"mypy": 15, "pyright": 240},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/pypa/bandersnatch",
@@ -213,7 +210,6 @@ def get_mypy_primer_projects() -> list[Project]:
             deps=["types-PyYAML", "types-python-dateutil", "types-pytz", "numpy"],
             expected_mypy_success=True,
             cost={"mypy": 25, "pyright": 170},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/pallets/werkzeug",
@@ -404,7 +400,6 @@ def get_mypy_primer_projects() -> list[Project]:
             needs_mypy_plugins=True,
             expected_mypy_success=True,
             cost={"mypy": 15},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/google/jax",
@@ -422,7 +417,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} dulwich",
             deps=["types-certifi", "types-paramiko"],
             expected_mypy_success=True,
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/optuna/optuna",
@@ -447,7 +441,6 @@ def get_mypy_primer_projects() -> list[Project]:
             deps=["types-protobuf", "types-PyYAML", "types-redis", "types-setuptools"],
             expected_mypy_success=True,
             cost={"mypy": 15, "pyright": 75},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/aiortc/aiortc",
@@ -483,7 +476,6 @@ def get_mypy_primer_projects() -> list[Project]:
             deps=["attrs", "types-requests", "types-PyYAML", "hypothesis"],
             expected_mypy_success=True,
             supported_platforms=["linux", "darwin"],
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/graphql-python/graphql-core",
@@ -616,7 +608,6 @@ def get_mypy_primer_projects() -> list[Project]:
             deps=["numpy"],
             expected_mypy_success=True,
             cost={"mypy": 20, "pyright": 110},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/laowantong/paroxython",
@@ -647,7 +638,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} lib/spack/llnl lib/spack/spack",
             expected_mypy_success=True,
             cost={"mypy": 20, "pyright": 100},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/johtso/httpx-caching",
@@ -757,7 +747,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} sympy",
             expected_mypy_success=True,
             cost={"mypy": 35, "pyright": 240},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/nion-software/nionutils",
@@ -787,7 +776,6 @@ def get_mypy_primer_projects() -> list[Project]:
                 "types-Deprecated",
             ],
             expected_mypy_success=True,
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/JohannesBuchner/imagehash",
@@ -948,7 +936,6 @@ def get_mypy_primer_projects() -> list[Project]:
                 "SQLAlchemy",
             ],
             cost={"mypy": 15, "pyright": 60},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/streamlit/streamlit",
@@ -992,7 +979,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} rotkehlchen",
             deps=["eth-typing", "types-requests", "types-setuptools"],
             cost={"pyright": 60},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/arviz-devs/arviz",
@@ -1071,7 +1057,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyright_cmd="{pyright}",
             pyrefly_cmd="{pyrefly} steam",
             deps=["cryptography"],
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/cpitclaudel/alectryon",
@@ -1226,7 +1211,6 @@ def get_mypy_primer_projects() -> list[Project]:
             ],
             expected_pyright_success=True,
             cost={"mypy": 40, "pyright": 75},
-            skip_determinism_check=True,
         ),
         # mypy checks w/ windows platform
         Project(
@@ -1235,7 +1219,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyright_cmd="{pyright}",
             pyrefly_cmd="{pyrefly} comtypes",
             deps=["numpy"],
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/mit-ll-responsible-ai/hydra-zen",
@@ -1289,7 +1272,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} pwndbg",
             deps=["types-gdb"],
             cost={"mypy": 10, "pyright": 75},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/keithasaurus/koda-validate",
@@ -1441,7 +1423,6 @@ def get_mypy_primer_projects() -> list[Project]:
                 "pytest",
                 "uv",
             ],
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/pola-rs/polars",
