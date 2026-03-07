@@ -22,6 +22,7 @@ use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::callable::Param;
 use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
+use pyrefly_types::type_var::Restriction;
 use pyrefly_types::typed_dict::TypedDict;
 use pyrefly_types::types::BoundMethod;
 use pyrefly_types::types::BoundMethodType;
@@ -1690,6 +1691,16 @@ impl<'a> CallGraphVisitor<'a> {
                     self.module_context.module_ids,
                 )),
                 is_class_def: false,
+            },
+            Type::Quantified(quantified) => match quantified.restriction() {
+                Restriction::Bound(bound) => {
+                    // Use the bound of the type var as the base class.
+                    self.receiver_class_from_type(bound, is_class_method)
+                }
+                _ => ReceiverClassResult {
+                    class: None,
+                    is_class_def: false,
+                },
             },
             _ => ReceiverClassResult {
                 class: None,

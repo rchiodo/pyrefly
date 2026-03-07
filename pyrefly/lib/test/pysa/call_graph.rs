@@ -7475,3 +7475,43 @@ def foo():
         )]
     }
 );
+
+call_graph_testcase!(
+    test_call_generic_member_class,
+    TEST_MODULE_NAME,
+    r#"
+from typing import TypeVar, Generic
+from dataclasses import dataclass
+
+class X:
+    def do(self) -> None:
+        pass
+
+class Y(X):
+    def do(self) -> None:
+        pass
+
+T = TypeVar("T", bound=X)
+
+@dataclass(frozen=True)
+class A(Generic[T]):
+    value: T
+
+class B(A[T], Generic[T]):
+    def foo(self) -> None:
+        self.value.do()
+"#,
+    &|context: &ModuleContext| {
+        vec![(
+            "test.B.foo",
+            vec![(
+                "21:9-21:24",
+                regular_call_callees(vec![
+                    create_call_target("test.X.do", TargetType::AllOverrides)
+                        .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                        .with_receiver_class_for_test("test.X", context),
+                ]),
+            )],
+        )]
+    }
+);
