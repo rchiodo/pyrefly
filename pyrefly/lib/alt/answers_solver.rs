@@ -280,7 +280,7 @@ impl CalcStack {
                 // (via Scc::merge's iteration state merge logic). Demotion
                 // is deferred to drive_all_iteration_members.
                 {
-                    let stack_len = self.stack.borrow().len();
+                    let calc_stack_vec = self.into_vec();
                     let mut scc_stack = self.scc_stack.borrow_mut();
                     let sccs_to_merge: Vec<Scc> = scc_stack.drain(scc_idx..).collect();
                     let sccs_to_merge = Vec1::try_from_vec(sccs_to_merge)
@@ -288,7 +288,32 @@ impl CalcStack {
                     let detected_at = sccs_to_merge.first().detected_at.dupe();
                     let mut merged = Scc::merge_many(sccs_to_merge, detected_at);
                     // Recompute segment_size after merge.
-                    merged.segment_size = stack_len - merged.anchor_pos;
+                    merged.segment_size = calc_stack_vec.len() - merged.anchor_pos;
+
+                    // Add free-floating CalcStack nodes (between merged SCCs)
+                    // to node_state and iterative.node_states, mirroring merge_sccs.
+                    for calc_id in calc_stack_vec.iter().skip(merged.anchor_pos) {
+                        merged
+                            .node_state
+                            .entry(calc_id.dupe())
+                            .or_insert(NodeState::InProgress);
+                    }
+                    if let Some(ref mut iter_state) = merged.iterative {
+                        let mut added_new = false;
+                        for calc_id in calc_stack_vec.iter().skip(merged.anchor_pos) {
+                            iter_state
+                                .node_states
+                                .entry(calc_id.dupe())
+                                .or_insert_with(|| {
+                                    added_new = true;
+                                    IterationNodeState::Fresh
+                                });
+                        }
+                        if added_new {
+                            iter_state.merge_happened = true;
+                        }
+                    }
+
                     scc_stack.push(merged);
                 }
                 // The target is now in the top SCC's iteration state.
