@@ -1312,7 +1312,6 @@ impl CalcStack {
     }
 
     /// Returns true if the SCC stack has no entries.
-    #[expect(dead_code)]
     fn scc_stack_is_empty(&self) -> bool {
         self.scc_stack.borrow().is_empty()
     }
@@ -1332,7 +1331,6 @@ impl CalcStack {
     /// `node_state`, and merges union the `node_state` maps. Within a single
     /// thread's `scc_stack`, SCCs are disjoint (overlapping membership
     /// triggers a merge), so an unrelated SCC will not contain our CalcId.
-    #[expect(dead_code)]
     fn top_scc_contains_member(&self, calc_id: &CalcId) -> bool {
         self.scc_stack
             .borrow()
@@ -2853,19 +2851,46 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Drive all fresh members until none remain.
             self.drive_all_iteration_members();
 
+            // Nested absorption guard: if a nested iteration driver absorbed
+            // and committed our SCC (via membership back-edge merge), the
+            // scc_stack is now empty. All members have been committed by the
+            // nested driver, so there is nothing left for us to do.
+            //
+            // TODO(stroxler): Is this actually necessary? It is harmless, but seems
+            // a bit defensive - I was expecting Pyrefly to always merge into the
+            // topmost Scc which would mean this isn't reachable. Investigate
+            // at some point once we've removed cycle-breaking code; as of
+            // this being added things are confusing and I don't want to remove
+            // a harmless defensive programming hook.
+            if self.stack().scc_stack_is_empty() {
+                return;
+            }
+
             // Absorption detection: if the top SCC's detected_at no longer
-            // matches our identity, this SCC was merged into an ancestor
-            // during iteration. If an ancestor iteration driver exists, it
-            // will handle the merged SCC, so return without committing.
-            // If no ancestor is iterating, the merged SCC would be orphaned
-            // with no driver, so we must continue driving it ourselves with
-            // the updated identity.
+            // matches our identity, this SCC was absorbed during iteration.
+            // Three cases:
+            // 1. An ancestor iteration driver exists → it will handle the
+            //    merged SCC, so return.
+            // 2. No ancestor, but the top SCC contains our original
+            //    detected_at as a member → our SCC was merged into the top
+            //    SCC (merge changes detected_at to min). Continue driving
+            //    with the updated identity.
+            // 3. No ancestor, and the top SCC does NOT contain our member
+            //    → our SCC was committed by a nested driver, and a
+            //    pre-existing SCC (e.g. Phase 0) remains on top. Return
+            //    to avoid taking ownership of an unrelated SCC.
             if self.stack().top_scc_detected_at() != scc_identity {
                 if self.stack().has_ancestor_iterating_scc() {
                     return;
                 }
-                // No ancestor driver exists. Update our identity to match
-                // the merged SCC and continue driving it.
+                if !self.stack().top_scc_contains_member(&scc_identity) {
+                    // The top SCC doesn't contain our member. Our SCC was
+                    // committed by a nested driver; the remaining SCC is
+                    // unrelated.
+                    return;
+                }
+                // The top SCC absorbed our SCC via merge. Continue driving
+                // with the updated identity.
                 scc_identity = self.stack().top_scc_detected_at();
             }
 
