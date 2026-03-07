@@ -567,15 +567,6 @@ impl CalcStack {
         popped
     }
 
-    /// Check if a CalcId is on the stack and return its first (earliest) position if so.
-    #[allow(dead_code)]
-    fn find_on_stack(&self, calc_id: &CalcId) -> Option<usize> {
-        self.position_of
-            .borrow()
-            .get(calc_id)
-            .map(|positions| *positions.first())
-    }
-
     /// Check if a CalcId is an SCC participant (exists in the top SCC's node_state).
     fn is_scc_participant(&self, current: &CalcId) -> bool {
         let scc_stack = self.scc_stack.borrow();
@@ -688,7 +679,6 @@ impl CalcStack {
     ///
     /// This works because segments are contiguous - all frames between anchor_pos
     /// and anchor_pos + segment_size belong to this SCC.
-    #[cfg_attr(test, allow(dead_code))]
     fn check_overlap(existing: &Scc, cycle_start_pos: usize) -> bool {
         // O(1) overlap check using segment bounds.
         // If the existing SCC's upper bound <= cycle start, there's no overlap.
@@ -987,12 +977,6 @@ impl CalcStack {
         None
     }
 
-    /// Returns true if `target` is a member of any iterating SCC on the stack.
-    #[allow(dead_code)]
-    fn is_iterating_member(&self, target: &CalcId) -> bool {
-        self.find_iterating_scc_containing(target).is_some()
-    }
-
     /// Returns true if the top SCC is iterating at iteration 1 (cold start).
     ///
     /// During cold-start iteration, back-edges allocate placeholders rather
@@ -1003,21 +987,6 @@ impl CalcStack {
             .last()
             .and_then(|scc| scc.iterative.as_ref())
             .is_some_and(|iter_state| iter_state.iteration == 1)
-    }
-
-    /// Returns true if the top SCC is iterating at iteration >= 2.
-    ///
-    /// This is used to decide whether to suppress errors: errors are
-    /// swallowed during iteration 1 and collected from iteration 2 onward.
-    /// The name "final" is a misnomer since more iterations may follow;
-    /// it means "past cold start."
-    #[allow(dead_code)]
-    fn is_final_iteration(&self) -> bool {
-        let scc_stack = self.scc_stack.borrow();
-        scc_stack
-            .last()
-            .and_then(|scc| scc.iterative.as_ref())
-            .is_some_and(|iter_state| iter_state.iteration >= 2)
     }
 
     /// Get the lightweight summary of a target's iteration node state in
@@ -1178,43 +1147,6 @@ impl CalcStack {
         None
     }
 
-    /// Extract done answers from the top SCC's iteration state.
-    ///
-    /// Iterates over `node_states`, collecting answers from `Done` variants.
-    /// Used to build `previous_answers` for the next iteration. Returns an
-    /// empty map if the top SCC is not iterating.
-    #[allow(dead_code, clippy::mutable_key_type)]
-    fn extract_previous_answers(&self) -> BTreeMap<CalcId, Arc<dyn Any + Send + Sync>> {
-        let scc_stack = self.scc_stack.borrow();
-        let Some(top_scc) = scc_stack.last() else {
-            return BTreeMap::new();
-        };
-        let Some(iter_state) = top_scc.iterative.as_ref() else {
-            return BTreeMap::new();
-        };
-        let mut answers = BTreeMap::new();
-        for (calc_id, state) in &iter_state.node_states {
-            if let IterationNodeState::Done { answer, .. } = state {
-                answers.insert(calc_id.dupe(), answer.clone());
-            }
-        }
-        answers
-    }
-
-    /// Read the demotion and convergence flags from the top SCC's iteration state.
-    ///
-    /// Returns `(demoted, has_changed)`. Panics if the top SCC is not iterating.
-    #[allow(dead_code)]
-    fn read_iteration_outcome(&self) -> (bool, bool) {
-        let scc_stack = self.scc_stack.borrow();
-        let top_scc = scc_stack.last().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_ref()
-            .expect("top SCC is not iterating");
-        (iter_state.demoted, iter_state.has_changed)
-    }
-
     /// Push an SCC onto the SCC stack.
     ///
     /// Used by the iteration driver between iterations: the SCC is popped,
@@ -1271,14 +1203,9 @@ impl CalcStack {
             .any(|scc| scc.iterative.is_some())
     }
 
-    /// Returns true if the SCC stack has no entries.
-    fn scc_stack_is_empty(&self) -> bool {
-        self.scc_stack.borrow().is_empty()
-    }
-
     /// Returns true if the top SCC's `node_state` contains the given CalcId.
     /// Returns false if the stack is empty (callers should guard with
-    /// `scc_stack_is_empty` first).
+    /// `sccs_is_empty` first).
     ///
     /// Used after nested absorption to distinguish two cases:
     /// - Our SCC was merged into the top SCC (detected_at changed, but our
@@ -1872,7 +1799,6 @@ impl Scc {
     /// The `detected_at` parameter is an additional candidate for the minimum
     /// detected_at, used when the detection point may not be represented in
     /// any of the SCCs being merged.
-    #[cfg_attr(test, allow(dead_code))]
     fn merge_many(sccs: Vec1<Scc>, detected_at: CalcId) -> Self {
         let (first, rest) = sccs.split_off_first();
         let mut result = rest.into_iter().fold(first, Scc::merge);
@@ -2817,7 +2743,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // at some point once we've removed cycle-breaking code; as of
             // this being added things are confusing and I don't want to remove
             // a harmless defensive programming hook.
-            if self.stack().scc_stack_is_empty() {
+            if self.stack().sccs_is_empty() {
                 return;
             }
 
