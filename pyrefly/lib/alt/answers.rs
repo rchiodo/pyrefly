@@ -570,7 +570,8 @@ pub trait LookupAnswer: Sized {
         _calc_id: CalcId,
         _answer: Arc<dyn Any + Send + Sync>,
         _errors: Option<Arc<ErrorCollector>>,
-    ) {
+    ) -> bool {
+        false
     }
 
     /// Release a write lock on a cross-module Calculation cell without

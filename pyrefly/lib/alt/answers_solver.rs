@@ -2694,14 +2694,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         calc_id: CalcId,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
-    ) {
+    ) -> bool {
         let CalcId(ref bindings, ref any_idx) = calc_id;
         if bindings.module().name() == self.bindings().module().name()
             && bindings.module().path() == self.bindings().module().path()
         {
             dispatch_anyidx!(any_idx, self, write_unlock_same_module, answer, errors)
         } else {
-            self.answers.write_unlock_in_module(calc_id, answer, errors);
+            self.answers.write_unlock_in_module(calc_id, answer, errors)
         }
     }
 
@@ -2711,7 +2711,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         idx: Idx<K>,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
-    ) where
+    ) -> bool
+    where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
@@ -2729,6 +2730,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
             self.base_errors.extend(errors);
         }
+        did_write
     }
 
     /// Release a write lock without writing a value (panic cleanup).
@@ -2834,7 +2836,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// Called after the fixpoint iteration converges (or max iterations are
     /// reached).
-    fn commit_final_answers(&self, scc: Scc) {
+    fn commit_final_answers(&self, scc: Scc) -> bool {
         let iter_state = scc
             .iterative
             .expect("commit_final_answers: SCC has no iteration state");
@@ -2876,12 +2878,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         for calc_id in &guard.locked {
             locked_members.push(calc_id.dupe());
         }
+        let mut did_write_any = false;
         for (calc_id, answer, errors) in members {
             if locked_members.contains(&calc_id) {
-                self.write_unlock_single(calc_id, answer, errors);
+                did_write_any |= self.write_unlock_single(calc_id, answer, errors);
             }
         }
         guard.disarm();
+        did_write_any
     }
 
     /// Drive a single iteration member by calling `get_idx` for its typed index.
@@ -3094,48 +3098,60 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Report per-member errors for non-converging SCC members.
         // Each member uses its own module's bindings and error collector
         // because SCCs can span modules.
-        if exceeded_max_iterations {
-            let iter_state = scc
-                .iterative
-                .as_ref()
-                .expect("iterative_resolve_scc: SCC lost iteration state before error reporting");
-            for (calc_id, node_state) in &iter_state.node_states {
-                if let IterationNodeState::Done { ref answer, .. } = *node_state {
-                    let previous = iter_state.previous_answers.get(calc_id);
-                    let member_bindings = &calc_id.0;
-                    if self.is_same_module(calc_id) {
-                        dispatch_anyidx!(
-                            &calc_id.1,
-                            self,
-                            check_and_report_non_convergent_member,
-                            answer,
-                            previous,
-                            member_bindings,
-                            self.base_errors
-                        );
-                    } else {
-                        // Cross-module member: create a temporary collector
-                        // with the member's module info. Each Error stores its
-                        // own module, so extending base_errors preserves the
-                        // correct file attribution.
-                        let cross_errors =
-                            ErrorCollector::new(calc_id.0.module().dupe(), ErrorStyle::Delayed);
-                        dispatch_anyidx!(
-                            &calc_id.1,
-                            self,
-                            check_and_report_non_convergent_member,
-                            answer,
-                            previous,
-                            member_bindings,
-                            &cross_errors
-                        );
-                        self.base_errors.extend(cross_errors);
-                    }
+        let non_convergent_members: Vec<(
+            CalcId,
+            Arc<dyn Any + Send + Sync>,
+            Option<Arc<dyn Any + Send + Sync>>,
+        )> = if exceeded_max_iterations {
+            let iter_state = scc.iterative.as_ref().expect(
+                "iterative_resolve_scc: SCC lost iteration state before non-convergence extraction",
+            );
+            iter_state
+                .node_states
+                .iter()
+                .filter_map(|(calc_id, node_state)| match node_state {
+                    IterationNodeState::Done { answer, .. } => Some((
+                        calc_id.dupe(),
+                        answer.dupe(),
+                        iter_state.previous_answers.get(calc_id).cloned(),
+                    )),
+                    IterationNodeState::Fresh | IterationNodeState::InProgress { .. } => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        let did_commit = self.commit_final_answers(scc);
+        if did_commit {
+            for (calc_id, answer, previous) in &non_convergent_members {
+                let member_bindings = &calc_id.0;
+                if self.is_same_module(calc_id) {
+                    dispatch_anyidx!(
+                        &calc_id.1,
+                        self,
+                        check_and_report_non_convergent_member,
+                        answer,
+                        previous.as_ref(),
+                        member_bindings,
+                        self.base_errors
+                    );
+                } else {
+                    let cross_errors =
+                        ErrorCollector::new(calc_id.0.module().dupe(), ErrorStyle::Delayed);
+                    dispatch_anyidx!(
+                        &calc_id.1,
+                        self,
+                        check_and_report_non_convergent_member,
+                        answer,
+                        previous.as_ref(),
+                        member_bindings,
+                        &cross_errors
+                    );
+                    self.base_errors.extend(cross_errors);
                 }
             }
         }
-
-        self.commit_final_answers(scc);
     }
 
     /// Finalize a recursive answer. This takes the raw value produced by `K::solve` and calls

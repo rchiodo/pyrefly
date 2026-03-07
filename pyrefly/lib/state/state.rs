@@ -2498,10 +2498,10 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         calc_id: CalcId,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
-    ) {
+    ) -> bool {
         let CalcId(_, ref any_idx) = calc_id;
         match self.lookup_target_answers(&calc_id) {
-            TargetAnswers::ModuleNotFound | TargetAnswers::Evicted => {}
+            TargetAnswers::ModuleNotFound | TargetAnswers::Evicted => false,
             TargetAnswers::Available { answers, load, .. } => {
                 let did_write = answers.write_unlock_preliminary(any_idx, answer);
                 if did_write && let (Some(errors), Some(target_load)) = (errors, load) {
@@ -2510,6 +2510,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
                     );
                     target_load.errors.extend(errors);
                 }
+                did_write
             }
         }
     }
