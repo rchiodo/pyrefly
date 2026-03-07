@@ -2343,7 +2343,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return result;
         }
 
-        let result = match self.stack().push(current.dupe(), calculation) {
+        let mut result = match self.stack().push(current.dupe(), calculation) {
             BindingAction::Calculate => self.calculate_and_record_answer(current, idx, calculation),
             BindingAction::Unwind => self
                 .attempt_to_unwind_cycle_from_here(&current, idx, calculation)
@@ -2381,6 +2381,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Legacy mode or singleton without self-loop: commit directly.
                 self.batch_commit_scc(scc);
             }
+        }
+        // After SCC iteration, the Calculation cell may hold a newer answer
+        // than what `calculate_and_record_answer` returned. This happens when
+        // the current CalcId is an SCC member: in iterative mode, the answer
+        // is stored in SCC-local NodeState::Done (not in the Calculation cell)
+        // and `calculate_and_record_answer` returns the first-iteration answer.
+        // After `iterative_resolve_scc` commits the final iterated answer to
+        // the Calculation cell, we must re-read it so that callers (like
+        // KeyExport nodes that depend on SCC members) see the SCC's final
+        // answer rather than the stale pre-iteration answer.
+        if let Some(v) = calculation.get() {
+            result = v;
         }
         result
     }
