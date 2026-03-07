@@ -10,6 +10,7 @@ use pyrefly_build::handle::Handle;
 
 use crate::state::state::State;
 use crate::test::util::get_batched_lsp_operations_report_no_cursor;
+use crate::test::util::get_batched_lsp_operations_report_no_cursor_allow_error;
 
 fn get_test_report(state: &State, handle: &Handle) -> String {
     let transaction = state.transaction();
@@ -543,6 +544,34 @@ while True:
         .trim(),
         report.trim(),
     );
+}
+
+/// Syntax errors like `x = = None` cause the parser to produce assignment
+/// targets with empty names. We must skip these to avoid returning
+/// `DocumentSymbol { name: "" }`, which violates the LSP spec and causes
+/// "name must not be falsy" errors in VS Code.
+#[test]
+fn test_syntax_error_empty_name_assign() {
+    let code = r#"
+def foo():
+    x = = None
+"#;
+    let report =
+        get_batched_lsp_operations_report_no_cursor_allow_error(&[("main", code)], get_test_report);
+    let symbols: Vec<lsp_types::DocumentSymbol> =
+        serde_json::from_str(&report.split('\n').skip(2).collect::<Vec<_>>().join("\n")).unwrap();
+
+    assert_eq!(symbols.len(), 1);
+    assert_eq!(symbols[0].name, "foo");
+
+    let children = symbols[0].children.as_ref().unwrap();
+    // BUG: The empty-name symbol should be filtered out. Currently the parser
+    // error-recovers from `x = = None` by producing two assignment targets:
+    // one with name "x" and one with name "". The empty name violates the LSP
+    // spec and causes "name must not be falsy" errors in VS Code.
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0].name, "x");
+    assert_eq!(children[1].name, "");
 }
 
 // TODO(kylei): list comprehension document symbol
