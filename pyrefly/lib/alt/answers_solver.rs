@@ -963,11 +963,18 @@ impl CalcStack {
         // iterative error suppression and convergence tracking until the next
         // iteration rebuilds node_states from scratch.
         if let Some(ref mut iter_state) = merged.iterative {
+            let mut added_new = false;
             for calc_id in calc_stack_vec.iter().skip(min_depth) {
                 iter_state
                     .node_states
                     .entry(calc_id.dupe())
-                    .or_insert(IterationNodeState::Fresh);
+                    .or_insert_with(|| {
+                        added_new = true;
+                        IterationNodeState::Fresh
+                    });
+            }
+            if added_new {
+                iter_state.merge_happened = true;
             }
         }
 
@@ -1813,10 +1820,27 @@ impl Scc {
                         .or_insert(IterationNodeState::Fresh);
                 }
 
+                // Use the max iteration from either SCC: if one has progressed
+                // further, we should not regress to iteration 1.
+                let iteration = [self_iter.as_ref(), other_iter.as_ref()]
+                    .iter()
+                    .filter_map(|opt| opt.map(|s| s.iteration))
+                    .max()
+                    .unwrap_or(1);
+                // Union previous_answers from both SCCs. Start with other's
+                // answers, then extend with self's (self is the older/lower SCC
+                // so its answers take priority on overlap).
+                let mut previous_answers = other_iter
+                    .as_ref()
+                    .map(|s| s.previous_answers.clone())
+                    .unwrap_or_default();
+                if let Some(self_s) = self_iter {
+                    previous_answers.extend(self_s.previous_answers);
+                }
                 Some(SccIterationState {
-                    iteration: self_iter.as_ref().map(|s| s.iteration).unwrap_or(1),
+                    iteration,
                     node_states: merged_node_states,
-                    previous_answers: self_iter.map(|s| s.previous_answers).unwrap_or_default(),
+                    previous_answers,
                     demoted: false,
                     has_changed: false,
                     merge_happened: true,
