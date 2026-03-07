@@ -276,8 +276,9 @@ impl CalcStack {
             };
             if is_non_top {
                 // Merge all SCCs from scc_idx to the top of the stack.
-                // This produces a single merged SCC with demoted = true
-                // (via Scc::merge's iteration state merge logic).
+                // This produces a single merged SCC with merge_happened = true
+                // (via Scc::merge's iteration state merge logic). Demotion
+                // is deferred to drive_all_iteration_members.
                 {
                     let stack_len = self.stack.borrow().len();
                     let mut scc_stack = self.scc_stack.borrow_mut();
@@ -292,10 +293,9 @@ impl CalcStack {
                 }
                 // The target is now in the top SCC's iteration state.
                 // Determine the appropriate action based on iteration state.
-                // After merge with demotion, the iteration state is fresh
-                // (iteration 1, all nodes Fresh, no previous answers), so the
-                // target will typically be Fresh. But we handle all cases for
-                // robustness.
+                // After merge, existing iteration states are preserved (Done/
+                // InProgress stay as-is) and new members are Fresh. The target
+                // will typically be Fresh or InProgress. Handle all cases.
                 if let Some(kind) = self.get_iteration_node_state(&current) {
                     return match kind {
                         IterationNodeStateKind::Fresh => {
@@ -1278,6 +1278,33 @@ impl CalcStack {
             .iter()
             .any(|scc| scc.iterative.is_some())
     }
+
+    /// Returns true if the top SCC's iteration state has `merge_happened` set.
+    ///
+    /// Used by `drive_all_iteration_members` to detect whether a merge occurred
+    /// during the drive loop, so it can defer demotion until after the loop.
+    fn top_scc_merge_happened(&self) -> bool {
+        let scc_stack = self.scc_stack.borrow();
+        scc_stack
+            .last()
+            .and_then(|scc| scc.iterative.as_ref())
+            .is_some_and(|iter_state| iter_state.merge_happened)
+    }
+
+    /// Set the `demoted` flag on the top SCC's iteration state.
+    ///
+    /// Used by `drive_all_iteration_members` to defer demotion: if a merge
+    /// occurred during the drive loop, the demotion is applied after the loop
+    /// completes rather than mid-loop (which would cause re-driving of
+    /// already-done members).
+    fn set_top_scc_demoted(&self, demoted: bool) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        if let Some(scc) = scc_stack.last_mut()
+            && let Some(ref mut iter_state) = scc.iterative
+        {
+            iter_state.demoted = demoted;
+        }
+    }
 }
 
 /// Tracks the state of a node within an active SCC.
@@ -1435,6 +1462,11 @@ pub struct SccIterationState {
     /// this iteration. When `false` after iteration >= 2, the SCC has
     /// converged.
     pub has_changed: bool,
+    /// Whether an SCC merge occurred during the current drive loop.
+    /// When set, `drive_all_iteration_members` defers demotion until after
+    /// the loop completes, ensuring each member is visited at most once
+    /// per iteration regardless of how many merges occur.
+    pub merge_happened: bool,
 }
 
 /// Tracks the state of a node within a single iteration of iterative SCC solving.
@@ -1713,12 +1745,14 @@ impl Scc {
     /// most advanced state for each participant.
     ///
     /// If either SCC has iteration state (`iterative: Some(...)`), the merged
-    /// SCC restarts at iteration 1 with fresh node states, cleared previous
-    /// answers, and `demoted = true`. The members of the merged iteration state
-    /// come from the already-merged `node_state.keys()` (the legacy SCC
-    /// membership), which is the union of both SCCs' members. This is
-    /// important because a non-iterating SCC has `iterative: None` but still
-    /// has members in `node_state`.
+    /// SCC preserves existing iteration node states (Done/InProgress) from both
+    /// sources and adds new members as Fresh. The `merge_happened` flag is set
+    /// so that `drive_all_iteration_members` can defer demotion until after the
+    /// current drive loop completes (bounding per-iteration work to O(N)).
+    /// The members of the merged iteration state come from the already-merged
+    /// `node_state.keys()` (the legacy SCC membership), which is the union of
+    /// both SCCs' members. This is important because a non-iterating SCC has
+    /// `iterative: None` but still has members in `node_state`.
     #[allow(clippy::mutable_key_type)]
     fn merge(mut self, other: Scc) -> Self {
         // Union break_at sets
@@ -1742,28 +1776,50 @@ impl Scc {
         // the merged anchor to the current stack top is part of this single SCC.
         // The caller must recompute segment_size = stack.len() - anchor_pos.
 
-        // Merge iteration state: if either SCC is iterating, the merged SCC
-        // restarts at iteration 1 with all members fresh and demoted = true.
-        // Members come from self.node_state.keys() (the already-merged legacy
-        // membership), NOT from iterative.node_states.keys(), because a
-        // non-iterating SCC has iterative: None but still has members.
+        // Merge iteration state: if either SCC is iterating, preserve existing
+        // iteration node states (Done/InProgress) and only add new members as
+        // Fresh. Set merge_happened so the drive loop defers demotion until
+        // after the current iteration completes, bounding per-iteration work
+        // to O(N) regardless of how many merges occur.
         self.iterative = match (self.iterative.take(), other.iterative) {
             (None, None) => None,
-            (Some(_), _) | (_, Some(_)) => {
-                // At least one SCC is iterating. Build fresh iteration state
-                // with ALL members from the merged node_state map.
-                let all_members: BTreeMap<CalcId, IterationNodeState> = self
-                    .node_state
-                    .keys()
-                    .duped()
-                    .map(|k| (k, IterationNodeState::Fresh))
-                    .collect();
+            (self_iter, other_iter) => {
+                // At least one SCC is iterating. Build merged iteration state
+                // preserving existing node states from both sources.
+                let mut merged_node_states: BTreeMap<CalcId, IterationNodeState> = BTreeMap::new();
+
+                // Collect existing iteration states from both SCCs.
+                if let Some(ref si) = self_iter {
+                    for (k, v) in &si.node_states {
+                        merged_node_states.insert(k.dupe(), v.clone());
+                    }
+                }
+                if let Some(ref oi) = other_iter {
+                    for (k, v) in &oi.node_states {
+                        // If already present from self, keep self's state (it
+                        // may be more advanced). Only insert if absent.
+                        merged_node_states
+                            .entry(k.dupe())
+                            .or_insert_with(|| v.clone());
+                    }
+                }
+
+                // Add any members from the merged node_state map that aren't
+                // yet in the iteration states (e.g. nodes from a non-iterating
+                // SCC or free-floating nodes). These are new → Fresh.
+                for key in self.node_state.keys() {
+                    merged_node_states
+                        .entry(key.dupe())
+                        .or_insert(IterationNodeState::Fresh);
+                }
+
                 Some(SccIterationState {
-                    iteration: 1,
-                    node_states: all_members,
-                    previous_answers: BTreeMap::new(),
-                    demoted: true,
+                    iteration: self_iter.as_ref().map(|s| s.iteration).unwrap_or(1),
+                    node_states: merged_node_states,
+                    previous_answers: self_iter.map(|s| s.previous_answers).unwrap_or_default(),
+                    demoted: false,
                     has_changed: false,
+                    merge_happened: true,
                 })
             }
         };
@@ -1829,6 +1885,7 @@ impl Scc {
             previous_answers,
             demoted: false,
             has_changed: false,
+            merge_happened: false,
         });
     }
 
@@ -2649,9 +2706,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Because every back-edge breaks immediately in iterative mode, a single
     /// DFS from one member may not reach all members. This method loops until
     /// `next_fresh_member` returns `None`, ensuring every member is driven.
+    ///
+    /// If a merge occurred during the drive loop (detected via `merge_happened`),
+    /// the demotion is deferred: instead of resetting all states to Fresh
+    /// mid-loop (which would re-drive already-done members), we set the
+    /// `demoted` flag so `iterative_resolve_scc` restarts the iteration.
     fn drive_all_iteration_members(&self) {
         while let Some(id) = self.stack().next_fresh_member() {
             self.drive_member(&id);
+        }
+        // If a merge happened during this drive loop, defer the demotion:
+        // set the demoted flag so iterative_resolve_scc will restart the
+        // iteration with all members Fresh. This ensures each member is
+        // visited at most once per drive loop, bounding work to O(N).
+        if self.stack().top_scc_merge_happened() {
+            self.stack().set_top_scc_demoted(true);
         }
     }
 
@@ -3637,7 +3706,7 @@ mod scc_tests {
     #[allow(clippy::mutable_key_type)]
     fn test_membership_back_edge_merge_and_demotion() {
         // Verify that pushing a CalcId which is a member of a non-top iterating
-        // SCC causes the SCCs to merge and the result to have demoted = true.
+        // SCC causes the SCCs to merge and the result to have merge_happened = true.
         //
         // Setup:
         //   CalcStack = [A, B, C, D, E]
@@ -3649,9 +3718,9 @@ mod scc_tests {
         //
         // Expected:
         //   - SCCs merge into one (stack length goes from 2 to 1)
-        //   - Merged SCC has iterative.demoted == true
+        //   - Merged SCC has iterative.merge_happened == true
         //   - Merged SCC contains members from both original SCCs {A, B, D, E}
-        //   - push returns Calculate (since after demotion all nodes are Fresh)
+        //   - push returns Calculate (since new members are Fresh)
         let a = CalcId::for_test("m", 0);
         let b = CalcId::for_test("m", 1);
         let c = CalcId::for_test("m", 2);
@@ -3685,6 +3754,7 @@ mod scc_tests {
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
+                    merge_happened: false,
                 }),
             }
         };
@@ -3712,6 +3782,7 @@ mod scc_tests {
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
+                    merge_happened: false,
                 }),
             }
         };
@@ -3741,20 +3812,25 @@ mod scc_tests {
 
         let merged = &scc_stack[0];
 
-        // The merged SCC must have demoted = true.
+        // The merged SCC must have merge_happened = true (demotion is deferred
+        // until after drive_all_iteration_members completes).
         let iter_state = merged
             .iterative
             .as_ref()
             .expect("merged SCC should have iterative state");
         assert!(
-            iter_state.demoted,
-            "merged SCC should have demoted = true after membership back-edge merge"
+            iter_state.merge_happened,
+            "merged SCC should have merge_happened = true after membership back-edge merge"
+        );
+        assert!(
+            !iter_state.demoted,
+            "merged SCC should have demoted = false (demotion is deferred)"
         );
 
-        // Iteration should be reset to 1 after demotion.
+        // Iteration should be preserved from self (the more advanced SCC).
         assert_eq!(
-            iter_state.iteration, 1,
-            "merged SCC iteration should be reset to 1 after demotion"
+            iter_state.iteration, 2,
+            "merged SCC iteration should be preserved from self"
         );
 
         // All members from both original SCCs should be in the merged SCC's
@@ -3863,6 +3939,7 @@ mod scc_tests {
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
+                    merge_happened: false,
                 }),
             }
         };
@@ -3890,6 +3967,7 @@ mod scc_tests {
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
+                    merge_happened: false,
                 }),
             }
         };
@@ -3951,15 +4029,22 @@ mod scc_tests {
              inner SCC's saved identity, signaling that the inner SCC was absorbed"
         );
 
-        // Verify the merged SCC has demoted = true (a side effect of merging
-        // iterating SCCs, confirming the merge actually happened).
+        // Verify the merged SCC has merge_happened = true (confirming the
+        // merge actually happened; demotion is deferred to drive_all_iteration_members).
         let scc_stack = calc_stack.borrow_scc_stack();
         let merged = &scc_stack[0];
         let iter_state = merged
             .iterative
             .as_ref()
             .expect("merged SCC should have iterative state");
-        assert!(iter_state.demoted, "merged SCC should have demoted = true");
+        assert!(
+            iter_state.merge_happened,
+            "merged SCC should have merge_happened = true"
+        );
+        assert!(
+            !iter_state.demoted,
+            "merged SCC should have demoted = false (demotion is deferred)"
+        );
     }
 
     #[test]
