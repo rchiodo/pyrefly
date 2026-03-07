@@ -957,6 +957,20 @@ impl CalcStack {
                 .or_insert(NodeState::InProgress);
         }
 
+        // If the merged SCC is iterating, ensure free-floating nodes that were
+        // just added to node_state are also present in iterative.node_states.
+        // Without this, next_fresh_member() won't see them and they'll bypass
+        // iterative error suppression and convergence tracking until the next
+        // iteration rebuilds node_states from scratch.
+        if let Some(ref mut iter_state) = merged.iterative {
+            for calc_id in calc_stack_vec.iter().skip(min_depth) {
+                iter_state
+                    .node_states
+                    .entry(calc_id.dupe())
+                    .or_insert(IterationNodeState::Fresh);
+            }
+        }
+
         // After a merge, everything from the merged anchor to the current stack top
         // is part of this single SCC. Recompute segment_size from scratch.
         merged.segment_size = calc_stack_vec.len() - merged.anchor_pos;
