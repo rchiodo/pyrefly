@@ -552,6 +552,32 @@ pub trait LookupAnswer: Sized {
     fn solve_idx_erased(&self, _calc_id: &CalcId, _thread_state: &ThreadState) -> bool {
         false
     }
+
+    /// Acquire a write lock on a cross-module Calculation cell for SCC
+    /// batch commit. Returns true if the lock was acquired.
+    ///
+    /// Default implementation returns false (not supported).
+    fn write_lock_in_module(&self, _calc_id: &CalcId) -> bool {
+        false
+    }
+
+    /// Write a value to a write-locked cross-module Calculation cell and
+    /// release the lock. Also extends errors if the write wins.
+    ///
+    /// Default implementation is a no-op.
+    fn write_unlock_in_module(
+        &self,
+        _calc_id: CalcId,
+        _answer: Arc<dyn Any + Send + Sync>,
+        _errors: Option<Arc<ErrorCollector>>,
+    ) {
+    }
+
+    /// Release a write lock on a cross-module Calculation cell without
+    /// writing a value. Used for panic cleanup.
+    ///
+    /// Default implementation is a no-op.
+    fn write_unlock_empty_in_module(&self, _calc_id: &CalcId) {}
 }
 
 impl Answers {
@@ -822,6 +848,65 @@ impl Answers {
             did_write
         } else {
             false
+        }
+    }
+
+    /// Acquire a write lock on a cell for SCC batch commit.
+    /// Returns true if the lock was acquired, false if the cell is already
+    /// `Calculated` (no lock needed since writes would be no-ops).
+    pub fn write_lock_preliminary(&self, any_idx: &AnyIdx) -> bool {
+        dispatch_anyidx!(any_idx, self, write_lock_typed)
+    }
+
+    /// Write a value to a write-locked cell and release the lock.
+    /// Returns true if this write stored the value (first-write-wins).
+    pub fn write_unlock_preliminary(
+        &self,
+        any_idx: &AnyIdx,
+        answer: Arc<dyn Any + Send + Sync>,
+    ) -> bool {
+        dispatch_anyidx!(any_idx, self, write_unlock_typed, answer)
+    }
+
+    /// Release a write lock without writing a value (panic cleanup).
+    pub fn write_unlock_empty_preliminary(&self, any_idx: &AnyIdx) {
+        dispatch_anyidx!(any_idx, self, write_unlock_empty_typed)
+    }
+
+    fn write_lock_typed<K: Keyed>(&self, idx: Idx<K>) -> bool
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+    {
+        if let Some(calculation) = self.table.get::<K>().get(idx) {
+            calculation.write_lock()
+        } else {
+            false
+        }
+    }
+
+    fn write_unlock_typed<K: Keyed>(&self, idx: Idx<K>, answer: Arc<dyn Any + Send + Sync>) -> bool
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+    {
+        let typed_answer: Arc<K::Answer> = Arc::unwrap_or_clone(
+            answer
+                .downcast::<Arc<K::Answer>>()
+                .expect("Answers::write_unlock_typed: type mismatch"),
+        );
+        if let Some(calculation) = self.table.get::<K>().get(idx) {
+            let (_answer, did_write) = calculation.write_unlock(typed_answer);
+            did_write
+        } else {
+            false
+        }
+    }
+
+    fn write_unlock_empty_typed<K: Keyed>(&self, idx: Idx<K>)
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+    {
+        if let Some(calculation) = self.table.get::<K>().get(idx) {
+            calculation.write_unlock_empty();
         }
     }
 

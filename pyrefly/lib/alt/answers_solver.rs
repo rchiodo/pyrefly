@@ -2132,6 +2132,33 @@ pub struct AnswersSolver<'a, Ans: LookupAnswer> {
     jaxtyping_dims: RefCell<FxHashMap<Name, Quantified>>,
 }
 
+/// RAII guard that releases write locks on panic during SCC batch commit.
+///
+/// Holds a list of `CalcId`s whose Calculation cells have been write-locked.
+/// On drop (panic), calls `write_unlock_empty` on each to release the locks
+/// without writing values, preventing deadlocks. On success, call `disarm()`
+/// to clear the list so `drop` is a no-op.
+struct SccWriteLockGuard<'a, 'b, Ans: LookupAnswer> {
+    solver: &'a AnswersSolver<'b, Ans>,
+    locked: Vec<CalcId>,
+}
+
+impl<Ans: LookupAnswer> Drop for SccWriteLockGuard<'_, '_, Ans> {
+    fn drop(&mut self) {
+        for calc_id in &self.locked {
+            self.solver.write_unlock_empty_single(calc_id);
+        }
+    }
+}
+
+impl<Ans: LookupAnswer> SccWriteLockGuard<'_, '_, Ans> {
+    /// Disarm the guard after a successful commit. Clears the locked list
+    /// so `drop` does nothing.
+    fn disarm(mut self) {
+        self.locked.clear();
+    }
+}
+
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn new(
         answers: &'a Ans,
@@ -2621,13 +2648,53 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         answer
     }
 
-    /// Commit a type-erased answer to the Calculation cell for a same-module binding.
-    /// Used during batch commit when an SCC completes.
-    ///
-    /// The answer was already finalized (force_var called) during calculate_and_record_answer,
-    /// so we use a no-op finalizer here. Errors are only extended into base_errors if
-    /// this thread's write wins (did_write = true).
-    fn commit_typed<K: Solve<Ans>>(
+    /// Returns true if the cell is same-module.
+    fn is_same_module(&self, calc_id: &CalcId) -> bool {
+        let CalcId(ref bindings, _) = *calc_id;
+        bindings.module().name() == self.bindings().module().name()
+            && bindings.module().path() == self.bindings().module().path()
+    }
+
+    /// Acquire a write lock on a single Calculation cell.
+    /// Routes to same-module or cross-module depending on the CalcId.
+    fn write_lock_single(&self, calc_id: &CalcId) -> bool {
+        let CalcId(_, ref any_idx) = *calc_id;
+        if self.is_same_module(calc_id) {
+            dispatch_anyidx!(any_idx, self, write_lock_same_module)
+        } else {
+            self.answers.write_lock_in_module(calc_id)
+        }
+    }
+
+    /// Same-module write lock: acquire the write lock on a typed Calculation cell.
+    fn write_lock_same_module<K: Solve<Ans>>(&self, idx: Idx<K>) -> bool
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+    {
+        self.get_calculation(idx).write_lock()
+    }
+
+    /// Write a value to a write-locked cell and release the lock, with error handling.
+    /// Routes to same-module or cross-module depending on the CalcId.
+    fn write_unlock_single(
+        &self,
+        calc_id: CalcId,
+        answer: Arc<dyn Any + Send + Sync>,
+        errors: Option<Arc<ErrorCollector>>,
+    ) {
+        let CalcId(ref bindings, ref any_idx) = calc_id;
+        if bindings.module().name() == self.bindings().module().name()
+            && bindings.module().path() == self.bindings().module().path()
+        {
+            dispatch_anyidx!(any_idx, self, write_unlock_same_module, answer, errors)
+        } else {
+            self.answers.write_unlock_in_module(calc_id, answer, errors);
+        }
+    }
+
+    /// Same-module write unlock: write the answer and handle errors.
+    fn write_unlock_same_module<K: Solve<Ans>>(
         &self,
         idx: Idx<K>,
         answer: Arc<dyn Any + Send + Sync>,
@@ -2639,73 +2706,67 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let typed_answer: Arc<K::Answer> = Arc::unwrap_or_clone(
             answer
                 .downcast::<Arc<K::Answer>>()
-                .expect("commit_typed: type mismatch in batch commit"),
+                .expect("write_unlock_same_module: type mismatch in batch commit"),
         );
         let calculation = self.get_calculation(idx);
-        // No recursive placeholder can exist in the Calculation cell because
-        // placeholders are stored only in SCC-local NodeState::HasPlaceholder.
-        // The answer was already finalized (force_var called) during
-        // calculate_and_record_answer's SCC path.
-        let (_answer, did_write) = calculation.record_value(typed_answer);
+        let (_answer, did_write) = calculation.write_unlock(typed_answer);
         if did_write && let Some(errors) = errors {
-            // ErrorCollector::extend takes ownership. Arc::try_unwrap succeeds
-            // because the Arc refcount is 1: the ErrorCollector is moved (not
-            // cloned) at every step from creation through NodeState::Done, SCC
-            // completion, and into this consuming iteration. (Scc::merge may
-            // transiently clone a NodeState, but the original is dropped
-            // immediately, so the refcount returns to 1 before we get here.)
             let errors = Arc::try_unwrap(errors).expect(
-                "Arc<ErrorCollector> refcount > 1 during batch commit; \
-                 errors would be silently lost. This indicates a bug in SCC lifecycle management.",
+                "Arc<ErrorCollector> refcount > 1 during write_unlock; \
+                 errors would be silently lost.",
             );
             self.base_errors.extend(errors);
         }
     }
 
-    /// Commit a single preliminary result from a completed SCC.
-    /// Uses dispatch_anyidx! to recover the concrete key type from AnyIdx,
-    /// then delegates to commit_typed<K> for same-module commits or
-    /// LookupAnswer::commit_to_module for cross-module commits.
-    fn commit_single_result(
-        &self,
-        calc_id: CalcId,
-        answer: Arc<dyn Any + Send + Sync>,
-        errors: Option<Arc<ErrorCollector>>,
-    ) {
-        let CalcId(ref bindings, ref any_idx) = calc_id;
-        if bindings.module().name() != self.bindings().module().name()
-            || bindings.module().path() != self.bindings().module().path()
-        {
-            // Cross-module: delegate to the LookupAnswer trait to route
-            // the commit to the correct module's Answers.
-            assert!(
-                self.answers
-                    .commit_to_module(calc_id.dupe(), answer, errors),
-                "commit_single_result: cross-module commit failed for {}. \
-                 The target module's Answers may not be loaded, which would \
-                 leave its Calculation cell stuck in Calculating state.",
-                calc_id,
-            );
-            return;
+    /// Release a write lock without writing a value (panic cleanup).
+    /// Routes to same-module or cross-module depending on the CalcId.
+    fn write_unlock_empty_single(&self, calc_id: &CalcId) {
+        let CalcId(_, ref any_idx) = *calc_id;
+        if self.is_same_module(calc_id) {
+            dispatch_anyidx!(any_idx, self, write_unlock_empty_same_module)
+        } else {
+            self.answers.write_unlock_empty_in_module(calc_id);
         }
-        dispatch_anyidx!(any_idx, self, commit_typed, answer, errors)
     }
 
-    /// Batch-commit all preliminary answers from a completed SCC.
-    /// Iterates the SCC's node_state map and commits each Done entry
-    /// to the appropriate Calculation cell.
+    /// Same-module write unlock empty: release the lock without writing.
+    fn write_unlock_empty_same_module<K: Solve<Ans>>(&self, idx: Idx<K>)
+    where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+    {
+        self.get_calculation(idx).write_unlock_empty();
+    }
+
+    /// Two-phase batch-commit all preliminary answers from a completed SCC.
+    ///
+    /// Phase 1: Lock all member Calculation cells (in CalcId order to avoid
+    /// deadlocks between threads).
+    /// Phase 2: Write all answers via `write_unlock`.
+    ///
+    /// This ensures that when two threads independently solve the same SCC,
+    /// the first thread to start committing writes ALL its answers atomically.
+    /// The second thread's writes are all no-ops (first-write-wins).
     ///
     /// Invariant: all SCC participants should be in `Done` state at this point.
     /// Nodes with `answer: None` are skipped (they were already committed by
     /// another thread via the Participant revisit path).
     fn batch_commit_scc(&self, completed_scc: Scc) {
+        // Collect committable members. BTreeMap iteration is already sorted
+        // by CalcId, ensuring deterministic lock acquisition order.
+        let mut members: Vec<(
+            CalcId,
+            Arc<dyn Any + Send + Sync>,
+            Option<Arc<ErrorCollector>>,
+        )> = Vec::new();
         for (calc_id, node_state) in completed_scc.node_state {
             match node_state {
                 NodeState::Done {
                     answer: Some(answer),
                     errors,
                 } => {
-                    self.commit_single_result(calc_id, answer, errors);
+                    members.push((calc_id, answer, errors));
                 }
                 NodeState::Done { answer: None, .. } => {
                     // Already committed by another thread via the Participant revisit path.
@@ -2726,33 +2787,89 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
         }
+
+        // Phase 1: Lock all cells.
+        let mut guard = SccWriteLockGuard {
+            solver: self,
+            locked: Vec::new(),
+        };
+        for (calc_id, _, _) in &members {
+            if self.write_lock_single(calc_id) {
+                guard.locked.push(calc_id.dupe());
+            }
+        }
+
+        // Phase 2: Write answers to locked cells. Cells that weren't locked
+        // are already Calculated (write_lock returned false), so writing
+        // would be a no-op — skip them.
+        let mut locked_members = Vec::with_capacity(guard.locked.len());
+        for calc_id in &guard.locked {
+            locked_members.push(calc_id.dupe());
+        }
+        for (calc_id, answer, errors) in members {
+            if locked_members.contains(&calc_id) {
+                self.write_unlock_single(calc_id, answer, errors);
+            }
+        }
+        guard.disarm();
     }
 
     /// Commit all final converged answers from an iteratively-solved SCC
-    /// to their respective Calculation cells.
+    /// to their respective Calculation cells using two-phase commit.
+    ///
+    /// Phase 1: Lock all member Calculation cells (in CalcId order).
+    /// Phase 2: Write all answers via `write_unlock`.
     ///
     /// Called after the fixpoint iteration converges (or max iterations are
-    /// reached). Iterates the SCC's iteration `node_states` and commits each
-    /// `Done` entry's answer and errors via `commit_single_result`.
+    /// reached).
     fn commit_final_answers(&self, scc: Scc) {
         let iter_state = scc
             .iterative
             .expect("commit_final_answers: SCC has no iteration state");
-        for (calc_id, node_state) in iter_state.node_states {
-            match node_state {
-                IterationNodeState::Done { answer, errors } => {
-                    self.commit_single_result(calc_id, answer, errors);
-                }
+
+        // Collect Done members. BTreeMap iteration is already sorted by CalcId.
+        let members: Vec<(
+            CalcId,
+            Arc<dyn Any + Send + Sync>,
+            Option<Arc<ErrorCollector>>,
+        )> = iter_state
+            .node_states
+            .into_iter()
+            .map(|(calc_id, node_state)| match node_state {
+                IterationNodeState::Done { answer, errors } => (calc_id, answer, errors),
                 IterationNodeState::Fresh | IterationNodeState::InProgress { .. } => {
-                    // All members should be Done after driving all iteration
-                    // members. If not, something went wrong in the iteration.
                     panic!(
                         "commit_final_answers: node {} is {:?} at commit time",
                         calc_id, node_state,
                     );
                 }
+            })
+            .collect();
+
+        // Phase 1: Lock all cells.
+        let mut guard = SccWriteLockGuard {
+            solver: self,
+            locked: Vec::new(),
+        };
+        for (calc_id, _, _) in &members {
+            if self.write_lock_single(calc_id) {
+                guard.locked.push(calc_id.dupe());
             }
         }
+
+        // Phase 2: Write answers to locked cells. Cells that weren't locked
+        // are already Calculated (write_lock returned false), so writing
+        // would be a no-op — skip them.
+        let mut locked_members = Vec::with_capacity(guard.locked.len());
+        for calc_id in &guard.locked {
+            locked_members.push(calc_id.dupe());
+        }
+        for (calc_id, answer, errors) in members {
+            if locked_members.contains(&calc_id) {
+                self.write_unlock_single(calc_id, answer, errors);
+            }
+        }
+        guard.disarm();
     }
 
     /// Drive a single iteration member by calling `get_idx` for its typed index.

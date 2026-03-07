@@ -2483,6 +2483,46 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
             }
         }
     }
+
+    fn write_lock_in_module(&self, calc_id: &CalcId) -> bool {
+        let CalcId(_, ref any_idx) = *calc_id;
+        match self.lookup_target_answers(calc_id) {
+            TargetAnswers::ModuleNotFound => false,
+            TargetAnswers::Evicted => false,
+            TargetAnswers::Available { answers, .. } => answers.write_lock_preliminary(any_idx),
+        }
+    }
+
+    fn write_unlock_in_module(
+        &self,
+        calc_id: CalcId,
+        answer: Arc<dyn Any + Send + Sync>,
+        errors: Option<Arc<ErrorCollector>>,
+    ) {
+        let CalcId(_, ref any_idx) = calc_id;
+        match self.lookup_target_answers(&calc_id) {
+            TargetAnswers::ModuleNotFound | TargetAnswers::Evicted => {}
+            TargetAnswers::Available { answers, load, .. } => {
+                let did_write = answers.write_unlock_preliminary(any_idx, answer);
+                if did_write && let (Some(errors), Some(target_load)) = (errors, load) {
+                    let errors = Arc::try_unwrap(errors).expect(
+                        "cross-module write_unlock: errors Arc has unexpected extra references",
+                    );
+                    target_load.errors.extend(errors);
+                }
+            }
+        }
+    }
+
+    fn write_unlock_empty_in_module(&self, calc_id: &CalcId) {
+        let CalcId(_, ref any_idx) = *calc_id;
+        match self.lookup_target_answers(calc_id) {
+            TargetAnswers::ModuleNotFound | TargetAnswers::Evicted => {}
+            TargetAnswers::Available { answers, .. } => {
+                answers.write_unlock_empty_preliminary(any_idx);
+            }
+        }
+    }
 }
 
 /// A checking state that will eventually commit.
