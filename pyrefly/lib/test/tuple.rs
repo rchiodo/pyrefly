@@ -430,6 +430,25 @@ assert_type(m, MyTuple)
 );
 
 testcase!(
+    test_star_unpack_single_unbounded_tuple,
+    r#"
+from typing import assert_type
+def test(x: tuple[int, ...]) -> None:
+    y = (*x,)
+"#,
+);
+
+testcase!(
+    test_star_unpack_union_of_tuples,
+    r#"
+from typing import assert_type
+def f() -> tuple[int, ...] | tuple[str, ...]:
+    ...
+x = (*f(),)
+"#,
+);
+
+testcase!(
     test_tuple_aug_assign,
     r#"
 def test() -> None:
