@@ -456,10 +456,8 @@ impl CalcStack {
                     // whether this CalcId has a live frame on the current stack.
                     ProposalResult::Calculatable => {
                         if let Some(current_cycle) = self.current_cycle() {
-                            match self.on_scc_detected(current_cycle) {
-                                SccDetectedResult::BreakHere => BindingAction::Unwind,
-                                SccDetectedResult::Continue => BindingAction::Calculate,
-                            }
+                            self.on_scc_detected(current_cycle);
+                            BindingAction::Unwind
                         } else {
                             // No cycle on the stack: this node simply needs
                             // computing. This is the normal case for both
@@ -469,10 +467,8 @@ impl CalcStack {
                     }
                     ProposalResult::CycleDetected => {
                         if let Some(current_cycle) = self.current_cycle() {
-                            match self.on_scc_detected(current_cycle) {
-                                SccDetectedResult::BreakHere => BindingAction::Unwind,
-                                SccDetectedResult::Continue => BindingAction::Calculate,
-                            }
+                            self.on_scc_detected(current_cycle);
+                            BindingAction::Unwind
                         } else if self.get_iteration_node_state(&current).is_some() {
                             // CycleDetected without an active cycle means Phase 0
                             // left stale Calculating state (the thread started
@@ -718,7 +714,7 @@ impl CalcStack {
     /// Once we find the first overlapping SCC, all subsequent SCCs must also
     /// overlap (due to LIFO ordering of the SCC stack).
     #[allow(clippy::mutable_key_type)] // CalcId's Hash impl doesn't depend on mutable parts
-    fn on_scc_detected(&self, raw: Vec1<CalcId>) -> SccDetectedResult {
+    fn on_scc_detected(&self, raw: Vec1<CalcId>) {
         let calc_stack_vec = self.into_vec();
 
         // Create the new SCC
@@ -760,11 +756,6 @@ impl CalcStack {
             // No overlap - just push the new SCC
             scc_stack.push(new_scc);
         };
-
-        // Every back-edge breaks immediately. This ensures Phase 0 is purely
-        // membership discovery and that no frame continues past its own cycle
-        // detection point.
-        SccDetectedResult::BreakHere
     }
 
     /// Check the SCC state for a node before calculating it.
@@ -1449,15 +1440,6 @@ enum SccState {
 /// so at exactly anchor_pos + segment_size we've exited.
 fn is_within_scc_segment(stack_len: usize, scc: &Scc) -> bool {
     stack_len < scc.anchor_pos + scc.segment_size
-}
-
-enum SccDetectedResult {
-    /// Break immediately at the idx where we detected the SCC, so that we
-    /// unwind back to the same idx.
-    BreakHere,
-    /// Continue recursing until we hit some other idx that is the minimal `break_at` idx.
-    #[expect(dead_code)]
-    Continue,
 }
 
 /// The action to take for a binding after checking SCC state and calculation proposal.
