@@ -282,9 +282,15 @@ impl CalcStack {
                 {
                     let calc_stack_vec = self.into_vec();
                     let mut scc_stack = self.scc_stack.borrow_mut();
-                    let sccs_to_merge: Vec<Scc> = scc_stack.drain(scc_idx..).collect();
+                    let mut sccs_to_merge: Vec<Scc> = scc_stack.drain(scc_idx..).collect();
+                    // Reverse so the top SCC (last in drain order) appears first,
+                    // matching merge_sccs order: merge_many gives priority to the
+                    // first element's iteration states.
+                    sccs_to_merge.reverse();
                     let sccs_to_merge = Vec1::try_from_vec(sccs_to_merge)
                         .expect("membership back-edge: at least the found SCC must be present");
+                    // detected_at is just an extra min-candidate; merge_many
+                    // takes min across all SCCs regardless of which we pass here.
                     let detected_at = sccs_to_merge.first().detected_at.dupe();
                     let mut merged = Scc::merge_many(sccs_to_merge, detected_at);
                     // Recompute segment_size after merge.
