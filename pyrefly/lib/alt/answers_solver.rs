@@ -179,26 +179,16 @@ pub struct CalcStack {
     /// SCCs that completed during `on_calculation_finished` but haven't been
     /// batch-committed yet. Drained by `get_idx` after each frame completes.
     pending_completed_sccs: RefCell<Vec<Scc>>,
-    /// The SCC solving mode, propagated from `ThreadState` at construction time.
-    /// This makes the mode accessible during SCC operations without needing a
-    /// back-reference to `ThreadState`.
-    scc_solving_mode: SccSolvingMode,
 }
 
 impl CalcStack {
-    fn new(scc_solving_mode: SccSolvingMode) -> Self {
+    fn new() -> Self {
         Self {
             stack: RefCell::new(Vec::new()),
             scc_stack: RefCell::new(Vec::new()),
             position_of: RefCell::new(FxHashMap::default()),
             pending_completed_sccs: RefCell::new(Vec::new()),
-            scc_solving_mode,
         }
-    }
-
-    /// Returns true when the SCC solving mode is `Iterative`.
-    fn is_iterative(&self) -> bool {
-        self.scc_solving_mode == SccSolvingMode::Iterative
     }
 
     /// Pop the current frame and drain any SCCs that completed during it.
@@ -265,9 +255,7 @@ impl CalcStack {
         // Borrow safety: `find_iterating_scc_containing` returns an owned
         // `Option<usize>`, so the shared borrow on `scc_stack` is released
         // before the exclusive borrow needed for merging.
-        if self.is_iterative()
-            && let Some(scc_idx) = self.find_iterating_scc_containing(&current)
-        {
+        if let Some(scc_idx) = self.find_iterating_scc_containing(&current) {
             let is_non_top = {
                 let scc_stack = self.scc_stack.borrow();
                 scc_idx < scc_stack.len() - 1
@@ -412,9 +400,7 @@ impl CalcStack {
         // Borrow safety: `get_iteration_node_state` returns an owned
         // `IterationNodeStateKind`, so the shared borrow on `scc_stack` is
         // released before any exclusive borrow for mutation.
-        if self.is_iterative()
-            && let Some(kind) = self.get_iteration_node_state(&current)
-        {
+        if let Some(kind) = self.get_iteration_node_state(&current) {
             // The node was unconditionally pushed onto the raw CalcStack
             // above, and pop() will decrement segment_size for any node
             // in the top SCC's node_state. We must increment here to
@@ -487,21 +473,19 @@ impl CalcStack {
                                 SccDetectedResult::BreakHere => BindingAction::Unwind,
                                 SccDetectedResult::Continue => BindingAction::Calculate,
                             }
-                        } else if self.is_iterative()
-                            && self.get_iteration_node_state(&current).is_some()
-                        {
-                            // In iterative mode, CycleDetected without an active
-                            // cycle means Phase 0 left stale Calculating state
-                            // (the thread started this node in a previous
-                            // iteration but the stack was unwound). Treat as a
-                            // cold-start back-edge: the caller (get_idx) will
-                            // allocate a placeholder via K::create_recursive.
+                        } else if self.get_iteration_node_state(&current).is_some() {
+                            // CycleDetected without an active cycle means Phase 0
+                            // left stale Calculating state (the thread started
+                            // this node in a previous iteration but the stack was
+                            // unwound). Treat as a cold-start back-edge: the
+                            // caller (get_idx) will allocate a placeholder via
+                            // K::create_recursive.
                             BindingAction::NeedsColdPlaceholder
                         } else {
-                            // Legacy mode: CycleDetected without a stack cycle is
-                            // surprising but has been observed in LSP. The thread
-                            // started a calculation but never saved an answer, and
-                            // the stack frame is gone. Proceed with Calculate as a
+                            // CycleDetected without a stack cycle is surprising
+                            // but has been observed in LSP. The thread started a
+                            // calculation but never saved an answer, and the stack
+                            // frame is gone. Proceed with Calculate as a
                             // best-effort fallback.
                             //
                             // TODO: This may indicate a bug in SCC merging, state
@@ -759,7 +743,7 @@ impl CalcStack {
             }
         }
 
-        let result = if let Some(first_idx) = first_merge_idx {
+        if let Some(first_idx) = first_merge_idx {
             // Merge all SCCs from first_idx to end, plus the new SCC
             let sccs_from_stack: Vec<Scc> = scc_stack.drain(first_idx..).collect();
             let sccs_to_merge = Vec1::from_vec_push(sccs_from_stack, new_scc);
@@ -771,32 +755,16 @@ impl CalcStack {
             // is part of this single SCC. Recompute segment_size from scratch.
             merged_scc.segment_size = calc_stack_vec.len() - merged_scc.anchor_pos;
 
-            let result = if merged_scc.break_at.contains(&detected_at) {
-                SccDetectedResult::BreakHere
-            } else {
-                SccDetectedResult::Continue
-            };
             scc_stack.push(merged_scc);
-            result
         } else {
             // No overlap - just push the new SCC
-            let result = if new_scc.break_at.contains(&detected_at) {
-                SccDetectedResult::BreakHere
-            } else {
-                SccDetectedResult::Continue
-            };
             scc_stack.push(new_scc);
-            result
         };
 
-        // Iterative mode never uses min-idx breaking: every back-edge breaks
-        // immediately. This ensures Phase 0 is purely membership discovery and
-        // that no frame continues past its own cycle detection point.
-        if self.is_iterative() {
-            return SccDetectedResult::BreakHere;
-        }
-
-        result
+        // Every back-edge breaks immediately. This ensures Phase 0 is purely
+        // membership discovery and that no frame continues past its own cycle
+        // detection point.
+        SccDetectedResult::BreakHere
     }
 
     /// Check the SCC state for a node before calculating it.
@@ -1488,6 +1456,7 @@ enum SccDetectedResult {
     /// unwind back to the same idx.
     BreakHere,
     /// Continue recursing until we hit some other idx that is the minimal `break_at` idx.
+    #[expect(dead_code)]
     Continue,
 }
 
@@ -2016,8 +1985,6 @@ pub struct ThreadState {
     debug: RefCell<bool>,
     /// Configuration for recursion depth limiting. None means disabled.
     recursion_limit_config: Option<RecursionLimitConfig>,
-    /// How SCC participants store answers during solving.
-    scc_solving_mode: SccSolvingMode,
     /// Partial answers for inline first-use pinning, keyed by (NameAssign def_idx, CalcStack height).
     /// The height ensures that only ForwardToFirstUse bindings at the same CalcStack depth
     /// as the NameAssign's solve_binding can see the partial answer (offset 0 in get_idx,
@@ -2025,31 +1992,14 @@ pub struct ThreadState {
     partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
 }
 
-/// Internal SCC-solving modes controlled via `PYREFLY_SCC_SOLVING_MODE`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum SccSolvingMode {
-    /// Write SCC participant answers to Calculation immediately.
-    #[default]
-    CyclesDualWrite,
-    /// Thread-local SCC solving with batch commits to Calculation.
-    CyclesThreadLocal,
-    /// Iterative fixpoint: re-solve SCC members until answers converge.
-    Iterative,
-}
-
 impl ThreadState {
     pub fn new(recursion_limit_config: Option<RecursionLimitConfig>) -> Self {
         Self {
-            stack: CalcStack::new(SccSolvingMode::Iterative),
+            stack: CalcStack::new(),
             debug: RefCell::new(false),
             recursion_limit_config,
-            scc_solving_mode: SccSolvingMode::Iterative,
             partial_answers: RefCell::new(FxHashMap::default()),
         }
-    }
-
-    fn scc_solving_mode(&self) -> SccSolvingMode {
-        self.scc_solving_mode
     }
 }
 
@@ -2344,12 +2294,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         for scc in self.stack().pop_and_drain_completed_sccs() {
-            if self.stack().is_iterative() && scc.has_break_at() {
-                // True cycle in iterative mode: run the iterative fixpoint
-                // driver instead of the one-shot batch commit.
+            if scc.has_break_at() {
+                // True cycle: run the iterative fixpoint driver instead of
+                // the one-shot batch commit.
                 self.iterative_resolve_scc(scc);
             } else {
-                // Legacy mode or singleton without self-loop: commit directly.
+                // Singleton without self-loop: commit directly.
                 self.batch_commit_scc(scc);
             }
         }
@@ -2399,11 +2349,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        // Iterative path: when iterative mode is active and the current CalcId
-        // is in the top SCC's iteration state, use the iterative code path
-        // instead of the legacy SCC or non-SCC paths.
-        if self.stack().is_iterative() && self.stack().get_iteration_node_state(&current).is_some()
-        {
+        // Iterative path: when the current CalcId is in the top SCC's iteration
+        // state, use the iterative code path instead of the non-SCC path.
+        if self.stack().get_iteration_node_state(&current).is_some() {
             return self.calculate_and_record_answer_iterative(current, idx);
         }
 
@@ -2429,7 +2377,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         if self.stack().is_scc_participant(&current) {
-            // SCC path: store in NodeState::Done and (optionally) write to Calculation.
+            // SCC path: store in NodeState::Done with batch commits to Calculation.
             //
             // If this is a break_at node (has a placeholder Var), we must finalize
             // the recursive answer now, before storing. Finalization mutates solver
@@ -2439,26 +2387,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } else {
                 raw_answer
             };
-            let (calc_answer, errors) =
-                if self.thread_state.scc_solving_mode() == SccSolvingMode::CyclesDualWrite {
-                    // Write to Calculation immediately for cross-thread visibility.
-                    // Without this, the Calculation stays in Calculating status during
-                    // SCC processing, allowing other threads to independently re-compute
-                    // this binding via propose_calculation() → Calculatable. Since
-                    // cycle-oriented solving is not entrypoint-invariant, independent
-                    // re-computation can produce different results depending on thread
-                    // scheduling, causing non-determinism.
-                    let (calc_answer, did_write) = calculation.record_value(answer.dupe());
-                    if did_write {
-                        self.base_errors.extend(local_errors);
-                    }
-                    (calc_answer, None)
-                } else {
-                    (answer, Some(Arc::new(local_errors)))
-                };
+            let errors = Some(Arc::new(local_errors));
             // Also store in NodeState::Done for SCC-local isolation (the SCC
             // uses these answers via SccLocalAnswer without touching Calculation).
-            let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(calc_answer.dupe());
+            let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
             let canonical_erased =
                 self.stack()
                     .on_calculation_finished(&current, Some(answer_erased), errors);
@@ -2470,7 +2402,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .downcast::<Arc<K::Answer>>()
                         .expect("on_calculation_finished canonical answer downcast failed"),
                 ),
-                None => calc_answer,
+                None => answer,
             }
         } else {
             // Non-SCC path: write directly to Calculation as before.
@@ -3688,18 +3620,7 @@ mod scc_tests {
 
     /// Helper to create a CalcStack for testing.
     fn make_calc_stack(entries: &[CalcId]) -> CalcStack {
-        make_calc_stack_with_mode(entries, SccSolvingMode::default())
-    }
-
-    /// Helper to create a CalcStack for testing in iterative mode.
-    #[allow(dead_code)]
-    fn make_iterative_calc_stack(entries: &[CalcId]) -> CalcStack {
-        make_calc_stack_with_mode(entries, SccSolvingMode::Iterative)
-    }
-
-    /// Helper to create a CalcStack for testing with a specific solving mode.
-    fn make_calc_stack_with_mode(entries: &[CalcId], mode: SccSolvingMode) -> CalcStack {
-        let stack = CalcStack::new(mode);
+        let stack = CalcStack::new();
         for entry in entries {
             stack.push_for_test(entry.dupe());
         }
@@ -3765,37 +3686,8 @@ mod scc_tests {
 
     #[test]
     fn test_current_cycle_empty_stack() {
-        let calc_stack = CalcStack::new(SccSolvingMode::default());
+        let calc_stack = CalcStack::new();
         assert!(calc_stack.current_cycle().is_none());
-    }
-
-    #[test]
-    fn test_initial_cycle_detection() {
-        // Setup: CalcStack = [M0, M1, M2], detect a cycle [M2, M1, M0]
-        // Expected: New SCC with participants {M0, M1, M2}, break_at = M0 (minimal)
-        let a = CalcId::for_test("m", 0);
-        let b = CalcId::for_test("m", 1);
-        let c = CalcId::for_test("m", 2);
-
-        let calc_stack = make_calc_stack(&[a.dupe(), b.dupe(), c.dupe()]);
-
-        // Simulate detecting cycle - raw cycle order is from detection point to back-edge target
-        let raw_cycle = vec1![c.dupe(), b.dupe(), a.dupe()];
-        let result = calc_stack.on_scc_detected(raw_cycle);
-
-        // Should not break immediately since break_at is A (minimal) but detected_at is C
-        assert!(matches!(result, SccDetectedResult::Continue));
-
-        // Verify SCC was created
-        let stack = calc_stack.borrow_scc_stack();
-        assert_eq!(stack.len(), 1);
-
-        let scc = &stack[0];
-        assert!(scc.break_at.contains(&a));
-        assert_eq!(scc.node_state.len(), 3);
-        assert!(scc.node_state.contains_key(&a));
-        assert!(scc.node_state.contains_key(&b));
-        assert!(scc.node_state.contains_key(&c));
     }
 
     #[test]
@@ -4042,7 +3934,7 @@ mod scc_tests {
         }
 
         // 2. Create a fresh stack (simulating a new request/thread reuse).
-        let stack = CalcStack::new(SccSolvingMode::default());
+        let stack = CalcStack::new();
 
         // 3. Push the same calculation.
         // This should NOT panic.
@@ -4081,8 +3973,7 @@ mod scc_tests {
         let e = CalcId::for_test("m", 4);
 
         // Build the iterative CalcStack with [A, B, C, D, E].
-        let calc_stack =
-            make_iterative_calc_stack(&[a.dupe(), b.dupe(), c.dupe(), d.dupe(), e.dupe()]);
+        let calc_stack = make_calc_stack(&[a.dupe(), b.dupe(), c.dupe(), d.dupe(), e.dupe()]);
 
         // Manually construct SCC0 with iterative state (iteration 2).
         let scc0 = {
@@ -4266,8 +4157,7 @@ mod scc_tests {
         let e = CalcId::for_test("m", 4);
 
         // Build the iterative CalcStack with [A, B, C, D, E].
-        let calc_stack =
-            make_iterative_calc_stack(&[a.dupe(), b.dupe(), c.dupe(), d.dupe(), e.dupe()]);
+        let calc_stack = make_calc_stack(&[a.dupe(), b.dupe(), c.dupe(), d.dupe(), e.dupe()]);
 
         // Manually construct SCC_outer (ancestor) with iterative state at iteration 2.
         let scc_outer = {

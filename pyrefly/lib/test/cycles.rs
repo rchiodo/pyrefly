@@ -567,23 +567,12 @@ x = Struct().serialize()
 "#,
 );
 
-// ---- Iterative SCC solving tests ----
-//
-// Tests that verify SCC solving behavior under iterative fixpoint mode.
-// These exercise the LoopPhi cold-start bypass and iterative convergence.
-
-/// Build a TestEnv configured for iterative fixpoint SCC solving.
-fn iterative_env() -> TestEnv {
-    TestEnv::new()
-}
-
 // Verify that a simple loop variable whose type is stable across iterations
 // is correctly inferred. The LoopPhi cold-start bypass resolves the prior
 // value (x = 0, type int) during iteration 1, and the warm-start iteration
 // confirms convergence.
 testcase!(
     iterative_loop_phi_simple,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -601,7 +590,6 @@ def f(cond: bool):
 // the warm-start iteration must confirm convergence for every variable.
 testcase!(
     iterative_loop_phi_multi_var,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -625,7 +613,6 @@ def f(cond: bool):
 // must converge to `int | None`.
 testcase!(
     iterative_loop_phi_increment,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -649,7 +636,6 @@ def f(cond: bool):
 // annotated return types.
 testcase!(
     iterative_warm_start_mutual_recursion,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -675,7 +661,6 @@ assert_type(g(1), str)
 // that produce no errors.
 testcase!(
     iterative_error_suppression_no_spurious_errors,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -697,7 +682,6 @@ assert_type(g(1), int)
 // incompatible-return-type error that must survive across iterations.
 testcase!(
     iterative_error_suppression_real_errors_reported,
-    iterative_env(),
     r#"
 from typing import assert_type
 
@@ -722,7 +706,7 @@ assert_type(g(1), str)
 // types via cold-start placeholders followed by warm-start iterations.
 
 fn env_iterative_cross_module_cycle() -> TestEnv {
-    let mut env = iterative_env();
+    let mut env = TestEnv::new();
     env.add(
         "a",
         r#"
@@ -764,7 +748,6 @@ assert_type(g(1), int)
 // completely independent mutual-recursion pairs.
 testcase!(
     iterative_disjoint_scc_independence,
-    iterative_env(),
     r#"
 from typing import assert_type
 
