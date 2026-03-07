@@ -1311,6 +1311,36 @@ impl CalcStack {
             .any(|scc| scc.iterative.is_some())
     }
 
+    /// Returns true if the SCC stack has no entries.
+    #[expect(dead_code)]
+    fn scc_stack_is_empty(&self) -> bool {
+        self.scc_stack.borrow().is_empty()
+    }
+
+    /// Returns true if the top SCC's `node_state` contains the given CalcId.
+    /// Returns false if the stack is empty (callers should guard with
+    /// `scc_stack_is_empty` first).
+    ///
+    /// Used after nested absorption to distinguish two cases:
+    /// - Our SCC was merged into the top SCC (detected_at changed, but our
+    ///   members are in the top SCC's node_state) → continue driving.
+    /// - Our SCC was committed by a nested driver, and a pre-existing,
+    ///   possibly non-iterating SCC (e.g. a Phase 0 SCC that was below us
+    ///   on the stack) is now the top → return.
+    ///
+    /// This works because `detected_at` is always a member of the SCC's
+    /// `node_state`, and merges union the `node_state` maps. Within a single
+    /// thread's `scc_stack`, SCCs are disjoint (overlapping membership
+    /// triggers a merge), so an unrelated SCC will not contain our CalcId.
+    #[expect(dead_code)]
+    fn top_scc_contains_member(&self, calc_id: &CalcId) -> bool {
+        self.scc_stack
+            .borrow()
+            .last()
+            .map(|scc| scc.node_state.contains_key(calc_id))
+            .unwrap_or(false)
+    }
+
     /// Returns true if the top SCC's iteration state has `merge_happened` set.
     ///
     /// Used by `drive_all_iteration_members` to detect whether a merge occurred
