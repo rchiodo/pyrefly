@@ -1212,7 +1212,6 @@ reveal_type([X])  # E: list[type[X[T]]]
 );
 
 testcase!(
-    bug = "Pyrefly gets tripped up by a self-referential bound in LoggerAdapter's type parameter",
     test_logger_alias,
     r#"
 from typing import Any
@@ -1220,7 +1219,7 @@ import logging
 
 LoggerLike = logging.Logger | logging.LoggerAdapter[Any]
 
-def f(x: LoggerLike | None = None): ...  # E: Expected a type form, got instance of `UnionType | type[Logger | None] | Any`
+def f(x: LoggerLike | None = None): ...
     "#,
 );
 

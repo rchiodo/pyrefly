@@ -18,17 +18,17 @@ use crate::module_wildcard::ModuleWildcard;
 /// Which SCC-solving strategy to use during type checking.
 ///
 /// This controls how strongly connected components (cycles) in the binding
-/// graph are resolved. The default is `CyclesDualWrite`, which writes answers
+/// graph are resolved. The default is `IterativeFixpoint`, which re-solves SCC
+/// members in a fixpoint loop until answers converge. `CyclesDualWrite` writes answers
 /// eagerly for cross-thread visibility. `CyclesThreadLocal` defers writes
-/// until the entire SCC completes. `IterativeFixpoint` re-solves SCC members
-/// in a fixpoint loop until answers converge.
+/// until the entire SCC completes.
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone, Copy, Default)]
 #[derive(ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum SccMode {
-    #[default]
     CyclesDualWrite,
     CyclesThreadLocal,
+    #[default]
     IterativeFixpoint,
 }
 

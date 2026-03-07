@@ -82,20 +82,21 @@ def main():
 );
 
 testcase!(
-    bug = "A recursive redefinition in a loop produces a hard-to-follow error message + location",
+    bug = "Analysis is correct, but UX is poor on a loop that does not converge",
     test_while_creates_recursive_type,
     r#"
 from typing import assert_type, Any, Literal
 def f(condition) -> None:
     x = 1
-    # It's fine to error here, but ideally we would error at the assignment
-    # rather than the `while`, and ideally we would note that the type is recursive
-    # in a way we don't support.
-    while condition():
-        assert_type(x, Literal[1] | list[Literal[1] | list[Any]])
-        x = [x]
-        assert_type(x, list[Literal[1] | list[Any]])
-    assert_type(x, Literal[1] | list[Literal[1] | list[Any]])
+    # The problem with this analysis is that when we have a non-convergent loop, we wind
+    # up with many bindings (the LoopPh and everything downstream) *all* failing to converge.
+    # So we get multiple errors, and one of them is on the top of the loop (in other words
+    # not even at an `x` here).
+    #
+    # The error message may not be great, but the really ugly thing is the duplication and
+    # poor location. Nontheless, the analysis itself is correct, this is a UX problem.
+    while condition():  # E: Fixpoint iteration did not converge. Inferred type `Literal[1] | list[int | list[int | list[int | list[int]]]]`. Adding annotations may help
+        x = [x]  # E: Fixpoint iteration did not converge.  # E: Fixpoint iteration did not converge.
     "#,
 );
 
@@ -601,7 +602,6 @@ def f():
 );
 
 testcase!(
-    bug = "Single-shot analysis cannot handle this - see https://github.com/facebook/pyrefly/issues/1234",
     test_assign_result_of_call_back_to_argument,
     r#"
 class Cursor:
@@ -614,7 +614,7 @@ class Query:
 
 def test(q: Query) -> None:
     cursor = None
-    while not cursor or not cursor.finished():  # E: Pyrefly detected conflicting types while breaking a dependency cycle: `Cursor | None` is not assignable to `None`.
+    while not cursor or not cursor.finished():
         cursor = q.send(cursor)
 "#,
 );
@@ -671,9 +671,9 @@ while condition():
 assert_type(good, list[int])
 
 bad = [1]
-while condition():  # E: Pyrefly detected conflicting types while breaking a dependency cycle: `list[int] | list[str]` is not assignable to `list[int]`.
+while condition():
     if condition():
-        bad = [f(bad)]
+        bad = [f(bad)]  # E: Argument `list[int] | list[str]` is not assignable to parameter `x` with type `list[int]` in function `f`
     else:
         bad = [""]
 "#,

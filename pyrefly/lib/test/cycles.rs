@@ -389,7 +389,7 @@ testcase!(
     force_for_narrowing_cycle_detection,
     r#"
 def f(  # E: Expected `)`, found newline
-    if n:  # E: Type narrowing encountered a cycle in Type::Var # E: Expected an indented block after `if` statement
+    if n:  # E: Expected an indented block after `if` statement
 )n = min(n, size)  # E: Expected a statement # E: `n` is uninitialized # E: Could not find name `size`
 "#,
 );
