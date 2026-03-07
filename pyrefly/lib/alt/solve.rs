@@ -2503,13 +2503,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn solve_tparams(&self, binding: &BindingTParams, errors: &ErrorCollector) -> Arc<TParams> {
-        self.calculate_class_tparams(
+        let result = self.calculate_class_tparams(
             &binding.name,
             binding.scoped_type_params.as_deref(),
             &binding.generic_bases,
             &binding.legacy_tparams,
             errors,
-        )
+        );
+        // Truncate recursive TArgs nesting in restrictions. This prevents unbounded
+        // growth during fixpoint iteration when mutually-recursive classes reference
+        // each other in type parameter bounds.
+        Arc::new(Arc::unwrap_or_clone(result).truncate_recursive_targs())
     }
 
     pub fn solve_class_base_type(
