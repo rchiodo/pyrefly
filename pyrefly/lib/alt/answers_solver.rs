@@ -2990,6 +2990,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut scc_identity = scc.detected_at.dupe();
         let mut iteration: u32 = 1;
         let mut demotions: u32 = 0;
+        let mut exceeded_max_iterations = false;
 
         loop {
             if iteration > MAX_ITERATIONS {
@@ -2999,6 +3000,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     scc_identity,
                     MAX_ITERATIONS,
                 );
+                exceeded_max_iterations = true;
                 break;
             }
 
@@ -3087,6 +3089,50 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
 
             iteration += 1;
+        }
+
+        // Report per-member errors for non-converging SCC members.
+        // Each member uses its own module's bindings and error collector
+        // because SCCs can span modules.
+        if exceeded_max_iterations {
+            let iter_state = scc
+                .iterative
+                .as_ref()
+                .expect("iterative_resolve_scc: SCC lost iteration state before error reporting");
+            for (calc_id, node_state) in &iter_state.node_states {
+                if let IterationNodeState::Done { ref answer, .. } = *node_state {
+                    let previous = iter_state.previous_answers.get(calc_id);
+                    let member_bindings = &calc_id.0;
+                    if self.is_same_module(calc_id) {
+                        dispatch_anyidx!(
+                            &calc_id.1,
+                            self,
+                            check_and_report_non_convergent_member,
+                            answer,
+                            previous,
+                            member_bindings,
+                            self.base_errors
+                        );
+                    } else {
+                        // Cross-module member: create a temporary collector
+                        // with the member's module info. Each Error stores its
+                        // own module, so extending base_errors preserves the
+                        // correct file attribution.
+                        let cross_errors =
+                            ErrorCollector::new(calc_id.0.module().dupe(), ErrorStyle::Delayed);
+                        dispatch_anyidx!(
+                            &calc_id.1,
+                            self,
+                            check_and_report_non_convergent_member,
+                            answer,
+                            previous,
+                            member_bindings,
+                            &cross_errors
+                        );
+                        self.base_errors.extend(cross_errors);
+                    }
+                }
+            }
         }
 
         self.commit_final_answers(scc);
@@ -3563,6 +3609,55 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .expect("answers_equal_typed: type mismatch on new answer");
         let mut ctx = TypeEqCtx::default();
         old_typed.type_eq(new_typed, &mut ctx)
+    }
+
+    /// Report a `NonConvergentRecursion` error on a single SCC member whose
+    /// answer changed in the final iteration. Called via `dispatch_anyidx!`
+    /// so that the concrete `K` (and therefore `K::Answer`) is known.
+    ///
+    /// `member_bindings` and `member_errors` must come from the member's own
+    /// module, not necessarily `self`. SCCs can span modules, so `self.bindings()`
+    /// and `self.base_errors` are only correct for same-module members.
+    ///
+    /// The message distinguishes `TypeInfo` answers ("inferred type") from
+    /// other answer kinds ("inferred result") for clarity in diagnostics.
+    fn check_and_report_non_convergent_member<K: Solve<Ans>>(
+        &self,
+        idx: Idx<K>,
+        current: &Arc<dyn Any + Send + Sync>,
+        previous: Option<&Arc<dyn Any + Send + Sync>>,
+        member_bindings: &Bindings,
+        member_errors: &ErrorCollector,
+    ) where
+        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
+        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+    {
+        // Only report if the answer actually changed from the previous iteration.
+        if let Some(prev) = previous
+            && self.answers_equal_typed::<K>(idx, prev, current)
+        {
+            return;
+        }
+        let typed_answer = current
+            .downcast_ref::<Arc<K::Answer>>()
+            .expect("check_and_report_non_convergent_member: type mismatch");
+        // TypeInfo answers represent inferred types; other answer kinds are
+        // internal results (class fields, metadata, etc.).
+        let noun = if current.downcast_ref::<Arc<TypeInfo>>().is_some() {
+            "type"
+        } else {
+            "result"
+        };
+        let range = K::range_with(idx, member_bindings);
+        member_errors.add(
+            range,
+            ErrorInfo::Kind(ErrorKind::NonConvergentRecursion),
+            vec1![format!(
+                "Fixpoint iteration did not converge. \
+                 Inferred {} `{}`. Adding annotations may help.",
+                noun, typed_answer,
+            )],
+        );
     }
 }
 

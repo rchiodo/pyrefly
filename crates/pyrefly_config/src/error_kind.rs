@@ -218,6 +218,9 @@ pub enum ErrorKind {
     NoAccess,
     /// Attempting to call an overloaded function, but none of the signatures match.
     NoMatchingOverload,
+    /// The SCC fixpoint iteration did not converge within the maximum number of
+    /// iterations. The inferred type may be incorrect; adding annotations can help.
+    NonConvergentRecursion,
     /// Matching on an enum without covering all possible cases.
     NonExhaustiveMatch,
     /// Attempting to use something that isn't a type where a type is expected.
@@ -336,6 +339,7 @@ impl ErrorKind {
             ErrorKind::MissingOverrideDecorator => Severity::Ignore,
             ErrorKind::MissingSource => Severity::Ignore,
             ErrorKind::NonExhaustiveMatch => Severity::Warn,
+            ErrorKind::NonConvergentRecursion => Severity::Warn,
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
             ErrorKind::OpenUnpacking => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,
