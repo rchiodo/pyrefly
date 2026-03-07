@@ -282,27 +282,7 @@ impl CalcStack {
 
                     // Add free-floating CalcStack nodes (between merged SCCs)
                     // to node_state and iterative.node_states, mirroring merge_sccs.
-                    for calc_id in calc_stack_vec.iter().skip(merged.anchor_pos) {
-                        merged
-                            .node_state
-                            .entry(calc_id.dupe())
-                            .or_insert(NodeState::InProgress);
-                    }
-                    if let Some(ref mut iter_state) = merged.iterative {
-                        let mut added_new = false;
-                        for calc_id in calc_stack_vec.iter().skip(merged.anchor_pos) {
-                            iter_state
-                                .node_states
-                                .entry(calc_id.dupe())
-                                .or_insert_with(|| {
-                                    added_new = true;
-                                    IterationNodeState::Fresh
-                                });
-                        }
-                        if added_new {
-                            iter_state.merge_happened = true;
-                        }
-                    }
+                    merged.absorb_calc_stack_members(&calc_stack_vec, merged.anchor_pos);
 
                     scc_stack.push(merged);
                 }
@@ -925,33 +905,7 @@ impl CalcStack {
         // of a known SCC. These nodes are already on the call stack (they have active frames),
         // so they are InProgress, not Fresh.
         let mut merged = Scc::merge_many(sccs_to_merge, detected_at_of_scc.dupe());
-        for calc_id in calc_stack_vec.iter().skip(min_depth) {
-            merged
-                .node_state
-                .entry(calc_id.dupe())
-                .or_insert(NodeState::InProgress);
-        }
-
-        // If the merged SCC is iterating, ensure free-floating nodes that were
-        // just added to node_state are also present in iterative.node_states.
-        // Without this, next_fresh_member() won't see them and they'll bypass
-        // iterative error suppression and convergence tracking until the next
-        // iteration rebuilds node_states from scratch.
-        if let Some(ref mut iter_state) = merged.iterative {
-            let mut added_new = false;
-            for calc_id in calc_stack_vec.iter().skip(min_depth) {
-                iter_state
-                    .node_states
-                    .entry(calc_id.dupe())
-                    .or_insert_with(|| {
-                        added_new = true;
-                        IterationNodeState::Fresh
-                    });
-            }
-            if added_new {
-                iter_state.merge_happened = true;
-            }
-        }
+        merged.absorb_calc_stack_members(&calc_stack_vec, min_depth);
 
         // After a merge, everything from the merged anchor to the current stack top
         // is part of this single SCC. Recompute segment_size from scratch.
@@ -1806,6 +1760,42 @@ impl Scc {
             result.detected_at = detected_at;
         }
         result
+    }
+
+    /// Absorb CalcStack members from `calc_stack[from_pos..]` into this SCC.
+    ///
+    /// Adds each CalcId as `NodeState::InProgress` to `node_state` (if not already
+    /// present) and as `IterationNodeState::Fresh` to `iterative.node_states` (if
+    /// iterating and not already present). Sets `merge_happened = true` on the
+    /// iteration state if any new entries are added to the iterative map.
+    ///
+    /// This is used for free-floating nodes: CalcIds that are on the call stack
+    /// (their frames are active) but were not previously tracked by any SCC.
+    /// They must be `InProgress` (not `Fresh`) because their computation has
+    /// already started — a revisit of a `Fresh` node would incorrectly trigger
+    /// the `Participant → InProgress` transition again.
+    #[allow(clippy::mutable_key_type)]
+    fn absorb_calc_stack_members(&mut self, calc_stack: &[CalcId], from_pos: usize) {
+        for calc_id in calc_stack.iter().skip(from_pos) {
+            self.node_state
+                .entry(calc_id.dupe())
+                .or_insert(NodeState::InProgress);
+        }
+        if let Some(ref mut iter_state) = self.iterative {
+            let mut added_new = false;
+            for calc_id in calc_stack.iter().skip(from_pos) {
+                iter_state
+                    .node_states
+                    .entry(calc_id.dupe())
+                    .or_insert_with(|| {
+                        added_new = true;
+                        IterationNodeState::Fresh
+                    });
+            }
+            if added_new {
+                iter_state.merge_happened = true;
+            }
+        }
     }
 
     /// Extract done answers from the current iteration state.
