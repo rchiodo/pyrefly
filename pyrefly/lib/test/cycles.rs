@@ -9,36 +9,19 @@ use crate::config::base::SccMode;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
-/*
-Leaky loop tests: Some of these are genuinely nondeterministic in cargo (they
-normally pass, but might not when run in the full test suite with threading
-because the check of `main` can race the check of `leaky_loop`) and so they are
-commented out.
+// Leaky loop tests: These demonstrate that loop recursion can create cycles
+// in the definition of variables. The loop creates a cycle in `x`, and with
+// iterative fixpoint solving we get deterministic answers regardless of which
+// variable we force first or where we enter the cycle.
 
-They demonstrate that we get nondeterminism from loop recursion, even with
-no placeholder types involved. The loop creates a cycle in the definition of
-`x`, and depending where we start the cycle we can get different answers.
-
-The one I've left uncommented is the one where there's no race condition.
-*/
-
-/* Improving loop handling in D85922045 made these tests once again
- * nondeterministic in cargo tests, because some percentage of the time
- * the type check for `y, x = f(x)` passes.
- *
- * This is occurring because it is entrypoint-dependent whether we type
- * check that binding once or twice, and if we type check it twice then
- * the second type check can produce a different answer due to
- * non-idempotence
-
- fn env_leaky_loop() -> TestEnv {
+fn env_leaky_loop() -> TestEnv {
     TestEnv::one(
         "leaky_loop",
         r#"
 x = None
 def f(_: str | None) -> tuple[str, str]: ...
 def g(_: int | None) -> tuple[int, int]: ...
-while True: # E: Pyrefly detected conflicting types while breaking a dependency cycle: `int | None` is not assignable to `str | None`.
+while True:
     y, x = f(x)  # E: Argument `int | None` is not assignable to parameter `_` with type `str | None` in function `f`
     z, x = g(x)  # E: Argument `str` is not assignable to parameter `_` with type `int | None` in function `g`
 "#,
@@ -46,7 +29,6 @@ while True: # E: Pyrefly detected conflicting types while breaking a dependency 
 }
 
 testcase!(
-    bug = "If we don't force anything, x will come back as `int`.",
     try_leaky_loop_and_import_x,
     env_leaky_loop(),
     r#"
@@ -57,7 +39,6 @@ assert_type(x, int | None)
 );
 
 testcase!(
-    bug = "Forcing `y` first gives us `int` for `x`",
     try_leaky_loop_and_import_y,
     env_leaky_loop(),
     r#"
@@ -68,14 +49,8 @@ from leaky_loop import x
 assert_type(x, int | None)
 "#,
 );
-*/
-
-/*
-The variant of this test that exercises an actual race condition can potentially
-give nondeterministic output so it is commented for CI stability.
 
 testcase!(
-    bug = "Forcing `z` first gives us `Any` for `x`",
     try_leaky_loop_and_import_z,
     env_leaky_loop(),
     r#"
@@ -83,32 +58,9 @@ from typing import assert_type, Any
 from leaky_loop import z
 assert_type(z, int)
 from leaky_loop import x
-assert_type(x, Any | None)
+assert_type(x, int | None)
 "#,
 );
-*/
-
-/*
-Import cycle tests: We can create a cycle of imports pretty easily. If we never
-do anything with imported names except forward them, we won't be able to exhibit
-nondeterminism because the answer to everything is just `Any` regardless of orders.
-
-But if anything in the cycle is able to actually compute a result (for example,
-because it makes a function call that takes a cyclic argument, but the function
-itself has a well-defined return type), we will see nondeterminism, because
-- If we break the cycle on exactly that element, it will spit out a recursive
-  `Var` from the point of view of its dependents, which when forced is typically
-  `Any`.
-- If we break the cycle anywhere else, the function call will be evaluated and
-  we'll spit out a concrete answer (the same concrete answer we'll eventually
-  get in the other case when we unwind the cycle back to ourselves), and our
-  dependents will see that.
-- Note that the nondeterminism *originates* from the place where we break
-  recursion, but the *visible effects* occur in the dependents of that element,
-  not the element itself.
-
-Unlike the leaky loop tests, these have no variations that aren't potentially
-subject to race conditions, so they are all commented out for CI stability.
 
 fn env_import_cycle() -> TestEnv {
     let mut env = TestEnv::new();
@@ -146,7 +98,7 @@ assert_type(x0, int)
 from yy import y
 assert_type(y, int)
 from xx import x1
-assert_type(y, int)
+assert_type(x1, int)
 "#,
 );
 
@@ -156,11 +108,11 @@ testcase!(
     r#"
 from typing import assert_type, Any
 from xx import x1
-assert_type(y, Any)
+assert_type(x1, int)
 from yy import y
-assert_type(y, Any)
+assert_type(y, int)
 from xx import x0
-assert_type(x0, Any)
+assert_type(x0, int)
 "#,
 );
 
@@ -172,9 +124,9 @@ from typing import assert_type, Any
 from yy import y
 assert_type(y, int)
 from xx import x1
-assert_type(y, int)
+assert_type(x1, int)
 from xx import x0
-assert_type(x0, Any)
+assert_type(x0, int)
 "#,
 );
 
@@ -186,12 +138,11 @@ from typing import assert_type, Any
 from yy import y
 assert_type(y, int)
 from xx import x0
-assert_type(x0, object)
+assert_type(x0, int)
 from xx import x1
-assert_type(y, Any)
+assert_type(x1, int)
 "#,
 );
-*/
 
 // This pair of tests shows that fully annotating modules eliminates
 // nondeterminism from import cycles of globals defined with assignment.
@@ -244,22 +195,10 @@ assert_type(yyy, bytes)
 "#,
 );
 
-// The following tests demonstrate that decorator cycles exhibit nondeterminism.
-//
-// The unit tests themselves are deterministic, because the `main` module (which
-// I need outside the cycle for my own sanity) isn't participating directly in
-// the cycle, and everything here has a concrete type once it's fully resolved.
-//
-// But if you run with `--nocapture`, you'll see that the type errors for
-// the `xx` and `yy` modules are not consistent between the two tests:
-// - In version (a) we get no type errors in xx and a type error in yy
-// - In version (b) we get no type errors in yy and a type error in xx
-//
-// The root cause of the error is that whichever of `fx` / `fy` *doesn't* break
-// the cycle winds up with type `int` prior to `@dec` being applied, but
-// whichever one *does* break it has type `Any` (until the cycle completes).
+// Decorator cycle tests: `fx` and `fy` each import and use the other as a
+// decorator, creating a cross-module cycle through decorator application.
+// With iterative fixpoint solving, these should converge deterministically.
 
-/*
 fn env_import_cycle_decorators() -> TestEnv {
     let mut env = TestEnv::new();
     env.add(
@@ -270,7 +209,7 @@ from yy import fy
 def dec(
     arg: Callable[[Callable[..., int]], Callable[..., int]]
 ) -> Callable[..., int]: ...
-@dec  # Sometimes an error, depends on the cycle resolution order
+@dec  # E: Argument `int` is not assignable to parameter `arg` with type `((...) -> int) -> (...) -> int` in function `dec`
 @fy
 def fx(arg: Callable[..., Any]) -> Callable[..., Any]: ...
 "#,
@@ -283,7 +222,7 @@ from xx import fx
 def dec(
     arg: Callable[[Callable[..., int]], Callable[..., int]]
 ) -> Callable[..., int]: ...
-@dec  # Sometimes an error, depends on the cycle resolution order
+@dec  # E: Argument `int` is not assignable to parameter `arg` with type `((...) -> int) -> (...) -> int` in function `dec`
 @fx
 def fy(arg: Callable[..., Any]) -> Callable[..., Any]: ...
 "#,
@@ -292,7 +231,6 @@ def fy(arg: Callable[..., Any]) -> Callable[..., Any]: ...
 }
 
 testcase!(
-    bug = "Type errors reported in xx / yy differ between versions (a) and (b) (run with --nocapture)",
     import_cycle_decorators_a,
     env_import_cycle_decorators(),
     r#"
@@ -305,7 +243,6 @@ assert_type(fx, Callable[..., int])
 );
 
 testcase!(
-    bug = "Type errors reported in xx / yy differ between versions (a) and (b) (run with --nocapture)",
     import_cycle_decorators_b,
     env_import_cycle_decorators(),
     r#"
@@ -316,7 +253,6 @@ from yy import fy
 assert_type(fy, Callable[..., int])
 "#,
 );
-*/
 
 // This pair of tests failed until we separated Mro out from ClassMetadata - parsing base
 // types depends on the metadata but not the Mro, which was leading to patterns where a base
