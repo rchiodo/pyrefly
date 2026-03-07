@@ -9,7 +9,6 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -20,7 +19,6 @@ use std::sync::Arc;
 use dupe::Dupe;
 use dupe::IterDupedExt;
 use fxhash::FxHashMap;
-use itertools::Itertools;
 use pyrefly_graph::calculation::Calculation;
 use pyrefly_graph::calculation::ProposalResult;
 use pyrefly_graph::index::Idx;
@@ -705,8 +703,8 @@ impl CalcStack {
     /// or continue recursing.
     ///
     /// When a new SCC overlaps with existing SCCs (shares participants),
-    /// we merge them to form a larger SCC. This preserves behavioral equivalence
-    /// because all break points are retained in the merged break_at set.
+    /// we merge them to form a larger SCC. The merged SCC uses the minimum
+    /// break_at CalcId of the two, which is sufficient as a single break point.
     ///
     /// Optimization: We use stack depth to efficiently find overlapping SCCs.
     /// The cycle spans CalcStack positions [N, M] where M = stack_depth - 1 and
@@ -1424,8 +1422,8 @@ enum SccState {
     /// This idx has already recorded a placeholder but hasn't computed the real
     /// answer yet. We should return the placeholder value.
     HasPlaceholder,
-    /// This idx is the `break_at` for the active SCC (in the break_at set but
-    /// hasn't recorded a placeholder yet), which means we have reached the end
+    /// This idx is the `break_at` for the active SCC (matches the break_at CalcId
+    /// but hasn't recorded a placeholder yet), which means we have reached the end
     /// of the recursion and should return a placeholder to our parent frame.
     BreakAt,
 }
@@ -1583,14 +1581,11 @@ impl IterationNodeState {
 #[derive(Debug, Clone)]
 pub struct Scc {
     /// Where do we want to break the SCC.
-    /// TODO(stroxler):
-    /// - This is a set because when SCCs overlap and are merged, we preserve
-    ///   all the original break points to maintain behavioral equivalence with
-    ///   solving each cycle independently, which is what Pyrefly used to do.
-    /// - One goal of solving at the SCC granularity is to eventually eliminate
-    ///   this behavior, which can cost excessive stack space, in favor of
-    ///   an algorithm that breaks recursion faster.
-    break_at: BTreeSet<CalcId>,
+    ///
+    /// This is the minimum CalcId of the cycle's members. When SCCs overlap
+    /// and are merged, we take the minimum of the two break points so that
+    /// a single break point is sufficient for the merged SCC.
+    break_at: CalcId,
     /// State of each participant in this SCC.
     /// Keys are all participants; values track their computation state.
     node_state: BTreeMap<CalcId, NodeState>,
@@ -1618,10 +1613,8 @@ impl Display for Scc {
         let states: Vec<_> = self.node_state.iter().collect();
         write!(
             f,
-            "Scc{{break_at: [{}], node_state: {:?}, detected_at: {}}}",
-            self.break_at.iter().format(", "),
-            states,
-            self.detected_at,
+            "Scc{{break_at: {}, node_state: {:?}, detected_at: {}}}",
+            self.break_at, states, self.detected_at,
         )
     }
 }
@@ -1636,12 +1629,9 @@ impl Scc {
         let node_state: BTreeMap<CalcId, NodeState> =
             raw.iter().duped().map(|c| (c, NodeState::Fresh)).collect();
 
-        let mut break_at_set = BTreeSet::new();
-        break_at_set.insert(break_at.dupe());
-
         // The anchor is the detected_at CalcId (the one pushed twice, triggering cycle
         // detection). Its first occurrence is at the deepest position in the cycle
-        // (cycle_start), making it a more robust anchor than break_at.
+        // (cycle_start), making it a more robust anchor.
         //
         // The initial segment size is the number of frames from anchor to top of stack.
         let anchor_pos = calc_stack_vec
@@ -1651,7 +1641,7 @@ impl Scc {
         let segment_size = calc_stack_vec.len() - anchor_pos;
 
         Scc {
-            break_at: break_at_set,
+            break_at: break_at.dupe(),
             node_state,
             detected_at,
             anchor_pos,
@@ -1671,7 +1661,7 @@ impl Scc {
     ///
     /// When a Fresh node is encountered, it transitions to InProgress.
     fn pre_calculate_state(&mut self, current: &CalcId) -> SccState {
-        if self.break_at.contains(current) {
+        if self.break_at == *current {
             // For break_at nodes that already have a placeholder or are Done,
             // return the state-appropriate response. BreakAt (which triggers
             // Unwind -> attempt_to_unwind_cycle_from_here -> on_placeholder_recorded)
@@ -1773,7 +1763,7 @@ impl Scc {
         self.detected_at.dupe()
     }
 
-    /// Merge two SCCs into one, preserving all break points and taking the
+    /// Merge two SCCs into one, taking the minimum break point and the
     /// most advanced state for each participant.
     ///
     /// If either SCC has iteration state (`iterative: Some(...)`), the merged
@@ -1787,8 +1777,9 @@ impl Scc {
     /// `iterative: None` but still has members in `node_state`.
     #[allow(clippy::mutable_key_type)]
     fn merge(mut self, other: Scc) -> Self {
-        // Union break_at sets
-        self.break_at.extend(other.break_at);
+        // Take the minimum break_at: a single break point is sufficient after merge.
+        // The non-minimum CalcId becomes a Participant in the merged SCC.
+        self.break_at = self.break_at.min(other.break_at);
         // Union node_state maps (keep the more advanced state)
         for (k, v) in other.node_state {
             self.node_state
@@ -3487,14 +3478,14 @@ mod scc_tests {
     /// due to duplicate CalcIds during cycle breaking.
     #[allow(clippy::mutable_key_type)]
     fn make_test_scc(
-        break_at: Vec<CalcId>,
+        break_at: CalcId,
         node_state: BTreeMap<CalcId, NodeState>,
         detected_at: CalcId,
         anchor_pos: usize,
     ) -> Scc {
         let segment_size = node_state.len();
         Scc {
-            break_at: break_at.into_iter().collect(),
+            break_at,
             node_state,
             detected_at,
             anchor_pos,
@@ -3694,21 +3685,21 @@ mod scc_tests {
     }
 
     #[test]
-    fn test_merge_many_preserves_break_points() {
+    fn test_merge_many_preserves_break_point() {
         let a = CalcId::for_test("m", 0);
         let b = CalcId::for_test("m", 1);
         let c = CalcId::for_test("m", 2);
         let d = CalcId::for_test("m", 3);
 
-        // Create two SCCs with different break points
+        // Create two SCCs with different break points; a < c by Ord on CalcId.
         let scc1 = make_test_scc(
-            vec![a.dupe()],
+            a.dupe(),
             fresh_nodes(&[a.dupe(), b.dupe()]),
             a.dupe(),
             0, // anchor_pos
         );
         let scc2 = make_test_scc(
-            vec![c.dupe()],
+            c.dupe(),
             fresh_nodes(&[c.dupe(), d.dupe()]),
             c.dupe(),
             2, // anchor_pos
@@ -3716,16 +3707,60 @@ mod scc_tests {
 
         let merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
 
-        // Both break points should be preserved
-        assert!(merged.break_at.contains(&a));
-        assert!(merged.break_at.contains(&c));
-        assert_eq!(merged.break_at.len(), 2);
+        // The merged SCC should use the minimum break point (a < c).
+        assert_eq!(merged.break_at, a);
 
         // All nodes should be present
         assert_eq!(merged.node_state.len(), 4);
 
         // anchor_pos should be the minimum (0)
         assert_eq!(merged.anchor_pos, 0);
+    }
+
+    #[test]
+    #[allow(clippy::mutable_key_type)]
+    fn test_merged_scc_single_break_point_phase0() {
+        // Regression test: after merging two SCCs, a single break_at CalcId
+        // is sufficient. `pre_calculate_state` must return `BreakAt` for the
+        // merged break_at node and `Participant` (Fresh → InProgress) for all
+        // other members.
+        //
+        // Setup: SCC1 = {a, b} with break_at = a,
+        //        SCC2 = {c, d} with break_at = c.
+        // a < c by CalcId::Ord, so the merged break_at should be a.
+        let a = CalcId::for_test("m", 0);
+        let b = CalcId::for_test("m", 1);
+        let c = CalcId::for_test("m", 2);
+        let d = CalcId::for_test("m", 3);
+
+        let scc1 = make_test_scc(a.dupe(), fresh_nodes(&[a.dupe(), b.dupe()]), a.dupe(), 0);
+        let scc2 = make_test_scc(c.dupe(), fresh_nodes(&[c.dupe(), d.dupe()]), c.dupe(), 2);
+
+        let mut merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
+
+        // The merged break point is the minimum: a.
+        assert_eq!(merged.break_at, a);
+
+        // pre_calculate_state for the break_at node returns BreakAt.
+        assert!(
+            matches!(merged.pre_calculate_state(&a), SccState::BreakAt),
+            "break_at node should return BreakAt"
+        );
+
+        // pre_calculate_state for the other members (b, c, d) transitions
+        // Fresh → InProgress and returns Participant.
+        assert!(
+            matches!(merged.pre_calculate_state(&b), SccState::Participant),
+            "non-break_at node b should return Participant"
+        );
+        assert!(
+            matches!(merged.pre_calculate_state(&c), SccState::Participant),
+            "non-break_at node c should return Participant"
+        );
+        assert!(
+            matches!(merged.pre_calculate_state(&d), SccState::Participant),
+            "non-break_at node d should return Participant"
+        );
     }
 
     #[test]
@@ -3738,13 +3773,13 @@ mod scc_tests {
         let mut scc1_state = BTreeMap::new();
         scc1_state.insert(a.dupe(), done_for_test());
         scc1_state.insert(b.dupe(), NodeState::Fresh);
-        let scc1 = make_test_scc(vec![a.dupe()], scc1_state, a.dupe(), 0);
+        let scc1 = make_test_scc(a.dupe(), scc1_state, a.dupe(), 0);
 
         // SCC2 has M0 as Fresh, M1 as InProgress
         let mut scc2_state = BTreeMap::new();
         scc2_state.insert(a.dupe(), NodeState::Fresh);
         scc2_state.insert(b.dupe(), NodeState::InProgress);
-        let scc2 = make_test_scc(vec![a.dupe()], scc2_state, a.dupe(), 0);
+        let scc2 = make_test_scc(a.dupe(), scc2_state, a.dupe(), 0);
 
         let merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
 
@@ -3765,19 +3800,9 @@ mod scc_tests {
         let b = CalcId::for_test("m", 1);
         let c = CalcId::for_test("m", 2);
         // SCC1 detected at M1
-        let scc1 = make_test_scc(
-            vec![a.dupe()],
-            fresh_nodes(&[a.dupe(), b.dupe()]),
-            b.dupe(),
-            0,
-        );
+        let scc1 = make_test_scc(a.dupe(), fresh_nodes(&[a.dupe(), b.dupe()]), b.dupe(), 0);
         // SCC2 detected at M2
-        let scc2 = make_test_scc(
-            vec![a.dupe()],
-            fresh_nodes(&[a.dupe(), c.dupe()]),
-            c.dupe(),
-            0,
-        );
+        let scc2 = make_test_scc(a.dupe(), fresh_nodes(&[a.dupe(), c.dupe()]), c.dupe(), 0);
         // When merging with M0 as the new detected_at, should keep M0 (smallest)
         let merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
         assert_eq!(merged.detected_at, a);
@@ -3790,14 +3815,9 @@ mod scc_tests {
         let c = CalcId::for_test("m", 2);
 
         // SCC1 with anchor_pos = 5
-        let scc1 = make_test_scc(
-            vec![a.dupe()],
-            fresh_nodes(&[a.dupe(), b.dupe()]),
-            a.dupe(),
-            5,
-        );
+        let scc1 = make_test_scc(a.dupe(), fresh_nodes(&[a.dupe(), b.dupe()]), a.dupe(), 5);
         // SCC2 with anchor_pos = 2
-        let scc2 = make_test_scc(vec![c.dupe()], fresh_nodes(&[c.dupe()]), c.dupe(), 2);
+        let scc2 = make_test_scc(c.dupe(), fresh_nodes(&[c.dupe()]), c.dupe(), 2);
 
         let merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
 
@@ -3872,7 +3892,7 @@ mod scc_tests {
             .into_iter()
             .collect();
             Scc {
-                break_at: [a.dupe()].into_iter().collect(),
+                break_at: a.dupe(),
                 node_state,
                 detected_at: a.dupe(),
                 anchor_pos: 0,
@@ -3900,7 +3920,7 @@ mod scc_tests {
             .into_iter()
             .collect();
             Scc {
-                break_at: [d.dupe()].into_iter().collect(),
+                break_at: d.dupe(),
                 node_state,
                 detected_at: d.dupe(),
                 anchor_pos: 3,
@@ -4056,7 +4076,7 @@ mod scc_tests {
             .into_iter()
             .collect();
             Scc {
-                break_at: [a.dupe()].into_iter().collect(),
+                break_at: a.dupe(),
                 node_state,
                 detected_at: a.dupe(),
                 anchor_pos: 0,
@@ -4084,7 +4104,7 @@ mod scc_tests {
             .into_iter()
             .collect();
             Scc {
-                break_at: [d.dupe()].into_iter().collect(),
+                break_at: d.dupe(),
                 node_state,
                 detected_at: d.dupe(),
                 anchor_pos: 3,
