@@ -1371,6 +1371,27 @@ impl CalcStack {
             iter_state.demoted = demoted;
         }
     }
+
+    /// Removes a CalcId from the top SCC's `iterative.node_states`.
+    ///
+    /// Used when `drive_member` was a no-op (e.g., the target module's
+    /// Answers were evicted by another thread). Removing the member from
+    /// iteration state prevents `next_fresh_member` from returning it
+    /// again, breaking what would otherwise be an infinite loop.
+    ///
+    /// The member remains in `node_state` (legacy SCC membership). If a
+    /// merge or iteration restart rebuilds `iterative.node_states` from
+    /// `node_state.keys()`, the member is re-added as Fresh and
+    /// re-detected on the next drive loop (which is harmless — the
+    /// eviction is persistent, so the member is immediately removed again).
+    fn remove_from_iteration_state(&self, calc_id: &CalcId) {
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        if let Some(scc) = scc_stack.last_mut()
+            && let Some(ref mut iter_state) = scc.iterative
+        {
+            iter_state.node_states.remove(calc_id);
+        }
+    }
 }
 
 /// Tracks the state of a node within an active SCC.
@@ -2797,6 +2818,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn drive_all_iteration_members(&self) {
         while let Some(id) = self.stack().next_fresh_member() {
             self.drive_member(&id);
+            // If the member is still Fresh after driving, the drive was a
+            // no-op. This happens when solve_idx_erased encounters an
+            // Evicted module (another thread ran Solutions and freed
+            // Answers). The member's answer is already committed globally,
+            // so remove it from iteration state to prevent infinite looping.
+            if matches!(
+                self.stack().get_iteration_node_state(&id),
+                Some(IterationNodeStateKind::Fresh)
+            ) {
+                self.stack().remove_from_iteration_state(&id);
+            }
         }
         // If a merge happened during this drive loop, defer the demotion:
         // set the demoted flag so iterative_resolve_scc will restart the
