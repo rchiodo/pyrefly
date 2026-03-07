@@ -473,7 +473,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> OverloadType {
         let q = Quantified::type_var(
             Name::new("_T"),
-            self.uniques,
+            self.uniques.fresh(),
             None,
             Restriction::Unrestricted,
             PreInferenceVariance::Invariant,

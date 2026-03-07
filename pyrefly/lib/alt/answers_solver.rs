@@ -2206,13 +2206,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .or_insert_with(|| match kind {
                 QuantifiedKind::TypeVar => Quantified::type_var(
                     name,
-                    self.uniques,
+                    self.uniques.fresh(),
                     None,
                     Restriction::Unrestricted,
                     PreInferenceVariance::Invariant,
                 ),
                 QuantifiedKind::TypeVarTuple => {
-                    Quantified::type_var_tuple(name, self.uniques, None)
+                    Quantified::type_var_tuple(name, self.uniques.fresh(), None)
                 }
                 QuantifiedKind::ParamSpec => {
                     unreachable!("jaxtyping dimensions cannot be ParamSpec")
