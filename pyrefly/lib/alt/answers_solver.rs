@@ -2468,10 +2468,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
     ) -> bool {
-        let CalcId(ref bindings, ref any_idx) = calc_id;
-        if bindings.module().name() == self.bindings().module().name()
-            && bindings.module().path() == self.bindings().module().path()
-        {
+        let CalcId(_, ref any_idx) = calc_id;
+        if self.is_same_module(&calc_id) {
             dispatch_anyidx!(any_idx, self, write_unlock_same_module, answer, errors)
         } else {
             self.answers.write_unlock_in_module(calc_id, answer, errors)
@@ -2572,13 +2570,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Phase 2: Write answers to locked cells. Cells that weren't locked
         // are already Calculated (write_lock returned false), so writing
         // would be a no-op — skip them.
-        let mut locked_members = Vec::with_capacity(guard.locked.len());
-        for calc_id in &guard.locked {
-            locked_members.push(calc_id.dupe());
-        }
         let mut did_write_any = false;
         for (calc_id, answer, errors) in members {
-            if locked_members.contains(&calc_id) {
+            if guard.locked.contains(&calc_id) {
                 did_write_any |= self.write_unlock_single(calc_id, answer, errors);
             }
         }
@@ -2722,17 +2716,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Drive all fresh members until none remain.
             self.drive_all_iteration_members();
 
-            // Nested absorption guard: if a nested iteration driver absorbed
-            // and committed our SCC (via membership back-edge merge), the
-            // scc_stack is now empty. All members have been committed by the
-            // nested driver, so there is nothing left for us to do.
-            //
-            // TODO(stroxler): Is this actually necessary? It is harmless, but seems
-            // a bit defensive - I was expecting Pyrefly to always merge into the
-            // topmost Scc which would mean this isn't reachable. Investigate
-            // at some point once we've removed cycle-breaking code; as of
-            // this being added things are confusing and I don't want to remove
-            // a harmless defensive programming hook.
+            // Defensive guard: if the SCC stack is empty here, another driver
+            // (via nested absorption) has already committed all members.
+            // We investigated this path during cleanup but could not confirm
+            // it is unreachable, so we keep the defensive return rather than
+            // asserting.
             if self.stack().sccs_is_empty() {
                 return;
             }
