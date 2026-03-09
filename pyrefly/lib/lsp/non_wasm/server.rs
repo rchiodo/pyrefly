@@ -20,6 +20,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use std::time::Instant;
 
 use crossbeam_channel::Receiver;
@@ -248,6 +249,7 @@ use crate::lsp::non_wasm::call_hierarchy::transform_incoming_calls;
 use crate::lsp::non_wasm::call_hierarchy::transform_outgoing_calls;
 use crate::lsp::non_wasm::convert_module_package::convert_module_package_code_actions;
 use crate::lsp::non_wasm::external_references::ExternalReferences;
+use crate::lsp::non_wasm::external_references::compute_qualified_name;
 use crate::lsp::non_wasm::lsp::apply_change_events;
 use crate::lsp::non_wasm::lsp::as_notification;
 use crate::lsp::non_wasm::lsp::as_request;
@@ -810,7 +812,6 @@ pub struct Server {
     /// Accumulated file watcher events waiting to be processed as a batch.
     pending_watched_file_changes: Mutex<Vec<FileEvent>>,
     /// An external source which may be included to assist in finding global references
-    #[expect(dead_code)]
     external_references: Arc<dyn ExternalReferences>,
     /// The time at which the server was started, for telemetry.
     server_start_time: Instant,
@@ -4282,7 +4283,7 @@ impl Server {
 
     /// Compute references of a symbol at a given position using the standard find_global_references_from_definition
     /// strategy. This is a convenience wrapper around async_find_from_definition_helper that handles
-    /// the common case of finding references.
+    /// the common case of finding references, including external references.
     fn async_find_references_helper<'a, V: serde::Serialize>(
         &'a self,
         request_id: RequestId,
@@ -4294,6 +4295,9 @@ impl Server {
         map_result: impl FnOnce(Vec<(Url, Vec<Range>)>) -> V + Send + Sync + 'static,
     ) {
         let path_remapper = self.path_remapper.clone();
+        let external_references = self.external_references.clone();
+        let source_uri = uri.clone();
+
         self.async_find_from_definition_helper(
             request_id,
             transaction,
@@ -4305,6 +4309,9 @@ impl Server {
                 ..Default::default()
             },
             move |transaction, handle, definition| {
+                let qualified_name =
+                    compute_qualified_name(transaction.as_ref(), handle, &definition);
+
                 let FindDefinitionItemWithDocstring {
                     metadata,
                     definition_range,
@@ -4312,22 +4319,59 @@ impl Server {
                     docstring_range: _,
                     ..
                 } = definition;
-                transaction.find_global_references_from_definition(
+
+                // Spawn external reference query on a separate thread so it runs
+                // concurrently with the local reference search.
+                // Only spawn if we have a qualified name to avoid unnecessary thread creation.
+                let external_references_handle = qualified_name.map(|qname| {
+                    std::thread::spawn({
+                        let external_references = external_references.clone();
+                        let source_uri = source_uri.clone();
+                        move || {
+                            external_references.find_references(
+                                &qname,
+                                &source_uri,
+                                Duration::from_secs(10),
+                                None,
+                            )
+                        }
+                    })
+                });
+
+                let local_results = transaction.find_global_references_from_definition(
                     handle.sys_info(),
                     metadata,
                     TextRangeWithModule::new(module, definition_range),
                     include_declaration,
-                )
+                )?;
+
+                let external_results = external_references_handle
+                    .map(|h| h.join().unwrap_or_default())
+                    .unwrap_or_default();
+
+                Ok((local_results, external_results))
             },
-            move |results: Vec<(ModuleInfo, Vec<TextRange>)>| {
-                // Transform ModuleInfo -> Url and TextRange -> Range
-                let mut locations = Vec::new();
-                for (info, ranges) in results {
+            move |results: (Vec<(ModuleInfo, Vec<TextRange>)>, Vec<(Url, Vec<Range>)>)| {
+                let (local_results, external_results) = results;
+
+                let mut locations: SmallMap<Url, Vec<Range>> = SmallMap::new();
+                for (info, ranges) in local_results {
                     if let Some(uri) = module_info_to_uri(&info, path_remapper.as_ref()) {
-                        locations.push((uri, ranges.into_map(|range| info.to_lsp_range(range))));
-                    };
+                        let lsp_ranges = ranges.into_map(|range| info.to_lsp_range(range));
+                        locations.entry(uri).or_default().extend(lsp_ranges);
+                    }
                 }
-                map_result(locations)
+
+                for (ext_url, ext_ranges) in external_results {
+                    let entry = locations.entry(ext_url).or_default();
+                    for r in ext_ranges {
+                        if !entry.contains(&r) {
+                            entry.push(r);
+                        }
+                    }
+                }
+
+                map_result(locations.into_iter().collect())
             },
         )
     }
