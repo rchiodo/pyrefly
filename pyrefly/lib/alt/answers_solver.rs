@@ -1882,9 +1882,9 @@ impl ThreadState {
 }
 
 /// Maximum number of fixpoint iterations before the iterative SCC solver
-/// gives up and commits the last answers. Exceeding this threshold logs a
-/// warning but does not panic, since the answers may still be approximately
-/// correct.
+/// gives up and commits the last answers. Exceeding this threshold produces
+/// a type error but accepts the result as-is, since the answer will usually
+/// still be approximately correct.
 const MAX_ITERATIONS: u32 = 5;
 
 /// Maximum number of demotion restarts (SCC membership expansions) before
