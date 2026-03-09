@@ -1494,11 +1494,12 @@ impl GleanState<'_> {
                 decl_infos.append(&mut imp_decl_infos);
             }
             Stmt::For(stmt_for) => {
+                let range = TextRange::new(stmt_for.range().start(), stmt_for.iter.range().end());
+                let info = AssignInfo {
+                    range,
+                    annotation: None,
+                };
                 stmt_for.target.visit(&mut |target| {
-                    let info = AssignInfo {
-                        range: target.range(),
-                        annotation: None,
-                    };
                     self.variable_facts(target, &info, context, next, &mut decl_infos)
                 });
                 self.visit_exprs(&stmt_for.iter, container);
