@@ -10,5 +10,6 @@
 pub mod get_python_search_paths;
 pub mod get_snapshot;
 pub mod get_supported_protocol_version;
+pub mod get_type_queries;
 pub mod object_model;
 pub mod resolve_import;

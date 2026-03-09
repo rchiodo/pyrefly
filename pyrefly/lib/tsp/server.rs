@@ -16,6 +16,7 @@ use pyrefly_util::telemetry::Telemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
 use pyrefly_util::telemetry::TelemetryEventKind;
 use tracing::info;
+use tsp_types::GetTypeParams;
 use tsp_types::TSPRequests;
 
 use crate::commands::lsp::IndexingMode;
@@ -133,15 +134,52 @@ impl<T: TspInterface> TspServer<T> {
                 self.handle_get_python_search_paths(request.id.clone(), params);
                 Ok(true)
             }
-            _ => {
-                // Recognized TSP method but not yet implemented — return MethodNotFound
-                self.inner.send_response(Response::new_err(
-                    request.id.clone(),
-                    lsp_server::ErrorCode::MethodNotFound as i32,
-                    format!("TSP method not implemented: {}", request.method),
-                ));
+            TSPRequests::GetDeclaredTypeRequest { params, .. } => {
+                self.dispatch_get_type_request(request.id.clone(), params, |s, p| {
+                    s.handle_get_declared_type(p)
+                });
                 Ok(true)
             }
+            TSPRequests::GetComputedTypeRequest { params, .. } => {
+                self.dispatch_get_type_request(request.id.clone(), params, |s, p| {
+                    s.handle_get_computed_type(p)
+                });
+                Ok(true)
+            }
+            TSPRequests::GetExpectedTypeRequest { params, .. } => {
+                self.dispatch_get_type_request(request.id.clone(), params, |s, p| {
+                    s.handle_get_expected_type(p)
+                });
+                Ok(true)
+            }
+        }
+    }
+
+    /// Deserialize `serde_json::Value` params into [`GetTypeParams`], call the
+    /// handler, and send the response. Shared by getDeclaredType,
+    /// getComputedType, and getExpectedType.
+    fn dispatch_get_type_request(
+        &self,
+        id: RequestId,
+        raw_params: serde_json::Value,
+        handler: impl FnOnce(
+            &Self,
+            GetTypeParams,
+        ) -> Result<Option<tsp_types::Type>, lsp_server::ResponseError>,
+    ) {
+        let params: GetTypeParams = match serde_json::from_value(raw_params) {
+            Ok(p) => p,
+            Err(e) => {
+                self.send_err(
+                    id,
+                    crate::tsp::validation::invalid_params_error(&e.to_string()),
+                );
+                return;
+            }
+        };
+        match handler(self, params) {
+            Ok(result) => self.send_ok(id, result),
+            Err(err) => self.send_err(id, err),
         }
     }
 }

@@ -173,6 +173,48 @@ impl TestTspServer {
         }));
     }
 
+    /// Send a `typeServer/getDeclaredType` request with a Node arg.
+    pub fn get_declared_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        self.send_get_type_request("typeServer/getDeclaredType", uri, line, character, snapshot);
+    }
+
+    /// Send a `typeServer/getComputedType` request with a Node arg.
+    pub fn get_computed_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        self.send_get_type_request("typeServer/getComputedType", uri, line, character, snapshot);
+    }
+
+    /// Send a `typeServer/getExpectedType` request with a Node arg.
+    pub fn get_expected_type(&mut self, uri: &str, line: u32, character: u32, snapshot: i32) {
+        self.send_get_type_request("typeServer/getExpectedType", uri, line, character, snapshot);
+    }
+
+    /// Shared helper for getDeclaredType/getComputedType/getExpectedType.
+    fn send_get_type_request(
+        &mut self,
+        method: &str,
+        uri: &str,
+        line: u32,
+        character: u32,
+        snapshot: i32,
+    ) {
+        let id = self.next_request_id();
+        self.send_message(Message::Request(Request {
+            id,
+            method: method.to_owned(),
+            params: serde_json::json!({
+                "arg": {
+                    "uri": uri,
+                    "range": {
+                        "start": { "line": line, "character": character },
+                        "end": { "line": line, "character": character },
+                    },
+                },
+                "snapshot": snapshot,
+            }),
+            activity_key: None,
+        }));
+    }
+
     pub fn did_open(&self, file: &'static str) {
         let path = self.get_root_or_panic().join(file);
         self.send_message(Message::Notification(Notification {
