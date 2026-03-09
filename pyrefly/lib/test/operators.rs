@@ -806,3 +806,28 @@ def test(x, y):
     f(z)
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/972
+testcase!(
+    test_int_pow_inference,
+    r#"
+from typing import assert_type, Any
+
+# Typeshed covers __pow__ for Literal[1..25] (-> int) and
+# Literal[-1..-25] (-> float).
+assert_type(2 ** 25, int)
+assert_type(2 ** -25, float)
+
+# For exponents outside the typeshed range, we special-case int ** int:
+# positive exponent -> int, negative exponent -> float.
+assert_type(2 ** 26, int)
+assert_type(2 ** 100, int)
+assert_type((-2) ** 26, int)
+assert_type(2 ** -26, float)
+assert_type(2 ** -100, float)
+
+# When the exponent sign is unknown, fall back to Any like typeshed.
+def f(x: int, y: int) -> None:
+    assert_type(x ** y, Any)
+"#,
+);

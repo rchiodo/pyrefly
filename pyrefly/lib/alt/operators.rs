@@ -10,6 +10,7 @@ use pyrefly_python::ast::Ast;
 use pyrefly_python::dunder;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::dimension::canonicalize;
+use pyrefly_types::lit_int::LitInt;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::QuantifiedKind;
@@ -388,6 +389,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.broadcast_tensor_binop(l_tensor, r_tensor, x.range, errors)
                 } else if let Some(result) = self.try_symint_binop(x.op, lhs, rhs) {
                     result
+                } else if x.op == Operator::Pow
+                    && self.is_subset_eq(lhs, &self.heap.mk_class_type(self.stdlib.int().clone()))
+                    && self.is_subset_eq(rhs, &self.heap.mk_class_type(self.stdlib.int().clone()))
+                {
+                    match rhs {
+                        // Special case int ** int
+                        // if the exponent is a positive int, return int
+                        // if the exponent is a negative int, retturn float
+                        // if the exponent is unknown, call the `__pow__` method like normal
+                        Type::Literal(box Literal {
+                            value: Lit::Int(n), ..
+                        }) => {
+                            if *n < LitInt::new(0) {
+                                self.heap.mk_class_type(self.stdlib.float().clone())
+                            } else {
+                                self.heap.mk_class_type(self.stdlib.int().clone())
+                            }
+                        }
+                        _ => {
+                            let context = || {
+                                ErrorContext::BinaryOp(
+                                    x.op.as_str().to_owned(),
+                                    self.for_display(lhs.clone()),
+                                    self.for_display(rhs.clone()),
+                                )
+                            };
+                            let calls = [
+                                (&Name::new_static(x.op.dunder()), lhs, rhs),
+                                (&Name::new_static(x.op.reflected_dunder()), rhs, lhs),
+                            ];
+                            self.try_binop_calls(&calls, x.range, errors, &context)
+                        }
+                    }
                 } else {
                     binop_call(x.op, lhs, rhs, x.range)
                 }
