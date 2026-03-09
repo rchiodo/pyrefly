@@ -755,6 +755,46 @@ class C3(Z): pass  # Should work - legacy implicit type alias
 );
 
 testcase!(
+    test_annotated_type_alias_base_class,
+    r#"
+from typing import Annotated, TypeAlias, TypeVar
+
+T = TypeVar("T")
+
+# Legacy explicit type alias using Annotated
+Ignore: TypeAlias = Annotated[T, "Ignore"]
+
+class A: ...
+class B(Ignore[A]): ...
+class C: ...  # unrelated class
+
+def test(o: A) -> None: ...
+test(B())  # should pass: B inherits from A
+
+def test2(o: C) -> None: ...
+test2(B())  # E: Argument `B` is not assignable to parameter `o` with type `C`
+
+# Legacy implicit type alias using Annotated
+Wrapper = Annotated[T, "Wrapper"]
+
+class D: ...
+class E(Wrapper[D]): ...
+
+def test3(o: D) -> None: ...
+test3(E())  # should pass: E inherits from D
+
+def test4(o: C) -> None: ...
+test4(E())  # E: Argument `E` is not assignable to parameter `o` with type `C`
+
+# PEP 695 type alias using Annotated
+type Tagged[S] = Annotated[S, "Tagged"]
+
+class F: ...
+class G(Tagged[F]): ...  # E: Cannot use scoped type alias `Tagged` as a base class
+    "#,
+);
+
+testcase!(
     test_string_annotations,
     r#"
 from typing import Annotated, Callable, Dict, List, Tuple, Type

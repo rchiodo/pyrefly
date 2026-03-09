@@ -936,12 +936,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // ```
                 // In this case, we can be sure that `Foo[B]` would be the same as `B`, so we inspect the subscript.
                 // This does create a potential cycle (e.g. `class A(Foo["A"])`), but not supporting it ended up breaking some important use cases.
+                // The alias body is `type[T]` for bare aliases and `Annotated[T]` for Annotated aliases;
+                // we must handle both.
                 match &ty {
                     Type::Forall(forall)
                         if forall.tparams.len() == 1
                             && let Forallable::TypeAlias(type_alias) = &forall.body
-                            && let Type::Type(box Type::Quantified(quantified)) =
-                                self.get_type_alias(type_alias).as_type()
+                            && let quantified = match self.get_type_alias(type_alias).as_type() {
+                                Type::Type(box Type::Quantified(q))
+                                | Type::Annotated(box Type::Quantified(q)) => Some(q),
+                                _ => None,
+                            }
+                            && let Some(quantified) = quantified
                             && quantified.kind() == QuantifiedKind::TypeVar
                             && matches!(quantified.restriction(), Restriction::Unrestricted)
                             && let Some(tparam) = forall.tparams.as_vec().first()
