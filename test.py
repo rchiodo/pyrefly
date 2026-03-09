@@ -214,7 +214,7 @@ class BuckExecutor(Executor):
             ],
             capture_output=True,
         )
-        tests = [line.strip() for line in res.stdout.splitlines()] + ["test:"]
+        tests = [line.strip() for line in res.stdout.splitlines()] + ["test/..."]
         run(
             ["buck2", "test"]
             + tests
