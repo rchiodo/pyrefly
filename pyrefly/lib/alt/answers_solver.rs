@@ -2690,12 +2690,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         loop {
             if iteration > MAX_ITERATIONS {
-                tracing::warn!(
-                    "iterative_resolve_scc: SCC {} exceeded {} iterations; \
-                     committing last answers",
-                    scc_identity,
-                    MAX_ITERATIONS,
-                );
                 exceeded_max_iterations = true;
                 break;
             }
