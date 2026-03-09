@@ -320,6 +320,7 @@ pub struct SubTaskTelemetry<'a> {
     server_state: TelemetryServerState,
     queue_name: QueueName,
     task_id: Option<usize>,
+    activity_key: Option<ActivityKey>,
 }
 
 impl<'a> SubTaskTelemetry<'a> {
@@ -328,23 +329,27 @@ impl<'a> SubTaskTelemetry<'a> {
         server_state: TelemetryServerState,
         queue_name: QueueName,
         task_id: Option<usize>,
+        activity_key: Option<ActivityKey>,
     ) -> Self {
         Self {
             telemetry,
             server_state,
             queue_name,
             task_id,
+            activity_key,
         }
     }
 
     pub fn new_task(&self, kind: TelemetryEventKind, start: Instant) -> TelemetryEvent {
-        TelemetryEvent::new_task(
+        let mut event = TelemetryEvent::new_task(
             kind,
             self.server_state.clone(),
             self.queue_name,
             self.task_id,
             start,
-        )
+        );
+        event.set_activity_key(self.activity_key.clone());
+        event
     }
 
     pub fn finish_task(&self, telemetry_event: TelemetryEvent, error: Option<&Error>) {

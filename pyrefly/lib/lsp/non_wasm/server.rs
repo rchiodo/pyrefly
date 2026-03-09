@@ -3060,8 +3060,13 @@ impl Server {
                     .or_default()
                     .insert(handle.path().dupe());
             }
-            let task_telemetry =
-                SubTaskTelemetry::new(telemetry, server.telemetry_state(), queue_name, task_id);
+            let task_telemetry = SubTaskTelemetry::new(
+                telemetry,
+                server.telemetry_state(),
+                queue_name,
+                task_id,
+                telemetry_event.activity_key.clone(),
+            );
             let (new_invalidated_source_dbs, rebuild_stats) =
                 ConfigFile::query_source_db(&configs_to_paths, force, Some(task_telemetry));
             telemetry_event.set_sourcedb_rebuild_stats(rebuild_stats);
@@ -3797,7 +3802,7 @@ impl Server {
                 import_behavior: ImportBehavior::StopAtRenamedImports,
                 ..Default::default()
             },
-            move |transaction, handle, definition| {
+            move |transaction, handle, definition, _telemetry, _activity_key| {
                 let FindDefinitionItemWithDocstring {
                     metadata: _,
                     definition_range,
@@ -4228,6 +4233,8 @@ impl Server {
             &mut CancellableTransaction,
             &Handle,
             FindDefinitionItemWithDocstring,
+            &dyn Telemetry,
+            Option<ActivityKey>,
         ) -> Result<T, Cancelled>
         + Send
         + Sync
@@ -4248,7 +4255,7 @@ impl Server {
         };
         self.find_reference_queue.queue_task(
             TelemetryEventKind::FindFromDefinition,
-            Box::new(move |server, _telemetry, telemetry_event, _, _| {
+            Box::new(move |server, telemetry, telemetry_event, _, _| {
                 let mut transaction = server.state.cancellable_transaction();
                 server
                     .cancellation_handles
@@ -4259,7 +4266,13 @@ impl Server {
                     telemetry_event,
                     None,
                 );
-                match find_fn(&mut transaction, &handle, definition) {
+                match find_fn(
+                    &mut transaction,
+                    &handle,
+                    definition,
+                    telemetry,
+                    telemetry_event.activity_key.clone(),
+                ) {
                     Ok(results) => {
                         server.cancellation_handles.lock().remove(&request_id);
                         server.connection.send(Message::Response(new_response(
@@ -4297,6 +4310,7 @@ impl Server {
         let path_remapper = self.path_remapper.clone();
         let external_references = self.external_references.clone();
         let source_uri = uri.clone();
+        let server_state = self.telemetry_state();
 
         self.async_find_from_definition_helper(
             request_id,
@@ -4308,7 +4322,7 @@ impl Server {
                 import_behavior: ImportBehavior::StopAtRenamedImports,
                 ..Default::default()
             },
-            move |transaction, handle, definition| {
+            move |transaction, handle, definition, telemetry, activity_key| {
                 let qualified_name =
                     compute_qualified_name(transaction.as_ref(), handle, &definition);
 
@@ -4320,36 +4334,43 @@ impl Server {
                     ..
                 } = definition;
 
-                // Spawn external reference query on a separate thread so it runs
-                // concurrently with the local reference search.
-                // Only spawn if we have a qualified name to avoid unnecessary thread creation.
-                let external_references_handle = qualified_name.map(|qname| {
-                    std::thread::spawn({
-                        let external_references = external_references.clone();
-                        let source_uri = source_uri.clone();
-                        move || {
+                let sub_task_telemetry = SubTaskTelemetry::new(
+                    telemetry,
+                    server_state,
+                    QueueName::FindReferenceQueue,
+                    None,
+                    activity_key,
+                );
+
+                // Use std::thread::scope so we can borrow sub_task_telemetry.
+                // Only spawn external references thread if we have a qualified name
+                // to avoid unnecessary thread creation.
+                let (local_results, external_results) = std::thread::scope(|s| {
+                    let ext_handle = qualified_name.as_ref().map(|qname| {
+                        s.spawn(|| {
                             external_references.find_references(
-                                &qname,
+                                qname,
                                 &source_uri,
                                 Duration::from_secs(10),
-                                None,
+                                Some(sub_task_telemetry),
                             )
-                        }
-                    })
+                        })
+                    });
+
+                    let local_results = transaction.find_global_references_from_definition(
+                        handle.sys_info(),
+                        metadata,
+                        TextRangeWithModule::new(module, definition_range),
+                        include_declaration,
+                    );
+
+                    let external_results = ext_handle
+                        .map(|h| h.join().unwrap_or_default())
+                        .unwrap_or_default();
+                    (local_results, external_results)
                 });
 
-                let local_results = transaction.find_global_references_from_definition(
-                    handle.sys_info(),
-                    metadata,
-                    TextRangeWithModule::new(module, definition_range),
-                    include_declaration,
-                )?;
-
-                let external_results = external_references_handle
-                    .map(|h| h.join().unwrap_or_default())
-                    .unwrap_or_default();
-
-                Ok((local_results, external_results))
+                Ok((local_results?, external_results))
             },
             move |results: (Vec<(ModuleInfo, Vec<TextRange>)>, Vec<(Url, Vec<Range>)>)| {
                 let (local_results, external_results) = results;
@@ -5173,7 +5194,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
-            |transaction, handle, definition| {
+            |transaction, handle, definition, _telemetry, _activity_key| {
                 let target_def =
                     TextRangeWithModule::new(definition.module.dupe(), definition.definition_range);
 
@@ -5219,7 +5240,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
-            move |transaction, handle, definition| {
+            move |transaction, handle, definition, _telemetry, _activity_key| {
                 // find_global_outgoing_calls_from_function_definition expects a position
                 let position = definition.definition_range.start();
 
@@ -5479,7 +5500,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
-            move |transaction, handle, definition| {
+            move |transaction, handle, definition, _telemetry, _activity_key| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
@@ -5534,7 +5555,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
-            move |transaction, handle, definition| {
+            move |transaction, handle, definition, _telemetry, _activity_key| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
