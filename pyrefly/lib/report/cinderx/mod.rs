@@ -26,7 +26,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::class::Class;
@@ -191,30 +190,30 @@ fn has_protocol_ancestor(
 
 /// Write a CinderX type report to `output_dir`.
 ///
+/// Reports on all modules in the transaction (project files and dependencies
+/// alike), not just the explicitly-checked project modules. This gives the
+/// static compiler a complete view of the type information across the entire
+/// dependency graph.
+///
 /// Writes:
 /// - `index.json` listing every module
 /// - `types/<module>.json` for each module with type table + located types
 /// - `class_metadata.json` with global class metadata (MRO + semantic tags)
-pub fn write_results(
-    output_dir: &Path,
-    transaction: &Transaction,
-    handles: &[Handle],
-) -> anyhow::Result<()> {
+pub fn write_results(output_dir: &Path, transaction: &Transaction) -> anyhow::Result<()> {
     fs_anyhow::create_dir_all(output_dir)?;
     let types_dir = output_dir.join("types");
     fs_anyhow::create_dir_all(&types_dir)?;
 
-    let mut modules = Vec::with_capacity(handles.len());
+    let all_handles = transaction.handles();
+    let mut modules = Vec::with_capacity(all_handles.len());
     let mut all_classes: Vec<Class> = Vec::new();
 
-    for handle in handles {
-        let data = collect_module_types(transaction, handle).ok_or_else(|| {
-            anyhow!(
-                "missing module type data for {} ({})",
-                handle.module(),
-                handle.path().as_path().display()
-            )
-        })?;
+    for handle in &all_handles {
+        // Some modules (e.g. namespace packages) may not have full type data;
+        // skip them rather than failing the entire report.
+        let Some(data) = collect_module_types(transaction, handle) else {
+            continue;
+        };
 
         modules.push(ModuleEntry {
             module_name: handle.module().to_string(),

@@ -983,7 +983,7 @@ impl CheckArgs {
             report::pysa::write_results(pysa_directory, transaction, handles, &shown_errors)?;
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
-            report::cinderx::write_results(cinderx_directory, transaction, handles)?;
+            report::cinderx::write_results(cinderx_directory, transaction)?;
         }
         if let Some(path) = &self.output.report_binding_memory {
             fs_anyhow::write(path, report::binding_memory::binding_memory(transaction))?;
