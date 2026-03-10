@@ -26,7 +26,6 @@ use crate::alt::answers::Answers;
 use crate::binding::binding::Key;
 use crate::binding::bindings::Bindings;
 use crate::module::module_info::ModuleInfo;
-use crate::query::python_ast_range_for_expr;
 use crate::report::cinderx::convert::type_to_structured;
 use crate::report::cinderx::types::LocatedType;
 use crate::report::cinderx::types::TypeTable;
@@ -138,7 +137,9 @@ fn walk_expressions(
     ) {
         if let Some(ty) = lookup_type(x, answers, bindings) {
             let range = x.range();
-            let location = python_ast_range_for_expr(module_info, range, x, parent);
+            let location = module_info
+                .lined_buffer()
+                .python_ast_range_for_expr(range, x, parent);
             let type_index = type_to_structured(&ty, table, pending_class_traits);
             locations.push(LocatedType {
                 location,

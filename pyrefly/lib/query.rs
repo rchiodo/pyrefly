@@ -67,7 +67,6 @@ use ruff_source_file::SourceLocation;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
-use serde::Serialize;
 use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
 
@@ -161,87 +160,21 @@ pub struct Attribute {
     pub is_final: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct PythonASTRange {
-    pub start_line: LineNumber,
-    pub start_col: u32,
-    pub end_line: LineNumber,
-    pub end_col: u32,
-}
+/// Re-export from `pyrefly_util::lined_buffer` for backwards compatibility.
+pub use pyrefly_util::lined_buffer::PythonASTRange;
 
-impl Serialize for PythonASTRange {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("PythonASTRange", 4)?;
-        state.serialize_field("start_line", &self.start_line.get())?;
-        state.serialize_field("start_col", &self.start_col)?;
-        state.serialize_field("end_line", &self.end_line.get())?;
-        state.serialize_field("end_col", &self.end_col)?;
-        state.end()
-    }
-}
-
-/// Convert a ruff `TextRange` for an expression into a `PythonASTRange`
-/// (1-indexed line/col pair matching Python's `ast` module conventions).
-///
-/// Generator expressions receive special handling to match the parenthesized
-/// range that CPython's `ast` module reports.
-///
-/// TODO(stroxler): Consider moving this to the `pyrefly_python` crate so it
-/// can be shared without depending on `query.rs`.
+/// Thin wrapper around `LinedBuffer::python_ast_range_for_expr` that accepts
+/// a `ModuleInfo` for convenience. Callers with direct access to a
+/// `LinedBuffer` can call the method directly.
 pub fn python_ast_range_for_expr(
     module_info: &ModuleInfo,
     original_range: TextRange,
     expr: &Expr,
     parent_expr: Option<&Expr>,
 ) -> PythonASTRange {
-    let expression_range = if let Expr::Generator(e) = expr {
-        // python AST module reports locations of all generator expressions as if they are parenthesized
-        // i.e any(any(a.b is not None for a in [l2]) for l2 in l1)
-        //        ^-will be col_offset for generator expression over l1
-        // ruff properly distinguishes between parenthesized and non-parenthesized expressions
-        // and points to the first character of the expression
-        // since queries are done based on Python AST for generator expression we will
-        // need to adjust start/end column offsets
-        if e.parenthesized {
-            original_range
-        } else if let Some(Expr::Call(p)) = parent_expr
-            && p.arguments.len() == 1
-            && p.arguments.inner_range().contains_range(original_range)
-        {
-            TextRange::new(
-                p.arguments.l_paren_range().start(),
-                p.arguments.r_paren_range().end(),
-            )
-        } else {
-            original_range
-                .sub_start(TextSize::new(1))
-                .add_end(TextSize::new(1))
-        }
-    } else {
-        original_range
-    };
-
-    let start_location = module_info.lined_buffer().line_index().source_location(
-        expression_range.start(),
-        module_info.lined_buffer().contents(),
-        ruff_source_file::PositionEncoding::Utf8,
-    );
-    let end_location = module_info.lined_buffer().line_index().source_location(
-        expression_range.end(),
-        module_info.lined_buffer().contents(),
-        ruff_source_file::PositionEncoding::Utf8,
-    );
-
-    PythonASTRange {
-        start_line: LineNumber::new(start_location.line.get() as u32).unwrap(),
-        start_col: start_location.character_offset.to_zero_indexed() as u32,
-        end_line: LineNumber::new(end_location.line.get() as u32).unwrap(),
-        end_col: end_location.character_offset.to_zero_indexed() as u32,
-    }
+    module_info
+        .lined_buffer()
+        .python_ast_range_for_expr(original_range, expr, parent_expr)
 }
 
 fn is_static_method(ty: &Type) -> bool {

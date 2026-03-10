@@ -18,10 +18,9 @@
 use std::collections::HashMap;
 use std::hash::Hasher;
 
+use pyrefly_util::lined_buffer::PythonASTRange;
 use serde::Serialize;
 use xxhash_rust::xxh64::Xxh64;
-
-use crate::query::PythonASTRange;
 
 // ---------------------------------------------------------------------------
 // StructuredType: the four kinds of type entries
