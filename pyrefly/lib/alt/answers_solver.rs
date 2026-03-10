@@ -328,12 +328,15 @@ impl CalcStack {
                     current,
                 );
             }
-            // The target is now in the top SCC's iteration state.
-            // Determine the appropriate action based on iteration state.
-            // After merge with demotion, the iteration state is fresh
-            // (iteration 1, all nodes Fresh, no previous answers), so the
-            // target will typically be Fresh. But we handle all cases for
-            // robustness.
+            // The target is in the top SCC's iteration state (not a cross-SCC
+            // back-edge). This path is an early-return that bypasses the
+            // iterative bypass below — we must increment segment_size here for
+            // the same reason the iterative bypass does (Contract P4): pop()
+            // will decrement segment_size for any node in node_state, so push
+            // must balance it with an increment.
+            if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
+                top_scc.segment_size += 1;
+            }
             if let Some(kind) = self.get_iteration_node_state(&current) {
                 return match kind {
                     IterationNodeStateKind::Fresh => {
@@ -485,7 +488,14 @@ impl CalcStack {
                     }
                 }
             }
-            SccState::BreakAt => BindingAction::Unwind,
+            SccState::BreakAt => {
+                // The break_at node is in node_state, so pop() will decrement
+                // segment_size for it. Increment here to keep the count symmetric
+                if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
+                    top_scc.segment_size += 1;
+                }
+                BindingAction::Unwind
+            }
             SccState::HasPlaceholder => {
                 // Read placeholder from SCC-local NodeState::HasPlaceholder.
                 // No need to touch the Calculation cell — placeholders are never
