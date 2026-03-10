@@ -54,13 +54,13 @@ fn test_simple_variable() {
         "expected at least one type table entry"
     );
 
-    // The type table should contain an `int` class entry
+    // The type table should contain a `builtins.int` class entry
     let has_int = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "int" && args.is_empty())
+        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.int" && args.is_empty())
     });
     assert!(
         has_int,
-        "expected `int` in the type table, got: {:#?}",
+        "expected `builtins.int` in the type table, got: {:#?}",
         data.entries
     );
 }
@@ -82,15 +82,14 @@ y = foo(42)
     let data = collect_module_types(&transaction, &handle).expect("should collect types");
 
     // Should have `int`, `str` class entries and a callable entry for `foo`
-    let has_str = data
-        .entries
-        .iter()
-        .any(|entry| matches!(&entry.ty, StructuredType::Class { qname, .. } if qname == "str"));
+    let has_str = data.entries.iter().any(
+        |entry| matches!(&entry.ty, StructuredType::Class { qname, .. } if qname == "builtins.str"),
+    );
     let has_callable = data
         .entries
         .iter()
         .any(|entry| matches!(&entry.ty, StructuredType::Callable { .. }));
-    assert!(has_str, "expected `str` in the type table");
+    assert!(has_str, "expected `builtins.str` in the type table");
     assert!(has_callable, "expected a Callable entry for `foo`");
 
     // Every location should reference a valid type table index
@@ -161,13 +160,13 @@ x: list[int] = [1, 2, 3]
 
     let data = collect_module_types(&transaction, &handle).expect("should collect types");
 
-    // Should have `typing.List` (canonicalized from `builtins.list`) with an `int` arg
+    // Should have `builtins.list` with an `builtins.int` arg
     let has_list = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "typing.List" && args.len() == 1)
+        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.list" && args.len() == 1)
     });
     assert!(
         has_list,
-        "expected `typing.List` with type arg in the type table, got: {:#?}",
+        "expected `builtins.list` with type arg in the type table, got: {:#?}",
         data.entries,
     );
 }
@@ -186,13 +185,13 @@ y: int = 2
 
     let data = collect_module_types(&transaction, &handle).expect("should collect types");
 
-    // `int` should appear only once in the type table despite being used twice
+    // `builtins.int` should appear only once in the type table despite being used twice
     let int_count = data.entries.iter().filter(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "int" && args.is_empty())
+        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.int" && args.is_empty())
     }).count();
     assert_eq!(
         int_count, 1,
-        "expected exactly one `int` entry (deduplication)"
+        "expected exactly one `builtins.int` entry (deduplication)"
     );
 }
 

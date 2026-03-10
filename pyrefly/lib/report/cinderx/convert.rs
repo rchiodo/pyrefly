@@ -30,19 +30,11 @@ use crate::report::cinderx::types::hash_variable;
 
 /// Canonicalize a fully qualified class name for the CinderX protocol.
 ///
-/// Collection types in `builtins` are remapped to their `typing` equivalents
-/// (e.g. `builtins.list` -> `typing.List`). Other `builtins.*` types have the
-/// prefix stripped (e.g. `builtins.int` -> `int`).
+/// Currently a pass-through: we use raw pyrefly qnames (e.g. `builtins.int`,
+/// `builtins.list`) rather than remapping to typing-module names. This
+/// function exists as a hook point for future canonicalization if needed.
 fn canonicalize_class_qname(raw: &str) -> String {
-    match raw {
-        "builtins.list" => "typing.List".to_owned(),
-        "builtins.dict" => "typing.Dict".to_owned(),
-        "builtins.tuple" => "typing.Tuple".to_owned(),
-        "builtins.set" => "typing.Set".to_owned(),
-        "builtins.frozenset" => "typing.FrozenSet".to_owned(),
-        _ if raw.starts_with("builtins.") => raw["builtins.".len()..].to_owned(),
-        _ => raw.to_owned(),
-    }
+    raw.to_owned()
 }
 
 /// Format a `QName` as a fully qualified dot-separated string
