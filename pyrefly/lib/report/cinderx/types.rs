@@ -60,8 +60,15 @@ pub enum StructuredType {
     OtherForm { qname: String, args: Vec<usize> },
     /// A method bound to a specific object instance.
     /// `self_type` is the receiver, `func_type` is the underlying callable.
+    /// `defining_class` is the fully qualified name of the class that defines
+    /// the method (for dispatch purposes).
     #[serde(rename = "bound_method")]
-    BoundMethod { self_type: usize, func_type: usize },
+    BoundMethod {
+        self_type: usize,
+        func_type: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        defining_class: Option<String>,
+    },
     /// Type variable with name and bounds.
     #[serde(rename = "variable")]
     Variable {
@@ -238,10 +245,17 @@ pub(crate) fn hash_other_form(qname: &str, arg_hashes: &[u64]) -> u64 {
 }
 
 /// Compute structural hash for a bound-method-kind type.
-pub(crate) fn hash_bound_method(self_hash: u64, func_hash: u64) -> u64 {
+pub(crate) fn hash_bound_method(
+    self_hash: u64,
+    func_hash: u64,
+    defining_class: Option<&str>,
+) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_BOUND_METHOD);
     h.write_u64(self_hash);
     h.write_u64(func_hash);
+    if let Some(dc) = defining_class {
+        h.write(dc.as_bytes());
+    }
     h.finish()
 }

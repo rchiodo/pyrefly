@@ -245,10 +245,19 @@ pub(crate) fn type_to_structured(
             let self_idx = type_to_structured(&bm.obj, table, pending_class_traits);
             let func_type = bm.func.clone().as_type();
             let func_idx = type_to_structured(&func_type, table, pending_class_traits);
-            let hash = hash_bound_method(table.hash_at(self_idx), table.hash_at(func_idx));
+            let defining_class = bm.func.metadata().kind.class().map(|cls| {
+                let raw = qname_to_full_string(cls.qname());
+                canonicalize_class_qname(&raw)
+            });
+            let hash = hash_bound_method(
+                table.hash_at(self_idx),
+                table.hash_at(func_idx),
+                defining_class.as_deref(),
+            );
             let sty = StructuredType::BoundMethod {
                 self_type: self_idx,
                 func_type: func_idx,
+                defining_class,
             };
             table.insert(sty, hash)
         }

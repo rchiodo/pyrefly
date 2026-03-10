@@ -381,3 +381,35 @@ y: Impl = Impl()
         "expected 'inherits_protocol' tag on Impl, got: {impl_tags:?}"
     );
 }
+
+#[test]
+fn test_bound_method_defining_class() {
+    let state = create_state(
+        "test",
+        r#"
+class MyClass:
+    def greet(self) -> str:
+        return "hello"
+
+obj = MyClass()
+result = obj.greet()
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Should have a BoundMethod entry with defining_class = "test.MyClass"
+    let has_bound_method = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::BoundMethod { defining_class: Some(dc), .. } if dc == "test.MyClass"
+        )
+    });
+    assert!(
+        has_bound_method,
+        "expected a BoundMethod with defining_class 'test.MyClass', got: {:#?}",
+        data.entries
+    );
+}
