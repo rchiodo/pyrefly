@@ -21,6 +21,7 @@ use pyrefly_util::display::Fmt;
 
 use crate::report::cinderx::types::StructuredType;
 use crate::report::cinderx::types::TypeTable;
+use crate::report::cinderx::types::hash_bound_method;
 use crate::report::cinderx::types::hash_callable;
 use crate::report::cinderx::types::hash_class;
 use crate::report::cinderx::types::hash_literal;
@@ -252,7 +253,12 @@ pub(crate) fn type_to_structured(
             let self_idx = type_to_structured(&bm.obj, table, pending_class_traits);
             let func_type = bm.func.clone().as_type();
             let func_idx = type_to_structured(&func_type, table, pending_class_traits);
-            insert_other_form_with_args("BoundMethod", vec![self_idx, func_idx], table)
+            let hash = hash_bound_method(table.hash_at(self_idx), table.hash_at(func_idx));
+            let sty = StructuredType::BoundMethod {
+                self_type: self_idx,
+                func_type: func_idx,
+            };
+            table.insert(sty, hash)
         }
         Type::TypeGuard(inner) => {
             let inner_idx = type_to_structured(inner, table, pending_class_traits);

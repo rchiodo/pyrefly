@@ -58,6 +58,10 @@ pub enum StructuredType {
     /// These do not have an MRO and are not real Python classes.
     #[serde(rename = "other_form")]
     OtherForm { qname: String, args: Vec<usize> },
+    /// A method bound to a specific object instance.
+    /// `self_type` is the receiver, `func_type` is the underlying callable.
+    #[serde(rename = "bound_method")]
+    BoundMethod { self_type: usize, func_type: usize },
     /// Type variable with name and bounds.
     #[serde(rename = "variable")]
     Variable {
@@ -172,6 +176,7 @@ const HASH_KIND_CALLABLE: u8 = 1;
 const HASH_KIND_VARIABLE: u8 = 2;
 const HASH_KIND_LITERAL: u8 = 3;
 const HASH_KIND_OTHER_FORM: u8 = 4;
+const HASH_KIND_BOUND_METHOD: u8 = 5;
 
 /// Compute structural hash for a class-kind type.
 ///
@@ -229,5 +234,14 @@ pub(crate) fn hash_other_form(qname: &str, arg_hashes: &[u64]) -> u64 {
     for &ah in arg_hashes {
         h.write_u64(ah);
     }
+    h.finish()
+}
+
+/// Compute structural hash for a bound-method-kind type.
+pub(crate) fn hash_bound_method(self_hash: u64, func_hash: u64) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_BOUND_METHOD);
+    h.write_u64(self_hash);
+    h.write_u64(func_hash);
     h.finish()
 }
