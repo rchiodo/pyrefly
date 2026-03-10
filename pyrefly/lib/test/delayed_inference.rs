@@ -489,5 +489,11 @@ def g(x: Any):
     y = f(x)
     y.append(1)
     assert_type(y, list[Any])
+
+# Make sure Any::Error behaves the same way as Any::Explicit
+def h(x: ThisIsANameError):  # E: Could not find name
+    y = f(x)
+    y.append(1)
+    assert_type(y, list[Any])
     "#,
 );

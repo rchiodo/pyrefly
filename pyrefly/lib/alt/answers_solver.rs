@@ -3171,15 +3171,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         tcc: &dyn Fn() -> TypeCheckContext,
     ) -> bool {
-        if got.is_error() {
-            true
-        } else {
-            match self.is_subset_eq_with_reason(got, want) {
-                Ok(()) => true,
-                Err(error) => {
-                    self.solver().error(got, want, errors, loc, tcc, error);
-                    false
-                }
+        match self.is_subset_eq_with_reason(got, want) {
+            Ok(()) => true,
+            Err(error) => {
+                self.solver().error(got, want, errors, loc, tcc, error);
+                false
             }
         }
     }
