@@ -4,7 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Compare pyrefly vs pyright on mypy_primer projects.
+"""Compare pyrefly, pyright, and mypy on mypy_primer projects.
 
 Two output modes:
   Error counts (default):  prints a summary table with error counts per project.
@@ -13,7 +13,8 @@ Two output modes:
 Local-only script. Two-phase usage:
 
   Prerequisites:
-    - A conda/venv environment with pyright installed: pip install pyright
+    - A conda/venv environment with pyright and mypy installed:
+      pip install pyright mypy
 
   Phase 1 — Clone projects (run outside conda, proxy works):
     python3 compare_typecheckers.py --clone-only --cache-dir /tmp/primer_cache
@@ -311,18 +312,66 @@ def parse_full_errors_pyright(stdout: str, repo_dir: str) -> list[dict[str, obje
     return errors
 
 
+def parse_error_count_mypy(output: str) -> int:
+    """Parse error count from mypy output.
+
+    Mypy summary line: 'Found 42 errors in 10 files (checked 50 source files)'
+    or: 'Success: no issues found in 50 source files'
+    """
+    for line in reversed(output.splitlines()):
+        if "no issues found" in line.lower():
+            return 0
+        m = re.search(r"Found\s+(\d+)\s+errors?", line)
+        if m:
+            return int(m.group(1))
+    return -1
+
+
+def parse_full_errors_mypy(output: str) -> list[dict[str, object]]:
+    """Parse mypy text output into structured error list.
+
+    Mypy outputs errors as:
+      file.py:10: error: Incompatible return type  [return-value]
+      file.py:20:5: error: Message  [code]
+
+    We only capture error/warning lines, not notes.
+    """
+    errors = []
+    pattern = re.compile(
+        r"^(.+?):(\d+)(?::(\d+))?: (error|warning): (.+?)(?:\s+\[(.+?)\])?\s*$"
+    )
+    for line in output.splitlines():
+        m = pattern.match(line)
+        if m:
+            errors.append(
+                {
+                    "file": m.group(1),
+                    "line": int(m.group(2)),
+                    "col": int(m.group(3)) if m.group(3) else 0,
+                    "kind": m.group(6) or "",
+                    "message": m.group(5),
+                    "severity": m.group(4),
+                }
+            )
+    return errors
+
+
 def generate_table(
     results: list[dict[str, object]], output_file: str | None, csv_file: str | None
 ) -> None:
     """Generate and print summary table, optionally write to file and CSV."""
     lines = []
-    header = f"{'Project':<35} {'Pyrefly Err':>12} {'Pyright Err':>12} {'Pyrefly (s)':>12} {'Pyright (s)':>12}"
-    separator = "-" * 87
+    header = (
+        f"{'Project':<35} {'Pyrefly Err':>12} {'Pyright Err':>12} {'Mypy Err':>12}"
+        f" {'Pyrefly (s)':>12} {'Pyright (s)':>12} {'Mypy (s)':>12}"
+    )
+    separator = "-" * 123
     lines.append(header)
     lines.append(separator)
     for r in results:
         lines.append(
-            f"{r['project']:<35} {r['pyrefly_errors']:>12} {r['pyright_errors']:>12} {r['pyrefly_time']:>12} {r['pyright_time']:>12}"
+            f"{r['project']:<35} {r['pyrefly_errors']:>12} {r['pyright_errors']:>12} {r['mypy_errors']:>12}"
+            f" {r['pyrefly_time']:>12} {r['pyright_time']:>12} {r['mypy_time']:>12}"
         )
 
     total_pyrefly = sum(
@@ -335,8 +384,15 @@ def generate_table(
         for r in results
         if isinstance(r["pyright_errors"], int) and r["pyright_errors"] >= 0
     )
+    total_mypy = sum(
+        r["mypy_errors"]
+        for r in results
+        if isinstance(r["mypy_errors"], int) and r["mypy_errors"] >= 0
+    )
     lines.append(separator)
-    lines.append(f"{'TOTAL':<35} {total_pyrefly:>12} {total_pyright:>12}")
+    lines.append(
+        f"{'TOTAL':<35} {total_pyrefly:>12} {total_pyright:>12} {total_mypy:>12}"
+    )
 
     table = "\n" + "\n".join(lines) + "\n"
     print(table)
@@ -354,8 +410,10 @@ def generate_table(
                     "project",
                     "pyrefly_errors",
                     "pyright_errors",
+                    "mypy_errors",
                     "pyrefly_time",
                     "pyright_time",
+                    "mypy_time",
                 ],
             )
             writer.writeheader()
@@ -378,7 +436,8 @@ def write_json_output(
           "name": "...",
           "url": "...",
           "pyrefly": {"errors": [...], "error_count": N, "duration_sec": T},
-          "pyright": {"errors": [...], "error_count": N, "duration_sec": T}
+          "pyright": {"errors": [...], "error_count": N, "duration_sec": T},
+          "mypy": {"errors": [...], "error_count": N, "duration_sec": T}
         }
       ]
     }
@@ -392,7 +451,7 @@ def write_json_output(
             "name": name,
             "url": url_by_name.get(name, ""),  # type: ignore[arg-type]
         }
-        for checker in ("pyrefly", "pyright"):
+        for checker in ("pyrefly", "pyright", "mypy"):
             error_list = r.get(f"{checker}_error_list", [])
             entry[checker] = {
                 "errors": error_list,
@@ -443,11 +502,10 @@ def check_project(
     debug: bool,
     full_errors: bool = False,
 ) -> dict[str, object]:
-    """Run pyrefly and pyright on a project, return a results row.
+    """Run pyrefly, pyright, and mypy on a project, return a results row.
 
     When full_errors is True, checkers run in JSON mode and the result
-    includes per-error detail lists under 'pyrefly_error_list' and
-    'pyright_error_list'.
+    includes per-error detail lists under '{checker}_error_list' keys.
     """
     site_paths = setup_project(project, repo_dir, debug, reuse=os.path.exists(repo_dir))
 
@@ -460,6 +518,10 @@ def check_project(
             f"  {project.name}: none of the target paths exist ({paths}), falling back to '.'"
         )
     path_args = " ".join(existing) if existing else "."
+
+    # Venv activate path for running mypy inside the project's venv
+    venv_dir = os.path.join(repo_dir, "_primer_venv")
+    activate = os.path.join(venv_dir, "bin", "activate")
 
     # Pyrefly — init to auto-detect configs, exclude venv via CLI flag
     # (config-file project-excludes is unreliable, CLI flag works)
@@ -525,30 +587,56 @@ def check_project(
         pyright_errors = parse_error_count(pyright_output)
         pyright_error_list = None
 
+    # Mypy — run inside the project's venv so it can resolve installed deps.
+    # The mypy_cmd uses {mypy} placeholder, replaced with just "mypy" from the venv.
+    mypy_cmd = project.mypy_cmd.format(mypy="mypy")
+    start = time.time()
+    pm = run(
+        f"source {activate} && {mypy_cmd}",
+        debug,
+        cwd=repo_dir,
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    mypy_time = time.time() - start
+
+    mypy_output = (pm.stdout or "") + (pm.stderr or "")
+    if full_errors:
+        mypy_error_list = parse_full_errors_mypy(mypy_output)
+        mypy_errors = len([e for e in mypy_error_list if e.get("severity") == "error"])
+    else:
+        mypy_errors = parse_error_count_mypy(mypy_output)
+        mypy_error_list = None
+
     logging.info(
         f"  pyrefly: {pyrefly_errors} errors in {pyrefly_time:.1f}s | "
-        f"pyright: {pyright_errors} errors in {pyright_time:.1f}s"
+        f"pyright: {pyright_errors} errors in {pyright_time:.1f}s | "
+        f"mypy: {mypy_errors} errors in {mypy_time:.1f}s"
     )
     result: dict[str, object] = {
         "project": project.name,
         "pyrefly_errors": pyrefly_errors,
         "pyright_errors": pyright_errors,
+        "mypy_errors": mypy_errors,
         "pyrefly_time": round(pyrefly_time, 2),
         "pyright_time": round(pyright_time, 2),
+        "mypy_time": round(mypy_time, 2),
     }
     if full_errors:
         result["pyrefly_error_list"] = pyrefly_error_list
         result["pyright_error_list"] = pyright_error_list
+        result["mypy_error_list"] = mypy_error_list
         result["url"] = project.location
     return result
 
 
 def get_projects(names: list[str] | None) -> list[Project]:
-    """Get filtered list of projects that have both pyrefly and pyright commands."""
+    """Get filtered list of projects that have all three checker commands."""
     projects = [
         p
         for p in get_mypy_primer_projects()
-        if p.pyrefly_cmd and p.pyright_cmd and not p.skip_pyrefly
+        if p.pyrefly_cmd and p.pyright_cmd and p.mypy_cmd and not p.skip_pyrefly
     ]
     if names:
         lower_names = {n.lower() for n in names}
@@ -575,7 +663,7 @@ def resolve_repo_dir(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Compare pyrefly vs pyright on mypy_primer projects"
+        description="Compare pyrefly vs pyright vs mypy on mypy_primer projects"
     )
     parser.add_argument(
         "--pyrefly", help="Path to pyrefly binary (default: build via cargo)"
@@ -641,6 +729,9 @@ def main() -> None:
             "pyright not found on PATH. Install it with: pip install pyright (in a conda env with its own pip)"
         )
 
+    if not shutil.which("mypy"):
+        parser.error("mypy not found on PATH. Install it with: pip install mypy")
+
     pyrefly_bin = os.path.abspath(args.pyrefly) if args.pyrefly else build_pyrefly()
     results: list[dict[str, object]] = []
     tmp_dir = None if args.cache_dir else tempfile.mkdtemp()
@@ -668,8 +759,10 @@ def main() -> None:
                         "project": project.name,
                         "pyrefly_errors": "ERR",
                         "pyright_errors": "ERR",
+                        "mypy_errors": "ERR",
                         "pyrefly_time": 0,
                         "pyright_time": 0,
+                        "mypy_time": 0,
                     }
                 )
     finally:
