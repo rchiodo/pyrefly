@@ -1821,3 +1821,49 @@ def main(resolve: bool) -> None:
     print(node)
 "#,
 );
+
+// for https://github.com/facebook/pyrefly/issues/1840
+testcase!(
+    test_exhaustive_flow_no_fall_through,
+    r#"
+import types
+from dataclasses import dataclass
+from typing import Any, TypeIs, assert_never
+
+
+def is_instance_union_aware[T](
+    value: Any, target_type: type[T] | tuple[type[T], ...]
+) -> TypeIs[T]: ...
+
+def test_is_instance_union_aware():
+    @dataclass
+    class C0:
+        f_common: int
+        f_0: int
+
+    @dataclass
+    class C1:
+        f_common: int
+        f_1: int
+
+    @dataclass
+    class C2:
+        f_common: int
+        f_2: int
+
+    def compute_1(obj: C0 | C1 | C2) -> int:
+        if is_instance_union_aware(obj, C0 | C1):
+            return obj.f_common
+        return obj.f_2 + obj.f_common
+
+    def compute_2(obj: C0 | C1 | C2) -> int:
+        if is_instance_union_aware(obj, C0 | C1):
+            return obj.f_common
+        if is_instance_union_aware(obj, C2):
+            return obj.f_2 + obj.f_common
+        assert_never(obj)
+
+    assert compute_1(C1(f_common=1, f_1=2)) == 3
+    assert compute_2(C1(f_common=4, f_1=5)) == 9
+    "#,
+);
