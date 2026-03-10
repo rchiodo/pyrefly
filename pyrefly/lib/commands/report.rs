@@ -778,10 +778,12 @@ mod tests {
     use crate::test::util::TestEnv;
 
     /// Load a checked-in test file from the REPORT_TEST_PATH directory.
+    /// Normalizes `\r\n` to `\n` so snapshots pass on Windows.
     fn load_test_file(name: &str) -> String {
         let path = std::env::var("REPORT_TEST_PATH").expect("REPORT_TEST_PATH env var must be set");
         std::fs::read_to_string(PathBuf::from(path).join(name))
             .unwrap_or_else(|e| panic!("failed to read test file {name}: {e}"))
+            .replace("\r\n", "\n")
     }
 
     /// Compare serialized JSON output against a checked-in expected file.
