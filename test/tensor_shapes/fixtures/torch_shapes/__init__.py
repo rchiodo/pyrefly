@@ -12,6 +12,8 @@ provides minimal runtime classes so that annotations using these types
 don't crash when evaluated by Python.
 """
 
+import typing
+
 import torch
 import torch.nn as nn
 
@@ -31,3 +33,93 @@ class Dim[T]:
     """
 
     pass
+
+
+class TypeVar:
+    """TypeVar with arithmetic support for tensor shape dimensions.
+
+    Like typing.TypeVar but arithmetic operations (N + 1, N * 2, etc.)
+    return self instead of raising TypeError. Setting
+    __class__ = typing.TypeVar makes isinstance(x, typing.TypeVar)
+    return True, so Generic[N] and TypedDict + Generic[N] both work.
+
+    In pyrefly, torch_shapes.TypeVar is treated identically to
+    typing.TypeVar.
+    """
+
+    __class__ = typing.TypeVar
+
+    def __init__(self, name: str):
+        self.__name__ = name
+        self.name = name
+
+    def __repr__(self):
+        return self.name
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self is other
+
+    def __add__(self, other):
+        return self
+
+    def __radd__(self, other):
+        return self
+
+    def __sub__(self, other):
+        return self
+
+    def __rsub__(self, other):
+        return self
+
+    def __mul__(self, other):
+        return self
+
+    def __rmul__(self, other):
+        return self
+
+    def __floordiv__(self, other):
+        return self
+
+    def __typing_subst__(self, arg):
+        return arg
+
+
+class TypeVarTuple:
+    """TypeVarTuple with support for integer shape dimensions.
+
+    Like typing.TypeVarTuple but for use in tensor shape annotations.
+    Setting __class__ = typing.TypeVarTuple and providing
+    __typing_is_unpacked_typevartuple__ makes Generic[*Ns] work.
+
+    In pyrefly, torch_shapes.TypeVarTuple is treated identically to
+    typing.TypeVarTuple.
+
+    __iter__ yields self so that *Ns unpacking works in subscripts
+    like Generic[*Ns] or Tensor[*Ns, 3]. Python's star-unpacking
+    calls __iter__ on the object.
+    """
+
+    __class__ = typing.TypeVarTuple
+
+    def __init__(self, name: str):
+        self.__name__ = name
+        self.name = name
+
+    def __repr__(self):
+        return f"*{self.name}"
+
+    def __hash__(self):
+        return hash(self.name)
+
+    def __eq__(self, other):
+        return self is other
+
+    def __iter__(self):
+        yield self
+
+    @property
+    def __typing_is_unpacked_typevartuple__(self):
+        return True
