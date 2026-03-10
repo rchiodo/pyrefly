@@ -3851,7 +3851,7 @@ impl Server {
                 // but we need to return Vec<(ModuleInfo, Vec<TextRange>)> to match the helper's
                 // expected format. Group implementations by module while preserving order.
                 let implementations = transaction.find_global_implementations_from_definition(
-                    handle.sys_info(),
+                    *handle.sys_info(),
                     TextRangeWithModule::new(module, definition_range),
                 )?;
 
@@ -4407,7 +4407,7 @@ impl Server {
                     });
 
                     let local_results = transaction.find_global_references_from_definition(
-                        handle.sys_info(),
+                        *handle.sys_info(),
                         metadata,
                         TextRangeWithModule::new(module, definition_range),
                         include_declaration,
@@ -4732,7 +4732,7 @@ impl Server {
             transaction.get_ast(handle),
             transaction.get_module_info(handle),
         ) {
-            let disabled_ranges = disabled_ranges_for_module(ast.as_ref(), handle.sys_info());
+            let disabled_ranges = disabled_ranges_for_module(ast.as_ref(), *handle.sys_info());
             let mut seen = HashSet::new();
             for range in disabled_ranges {
                 if range.is_empty() || !seen.insert(range) {
@@ -5254,7 +5254,7 @@ impl Server {
                     TextRangeWithModule::new(definition.module.dupe(), definition.definition_range);
 
                 transaction.find_global_incoming_calls_from_function_definition(
-                    handle.sys_info(),
+                    *handle.sys_info(),
                     definition.metadata.clone(),
                     &target_def,
                 )
@@ -5393,7 +5393,7 @@ impl Server {
         let definition_location =
             TextRangeWithModule::new(definition.module.dupe(), target.name_range);
         let candidate_handles = transaction.process_rdeps_with_definition(
-            handle.sys_info(),
+            *handle.sys_info(),
             &definition_location,
             |_, handle, _| Some(handle.dupe()),
         )?;

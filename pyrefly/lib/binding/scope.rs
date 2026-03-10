@@ -389,7 +389,7 @@ impl Static {
         module_info: &ModuleInfo,
         top_level: bool,
         lookup: &dyn LookupExport,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         get_annotation_idx: &mut impl FnMut(ShortIdentifier) -> Idx<KeyAnnotation>,
         scopes: Option<&Scopes>,
     ) -> SmallSet<Name> {
@@ -1511,7 +1511,7 @@ impl Scopes {
         module_info: &ModuleInfo,
         top_level: bool,
         lookup: &dyn LookupExport,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         get_annotation_idx: &mut impl FnMut(ShortIdentifier) -> Idx<KeyAnnotation>,
     ) {
         let mut initialize = |scope: &mut Scope, myself: Option<&Self>| {

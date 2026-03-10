@@ -267,10 +267,10 @@ impl DunderAllEntry {
     }
 }
 
-struct DefinitionsBuilder<'a> {
+struct DefinitionsBuilder {
     module_name: ModuleName,
     is_init: bool,
-    sys_info: &'a SysInfo,
+    sys_info: SysInfo,
     inner: Definitions,
 }
 
@@ -321,7 +321,7 @@ fn is_overload_decorator(decorator: &Decorator) -> bool {
 }
 
 impl Definitions {
-    pub fn new(x: &[Stmt], module_name: ModuleName, is_init: bool, sys_info: &SysInfo) -> Self {
+    pub fn new(x: &[Stmt], module_name: ModuleName, is_init: bool, sys_info: SysInfo) -> Self {
         let mut builder = DefinitionsBuilder {
             module_name,
             sys_info,
@@ -412,7 +412,7 @@ impl Definitions {
     }
 }
 
-impl<'a> DefinitionsBuilder<'a> {
+impl DefinitionsBuilder {
     fn stmts(&mut self, xs: &[Stmt]) {
         for x in xs {
             self.stmt(x);
@@ -790,7 +790,8 @@ impl<'a> DefinitionsBuilder<'a> {
             }
             Stmt::If(x) => {
                 self.named_in_expr(&x.test);
-                for (_, body) in self.sys_info.pruned_if_branches(x) {
+                let sys_info = self.sys_info;
+                for (_, body) in sys_info.pruned_if_branches(x) {
                     self.stmts(body);
                 }
                 return; // We went through the relevant branches already
@@ -904,7 +905,7 @@ mod tests {
             &Ast::parse(contents, PySourceType::Python).0.body,
             module_name,
             is_init,
-            &SysInfo::default(),
+            SysInfo::default(),
         );
         res.dunder_all.entries.iter_mut().for_each(unrange);
         res

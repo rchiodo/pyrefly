@@ -3362,7 +3362,7 @@ fn find_child_implementations_impl<T: RdepTransaction>(
 
 fn compute_transitive_rdeps_for_definition_impl<T: RdepTransaction>(
     transaction: &mut T,
-    sys_info: &SysInfo,
+    sys_info: SysInfo,
     definition: &TextRangeWithModule,
 ) -> Result<Vec<Handle>, Cancelled> {
     let mut transitive_rdeps = match definition.module.path().details() {
@@ -3370,13 +3370,13 @@ fn compute_transitive_rdeps_for_definition_impl<T: RdepTransaction>(
             let handle_of_filesystem_counterpart = Handle::new(
                 definition.module.name(),
                 ModulePath::filesystem((**path_buf).clone()),
-                sys_info.dupe(),
+                sys_info,
             );
             let mut rdeps = transaction.transitive_rdeps(handle_of_filesystem_counterpart.dupe());
             rdeps.insert(Handle::new(
                 definition.module.name(),
                 definition.module.path().dupe(),
-                sys_info.dupe(),
+                sys_info,
             ));
             rdeps
         }
@@ -3384,7 +3384,7 @@ fn compute_transitive_rdeps_for_definition_impl<T: RdepTransaction>(
             let definition_handle = Handle::new(
                 definition.module.name(),
                 definition.module.path().dupe(),
-                sys_info.dupe(),
+                sys_info,
             );
             let rdeps = transaction.transitive_rdeps(definition_handle.dupe());
             transaction.run_for_handles(&[definition_handle], Require::Everything)?;
@@ -3441,7 +3441,7 @@ fn patch_definition_for_handle_impl<T: RdepTransaction>(
 
 fn process_rdeps_with_definition_impl<T: RdepTransaction, R>(
     transaction: &mut T,
-    sys_info: &SysInfo,
+    sys_info: SysInfo,
     definition: &TextRangeWithModule,
     mut process_fn: impl FnMut(&mut T, &Handle, &TextRangeWithModule) -> Option<R>,
 ) -> Result<Vec<R>, Cancelled> {
@@ -3461,7 +3461,7 @@ fn process_rdeps_with_definition_impl<T: RdepTransaction, R>(
 
 fn find_global_references_from_definition_impl<T: RdepTransaction>(
     transaction: &mut T,
-    sys_info: &SysInfo,
+    sys_info: SysInfo,
     definition_kind: DefinitionMetadata,
     definition: TextRangeWithModule,
     include_declaration: bool,
@@ -3537,7 +3537,7 @@ impl<'a> Transaction<'a> {
     /// Returns all references (including child implementations) for the definition.
     pub fn find_global_references_from_definition(
         &mut self,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         definition_kind: DefinitionMetadata,
         definition: TextRangeWithModule,
         include_declaration: bool,
@@ -3559,7 +3559,7 @@ impl<'a> CancellableTransaction<'a> {
     /// references-related features
     pub(crate) fn process_rdeps_with_definition<T>(
         &mut self,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         definition: &TextRangeWithModule,
         process_fn: impl FnMut(&mut Self, &Handle, &TextRangeWithModule) -> Option<T>,
     ) -> Result<Vec<T>, Cancelled> {
@@ -3569,7 +3569,7 @@ impl<'a> CancellableTransaction<'a> {
     /// Returns Err if the request is canceled in the middle of a run.
     pub fn find_global_references_from_definition(
         &mut self,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         definition_kind: DefinitionMetadata,
         definition: TextRangeWithModule,
         include_declaration: bool,
@@ -3589,7 +3589,7 @@ impl<'a> CancellableTransaction<'a> {
     /// Returns Err if the request is canceled in the middle of a run.
     pub fn find_global_implementations_from_definition(
         &mut self,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         definition: TextRangeWithModule,
     ) -> Result<Vec<TextRangeWithModule>, Cancelled> {
         let results = self.process_rdeps_with_definition(

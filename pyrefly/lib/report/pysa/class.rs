@@ -275,7 +275,7 @@ pub fn get_context_from_class<'a>(
     let handle = Handle::new(
         class.module_name(),
         class.module_path().clone(),
-        context.handle.sys_info().clone(),
+        *context.handle.sys_info(),
     );
     ModuleContext::create(handle, context.transaction, context.module_ids).unwrap()
 }

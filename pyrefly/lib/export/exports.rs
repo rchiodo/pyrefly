@@ -120,7 +120,7 @@ impl Display for Exports {
 }
 
 impl Exports {
-    pub fn new(x: &[Stmt], module_info: &ModuleInfo, sys_info: &SysInfo) -> Self {
+    pub fn new(x: &[Stmt], module_info: &ModuleInfo, sys_info: SysInfo) -> Self {
         let mut definitions = Definitions::new(
             x,
             module_info.name(),
@@ -488,7 +488,7 @@ mod tests {
             path,
             Arc::new(contents.to_owned()),
         );
-        Arc::new(Exports::new(&ast.body, &module_info, &SysInfo::default()))
+        Arc::new(Exports::new(&ast.body, &module_info, SysInfo::default()))
     }
 
     fn eq_wildcards(exports: &Exports, lookup: &dyn LookupExport, all: &[&str]) {

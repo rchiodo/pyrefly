@@ -461,7 +461,7 @@ impl<'a> Transaction<'a> {
         {
             let definition_kind = DefinitionMetadata::VariableOrAttribute(None);
             if let Ok(references) = transaction.find_global_references_from_definition(
-                handle.sys_info(),
+                *handle.sys_info(),
                 definition_kind,
                 TextRangeWithModule::new(module_info, id.range()),
                 true,

@@ -62,7 +62,7 @@ pub(crate) fn safe_delete_code_actions(
     let context = find_definition_context(ast.as_ref(), definition.definition_range)?;
     let references = transaction
         .find_global_references_from_definition(
-            handle.sys_info(),
+            *handle.sys_info(),
             definition.metadata.clone(),
             TextRangeWithModule::new(definition.module.dupe(), definition.definition_range),
             true,

@@ -234,7 +234,7 @@ struct DeferredBoundName {
 pub struct BindingsBuilder<'a> {
     pub module_info: ModuleInfo,
     pub lookup: &'a dyn LookupExport,
-    pub sys_info: &'a SysInfo,
+    pub sys_info: SysInfo,
     pub class_count: u32,
     pub func_count: u32,
     type_alias_count: u32,
@@ -483,7 +483,7 @@ impl Bindings {
         exports: &Exports,
         solver: &Solver,
         lookup: &dyn LookupExport,
-        sys_info: &SysInfo,
+        sys_info: SysInfo,
         errors: &ErrorCollector,
         uniques: &UniqueFactory,
         enable_trace: bool,

@@ -812,9 +812,9 @@ impl<'a> BindingsBuilder<'a> {
 /// * Return Some(xs) to say this set might be the last expression.
 fn function_last_expressions<'a>(
     x: &'a [Stmt],
-    sys_info: &SysInfo,
+    sys_info: SysInfo,
 ) -> Option<Vec<(LastStmt, &'a Expr)>> {
-    fn f<'a>(sys_info: &SysInfo, x: &'a [Stmt], res: &mut Vec<(LastStmt, &'a Expr)>) -> Option<()> {
+    fn f<'a>(sys_info: SysInfo, x: &'a [Stmt], res: &mut Vec<(LastStmt, &'a Expr)>) -> Option<()> {
         fn loop_body_has_break_statement(statement: &Stmt, has_break: &mut bool) {
             match statement {
                 Stmt::Break(_) => {
