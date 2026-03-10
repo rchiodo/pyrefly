@@ -766,11 +766,9 @@ impl ReportArgs {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
-    use std::sync::Arc;
 
     use dupe::Dupe;
     use pyrefly_build::handle::Handle;
-    use pyrefly_python::module::Module;
     use pyrefly_python::module_name::ModuleName;
     use pyrefly_python::module_path::ModulePath;
     use pyrefly_python::sys_info::SysInfo;
@@ -779,56 +777,41 @@ mod tests {
     use crate::state::require::Require;
     use crate::test::util::TestEnv;
 
-    /// Helper to create a module from source code for testing
-    fn create_test_module(code: &str) -> Module {
-        Module::new(
-            ModuleName::from_str("test"),
-            ModulePath::memory(PathBuf::from("test.py")),
-            Arc::new(code.to_owned()),
-        )
+    /// Load a checked-in test file from the REPORT_TEST_PATH directory.
+    fn load_test_file(name: &str) -> String {
+        let path = std::env::var("REPORT_TEST_PATH").expect("REPORT_TEST_PATH env var must be set");
+        std::fs::read_to_string(PathBuf::from(path).join(name))
+            .unwrap_or_else(|e| panic!("failed to read test file {name}: {e}"))
     }
 
-    #[test]
-    fn test_parse_suppressions() {
-        let code = r#"
-x = 1  # pyrefly: ignore[error-code]
-y = 2
-z = 3  # pyrefly: ignore[code1, code2]
-"#;
-        let module = create_test_module(code);
-        let suppressions = ReportArgs::parse_suppressions(&module);
+    /// Compare serialized JSON output against a checked-in expected file.
+    /// When `REPORT_TEST_WRITE_PATH` is set, writes the actual output to that
+    /// directory instead of comparing (use this to update snapshots).
+    fn compare_snapshot<T: serde::Serialize>(name: &str, actual: &T) {
+        let actual_json = serde_json::to_string_pretty(actual).unwrap();
 
-        assert_eq!(suppressions.len(), 2);
+        if let Ok(write_path) = std::env::var("REPORT_TEST_WRITE_PATH") {
+            let out = PathBuf::from(write_path).join(name);
+            std::fs::write(&out, format!("{}\n", actual_json.trim()))
+                .unwrap_or_else(|e| panic!("failed to write snapshot {}: {e}", out.display()));
+            println!("Updated snapshot: {}", out.display());
+            return;
+        }
 
-        // Suppression with single error code
-        assert_eq!(suppressions[0].kind, "ignore");
-        assert_eq!(suppressions[0].codes, vec!["error-code"]);
-        assert_eq!(suppressions[0].location.line, 2);
-
-        // Suppression with multiple error codes
-        assert_eq!(suppressions[1].kind, "ignore");
-        assert_eq!(suppressions[1].codes, vec!["code1", "code2"]);
-        assert_eq!(suppressions[1].location.line, 4);
+        let expected_json = load_test_file(name);
+        pretty_assertions::assert_eq!(
+            actual_json.trim(),
+            expected_json.trim(),
+            "Snapshot mismatch for {name}. To update, run with \
+             REPORT_TEST_WRITE_PATH set to the test_files directory."
+        );
     }
 
-    #[test]
-    fn test_parse_variables() {
-        let code = r#"
-from typing import Callable, TypeVar
-from typing import List as MyList
-
-T = TypeVar("T")
-x = 42
-y: Callable[[int], int] = lambda n: n
-z: str = "hello"
-
-def some_func() -> None:
-    pass
-
-class SomeClass:
-    my_field = 42
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
+    /// Build a full `FileReport` from a checked-in Python test file,
+    /// mirroring the production pipeline in `run_inner`.
+    fn build_file_report(py_file: &str) -> FileReport {
+        let code = load_test_file(py_file);
+        let (state, handle_fn) = TestEnv::one("test", &code)
             .with_default_require_level(Require::Everything)
             .to_state();
         let handle = handle_fn("test");
@@ -839,400 +822,80 @@ class SomeClass:
         let answers = transaction.get_answers(&handle).unwrap();
         let exports = transaction.get_exports(&handle);
 
+        let line_count = module.lined_buffer().line_index().line_count();
         let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        let classes = ReportArgs::parse_classes(&module, bindings.dupe(), answers);
+        let classes = ReportArgs::parse_classes(&module, bindings.dupe(), answers.dupe());
         let variables =
             ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
-        // T (line 5), x (line 6), y (line 7), z (line 8)
-        assert_eq!(variables.len(), 4, "should have 4 variables: T, x, y, z");
+        let suppressions = ReportArgs::parse_suppressions(&module);
 
-        // T (TypeVar) on line 5
-        assert_eq!(variables[0].name, "test.T");
-        assert_eq!(variables[0].annotation, None);
-        assert_eq!(variables[0].location.line, 5, "T should be on line 5");
+        let annotated_count = functions
+            .iter()
+            .filter(|f| ReportArgs::is_fully_annotated(f))
+            .count();
+        let annotation_completeness = if functions.is_empty() {
+            100.0
+        } else {
+            (annotated_count as f64 / functions.len() as f64) * 100.0
+        };
+        let type_completeness = if annotated_count == 0 {
+            100.0
+        } else {
+            let type_complete = functions.iter().filter(|f| f.is_type_known).count();
+            (type_complete as f64 / annotated_count as f64) * 100.0
+        };
 
-        // x has no annotation on line 6
-        assert_eq!(variables[1].name, "test.x");
-        assert_eq!(variables[1].annotation, None);
-        assert_eq!(variables[1].location.line, 6, "x should be on line 6");
-
-        // y has a Callable[[int], int] annotation on line 7
-        assert_eq!(variables[2].name, "test.y");
-        assert_eq!(
-            variables[2].annotation,
-            Some("Callable[[int], int]".to_owned())
-        );
-        assert_eq!(variables[2].location.line, 7, "y should be on line 7");
-
-        // z has a str annotation on line 8
-        assert_eq!(variables[3].name, "test.z");
-        assert_eq!(variables[3].annotation, Some("str".to_owned()));
-        assert_eq!(variables[3].location.line, 8, "z should be on line 8");
-
-        // Functions and classes should NOT appear as variables
-        assert!(
-            !variables.iter().any(|v| v.name.contains("some_func")),
-            "functions should not be reported as variables"
-        );
-        assert!(
-            !variables.iter().any(|v| v.name.contains("SomeClass")),
-            "classes should not be reported as variables"
-        );
-        assert!(
-            !variables.iter().any(|v| v.name.contains("Callable")),
-            "we should not report re-exported symbols as variables"
-        );
-        assert!(
-            !variables.iter().any(|v| v.name.contains("MyList")),
-            "we should not report re-exported symbols as variables"
-        );
-        assert!(
-            !variables.iter().any(|v| v.name.contains("my_field")),
-            "we should not report class fields as variables"
-        );
-    }
-
-    #[test]
-    fn test_parse_functions() {
-        let code = r#"
-def foo(x: int, y: str) -> bool:
-    return True
-def foo_unannotated(x, y):
-    return True
-class C:
-    def bar(self, x: int, y: str) -> bool:
-        return True
-    class Inner:
-        def baz(self, x: int, y: str) -> bool:
-            return True
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-        let exports = transaction.get_exports(&handle);
-
-        let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-
-        assert_eq!(functions.len(), 4);
-
-        // functions[0]: foo - fully annotated top-level function
-        let foo = &functions[0];
-        assert_eq!(foo.name, "test.foo");
-        assert_eq!(foo.return_annotation, Some("bool".to_owned()));
-        assert_eq!(foo.parameters.len(), 2);
-        assert_eq!(foo.parameters[0].name, "x");
-        assert_eq!(foo.parameters[0].annotation, Some("int".to_owned()));
-        assert_eq!(foo.parameters[1].name, "y");
-        assert_eq!(foo.parameters[1].annotation, Some("str".to_owned()));
-
-        // functions[1]: foo_unannotated - no annotations
-        let foo_unannotated = &functions[1];
-        assert_eq!(foo_unannotated.name, "test.foo_unannotated");
-        assert_eq!(foo_unannotated.return_annotation, None);
-        assert_eq!(foo_unannotated.parameters.len(), 2);
-        assert_eq!(foo_unannotated.parameters[0].name, "x");
-        assert_eq!(foo_unannotated.parameters[0].annotation, None);
-        assert_eq!(foo_unannotated.parameters[1].name, "y");
-        assert_eq!(foo_unannotated.parameters[1].annotation, None);
-
-        // functions[2]: C.bar - method in class C
-        let c_bar = &functions[2];
-        assert_eq!(c_bar.name, "test.C.bar");
-        assert_eq!(c_bar.return_annotation, Some("bool".to_owned()));
-        assert_eq!(c_bar.parameters.len(), 3);
-        assert_eq!(c_bar.parameters[0].name, "self");
-        assert_eq!(c_bar.parameters[0].annotation, None);
-        assert_eq!(c_bar.parameters[1].name, "x");
-        assert_eq!(c_bar.parameters[1].annotation, Some("int".to_owned()));
-        assert_eq!(c_bar.parameters[2].name, "y");
-        assert_eq!(c_bar.parameters[2].annotation, Some("str".to_owned()));
-
-        // functions[3]: C.Inner.baz - method in nested class Inner
-        let inner_baz = &functions[3];
-        assert_eq!(inner_baz.name, "test.C.Inner.baz");
-        assert_eq!(inner_baz.return_annotation, Some("bool".to_owned()));
-        assert_eq!(inner_baz.parameters.len(), 3);
-        assert_eq!(inner_baz.parameters[0].name, "self");
-        assert_eq!(inner_baz.parameters[0].annotation, None);
-        assert_eq!(inner_baz.parameters[1].name, "x");
-        assert_eq!(inner_baz.parameters[1].annotation, Some("int".to_owned()));
-        assert_eq!(inner_baz.parameters[2].name, "y");
-        assert_eq!(inner_baz.parameters[2].annotation, Some("str".to_owned()));
-    }
-
-    #[test]
-    fn test_unknown_module() {
-        let code = r#"
-def foo():
-    pass
-"#;
-        let module = Module::new(
-            ModuleName::unknown(),
-            ModulePath::memory(PathBuf::from("test.py")),
-            Arc::new(code.to_owned()),
-        );
-        let (state, handle_fn) = TestEnv::one("__unknown__", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("__unknown__");
-        let transaction = state.transaction();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-        let exports = transaction.get_exports(&handle);
-
-        let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-
-        assert_eq!(functions.len(), 1);
-        assert_eq!(functions[0].name, "foo");
-    }
-
-    #[test]
-    fn test_parse_classes_with_incomplete_methods() {
-        let code = r#"
-class Complete:
-    def method(self, x: int) -> bool:
-        return True
-
-class Incomplete:
-    def method_unannotated(self, x):
-        pass
-    def method_partial(self, x: int):
-        pass
-    def method_complete(self, x: int) -> bool:
-        return True
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-
-        let classes = ReportArgs::parse_classes(&module, bindings, answers);
-
-        assert_eq!(classes.len(), 2);
-
-        assert_eq!(classes[0].name, "test.Complete");
-        assert_eq!(classes[0].incomplete_attributes.len(), 0);
-
-        assert_eq!(classes[1].name, "test.Incomplete");
-        assert_eq!(classes[1].incomplete_attributes.len(), 2);
-        assert_eq!(
-            classes[1].incomplete_attributes[0].name.as_str(),
-            "method_partial"
-        );
-        assert_eq!(
-            classes[1].incomplete_attributes[1].name.as_str(),
-            "method_unannotated"
-        );
-        for attr in &classes[1].incomplete_attributes {
-            assert_eq!(attr.declared_in, "test.Incomplete");
+        FileReport {
+            variables,
+            line_count,
+            functions,
+            classes,
+            suppressions,
+            annotation_completeness,
+            type_completeness,
         }
     }
 
     #[test]
-    fn test_parse_classes_nested() {
-        let code = r#"
-class Outer:
-    def method(self, x: int) -> bool:
-        return True
-
-    class Inner:
-        def inner_method(self, x):
-            pass
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-
-        let classes = ReportArgs::parse_classes(&module, bindings, answers);
-        assert_eq!(classes.len(), 2);
-        assert_eq!(classes[0].name, "test.Outer");
-        assert_eq!(classes[0].incomplete_attributes.len(), 0);
-        assert_eq!(classes[1].name, "test.Outer.Inner");
-        assert_eq!(classes[1].incomplete_attributes.len(), 1);
-        assert_eq!(classes[1].incomplete_attributes[0].name, "inner_method");
+    fn test_report_suppressions() {
+        let report = build_file_report("suppressions.py");
+        compare_snapshot("suppressions.expected.json", &report);
     }
 
     #[test]
-    fn test_parse_classes_inheritance() {
-        let code = r#"
-class Base:
-    def base_method(self, x):
-        pass
-
-class Child(Base):
-    def child_method(self, x: int) -> bool:
-        return True
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-
-        let classes = ReportArgs::parse_classes(&module, bindings, answers);
-
-        // Both Base and Child should be reported
-        // Base has base_method incomplete
-        // Child inherits base_method from Base
-        assert!(!classes.is_empty());
-
-        // Find Base class
-        let base = classes.iter().find(|c| c.name == "test.Base");
-        assert!(base.is_some(), "Base class should be reported");
-        let base = base.unwrap();
-        assert_eq!(base.incomplete_attributes.len(), 1);
-        assert_eq!(base.incomplete_attributes[0].name, "base_method");
-        assert_eq!(base.incomplete_attributes[0].declared_in, "test.Base");
+    fn test_report_variables() {
+        let report = build_file_report("variables.py");
+        compare_snapshot("variables.expected.json", &report);
     }
 
     #[test]
-    fn test_parse_functions_excludes_nested_in_functions() {
-        let code = r#"
-def outer() -> None:
-    def inner() -> None:
-        pass
-    def inner2(x: int) -> str:
-        return str(x)
-
-def top_level(x: int) -> bool:
-    return True
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-        let exports = transaction.get_exports(&handle);
-
-        let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-
-        // Only top-level functions should be reported; inner and inner2 are nested
-        // inside outer and are not public symbols.
-        let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
-        assert!(
-            names.contains(&"test.outer"),
-            "top-level function 'outer' should be reported, got: {names:?}"
-        );
-        assert!(
-            names.contains(&"test.top_level"),
-            "top-level function 'top_level' should be reported, got: {names:?}"
-        );
-        assert!(
-            !names.iter().any(|n| n.contains("inner")),
-            "nested functions should not be reported, got: {names:?}"
-        );
-        assert_eq!(
-            functions.len(),
-            2,
-            "only 2 top-level functions expected, got: {names:?}"
-        );
+    fn test_report_functions() {
+        let report = build_file_report("functions.py");
+        compare_snapshot("functions.expected.json", &report);
     }
 
     #[test]
-    fn test_parse_functions_excludes_methods_of_classes_nested_in_functions() {
-        let code = r#"
-def outer() -> None:
-    class LocalClass:
-        def method(self) -> None:
-            pass
-
-class TopLevel:
-    def method(self) -> None:
-        pass
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
-
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-        let exports = transaction.get_exports(&handle);
-
-        let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        // LocalClass.method is inside a function and is not a public symbol.
-        let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
-        assert!(
-            names.contains(&"test.outer"),
-            "top-level function 'outer' should be reported, got: {names:?}"
-        );
-        assert!(
-            names.contains(&"test.TopLevel.method"),
-            "method of top-level class should be reported, got: {names:?}"
-        );
-        assert!(
-            !names.iter().any(|n| n.contains("LocalClass")),
-            "methods of classes nested in functions should not be reported, got: {names:?}"
-        );
+    fn test_report_incomplete_methods() {
+        let report = build_file_report("incomplete_methods.py");
+        compare_snapshot("incomplete_methods.expected.json", &report);
     }
 
     #[test]
-    fn test_parse_classes_excludes_nested_in_functions() {
-        let code = r#"
-def outer() -> None:
-    class LocalClass:
-        def method(self) -> None:
-            pass
+    fn test_report_nested_classes() {
+        let report = build_file_report("nested_classes.py");
+        compare_snapshot("nested_classes.expected.json", &report);
+    }
 
-class TopLevel:
-    def method(self) -> None:
-        pass
-"#;
-        let (state, handle_fn) = TestEnv::one("test", code)
-            .with_default_require_level(Require::Everything)
-            .to_state();
-        let handle = handle_fn("test");
-        let transaction = state.transaction();
+    #[test]
+    fn test_report_inheritance() {
+        let report = build_file_report("inheritance.py");
+        compare_snapshot("inheritance.expected.json", &report);
+    }
 
-        let module = transaction.get_module_info(&handle).unwrap();
-        let bindings = transaction.get_bindings(&handle).unwrap();
-        let answers = transaction.get_answers(&handle).unwrap();
-
-        let classes = ReportArgs::parse_classes(&module, bindings, answers);
-
-        // Only TopLevel should be reported; LocalClass is nested inside a function
-        // and is not a public symbol.
-        let names: Vec<&str> = classes.iter().map(|c| c.name.as_str()).collect();
-        assert!(
-            names.contains(&"test.TopLevel"),
-            "top-level class should be reported, got: {names:?}"
-        );
-        assert!(
-            !names.iter().any(|n| n.contains("LocalClass")),
-            "classes nested in functions should not be reported, got: {names:?}"
-        );
-        assert_eq!(
-            classes.len(),
-            1,
-            "only 1 top-level class expected, got: {names:?}"
-        );
+    #[test]
+    fn test_report_nested_exclusions() {
+        let report = build_file_report("nested_exclusions.py");
+        compare_snapshot("nested_exclusions.expected.json", &report);
     }
 
     /// When both test.py and test.pyi exist, the .py file is shadowed.
