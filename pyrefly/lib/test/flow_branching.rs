@@ -1867,3 +1867,40 @@ def test_is_instance_union_aware():
     assert compute_2(C1(f_common=4, f_1=5)) == 9
     "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/1896
+testcase!(
+    test_exhaustive_flow_no_early_return_narrow,
+    r#"
+import dataclasses as dc
+from typing import assert_type
+
+@dc.dataclass(frozen=True)
+class Success:
+    value: int
+
+@dc.dataclass(frozen=True)
+class Error:
+    message: str
+
+Result = Success | Error | None
+
+def get_result() -> Result:
+    return Success(value=42)
+
+def use_success(s: Success) -> int:
+    return s.value
+
+def demo_pyre_narrowing_failure() -> int:
+    result = get_result()
+    match result:
+        case Error() as err:
+            return -1
+        case None:
+            return 0
+        case _:
+            success = result
+    assert_type(success, Success)
+    return use_success(success)
+    "#,
+);
