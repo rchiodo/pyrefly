@@ -11,6 +11,8 @@
 //! intended for consumption by CinderX's static Python compiler.
 
 #[allow(dead_code)]
+pub mod collect;
+#[allow(dead_code)]
 pub mod convert;
 #[allow(dead_code)]
 pub mod types;

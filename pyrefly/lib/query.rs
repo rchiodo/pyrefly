@@ -184,7 +184,15 @@ impl Serialize for PythonASTRange {
     }
 }
 
-fn python_ast_range_for_expr(
+/// Convert a ruff `TextRange` for an expression into a `PythonASTRange`
+/// (1-indexed line/col pair matching Python's `ast` module conventions).
+///
+/// Generator expressions receive special handling to match the parenthesized
+/// range that CPython's `ast` module reports.
+///
+/// TODO(stroxler): Consider moving this to the `pyrefly_python` crate so it
+/// can be shared without depending on `query.rs`.
+pub fn python_ast_range_for_expr(
     module_info: &ModuleInfo,
     original_range: TextRange,
     expr: &Expr,
