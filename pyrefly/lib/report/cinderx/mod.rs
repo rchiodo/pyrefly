@@ -23,6 +23,7 @@ pub mod types;
 
 use std::path::Path;
 
+use anyhow::anyhow;
 use pyrefly_build::handle::Handle;
 use pyrefly_util::fs_anyhow;
 use serde::Serialize;
@@ -73,13 +74,29 @@ pub fn write_results(
     let types_dir = output_dir.join("types");
     fs_anyhow::create_dir_all(&types_dir)?;
 
-    let modules: Vec<ModuleEntry> = handles
-        .iter()
-        .map(|handle| ModuleEntry {
+    let mut modules = Vec::with_capacity(handles.len());
+    for handle in handles {
+        let data = collect_module_types(transaction, handle).ok_or_else(|| {
+            anyhow!(
+                "missing module type data for {} ({})",
+                handle.module(),
+                handle.path().as_path().display()
+            )
+        })?;
+
+        modules.push(ModuleEntry {
             module_name: handle.module().to_string(),
             path: handle.path().as_path().display().to_string(),
-        })
-        .collect();
+        });
+
+        let report = ModuleReport {
+            type_table: data.entries,
+            locations: data.locations,
+        };
+        let module_json = serde_json::to_string_pretty(&report)?;
+        let filename = format!("{}.json", handle.module());
+        fs_anyhow::write(&types_dir.join(filename), module_json)?;
+    }
 
     let index = CinderxIndex {
         version: "0.1".to_owned(),
@@ -88,18 +105,6 @@ pub fn write_results(
 
     let json = serde_json::to_string_pretty(&index)?;
     fs_anyhow::write(&output_dir.join("index.json"), json)?;
-
-    for handle in handles {
-        if let Some(data) = collect_module_types(transaction, handle) {
-            let report = ModuleReport {
-                type_table: data.entries,
-                locations: data.locations,
-            };
-            let module_json = serde_json::to_string_pretty(&report)?;
-            let filename = format!("{}.json", handle.module());
-            fs_anyhow::write(&types_dir.join(filename), module_json)?;
-        }
-    }
 
     Ok(())
 }
