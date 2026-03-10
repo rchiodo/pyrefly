@@ -368,7 +368,7 @@ testcase!(
     r#"
 def test():
     return 1
-    yield 2 # E: This `yield` expression is unreachable
+    yield 2
 "#,
 );
 
@@ -431,7 +431,7 @@ testcase!(
     r#"
 def test():
     return 1
-    yield from [2, 3] # E: This `yield from` expression is unreachable
+    yield from [2, 3]
 "#,
 );
 

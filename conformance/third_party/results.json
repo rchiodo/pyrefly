@@ -1,9 +1,9 @@
 {
   "total": 138,
-  "pass": 122,
-  "fail": 16,
-  "pass_rate": 0.88,
-  "differences": 42,
+  "pass": 123,
+  "fail": 15,
+  "pass_rate": 0.89,
+  "differences": 39,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -12,6 +12,7 @@
     "aliases_typealiastype.py",
     "aliases_variance.py",
     "annotations_coroutines.py",
+    "annotations_generators.py",
     "annotations_methods.py",
     "annotations_typeexpr.py",
     "callables_kwargs.py",
@@ -131,7 +132,6 @@
   "failing": {
     "aliases_implicit.py": 5,
     "annotations_forward_refs.py": 2,
-    "annotations_generators.py": 3,
     "callables_annotation.py": 2,
     "constructors_callable.py": 4,
     "dataclasses_descriptors.py": 6,

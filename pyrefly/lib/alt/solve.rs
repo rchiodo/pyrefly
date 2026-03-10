@@ -4965,17 +4965,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
                 Arc::new(YieldResult::any_error(self.heap))
             }
+            // Unreachable yields are not errors: the `return; yield` pattern is a
+            // common idiom to create empty generators, since Python determines
+            // generator status syntactically. Infer types for IDE support.
             BindingYield::Unreachable(x) => {
-                if let Some(expr) = x.value.as_ref() {
-                    self.expr_infer(expr, errors);
-                }
-                self.error(
-                    errors,
-                    x.range,
-                    ErrorInfo::Kind(ErrorKind::Unreachable),
-                    "This `yield` expression is unreachable".to_owned(),
-                );
-                Arc::new(YieldResult::any_error(self.heap))
+                let yield_ty = if let Some(expr) = x.value.as_ref() {
+                    self.expr_infer(expr, errors)
+                } else {
+                    self.heap.mk_none()
+                };
+                let send_ty = self.heap.mk_any_implicit();
+                Arc::new(YieldResult { yield_ty, send_ty })
             }
         }
     }
@@ -5057,15 +5057,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
                 Arc::new(YieldFromResult::any_error(self.heap))
             }
+            // Unreachable yield-from is not an error: see comment on
+            // BindingYield::Unreachable above.
             BindingYieldFrom::Unreachable(x) => {
-                self.expr_infer(&x.value, errors);
-                self.error(
-                    errors,
-                    x.range,
-                    ErrorInfo::Kind(ErrorKind::Unreachable),
-                    "This `yield from` expression is unreachable".to_owned(),
-                );
-                Arc::new(YieldFromResult::any_error(self.heap))
+                let ty = self.expr_infer(&x.value, errors);
+                if let Some(generator) = self.unwrap_generator(&ty) {
+                    Arc::new(YieldFromResult::from_generator(generator))
+                } else if let Some(yield_ty) = self.unwrap_iterable(&ty) {
+                    Arc::new(YieldFromResult::from_iterable(self.heap, yield_ty))
+                } else {
+                    Arc::new(YieldFromResult::any_error(self.heap))
+                }
             }
         }
     }
