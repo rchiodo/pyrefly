@@ -124,7 +124,7 @@ fn is_test_function(func: &StmtFunctionDef, class_name: Option<&Name>) -> bool {
     if !is_test_name(&func.name.id) {
         return false;
     }
-    class_name.map_or(true, |name| name.as_str().starts_with("Test"))
+    class_name.is_none_or(|name| name.as_str().starts_with("Test"))
 }
 
 fn collect_test_functions<'a>(
@@ -169,14 +169,13 @@ fn fixture_return_type(
 ) -> Option<Type> {
     let return_key = Key::ReturnType(ShortIdentifier::new(&func.name));
     let mut ty = transaction.get_type(handle, &return_key)?;
-    if func.is_async {
-        if let Some(Some((_, _, return_ty))) =
+    if func.is_async
+        && let Some(Some((_, _, return_ty))) =
             transaction.ad_hoc_solve(handle, "pytest_fixture_unwrap_coroutine", |solver| {
                 solver.unwrap_coroutine(&ty)
             })
-        {
-            ty = return_ty;
-        }
+    {
+        ty = return_ty;
     }
     if let Some(display_ty) =
         transaction.ad_hoc_solve(handle, "pytest_fixture_for_display", |solver| {
@@ -359,9 +358,9 @@ pub(crate) fn pytest_fixture_type_annotation_code_actions(
         .iter()
         .any(|candidate| candidate.def_range.contains_range(selection));
     let mut actions = Vec::new();
-    for candidate in candidates
+    if let Some(candidate) = candidates
         .iter()
-        .filter(|candidate| candidate.def_range.contains_range(selection))
+        .find(|candidate| candidate.def_range.contains_range(selection))
     {
         let mut edits = Vec::new();
         edits.push((
@@ -381,7 +380,6 @@ pub(crate) fn pytest_fixture_type_annotation_code_actions(
             edits,
             kind: lsp_types::CodeActionKind::QUICKFIX,
         });
-        break;
     }
 
     if selection_matches_fixtures && candidates.len() > 1 {
