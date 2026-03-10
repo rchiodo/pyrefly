@@ -29,7 +29,6 @@ use crate::query::PythonASTRange;
 
 /// Structured type representation for the CinderX report protocol.
 /// Each variant maps to a category of Python type that CinderX cares about.
-#[expect(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind")]
 pub enum StructuredType {
@@ -85,7 +84,6 @@ pub struct TypeTableEntry {
 // ---------------------------------------------------------------------------
 
 /// A located type reference: source range paired with an index into the type table.
-#[expect(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct LocatedType {
     #[serde(rename = "loc")]
@@ -110,7 +108,6 @@ pub(crate) struct TypeTable {
     seen: HashMap<u64, usize>,
 }
 
-#[expect(dead_code)]
 impl TypeTable {
     pub(crate) fn new() -> Self {
         Self {
@@ -172,19 +169,24 @@ const HASH_KIND_VARIABLE: u8 = 2;
 const HASH_KIND_LITERAL: u8 = 3;
 
 /// Compute structural hash for a class-kind type.
-#[expect(dead_code)]
-pub(crate) fn hash_class(qname: &str, arg_hashes: &[u64]) -> u64 {
+///
+/// Traits are included in the hash because they are part of the structural
+/// identity (e.g. a `TypedDict` and `PartialTypedDict` with the same qname
+/// must not collide).
+pub(crate) fn hash_class(qname: &str, arg_hashes: &[u64], traits: &[&str]) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_CLASS);
     h.write(qname.as_bytes());
     for &ah in arg_hashes {
         h.write_u64(ah);
     }
+    for t in traits {
+        h.write(t.as_bytes());
+    }
     h.finish()
 }
 
 /// Compute structural hash for a callable-kind type.
-#[expect(dead_code)]
 pub(crate) fn hash_callable(param_hashes: &[u64], return_hash: u64) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_CALLABLE);
@@ -196,7 +198,6 @@ pub(crate) fn hash_callable(param_hashes: &[u64], return_hash: u64) -> u64 {
 }
 
 /// Compute structural hash for a variable-kind type.
-#[expect(dead_code)]
 pub(crate) fn hash_variable(name: &str, bound_hashes: &[u64]) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_VARIABLE);
@@ -208,7 +209,6 @@ pub(crate) fn hash_variable(name: &str, bound_hashes: &[u64]) -> u64 {
 }
 
 /// Compute structural hash for a literal-kind type.
-#[expect(dead_code)]
 pub(crate) fn hash_literal(value: &str) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_LITERAL);

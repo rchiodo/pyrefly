@@ -10,6 +10,9 @@
 //! Produces a flat JSON report with per-expression structured type data,
 //! intended for consumption by CinderX's static Python compiler.
 
+#[allow(dead_code)]
+pub mod convert;
+#[allow(dead_code)]
 pub mod types;
 
 use std::path::Path;
