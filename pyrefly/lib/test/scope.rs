@@ -873,7 +873,6 @@ class C:
 );
 
 testcase!(
-    bug = "We don't yet handle all class body members correctly",
     test_class_scope_edge_cases,
     r#"
 from typing import assert_type, Any

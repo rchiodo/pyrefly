@@ -1386,7 +1386,6 @@ class GoodChild2(Parent3, extra_items=bool):  # ok because Parent3 has extra ite
 );
 
 testcase!(
-    bug = "You shouldn't be able to add items to a closed TypedDict",
     test_no_add_items_if_closed,
     r#"
 from typing import TypedDict

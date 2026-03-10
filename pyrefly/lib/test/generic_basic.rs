@@ -328,13 +328,12 @@ def test(m: MyStr, s: str):
 "#,
 );
 
+// https://github.com/facebook/pyrefly/issues/245
 testcase!(
-    bug = "Update should know about string arguments",
     test_dict_update,
     r#"
-# From https://github.com/facebook/pyrefly/issues/245
+# update w/ kwargs should pin dict key to str
 from typing import assert_type, Any
-
 def f():
     x = {}
     x.update(a = 1)
@@ -342,7 +341,7 @@ def f():
 
 def g():
     x: dict[int, int] = {}
-    x.update(a = 1) # E: No matching overload
+    x.update(a=1) # E: No matching overload
 "#,
 );
 

@@ -200,7 +200,6 @@ assert_type(x, Literal[""])
 );
 
 testcase!(
-    bug = "Should narrow",
     test_boolean_operator_narrow,
     r#"
 from typing import assert_type, Literal
