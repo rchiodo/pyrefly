@@ -905,3 +905,13 @@ for part in ['a', 'b', 'c', 'd']:
         lineStart = lineno
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/1561
+testcase!(
+    test_divmod_loop_inference,
+    r#"
+def process(value: int | float):
+    for i in range(2):
+        (v, value) = divmod(value, 7)
+"#,
+);
