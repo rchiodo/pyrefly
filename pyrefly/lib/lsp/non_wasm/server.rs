@@ -1782,7 +1782,12 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.async_go_to_implementations(x.id, &transaction, params);
+                        self.async_go_to_implementations(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     }
                 } else if let Some(params) = as_request::<CodeActionRequest>(&x) {
                     if let Some(params) = self
@@ -1860,7 +1865,12 @@ impl Server {
                             params.text_document_position.text_document.uri.clone(),
                             telemetry_event,
                         );
-                        self.references(x.id, &transaction, params);
+                        self.references(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     } else {
                         // TODO(yangdanny) handle notebooks
                         let locations: Vec<Location> = Vec::new();
@@ -1897,7 +1907,12 @@ impl Server {
                         if let Some(_range) =
                             self.prepare_rename(&transaction, params.text_document_position.clone())
                         {
-                            self.rename(x.id, &transaction, params);
+                            self.rename(
+                                x.id,
+                                &transaction,
+                                params,
+                                telemetry_event.activity_key.clone(),
+                            );
                         } else {
                             self.send_response(Response {
                                 id: x.id,
@@ -2116,7 +2131,12 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_call_hierarchy_incoming_calls(x.id, &transaction, params);
+                        self.async_call_hierarchy_incoming_calls(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     }
                 } else if let Some(params) = as_request::<CallHierarchyOutgoingCalls>(&x) {
                     if let Some(params) = self
@@ -2125,7 +2145,12 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_call_hierarchy_outgoing_calls(x.id, &transaction, params);
+                        self.async_call_hierarchy_outgoing_calls(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     }
                 } else if let Some(params) = as_request::<TypeHierarchyPrepare>(&x) {
                     if let Some(params) = self
@@ -2153,7 +2178,12 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_type_hierarchy_supertypes(x.id, &transaction, params);
+                        self.async_type_hierarchy_supertypes(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     }
                 } else if let Some(params) = as_request::<TypeHierarchySubtypes>(&x) {
                     if let Some(params) = self
@@ -2162,7 +2192,12 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_type_hierarchy_subtypes(x.id, &transaction, params);
+                        self.async_type_hierarchy_subtypes(
+                            x.id,
+                            &transaction,
+                            params,
+                            telemetry_event.activity_key.clone(),
+                        );
                     }
                 } else if &x.method == "pyrefly/textDocument/docstringRanges" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
@@ -3775,6 +3810,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: GotoImplementationParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = &params.text_document_position_params.text_document.uri;
         if self.open_notebook_cells.read().contains_key(uri) {
@@ -3802,6 +3838,7 @@ impl Server {
                 import_behavior: ImportBehavior::StopAtRenamedImports,
                 ..Default::default()
             },
+            activity_key,
             move |transaction, handle, definition, _telemetry, _activity_key| {
                 let FindDefinitionItemWithDocstring {
                     metadata: _,
@@ -4229,6 +4266,7 @@ impl Server {
         uri: &Url,
         position: Position,
         find_preference: FindPreference,
+        activity_key: Option<ActivityKey>,
         find_fn: impl FnOnce(
             &mut CancellableTransaction,
             &Handle,
@@ -4256,6 +4294,7 @@ impl Server {
         self.find_reference_queue.queue_task(
             TelemetryEventKind::FindFromDefinition,
             Box::new(move |server, telemetry, telemetry_event, _, _| {
+                telemetry_event.set_activity_key(activity_key);
                 let mut transaction = server.state.cancellable_transaction();
                 server
                     .cancellation_handles
@@ -4305,6 +4344,7 @@ impl Server {
         uri: &Url,
         position: Position,
         include_declaration: bool,
+        activity_key: Option<ActivityKey>,
         map_result: impl FnOnce(Vec<(Url, Vec<Range>)>) -> V + Send + Sync + 'static,
     ) {
         let path_remapper = self.path_remapper.clone();
@@ -4322,6 +4362,7 @@ impl Server {
                 import_behavior: ImportBehavior::StopAtRenamedImports,
                 ..Default::default()
             },
+            activity_key,
             move |transaction, handle, definition, telemetry, activity_key| {
                 let qualified_name =
                     compute_qualified_name(transaction.as_ref(), handle, &definition);
@@ -4402,6 +4443,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: ReferenceParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = &params.text_document_position.text_document.uri;
         let Some(handle) = self.make_handle_if_enabled(uri, Some(References::METHOD)) else {
@@ -4414,6 +4456,7 @@ impl Server {
             uri,
             params.text_document_position.position,
             params.context.include_declaration,
+            activity_key,
             move |results| {
                 let mut locations = Vec::new();
                 for (uri, ranges) in results {
@@ -4434,6 +4477,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: RenameParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = &params.text_document_position.text_document.uri;
         let Some(handle) = self.make_handle_if_enabled(uri, Some(Rename::METHOD)) else {
@@ -4446,6 +4490,7 @@ impl Server {
             uri,
             params.text_document_position.position,
             true,
+            activity_key,
             move |results| {
                 let mut changes = HashMap::new();
                 for (uri, ranges) in results {
@@ -5173,6 +5218,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: lsp_types::CallHierarchyIncomingCallsParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = params.item.uri.clone();
 
@@ -5194,6 +5240,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
+            activity_key,
             |transaction, handle, definition, _telemetry, _activity_key| {
                 let target_def =
                     TextRangeWithModule::new(definition.module.dupe(), definition.definition_range);
@@ -5217,6 +5264,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: lsp_types::CallHierarchyOutgoingCallsParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = params.item.uri.clone();
 
@@ -5240,6 +5288,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
+            activity_key,
             move |transaction, handle, definition, _telemetry, _activity_key| {
                 // find_global_outgoing_calls_from_function_definition expects a position
                 let position = definition.definition_range.start();
@@ -5464,6 +5513,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: lsp_types::TypeHierarchySupertypesParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = params.item.uri.clone();
         let Some(handle) = self.make_handle_if_enabled(&uri, Some(TypeHierarchySupertypes::METHOD))
@@ -5500,6 +5550,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
+            activity_key,
             move |transaction, handle, definition, _telemetry, _activity_key| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
@@ -5537,6 +5588,7 @@ impl Server {
         request_id: RequestId,
         transaction: &Transaction<'a>,
         params: lsp_types::TypeHierarchySubtypesParams,
+        activity_key: Option<ActivityKey>,
     ) {
         let uri = params.item.uri.clone();
         let Some(handle) = self.make_handle_if_enabled(&uri, Some(TypeHierarchySubtypes::METHOD))
@@ -5555,6 +5607,7 @@ impl Server {
             &uri,
             params.item.selection_range.start,
             FindPreference::default(),
+            activity_key,
             move |transaction, handle, definition, _telemetry, _activity_key| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
