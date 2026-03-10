@@ -1,9 +1,9 @@
 {
-  "total": 138,
+  "total": 139,
   "pass": 123,
-  "fail": 15,
-  "pass_rate": 0.89,
-  "differences": 39,
+  "fail": 16,
+  "pass_rate": 0.88,
+  "differences": 66,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -144,7 +144,8 @@
     "generics_self_usage.py": 2,
     "generics_typevartuple_basic.py": 1,
     "protocols_modules.py": 1,
-    "qualifiers_final_annotation.py": 3
+    "qualifiers_final_annotation.py": 3,
+    "typeforms_typeform.py": 27
   },
   "comment": "@generated"
 }

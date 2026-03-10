@@ -102,10 +102,10 @@
   "generics_paramspec_semantics.py": [],
   "generics_paramspec_specialization.py": [],
   "generics_scoping.py": [
-    "Line 75: Expected 1 errors",
-    "Line 78: Expected 1 errors",
-    "Line 87: Expected 1 errors",
-    "Line 96: Expected 1 errors"
+    "Line 86: Expected 1 errors",
+    "Line 89: Expected 1 errors",
+    "Line 98: Expected 1 errors",
+    "Line 107: Expected 1 errors"
   ],
   "generics_self_advanced.py": [],
   "generics_self_attributes.py": [],
@@ -191,5 +191,34 @@
   "typeddicts_readonly_update.py": [],
   "typeddicts_required.py": [],
   "typeddicts_type_consistency.py": [],
-  "typeddicts_usage.py": []
+  "typeddicts_usage.py": [],
+  "typeforms_typeform.py": [
+    "Line 59: Expected 1 errors",
+    "Line 15: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 16: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 17: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 18: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 19: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 20: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 21: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 29: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 30: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 31: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 32: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 40: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
+    "Line 41: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 46: Unexpected errors ['`type[str | None]` is not assignable to `UnionType`']",
+    "Line 47: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 49: Unexpected errors ['`type[list[int]]` is not assignable to `GenericAlias`', 'Expected `v2_actual` to be a type alias, got `GenericAlias`']",
+    "Line 50: Unexpected errors ['Expected a type form, got instance of `_SpecialForm`']",
+    "Line 52: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 53: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 80: Unexpected errors ['Expected a callable, got `_SpecialForm`']",
+    "Line 81: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 83: Unexpected errors ['Expected a callable, got `_SpecialForm`']",
+    "Line 84: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 93: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 97: Unexpected errors ['Expected a type form, got instance of `object`']",
+    "Line 107: Unexpected errors ['Expected a type form, got instance of `object`']"
+  ]
 }
