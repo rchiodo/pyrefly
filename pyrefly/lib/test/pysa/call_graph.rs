@@ -7515,3 +7515,111 @@ class B(A[T], Generic[T]):
         )]
     }
 );
+
+call_graph_testcase!(
+    test_dataclass_constructor,
+    TEST_MODULE_NAME,
+    r#"
+from dataclasses import dataclass
+
+@dataclass
+class Point:
+    x: int
+    y: str
+
+def foo():
+    Point(1, "hello")
+"#,
+    &|context: &ModuleContext| {
+        vec![(
+            "test.foo",
+            vec![(
+                "10:5-10:22",
+                constructor_call_callees(
+                    vec![
+                        create_call_target("test.Point.__init__", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_receiver_class_for_test("test.Point", context),
+                    ],
+                    vec![
+                        create_call_target("builtins.object.__new__", TargetType::Function)
+                            .with_is_static_method(true),
+                    ],
+                ),
+            )],
+        )]
+    }
+);
+
+call_graph_testcase!(
+    test_named_tuple_constructor,
+    TEST_MODULE_NAME,
+    r#"
+from typing import NamedTuple
+
+class Pair(NamedTuple):
+    x: int
+    y: str
+
+def foo():
+    Pair(1, "hello")
+"#,
+    &|context: &ModuleContext| {
+        vec![(
+            "test.foo",
+            vec![(
+                "9:5-9:21",
+                constructor_call_callees(
+                    vec![
+                        create_call_target("test.Pair.__init__", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_receiver_class_for_test("test.Pair", context),
+                    ],
+                    vec![
+                        create_call_target("test.Pair.__new__", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_is_static_method(true),
+                    ],
+                ),
+            )],
+        )]
+    }
+);
+
+call_graph_testcase!(
+    test_named_tuple_subclass_constructor,
+    TEST_MODULE_NAME,
+    r#"
+from typing import NamedTuple
+
+class Base(NamedTuple):
+    x: int
+    y: str
+
+class Sub(Base):
+    pass
+
+def foo():
+    Sub(1, "hello")
+"#,
+    &|context: &ModuleContext| {
+        vec![(
+            "test.foo",
+            vec![(
+                "12:5-12:20",
+                constructor_call_callees(
+                    vec![
+                        create_call_target("test.Sub.__init__", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_receiver_class_for_test("test.Sub", context),
+                    ],
+                    vec![
+                        create_call_target("test.Sub.__new__", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_is_static_method(true),
+                    ],
+                ),
+            )],
+        )]
+    }
+);
