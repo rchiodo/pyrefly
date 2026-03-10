@@ -665,6 +665,20 @@ list[int] == list[str]
 "#,
 );
 
+testcase!(
+    test_recursively_constrained_typevar,
+    r#"
+from typing import TypeVar, Generic, Any
+
+class Foo:
+    pass
+
+_L = TypeVar("_L", bound="Foo | Bar[Any]")
+class Bar(Generic[_L]):
+    pass
+"#,
+);
+
 // Regression test for https://github.com/facebook/pyrefly/issues/1137
 testcase!(
     test_unresolved_typevar_in_union_resolves_to_never,
