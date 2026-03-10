@@ -497,6 +497,14 @@ impl CalcStack {
                 BindingAction::Unwind
             }
             SccState::HasPlaceholder => {
+                // Check for new cycles: this node is already in the SCC with a
+                // placeholder, but the current traversal path may have introduced
+                // new nodes between the previous occurrence and now. If a cycle
+                // is detected, merge those new nodes into the SCC so their
+                // answers are handled by the SCC's iterative convergence.
+                if let Some(current_cycle) = self.current_cycle() {
+                    self.on_scc_detected(current_cycle);
+                }
                 // Read placeholder from SCC-local NodeState::HasPlaceholder.
                 // No need to touch the Calculation cell — placeholders are never
                 // stored there.
