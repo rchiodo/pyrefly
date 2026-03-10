@@ -15,6 +15,7 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use dupe::Dupe;
 use dupe::IterDupedExt;
@@ -1977,6 +1978,14 @@ impl<Ans: LookupAnswer> SccWriteLockGuard<'_, '_, Ans> {
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
+    fn fixpoint_details_enabled() -> bool {
+        static ENABLED: OnceLock<bool> = OnceLock::new();
+        *ENABLED.get_or_init(|| {
+            std::env::var_os("PYREFLY_FIXPOINT_DETAILS")
+                .is_some_and(|value| !value.is_empty() && value != "0")
+        })
+    }
+
     pub fn new(
         answers: &'a Ans,
         current: &'a Answers,
@@ -3335,6 +3344,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// The message distinguishes `TypeInfo` answers ("inferred type") from
     /// other answer kinds ("inferred result") for clarity in diagnostics.
+    ///
+    /// If `PYREFLY_FIXPOINT_DETAILS` is set (to any non-empty value besides `0`),
+    /// append internal debug details for bug reports (key/binding and both
+    /// previous/current answers in Debug format).
     fn check_and_report_non_convergent_member<K: Solve<Ans>>(
         &self,
         idx: Idx<K>,
@@ -3345,6 +3358,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
+        K::Answer: Debug,
+        K::Value: Debug,
     {
         // Only report if the answer actually changed from the previous iteration.
         if let Some(prev) = previous
@@ -3362,15 +3377,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             "result"
         };
+        let mut messages = vec1![format!(
+            "Fixpoint iteration did not converge. \
+             Inferred {} `{}`. Adding annotations may help.",
+            noun, typed_answer,
+        )];
+        // If PYREFLY_FIXPOINT_DETAILS=1 is set, we output much more detailed information useful
+        // for explaining or debugging nonconvergence in terms of Pyrefly internals.
+        if Self::fixpoint_details_enabled() {
+            let binding = member_bindings.get(idx);
+            let previous_debug = previous
+                .map(|prev| {
+                    let prev_typed = prev.downcast_ref::<Arc<K::Answer>>().expect(
+                        "check_and_report_non_convergent_member: previous answer type mismatch",
+                    );
+                    format!("{prev_typed:?}")
+                })
+                .unwrap_or_else(|| "<none>".to_owned());
+            messages.push(format!(
+                "[PYREFLY_FIXPOINT_DETAILS] key={:?} key_idx={idx:?}",
+                K::to_anyidx(idx),
+            ));
+            messages.push(format!(
+                "[PYREFLY_FIXPOINT_DETAILS] module={} path={}",
+                member_bindings.module().name(),
+                member_bindings.module().path(),
+            ));
+            messages.push(format!("[PYREFLY_FIXPOINT_DETAILS] binding={binding:?}",));
+            messages.push(format!(
+                "[PYREFLY_FIXPOINT_DETAILS] answer_type={}",
+                std::any::type_name::<K::Answer>(),
+            ));
+            messages.push(format!(
+                "[PYREFLY_FIXPOINT_DETAILS] previous={previous_debug}",
+            ));
+            messages.push(format!(
+                "[PYREFLY_FIXPOINT_DETAILS] current={typed_answer:?}",
+            ));
+        }
         let range = K::range_with(idx, member_bindings);
         member_errors.add(
             range,
             ErrorInfo::Kind(ErrorKind::NonConvergentRecursion),
-            vec1![format!(
-                "Fixpoint iteration did not converge. \
-                 Inferred {} `{}`. Adding annotations may help.",
-                noun, typed_answer,
-            )],
+            messages,
         );
     }
 }
