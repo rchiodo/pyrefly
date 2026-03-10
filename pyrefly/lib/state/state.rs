@@ -6,6 +6,7 @@
  */
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
@@ -28,6 +29,7 @@ use std::time::Duration;
 use dupe::Dupe;
 use dupe::OptionDupedExt;
 use enum_iterator::Sequence;
+use fxhash::FxHashMap;
 use itertools::Itertools;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
@@ -1291,6 +1293,7 @@ impl<'a> Transaction<'a> {
         TransactionHandle {
             transaction: self,
             module_data,
+            deferred_deps: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -2054,6 +2057,12 @@ impl<'a> Transaction<'a> {
 pub(crate) struct TransactionHandle<'a> {
     transaction: &'a Transaction<'a>,
     module_data: ArcId<ModuleDataMut>,
+    /// Locally accumulated deps, flushed to `module_data.deps` on drop.
+    /// This batches N lock acquisitions per handle lifetime into 1.
+    /// Keyed by ModulePath (cheap to hash — discriminant + interned u64) rather
+    /// than Handle, since ModulePath uniquely identifies the target module within
+    /// a TransactionHandle (module name is derivable, sys_info is invariant).
+    deferred_deps: RefCell<FxHashMap<ModulePath, (Handle, ModuleDeps)>>,
 }
 
 /// Result of looking up a target module's `Answers` for a cross-module
@@ -2122,17 +2131,12 @@ impl<'a> TransactionHandle<'a> {
 
         handle.map(|handle| {
             let res = self.transaction.get_imported_module(&handle);
-            let mut deps = self.module_data.deps.write();
-            match deps.entry(handle) {
-                Entry::Occupied(mut e) => {
-                    e.get_mut().add_dep(dep);
-                }
-                Entry::Vacant(e) => {
-                    e.insert(ModuleDeps::default().with_dep(dep));
-                    let inserted = res.rdeps.lock().insert(self.module_data.handle.dupe());
-                    assert!(inserted);
-                }
-            }
+            self.deferred_deps
+                .borrow_mut()
+                .entry(handle.path().dupe())
+                .or_insert_with(|| (handle, ModuleDeps::default()))
+                .1
+                .add_dep(dep);
             res
         })
     }
@@ -2149,6 +2153,7 @@ impl<'a> TransactionHandle<'a> {
         let lookup = TransactionHandle {
             transaction: self.transaction,
             module_data,
+            deferred_deps: RefCell::new(FxHashMap::default()),
         };
         Some(f(&exports, &lookup))
     }
@@ -2214,6 +2219,32 @@ impl<'a> TransactionHandle<'a> {
             TargetAnswers::Evicted
         } else {
             TargetAnswers::ModuleNotFound
+        }
+    }
+}
+
+impl Drop for TransactionHandle<'_> {
+    /// Flush locally accumulated deps to the shared `module_data.deps` lock
+    /// and update `rdeps` for any newly discovered dependencies.
+    fn drop(&mut self) {
+        // get_mut() avoids RefCell runtime borrow check since drop has &mut self.
+        let deferred = mem::take(self.deferred_deps.get_mut());
+        if deferred.is_empty() {
+            return;
+        }
+        let mut deps_lock = self.module_data.deps.write();
+        for (_path, (target_handle, new_deps)) in deferred {
+            match deps_lock.entry(target_handle.dupe()) {
+                Entry::Occupied(mut e) => {
+                    e.get_mut().merge(new_deps);
+                }
+                Entry::Vacant(e) => {
+                    e.insert(new_deps);
+                    let target = self.transaction.get_module(&target_handle);
+                    let inserted = target.rdeps.lock().insert(self.module_data.handle.dupe());
+                    assert!(inserted);
+                }
+            }
         }
     }
 }
