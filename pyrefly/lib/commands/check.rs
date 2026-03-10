@@ -233,6 +233,9 @@ struct OutputArgs {
     /// Generate a Pysa-compatible JSON file for each module
     #[arg(long, value_name = "OUTPUT_FILE")]
     report_pysa: Option<PathBuf>,
+    /// Generate a CinderX-format type report (experimental, internal-only).
+    #[arg(long, value_name = "OUTPUT_DIR", hide = true)]
+    report_cinderx: Option<PathBuf>,
     /// Count the number of each error kind. Prints the top N [default=5] errors, sorted by count, or all errors if N is 0.
     #[arg(
         long,
@@ -786,7 +789,8 @@ impl CheckArgs {
             || self.output.debug_info.is_some()
             || self.output.report_trace.is_some()
             || self.output.report_glean.is_some()
-            || self.output.report_pysa.is_some();
+            || self.output.report_pysa.is_some()
+            || self.output.report_cinderx.is_some();
         RequireLevels {
             specified: if retain {
                 Require::Everything
@@ -977,6 +981,9 @@ impl CheckArgs {
         }
         if let Some(pysa_directory) = &self.output.report_pysa {
             report::pysa::write_results(pysa_directory, transaction, handles, &shown_errors)?;
+        }
+        if let Some(cinderx_directory) = &self.output.report_cinderx {
+            report::cinderx::write_results(cinderx_directory, transaction, handles)?;
         }
         if let Some(path) = &self.output.report_binding_memory {
             fs_anyhow::write(path, report::binding_memory::binding_memory(transaction))?;
