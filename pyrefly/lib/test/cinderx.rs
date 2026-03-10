@@ -119,7 +119,7 @@ x: int | None = None
 
     // Should have a typing.Optional wrapping int
     let has_optional = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "typing.Optional" && args.len() == 1)
+        matches!(&entry.ty, StructuredType::OtherForm { qname, args } if qname == "typing.Optional" && args.len() == 1)
     });
     assert!(
         has_optional,

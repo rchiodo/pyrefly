@@ -31,8 +31,8 @@ use xxhash_rust::xxh64::Xxh64;
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind")]
 pub enum StructuredType {
-    /// Named type with qualified name and type arguments.
-    /// Covers ClassType, Union, Optional, BoundMethod, TypeGuard, etc.
+    /// Real Python class with qualified name and type arguments.
+    /// Covers ClassType, TypedDict, and other types backed by actual Python classes.
     #[serde(rename = "class")]
     Class {
         qname: String,
@@ -54,6 +54,10 @@ pub enum StructuredType {
         params: Vec<usize>,
         return_type: usize,
     },
+    /// Type operators, special forms, and other non-class type constructs.
+    /// These do not have an MRO and are not real Python classes.
+    #[serde(rename = "other_form")]
+    OtherForm { qname: String, args: Vec<usize> },
     /// Type variable with name and bounds.
     #[serde(rename = "variable")]
     Variable {
@@ -167,6 +171,7 @@ const HASH_KIND_CLASS: u8 = 0;
 const HASH_KIND_CALLABLE: u8 = 1;
 const HASH_KIND_VARIABLE: u8 = 2;
 const HASH_KIND_LITERAL: u8 = 3;
+const HASH_KIND_OTHER_FORM: u8 = 4;
 
 /// Compute structural hash for a class-kind type.
 ///
@@ -213,5 +218,16 @@ pub(crate) fn hash_literal(value: &str) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_LITERAL);
     h.write(value.as_bytes());
+    h.finish()
+}
+
+/// Compute structural hash for an other-form-kind type.
+pub(crate) fn hash_other_form(qname: &str, arg_hashes: &[u64]) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_OTHER_FORM);
+    h.write(qname.as_bytes());
+    for &ah in arg_hashes {
+        h.write_u64(ah);
+    }
     h.finish()
 }

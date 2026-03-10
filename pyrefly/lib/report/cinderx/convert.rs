@@ -24,6 +24,7 @@ use crate::report::cinderx::types::TypeTable;
 use crate::report::cinderx::types::hash_callable;
 use crate::report::cinderx::types::hash_class;
 use crate::report::cinderx::types::hash_literal;
+use crate::report::cinderx::types::hash_other_form;
 use crate::report::cinderx::types::hash_variable;
 
 /// Canonicalize a fully qualified class name for the CinderX protocol.
@@ -116,18 +117,6 @@ fn insert_simple_class(qname: &str, table: &mut TypeTable) -> usize {
     table.insert(sty, hash)
 }
 
-/// Insert a class entry wrapping a single child type argument.
-fn insert_wrapper_class(qname: &str, inner_idx: usize, table: &mut TypeTable) -> usize {
-    let arg_hashes = vec![table.hash_at(inner_idx)];
-    let hash = hash_class(qname, &arg_hashes, &[]);
-    let sty = StructuredType::Class {
-        qname: qname.to_owned(),
-        args: vec![inner_idx],
-        traits: vec![],
-    };
-    table.insert(sty, hash)
-}
-
 /// Insert a class entry with the given type argument indices.
 fn insert_class_with_args(qname: &str, arg_indices: Vec<usize>, table: &mut TypeTable) -> usize {
     let arg_hashes: Vec<u64> = arg_indices.iter().map(|&i| table.hash_at(i)).collect();
@@ -136,6 +125,42 @@ fn insert_class_with_args(qname: &str, arg_indices: Vec<usize>, table: &mut Type
         qname: qname.to_owned(),
         args: arg_indices,
         traits: vec![],
+    };
+    table.insert(sty, hash)
+}
+
+/// Insert a simple other-form entry with no type arguments.
+fn insert_simple_other_form(qname: &str, table: &mut TypeTable) -> usize {
+    let hash = hash_other_form(qname, &[]);
+    let sty = StructuredType::OtherForm {
+        qname: qname.to_owned(),
+        args: vec![],
+    };
+    table.insert(sty, hash)
+}
+
+/// Insert an other-form entry wrapping a single child type argument.
+fn insert_wrapper_other_form(qname: &str, inner_idx: usize, table: &mut TypeTable) -> usize {
+    let arg_hashes = vec![table.hash_at(inner_idx)];
+    let hash = hash_other_form(qname, &arg_hashes);
+    let sty = StructuredType::OtherForm {
+        qname: qname.to_owned(),
+        args: vec![inner_idx],
+    };
+    table.insert(sty, hash)
+}
+
+/// Insert an other-form entry with the given type argument indices.
+fn insert_other_form_with_args(
+    qname: &str,
+    arg_indices: Vec<usize>,
+    table: &mut TypeTable,
+) -> usize {
+    let arg_hashes: Vec<u64> = arg_indices.iter().map(|&i| table.hash_at(i)).collect();
+    let hash = hash_other_form(qname, &arg_hashes);
+    let sty = StructuredType::OtherForm {
+        qname: qname.to_owned(),
+        args: arg_indices,
     };
     table.insert(sty, hash)
 }
@@ -182,25 +207,25 @@ pub(crate) fn type_to_structured(
                     }));
                     type_to_structured(&inner_union, table, pending_class_traits)
                 };
-                insert_wrapper_class("typing.Optional", inner_idx, table)
+                insert_wrapper_other_form("typing.Optional", inner_idx, table)
             } else if !has_none {
                 // Union without None
                 let arg_indices: Vec<usize> = members
                     .iter()
                     .map(|m| type_to_structured(m, table, pending_class_traits))
                     .collect();
-                insert_class_with_args("typing.Union", arg_indices, table)
+                insert_other_form_with_args("typing.Union", arg_indices, table)
             } else {
                 // All None (degenerate)
                 type_to_structured(&Type::None, table, pending_class_traits)
             }
         }
-        Type::Any(_) => insert_simple_class("typing.Any", table),
-        Type::None => insert_simple_class("None", table),
-        Type::Never(_) => insert_simple_class("typing.Never", table),
+        Type::Any(_) => insert_simple_other_form("typing.Any", table),
+        Type::None => insert_simple_other_form("None", table),
+        Type::Never(_) => insert_simple_other_form("typing.Never", table),
         Type::Type(inner) => {
             let inner_idx = type_to_structured(inner, table, pending_class_traits);
-            insert_wrapper_class("typing.Type", inner_idx, table)
+            insert_wrapper_other_form("typing.Type", inner_idx, table)
         }
         Type::TypedDict(td) | Type::PartialTypedDict(td) => {
             let (qname, trait_name) = match (ty, td) {
@@ -227,15 +252,15 @@ pub(crate) fn type_to_structured(
             let self_idx = type_to_structured(&bm.obj, table, pending_class_traits);
             let func_type = bm.func.clone().as_type();
             let func_idx = type_to_structured(&func_type, table, pending_class_traits);
-            insert_class_with_args("BoundMethod", vec![self_idx, func_idx], table)
+            insert_other_form_with_args("BoundMethod", vec![self_idx, func_idx], table)
         }
         Type::TypeGuard(inner) => {
             let inner_idx = type_to_structured(inner, table, pending_class_traits);
-            insert_wrapper_class("typing.TypeGuard", inner_idx, table)
+            insert_wrapper_other_form("typing.TypeGuard", inner_idx, table)
         }
         Type::TypeIs(inner) => {
             let inner_idx = type_to_structured(inner, table, pending_class_traits);
-            insert_wrapper_class("typing.TypeIs", inner_idx, table)
+            insert_wrapper_other_form("typing.TypeIs", inner_idx, table)
         }
         Type::Annotated(inner) => {
             // Annotated is transparent for type purposes
@@ -246,7 +271,7 @@ pub(crate) fn type_to_structured(
             let raw_qname = qname_to_full_string(class.qname());
             let qname = canonicalize_class_qname(&raw_qname);
             let inner_idx = insert_simple_class(&qname, table);
-            insert_wrapper_class("typing.Type", inner_idx, table)
+            insert_wrapper_other_form("typing.Type", inner_idx, table)
         }
         Type::SelfType(ct) => {
             // Unwrap Self and treat as the underlying ClassType
@@ -258,10 +283,10 @@ pub(crate) fn type_to_structured(
             }
             TypeAliasData::Ref(_) => {
                 // Recursive alias reference — fall back to Any
-                insert_simple_class("typing.Any", table)
+                insert_simple_other_form("typing.Any", table)
             }
         },
-        Type::Ellipsis => insert_simple_class("builtins.ellipsis", table),
+        Type::Ellipsis => insert_simple_other_form("builtins.ellipsis", table),
         Type::Tuple(tuple) => {
             let arg_indices: Vec<usize> = match tuple {
                 pyrefly_types::tuple::Tuple::Concrete(elts) => elts
@@ -285,11 +310,11 @@ pub(crate) fn type_to_structured(
                     indices
                 }
             };
-            insert_class_with_args("typing.Tuple", arg_indices, table)
+            insert_other_form_with_args("typing.Tuple", arg_indices, table)
         }
-        Type::Module(_) => insert_simple_class("types.ModuleType", table),
-        Type::Overload(_) => insert_simple_class("typing.overload", table),
-        Type::LiteralString(_) => insert_simple_class("typing.LiteralString", table),
+        Type::Module(_) => insert_simple_other_form("types.ModuleType", table),
+        Type::Overload(_) => insert_simple_other_form("typing.overload", table),
+        Type::LiteralString(_) => insert_simple_other_form("typing.LiteralString", table),
         Type::Forall(box forall) => {
             // Unwrap Forall and recurse into the body
             type_to_structured(&forall.body.clone().as_type(), table, pending_class_traits)
@@ -359,6 +384,6 @@ pub(crate) fn type_to_structured(
         | Type::ElementOfTypeVarTuple(_)
         | Type::Tensor(_)
         | Type::Size(_)
-        | Type::Dim(_) => insert_simple_class("typing.Any", table),
+        | Type::Dim(_) => insert_simple_other_form("typing.Any", table),
     }
 }
