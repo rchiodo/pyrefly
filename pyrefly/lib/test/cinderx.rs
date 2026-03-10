@@ -271,23 +271,23 @@ x: Child = Child()
     let output_dir = tempfile::tempdir().expect("should create temp dir");
     write_results(output_dir.path(), &transaction, &handles).expect("should write results");
 
-    // Read and parse mro.json
-    let mro_json =
-        std::fs::read_to_string(output_dir.path().join("mro.json")).expect("mro.json should exist");
-    let mro: serde_json::Value =
-        serde_json::from_str(&mro_json).expect("mro.json should be valid JSON");
+    // Read and parse class_metadata.json
+    let metadata_json = std::fs::read_to_string(output_dir.path().join("class_metadata.json"))
+        .expect("class_metadata.json should exist");
+    let metadata: serde_json::Value =
+        serde_json::from_str(&metadata_json).expect("class_metadata.json should be valid JSON");
 
-    let entries = mro["entries"]
+    let entries = metadata["entries"]
         .as_array()
         .expect("entries should be an array");
 
-    // Find the Child class MRO entry
+    // Find the Child class entry
     let child_entry = entries
         .iter()
         .find(|e| e["qname"].as_str() == Some("test.Child"));
     assert!(
         child_entry.is_some(),
-        "expected MRO entry for test.Child, got entries: {mro_json}"
+        "expected entry for test.Child, got entries: {metadata_json}"
     );
 
     let ancestors = child_entry.unwrap()["ancestors"]
@@ -300,5 +300,84 @@ x: Child = Child()
     assert!(
         ancestor_names.contains(&"test.Base"),
         "expected test.Base in Child's MRO, got: {ancestor_names:?}"
+    );
+
+    // Non-protocol classes should have no tags
+    let child_tags = child_entry.unwrap().get("tags");
+    assert!(
+        child_tags.is_none() || child_tags.unwrap().as_array().unwrap().is_empty(),
+        "expected no tags on non-protocol class"
+    );
+}
+
+#[test]
+fn test_protocol_tags() {
+    let state = create_state(
+        "test",
+        r#"
+from typing import Protocol
+
+class MyProto(Protocol):
+    def method(self) -> int: ...
+
+class Impl(MyProto):
+    def method(self) -> int:
+        return 42
+
+x: MyProto = Impl()
+y: Impl = Impl()
+"#,
+    );
+    let transaction = state.transaction();
+    let handles: Vec<_> = transaction.handles();
+
+    let output_dir = tempfile::tempdir().expect("should create temp dir");
+    write_results(output_dir.path(), &transaction, &handles).expect("should write results");
+
+    let metadata_json = std::fs::read_to_string(output_dir.path().join("class_metadata.json"))
+        .expect("class_metadata.json should exist");
+    let metadata: serde_json::Value =
+        serde_json::from_str(&metadata_json).expect("class_metadata.json should be valid JSON");
+
+    let entries = metadata["entries"]
+        .as_array()
+        .expect("entries should be an array");
+
+    // MyProto should have the "protocol" tag
+    let proto_entry = entries
+        .iter()
+        .find(|e| e["qname"].as_str() == Some("test.MyProto"));
+    assert!(
+        proto_entry.is_some(),
+        "expected entry for test.MyProto, got entries: {metadata_json}"
+    );
+    let proto_tags: Vec<&str> = proto_entry.unwrap()["tags"]
+        .as_array()
+        .expect("tags should be an array")
+        .iter()
+        .map(|t| t.as_str().expect("tag should be a string"))
+        .collect();
+    assert!(
+        proto_tags.contains(&"protocol"),
+        "expected 'protocol' tag on MyProto, got: {proto_tags:?}"
+    );
+
+    // Impl should have the "inherits_protocol" tag
+    let impl_entry = entries
+        .iter()
+        .find(|e| e["qname"].as_str() == Some("test.Impl"));
+    assert!(
+        impl_entry.is_some(),
+        "expected entry for test.Impl, got entries: {metadata_json}"
+    );
+    let impl_tags: Vec<&str> = impl_entry.unwrap()["tags"]
+        .as_array()
+        .expect("tags should be an array")
+        .iter()
+        .map(|t| t.as_str().expect("tag should be a string"))
+        .collect();
+    assert!(
+        impl_tags.contains(&"inherits_protocol"),
+        "expected 'inherits_protocol' tag on Impl, got: {impl_tags:?}"
     );
 }

@@ -13,9 +13,9 @@
 //! Output structure:
 //! ```text
 //! <output_dir>/
-//!   index.json          — lists all modules with paths
-//!   types/<module>.json  — per-module type table + located types
-//!   mro.json            — global MRO table for all classes
+//!   index.json              — lists all modules with paths
+//!   types/<module>.json      — per-module type table + located types
+//!   class_metadata.json      — global class metadata (MRO + semantic tags)
 //! ```
 
 pub mod collect;
@@ -28,12 +28,15 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use pyrefly_build::handle::Handle;
+use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::class::Class;
 use pyrefly_util::display::Fmt;
 use pyrefly_util::fs_anyhow;
 use serde::Serialize;
 
+use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
+use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::report::cinderx::collect::collect_module_types;
 use crate::report::cinderx::convert::canonicalize_class_qname;
@@ -69,29 +72,41 @@ struct ModuleReport {
     locations: Vec<LocatedType>,
 }
 
-/// One entry in the global MRO table.
+/// One entry in the global class metadata table.
 #[derive(Debug, Serialize)]
-struct MroEntry {
+struct ClassMetadataEntry {
     /// Canonicalized qualified name of the class.
     qname: String,
     /// Ancestor classes in method resolution order (excludes `self` and `object`).
     ancestors: Vec<String>,
+    /// Semantic tags for this class.
+    ///
+    /// Current tags:
+    /// - `"protocol"` — the class itself is a Protocol
+    /// - `"inherits_protocol"` — the class is not a Protocol, but has a
+    ///   Protocol ancestor in its runtime MRO (pyrefly excludes Protocol
+    ///   from the reported MRO, but at runtime it is present)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
 }
 
-/// Global MRO table written to `mro.json`.
+/// Global class metadata written to `class_metadata.json`.
 #[derive(Debug, Serialize)]
-struct MroTable {
+struct ClassMetadataTable {
     /// One entry per unique class encountered in the type report.
-    entries: Vec<MroEntry>,
+    entries: Vec<ClassMetadataEntry>,
 }
 
-/// Collect MRO entries for all classes, deduplicated by qname.
+/// Collect class metadata entries for all classes, deduplicated by qname.
 ///
-/// For each unique class, looks up its MRO via `KeyClassMro` from the
-/// defining module's solutions. Classes whose defining module is not
-/// available (e.g. third-party stubs not loaded) are silently skipped.
-fn collect_mro_entries(classes: Vec<Class>, transaction: &Transaction) -> Vec<MroEntry> {
-    // Build a handle lookup by module name for cross-module MRO resolution.
+/// For each unique class, looks up its MRO and metadata via `KeyClassMro`
+/// and `KeyClassMetadata` from the defining module's solutions. Classes
+/// whose defining module is not available are silently skipped.
+fn collect_class_metadata(
+    classes: Vec<Class>,
+    transaction: &Transaction,
+) -> Vec<ClassMetadataEntry> {
+    // Build a handle lookup by module name for cross-module resolution.
     let handle_by_module: HashMap<_, _> = transaction
         .handles()
         .into_iter()
@@ -106,7 +121,7 @@ fn collect_mro_entries(classes: Vec<Class>, transaction: &Transaction) -> Vec<Mr
         seen_qnames.entry(qname).or_insert(cls);
     }
 
-    let mut entries: Vec<MroEntry> = Vec::with_capacity(seen_qnames.len());
+    let mut entries: Vec<ClassMetadataEntry> = Vec::with_capacity(seen_qnames.len());
     for (qname, cls) in &seen_qnames {
         let Some(defining_handle) = handle_by_module.get(&cls.module_name()) else {
             continue;
@@ -114,6 +129,8 @@ fn collect_mro_entries(classes: Vec<Class>, transaction: &Transaction) -> Vec<Mr
         let Some(solutions) = transaction.get_solutions(defining_handle) else {
             continue;
         };
+
+        // Look up MRO.
         let mro: &Arc<ClassMro> = solutions.get(&KeyClassMro(cls.index()));
         let ancestors: Vec<String> = mro
             .ancestors_no_object()
@@ -123,9 +140,20 @@ fn collect_mro_entries(classes: Vec<Class>, transaction: &Transaction) -> Vec<Mr
                 canonicalize_class_qname(&raw)
             })
             .collect();
-        entries.push(MroEntry {
+
+        // Look up class metadata for semantic tags.
+        let metadata: &Arc<ClassMetadata> = solutions.get(&KeyClassMetadata(cls.index()));
+        let mut tags = Vec::new();
+        if metadata.is_protocol() {
+            tags.push("protocol".to_owned());
+        } else if has_protocol_ancestor(mro, &handle_by_module, transaction) {
+            tags.push("inherits_protocol".to_owned());
+        }
+
+        entries.push(ClassMetadataEntry {
             qname: qname.clone(),
             ancestors,
+            tags,
         });
     }
 
@@ -134,12 +162,39 @@ fn collect_mro_entries(classes: Vec<Class>, transaction: &Transaction) -> Vec<Mr
     entries
 }
 
+/// Check whether any ancestor in the MRO is a Protocol.
+///
+/// This detects classes that aren't themselves Protocols but inherit from one
+/// at runtime (e.g. `class Foo(MyProtocol): ...` where `MyProtocol` is a
+/// Protocol). Pyrefly excludes `Protocol` from the MRO, but at runtime it is
+/// present in `__mro__`.
+fn has_protocol_ancestor(
+    mro: &ClassMro,
+    handle_by_module: &HashMap<ModuleName, Handle>,
+    transaction: &Transaction,
+) -> bool {
+    for ancestor in mro.ancestors_no_object() {
+        let cls = ancestor.class_object();
+        let Some(handle) = handle_by_module.get(&cls.module_name()) else {
+            continue;
+        };
+        let Some(solutions) = transaction.get_solutions(handle) else {
+            continue;
+        };
+        let metadata: &Arc<ClassMetadata> = solutions.get(&KeyClassMetadata(cls.index()));
+        if metadata.is_protocol() {
+            return true;
+        }
+    }
+    false
+}
+
 /// Write a CinderX type report to `output_dir`.
 ///
 /// Writes:
 /// - `index.json` listing every module
 /// - `types/<module>.json` for each module with type table + located types
-/// - `mro.json` with the global MRO table for all classes encountered
+/// - `class_metadata.json` with global class metadata (MRO + semantic tags)
 pub fn write_results(
     output_dir: &Path,
     transaction: &Transaction,
@@ -184,12 +239,12 @@ pub fn write_results(
     let json = serde_json::to_string_pretty(&index)?;
     fs_anyhow::write(&output_dir.join("index.json"), json)?;
 
-    // Write global MRO table.
-    let mro_table = MroTable {
-        entries: collect_mro_entries(all_classes, transaction),
+    // Write global class metadata.
+    let class_metadata = ClassMetadataTable {
+        entries: collect_class_metadata(all_classes, transaction),
     };
-    let mro_json = serde_json::to_string_pretty(&mro_table)?;
-    fs_anyhow::write(&output_dir.join("mro.json"), mro_json)?;
+    let metadata_json = serde_json::to_string_pretty(&class_metadata)?;
+    fs_anyhow::write(&output_dir.join("class_metadata.json"), metadata_json)?;
 
     Ok(())
 }
