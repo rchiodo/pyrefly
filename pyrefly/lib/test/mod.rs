@@ -15,6 +15,7 @@ mod attributes;
 mod attrs;
 mod callable;
 mod calls;
+mod cinderx;
 mod class_keywords;
 mod class_overrides;
 mod class_subtyping;
