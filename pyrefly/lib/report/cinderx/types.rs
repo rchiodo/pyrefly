@@ -1,0 +1,217 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+//! Structured type representation for CinderX reports.
+//!
+//! Types are represented as a flat, deduplicated table of `TypeTableEntry`
+//! values. Each entry carries a structural hash so that identical types
+//! (across modules or within a single module) share the same table slot.
+//!
+//! The representation is designed for CinderX's static Python compiler,
+//! which needs per-expression type information in a format it can consume
+//! without depending on pyrefly internals.
+
+use std::collections::HashMap;
+use std::hash::Hasher;
+
+use serde::Serialize;
+use xxhash_rust::xxh64::Xxh64;
+
+use crate::query::PythonASTRange;
+
+// ---------------------------------------------------------------------------
+// StructuredType: the four kinds of type entries
+// ---------------------------------------------------------------------------
+
+/// Structured type representation for the CinderX report protocol.
+/// Each variant maps to a category of Python type that CinderX cares about.
+#[expect(dead_code)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind")]
+pub enum StructuredType {
+    /// Named type with qualified name and type arguments.
+    /// Covers ClassType, Union, Optional, BoundMethod, TypeGuard, etc.
+    #[serde(rename = "class")]
+    Class {
+        qname: String,
+        args: Vec<usize>,
+        /// Optional semantic tags for class-like entries.
+        ///
+        /// These are classification hints derived from pyrefly metadata/MRO,
+        /// not type arguments. In v0 we only emit typed-dict related tags:
+        /// - `"typed_dict"`
+        /// - `"partial_typed_dict"`
+        ///
+        /// Additional tags may be added in future versions.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        traits: Vec<String>,
+    },
+    /// Callable type with parameter types and return type.
+    #[serde(rename = "callable")]
+    Callable {
+        params: Vec<usize>,
+        return_type: usize,
+    },
+    /// Type variable with name and bounds.
+    #[serde(rename = "variable")]
+    Variable {
+        name: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        bounds: Vec<usize>,
+    },
+    /// Literal value (used as type arg of `typing_extensions.Literal`).
+    #[serde(rename = "literal")]
+    Literal { value: String },
+}
+
+// ---------------------------------------------------------------------------
+// TypeTableEntry: one slot in the deduplicated table
+// ---------------------------------------------------------------------------
+
+/// A single entry in the type table: structured type + structural hash.
+#[derive(Debug, Clone, Serialize)]
+pub struct TypeTableEntry {
+    #[serde(flatten)]
+    pub ty: StructuredType,
+    pub hash: u64,
+}
+
+// ---------------------------------------------------------------------------
+// LocatedType: pairs a source location with a type table index
+// ---------------------------------------------------------------------------
+
+/// A located type reference: source range paired with an index into the type table.
+#[expect(dead_code)]
+#[derive(Debug, Clone, Serialize)]
+pub struct LocatedType {
+    #[serde(rename = "loc")]
+    pub location: PythonASTRange,
+    #[serde(rename = "type")]
+    pub type_index: usize,
+}
+
+// ---------------------------------------------------------------------------
+// TypeTable: builder with hash-based deduplication
+// ---------------------------------------------------------------------------
+
+/// Builder for a deduplicated type table.
+///
+/// Entries are inserted bottom-up (children before parents).
+/// Deduplication is by structural hash: if two types produce the same
+/// hash they share a single table slot.
+pub(crate) struct TypeTable {
+    /// The ordered list of unique entries.
+    entries: Vec<TypeTableEntry>,
+    /// Maps structural hash -> index in `entries` for O(1) dedup lookup.
+    seen: HashMap<u64, usize>,
+}
+
+#[expect(dead_code)]
+impl TypeTable {
+    pub(crate) fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            seen: HashMap::new(),
+        }
+    }
+
+    /// Insert an entry if not already present (by hash).
+    /// Returns the table index.
+    ///
+    /// TODO(stroxler): Deduplication is by hash only, not structural equality.
+    /// Hash collisions (two different types mapping to the same u64) would
+    /// silently merge distinct types. With 64-bit xxh64 this is astronomically
+    /// unlikely in practice, but we should either add a structural equality
+    /// check on collision or document this as an accepted limitation.
+    pub(crate) fn insert(&mut self, ty: StructuredType, hash: u64) -> usize {
+        if let Some(&idx) = self.seen.get(&hash) {
+            return idx;
+        }
+        let idx = self.entries.len();
+        self.entries.push(TypeTableEntry { ty, hash });
+        self.seen.insert(hash, idx);
+        idx
+    }
+
+    /// Set traits on an existing class entry. No-op if the entry is not a Class.
+    pub(crate) fn set_traits(&mut self, idx: usize, traits: Vec<String>) {
+        if let StructuredType::Class {
+            traits: ref mut t, ..
+        } = self.entries[idx].ty
+        {
+            *t = traits;
+        }
+    }
+
+    /// Look up the hash of an entry by index. Used when building parent hashes
+    /// from child indices.
+    pub(crate) fn hash_at(&self, idx: usize) -> u64 {
+        self.entries[idx].hash
+    }
+
+    /// Consume the builder and return the finished entry list.
+    pub(crate) fn into_entries(self) -> Vec<TypeTableEntry> {
+        self.entries
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structural hash functions
+// ---------------------------------------------------------------------------
+
+/// Kind discriminants for structural hashing.
+/// Each `StructuredType` variant gets a unique byte prefix so that
+/// e.g. a class named "int" and a variable named "int" hash differently.
+const HASH_KIND_CLASS: u8 = 0;
+const HASH_KIND_CALLABLE: u8 = 1;
+const HASH_KIND_VARIABLE: u8 = 2;
+const HASH_KIND_LITERAL: u8 = 3;
+
+/// Compute structural hash for a class-kind type.
+#[expect(dead_code)]
+pub(crate) fn hash_class(qname: &str, arg_hashes: &[u64]) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_CLASS);
+    h.write(qname.as_bytes());
+    for &ah in arg_hashes {
+        h.write_u64(ah);
+    }
+    h.finish()
+}
+
+/// Compute structural hash for a callable-kind type.
+#[expect(dead_code)]
+pub(crate) fn hash_callable(param_hashes: &[u64], return_hash: u64) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_CALLABLE);
+    for &ph in param_hashes {
+        h.write_u64(ph);
+    }
+    h.write_u64(return_hash);
+    h.finish()
+}
+
+/// Compute structural hash for a variable-kind type.
+#[expect(dead_code)]
+pub(crate) fn hash_variable(name: &str, bound_hashes: &[u64]) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_VARIABLE);
+    h.write(name.as_bytes());
+    for &bh in bound_hashes {
+        h.write_u64(bh);
+    }
+    h.finish()
+}
+
+/// Compute structural hash for a literal-kind type.
+#[expect(dead_code)]
+pub(crate) fn hash_literal(value: &str) -> u64 {
+    let mut h = Xxh64::new(0);
+    h.write_u8(HASH_KIND_LITERAL);
+    h.write(value.as_bytes());
+    h.finish()
+}

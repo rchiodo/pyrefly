@@ -10,6 +10,8 @@
 //! Produces a flat JSON report with per-expression structured type data,
 //! intended for consumption by CinderX's static Python compiler.
 
+pub mod types;
+
 use std::path::Path;
 
 use pyrefly_build::handle::Handle;
