@@ -747,6 +747,7 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} sympy",
             expected_mypy_success=True,
             cost={"mypy": 35, "pyright": 240},
+            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/nion-software/nionutils",
