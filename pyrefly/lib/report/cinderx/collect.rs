@@ -38,6 +38,8 @@ pub(crate) struct ModuleTypeData {
     pub entries: Vec<TypeTableEntry>,
     /// Per-expression located type references into the table.
     pub locations: Vec<LocatedType>,
+    /// All classes encountered during type conversion, for MRO collection.
+    pub classes: Vec<Class>,
 }
 
 /// Collect per-expression types for a single module.
@@ -72,13 +74,16 @@ pub(crate) fn collect_module_types(
         &mut pending_class_traits,
     );
 
-    // TODO(stroxler): Post-process pending_class_traits to fill in trait
-    // information on class entries. This requires solver access; for now
-    // traits are left empty on ClassType entries.
+    // Extract unique classes from pending_class_traits for MRO collection.
+    let classes: Vec<Class> = pending_class_traits
+        .into_iter()
+        .map(|(_, cls)| cls)
+        .collect();
 
     Some(ModuleTypeData {
         entries: table.into_entries(),
         locations,
+        classes,
     })
 }
 

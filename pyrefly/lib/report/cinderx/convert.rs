@@ -33,13 +33,13 @@ use crate::report::cinderx::types::hash_variable;
 /// Currently a pass-through: we use raw pyrefly qnames (e.g. `builtins.int`,
 /// `builtins.list`) rather than remapping to typing-module names. This
 /// function exists as a hook point for future canonicalization if needed.
-fn canonicalize_class_qname(raw: &str) -> String {
+pub(crate) fn canonicalize_class_qname(raw: &str) -> String {
     raw.to_owned()
 }
 
 /// Format a `QName` as a fully qualified dot-separated string
 /// (e.g. `module.Outer.Inner`).
-fn qname_to_full_string(qname: &pyrefly_python::qname::QName) -> String {
+pub(crate) fn qname_to_full_string(qname: &pyrefly_python::qname::QName) -> String {
     format!("{}", Fmt(|f| qname.fmt_with_module(f)))
 }
 

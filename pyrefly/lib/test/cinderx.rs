@@ -11,6 +11,7 @@ use pretty_assertions::assert_eq;
 
 use crate::report::cinderx::collect::collect_module_types;
 use crate::report::cinderx::types::StructuredType;
+use crate::report::cinderx::write_results;
 use crate::state::require::Require;
 use crate::test::util::TestEnv;
 
@@ -221,5 +222,83 @@ fn test_json_serialization() {
     assert!(
         locations_json.contains("\"type\""),
         "locations JSON should have 'type' field"
+    );
+}
+
+#[test]
+fn test_mro_collection() {
+    let state = create_state(
+        "test",
+        r#"
+class Base:
+    pass
+
+class Child(Base):
+    pass
+
+x: Child = Child()
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The classes list should contain the classes we referenced
+    assert!(
+        !data.classes.is_empty(),
+        "expected at least one class in the classes list"
+    );
+}
+
+#[test]
+fn test_mro_in_report() {
+    let state = create_state(
+        "test",
+        r#"
+class Base:
+    pass
+
+class Child(Base):
+    pass
+
+x: Child = Child()
+"#,
+    );
+    let transaction = state.transaction();
+    let handles: Vec<_> = transaction.handles();
+
+    let output_dir = tempfile::tempdir().expect("should create temp dir");
+    write_results(output_dir.path(), &transaction, &handles).expect("should write results");
+
+    // Read and parse mro.json
+    let mro_json =
+        std::fs::read_to_string(output_dir.path().join("mro.json")).expect("mro.json should exist");
+    let mro: serde_json::Value =
+        serde_json::from_str(&mro_json).expect("mro.json should be valid JSON");
+
+    let entries = mro["entries"]
+        .as_array()
+        .expect("entries should be an array");
+
+    // Find the Child class MRO entry
+    let child_entry = entries
+        .iter()
+        .find(|e| e["qname"].as_str() == Some("test.Child"));
+    assert!(
+        child_entry.is_some(),
+        "expected MRO entry for test.Child, got entries: {mro_json}"
+    );
+
+    let ancestors = child_entry.unwrap()["ancestors"]
+        .as_array()
+        .expect("ancestors should be an array");
+    let ancestor_names: Vec<&str> = ancestors
+        .iter()
+        .map(|a| a.as_str().expect("ancestor should be a string"))
+        .collect();
+    assert!(
+        ancestor_names.contains(&"test.Base"),
+        "expected test.Base in Child's MRO, got: {ancestor_names:?}"
     );
 }
