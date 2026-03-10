@@ -193,50 +193,102 @@ pub enum TypeServerVersion {
 }
 
 /// Flags that describe the characteristics of a type. These flags can be combined using bitwise operations.
-#[derive(Serialize, Deserialize, PartialEq, Debug, Eq, Clone)]
-pub enum TypeFlags {
-    #[serde(rename = "None")]
-    None,
-
-    /// Indicates if the type can be instantiated.
-    #[serde(rename = "Instantiable")]
-    Instantiable,
-
-    /// Indicates if the type represents an instance (as opposed to a class or type itself).
-    #[serde(rename = "Instance")]
-    Instance,
-
-    /// Indicates if an instance of the type can be called like a function. (It has a `__call__` method).
-    #[serde(rename = "Callable")]
-    Callable,
-
-    /// Indicates if the instance is a literal (like `42`, `"hello"`, etc.).
-    #[serde(rename = "Literal")]
-    Literal,
-
-    /// Indicates if the type is an interface (a type that defines a set of methods and properties). In Python this would be a Protocol.
-    #[serde(rename = "Interface")]
-    Interface,
-
-    /// Indicates if the type is a generic type (a type that can be parameterized with other types).
-    #[serde(rename = "Generic")]
-    Generic,
-
-    /// Indicates if the type came from an alias (a type that refers to another type).
-    #[serde(rename = "FromAlias")]
-    Fromalias,
-
-    /// Indicates if the type is unpacked (used with TypeVarTuple).
-    #[serde(rename = "Unpacked")]
-    Unpacked,
-
-    /// Indicates if the type is optional (used with Tuple type arguments).
-    #[serde(rename = "Optional")]
-    Optional,
-
-    /// Indicates if the type is unbound (used with *args in tuple type arguments).
-    #[serde(rename = "Unbound")]
-    Unbound,
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct TypeFlags(pub i32);
+impl TypeFlags {
+    pub const NONE: TypeFlags = TypeFlags(0);
+    pub const INSTANTIABLE: TypeFlags = TypeFlags(1);
+    pub const INSTANCE: TypeFlags = TypeFlags(2);
+    pub const CALLABLE: TypeFlags = TypeFlags(4);
+    pub const LITERAL: TypeFlags = TypeFlags(8);
+    pub const INTERFACE: TypeFlags = TypeFlags(16);
+    pub const GENERIC: TypeFlags = TypeFlags(32);
+    pub const FROM_ALIAS: TypeFlags = TypeFlags(64);
+    pub const UNPACKED: TypeFlags = TypeFlags(128);
+    pub const OPTIONAL: TypeFlags = TypeFlags(256);
+    pub const UNBOUND: TypeFlags = TypeFlags(512);
+    #[inline]
+    pub fn new() -> Self {
+        Self::NONE
+    }
+    #[inline]
+    pub fn with_instantiable(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::INSTANTIABLE.0)
+    }
+    #[inline]
+    pub fn with_instance(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::INSTANCE.0)
+    }
+    #[inline]
+    pub fn with_callable(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::CALLABLE.0)
+    }
+    #[inline]
+    pub fn with_literal(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::LITERAL.0)
+    }
+    #[inline]
+    pub fn with_interface(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::INTERFACE.0)
+    }
+    #[inline]
+    pub fn with_generic(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::GENERIC.0)
+    }
+    #[inline]
+    pub fn with_from_alias(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::FROM_ALIAS.0)
+    }
+    #[inline]
+    pub fn with_unpacked(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::UNPACKED.0)
+    }
+    #[inline]
+    pub fn with_optional(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::OPTIONAL.0)
+    }
+    #[inline]
+    pub fn with_unbound(self) -> Self {
+        TypeFlags(self.0 | TypeFlags::UNBOUND.0)
+    }
+    #[inline]
+    pub fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+impl Serialize for TypeFlags {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        s.serialize_i32(self.0)
+    }
+}
+impl<'de> Deserialize<'de> for TypeFlags {
+    fn deserialize<D>(d: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let v = i32::deserialize(d)?;
+        Ok(TypeFlags(v))
+    }
+}
+impl std::ops::BitOr for TypeFlags {
+    type Output = TypeFlags;
+    fn bitor(self, rhs: TypeFlags) -> TypeFlags {
+        TypeFlags(self.0 | rhs.0)
+    }
+}
+impl std::ops::BitOrAssign for TypeFlags {
+    fn bitor_assign(&mut self, rhs: TypeFlags) {
+        self.0 |= rhs.0;
+    }
+}
+impl std::ops::BitAnd for TypeFlags {
+    type Output = TypeFlags;
+    fn bitand(self, rhs: TypeFlags) -> TypeFlags {
+        TypeFlags(self.0 & rhs.0)
+    }
 }
 
 /// Represents the category of a declaration in the type system. This is used to classify declarations such as variables, functions, classes, etc.

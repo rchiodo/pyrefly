@@ -2,6 +2,26 @@
     "metaData": {
         "version": "0.2.0"
     },
+    "enumerations": [
+        {
+            "name": "TypeFlags",
+            "type": {"kind": "base", "name": "integer"},
+            "documentation": "Flags that describe the characteristics of a type. These flags can be combined using bitwise operations.",
+            "values": [
+                {"name": "None", "value": 0, "documentation": "No flags set."},
+                {"name": "Instantiable", "value": 1, "documentation": "Indicates if the type can be instantiated."},
+                {"name": "Instance", "value": 2, "documentation": "Indicates if the type represents an instance (as opposed to a class or type itself)."},
+                {"name": "Callable", "value": 4, "documentation": "Indicates if an instance of the type can be called like a function. (It has a `__call__` method)."},
+                {"name": "Literal", "value": 8, "documentation": "Indicates if the instance is a literal (like `42`, `\"hello\"`, etc.)."},
+                {"name": "Interface", "value": 16, "documentation": "Indicates if the type is an interface (a type that defines a set of methods and properties). In Python this would be a Protocol."},
+                {"name": "Generic", "value": 32, "documentation": "Indicates if the type is a generic type (a type that can be parameterized with other types)."},
+                {"name": "FromAlias", "value": 64, "documentation": "Indicates if the type came from an alias (a type that refers to another type)."},
+                {"name": "Unpacked", "value": 128, "documentation": "Indicates if the type is unpacked (used with TypeVarTuple)."},
+                {"name": "Optional", "value": 256, "documentation": "Indicates if the type is optional (used with Tuple type arguments)."},
+                {"name": "Unbound", "value": 512, "documentation": "Indicates if the type is unbound (used with *args in tuple type arguments)."}
+            ]
+        }
+    ],
     "requests": [
         {
             "method": "typeServer/getComputedType",
@@ -246,35 +266,6 @@
                 "v0_2_0": "Added new request types and fields",
                 "v0_3_0": "Switch to more complex types",
                 "current": "Switch to Type union and using stubs"
-            }
-        },
-        "TypeFlags": {
-            "kind": "stringLiteral",
-            "value": [
-                "None",
-                "Instantiable",
-                "Instance",
-                "Callable",
-                "Literal",
-                "Interface",
-                "Generic",
-                "FromAlias",
-                "Unpacked",
-                "Optional",
-                "Unbound"
-            ],
-            "documentation": "Flags that describe the characteristics of a type. These flags can be combined using bitwise operations.",
-            "valueDocumentation": {
-                "Instantiable": "Indicates if the type can be instantiated.",
-                "Instance": "Indicates if the type represents an instance (as opposed to a class or type itself).",
-                "Callable": "Indicates if an instance of the type can be called like a function. (It has a `__call__` method).",
-                "Literal": "Indicates if the instance is a literal (like `42`, `\"hello\"`, etc.).",
-                "Interface": "Indicates if the type is an interface (a type that defines a set of methods and properties). In Python this would be a Protocol.",
-                "Generic": "Indicates if the type is a generic type (a type that can be parameterized with other types).",
-                "FromAlias": "Indicates if the type came from an alias (a type that refers to another type).",
-                "Unpacked": "Indicates if the type is unpacked (used with TypeVarTuple).",
-                "Optional": "Indicates if the type is optional (used with Tuple type arguments).",
-                "Unbound": "Indicates if the type is unbound (used with *args in tuple type arguments)."
             }
         },
         "DeclarationCategory": {

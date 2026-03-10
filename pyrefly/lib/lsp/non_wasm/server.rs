@@ -416,6 +416,20 @@ pub trait TspInterface: Send + Sync {
     /// Returns `Err` if `from_url` cannot be converted to a filesystem path
     /// (e.g. on the wrong platform).
     fn get_python_search_paths(&self, from_url: &Url) -> Result<Vec<String>, String>;
+
+    /// Return the inferred type at the given position in a file.
+    ///
+    /// `uri` is a file URI string (e.g. `file:///path/to/file.py`).
+    /// `line` and `character` are zero-based positions within the file.
+    ///
+    /// Returns `None` when the URI cannot be resolved, the position is invalid,
+    /// or no type information is available at that location.
+    fn get_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type>;
 }
 
 pub struct Connection {
@@ -5735,5 +5749,26 @@ impl TspInterface for Server {
             .filter(|uri| seen.insert(uri.clone()))
             .collect();
         Ok(paths)
+    }
+
+    fn get_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type> {
+        let url = Url::parse(uri)
+            .ok()
+            .or_else(|| Url::from_file_path(uri).ok())?;
+        let path = url.to_file_path().ok()?;
+
+        let handle = make_open_handle(&self.state, &path);
+        let transaction = self.state.transaction();
+        let module_info = transaction.get_module_info(&handle)?;
+        let position = module_info.from_lsp_position(
+            lsp_types::Position { line, character },
+            /* notebook_cell */ None,
+        );
+        transaction.get_type_at(&handle, position)
     }
 }

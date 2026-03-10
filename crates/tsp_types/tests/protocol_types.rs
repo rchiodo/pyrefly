@@ -52,9 +52,9 @@ fn test_declaration_category_serialization() {
 
 #[test]
 fn test_type_flags_serialization() {
-    let flag = TypeFlags::Callable;
+    let flag = TypeFlags::CALLABLE;
     let json = serde_json::to_value(&flag).unwrap();
-    assert_eq!(json, serde_json::json!("Callable"));
+    assert_eq!(json, serde_json::json!(4));
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn test_builtin_type_has_base_fields() {
     let t = BuiltInType {
         id: 1,
         kind: "BuiltIn".to_owned(),
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         type_alias_info: None,
         name: "int".to_owned(),
         declaration: None,
@@ -262,7 +262,7 @@ fn test_builtin_type_has_base_fields() {
     // TypeBase fields are present
     assert_eq!(t.id, 1);
     assert_eq!(t.kind, "BuiltIn");
-    assert_eq!(t.flags, TypeFlags::Instance);
+    assert_eq!(t.flags, TypeFlags::INSTANCE);
     assert!(t.type_alias_info.is_none());
     // Own fields
     assert_eq!(t.name, "int");
@@ -273,7 +273,7 @@ fn test_builtin_type_serialization_round_trip() {
     let t = BuiltInType {
         id: 42,
         kind: "BuiltIn".to_owned(),
-        flags: TypeFlags::None,
+        flags: TypeFlags::NONE,
         type_alias_info: None,
         name: "unknown".to_owned(),
         declaration: None,
@@ -282,7 +282,7 @@ fn test_builtin_type_serialization_round_trip() {
     let json = serde_json::to_value(&t).unwrap();
     assert_eq!(json["id"], 42);
     assert_eq!(json["kind"], "BuiltIn");
-    assert_eq!(json["flags"], "None");
+    assert_eq!(json["flags"], 0);
     assert_eq!(json["name"], "unknown");
 
     let back: BuiltInType = serde_json::from_value(json).unwrap();
@@ -295,7 +295,7 @@ fn test_union_type_serialization() {
     let int_type = Type::BuiltInType(BuiltInType {
         id: 1,
         kind: "BuiltIn".to_owned(),
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         type_alias_info: None,
         name: "int".to_owned(),
         declaration: None,
@@ -304,7 +304,7 @@ fn test_union_type_serialization() {
     let str_type = Type::BuiltInType(BuiltInType {
         id: 2,
         kind: "BuiltIn".to_owned(),
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         type_alias_info: None,
         name: "str".to_owned(),
         declaration: None,
@@ -313,7 +313,7 @@ fn test_union_type_serialization() {
     let union = UnionType {
         id: 3,
         kind: "Union".to_owned(),
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         type_alias_info: None,
         sub_types: vec![int_type, str_type],
     };
@@ -330,7 +330,7 @@ fn test_module_type_serialization() {
     let m = ModuleType {
         id: 10,
         kind: "Module".to_owned(),
-        flags: TypeFlags::None,
+        flags: TypeFlags::NONE,
         type_alias_info: None,
         module_name: "os.path".to_owned(),
         uri: "file:///usr/lib/python3.11/posixpath.py".to_owned(),
@@ -348,7 +348,7 @@ fn test_type_reference_type_serialization() {
     let r = TypeReferenceType {
         id: 99,
         kind: "TypeReference".to_owned(),
-        flags: TypeFlags::None,
+        flags: TypeFlags::NONE,
         type_alias_info: None,
         type_reference_id: 1,
     };
@@ -460,7 +460,7 @@ fn test_enum_literal_serialization() {
     let int_type = Type::BuiltInType(BuiltInType {
         id: 1,
         kind: "BuiltIn".to_owned(),
-        flags: TypeFlags::Instance,
+        flags: TypeFlags::INSTANCE,
         type_alias_info: None,
         name: "int".to_owned(),
         declaration: None,
