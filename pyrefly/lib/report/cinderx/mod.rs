@@ -9,12 +9,16 @@
 //!
 //! Produces a flat JSON report with per-expression structured type data,
 //! intended for consumption by CinderX's static Python compiler.
+//!
+//! Output structure:
+//! ```text
+//! <output_dir>/
+//!   index.json          — lists all modules with paths
+//!   types/<module>.json  — per-module type table + located types
+//! ```
 
-#[allow(dead_code)]
 pub mod collect;
-#[allow(dead_code)]
 pub mod convert;
-#[allow(dead_code)]
 pub mod types;
 
 use std::path::Path;
@@ -23,6 +27,9 @@ use pyrefly_build::handle::Handle;
 use pyrefly_util::fs_anyhow;
 use serde::Serialize;
 
+use crate::report::cinderx::collect::collect_module_types;
+use crate::report::cinderx::types::LocatedType;
+use crate::report::cinderx::types::TypeTableEntry;
 use crate::state::state::Transaction;
 
 /// A module entry in the cinderx index.
@@ -43,16 +50,28 @@ struct CinderxIndex {
     modules: Vec<ModuleEntry>,
 }
 
-/// Write a stub CinderX report to `output_dir`.
+/// Per-module type report written to `types/<module>.json`.
+#[derive(Debug, Serialize)]
+struct ModuleReport {
+    /// Deduplicated type table; indices in `locations` refer into this.
+    type_table: Vec<TypeTableEntry>,
+    /// Per-expression type annotations keyed by source location.
+    locations: Vec<LocatedType>,
+}
+
+/// Write a CinderX type report to `output_dir`.
 ///
-/// Currently writes only an `index.json` listing every module name and path.
-/// Future commits will add per-module type tables.
+/// Writes an `index.json` listing every module, plus a `types/<module>.json`
+/// for each module containing the deduplicated type table and per-expression
+/// located type references.
 pub fn write_results(
     output_dir: &Path,
-    _transaction: &Transaction,
+    transaction: &Transaction,
     handles: &[Handle],
 ) -> anyhow::Result<()> {
     fs_anyhow::create_dir_all(output_dir)?;
+    let types_dir = output_dir.join("types");
+    fs_anyhow::create_dir_all(&types_dir)?;
 
     let modules: Vec<ModuleEntry> = handles
         .iter()
@@ -69,6 +88,18 @@ pub fn write_results(
 
     let json = serde_json::to_string_pretty(&index)?;
     fs_anyhow::write(&output_dir.join("index.json"), json)?;
+
+    for handle in handles {
+        if let Some(data) = collect_module_types(transaction, handle) {
+            let report = ModuleReport {
+                type_table: data.entries,
+                locations: data.locations,
+            };
+            let module_json = serde_json::to_string_pretty(&report)?;
+            let filename = format!("{}.json", handle.module());
+            fs_anyhow::write(&types_dir.join(filename), module_json)?;
+        }
+    }
 
     Ok(())
 }
