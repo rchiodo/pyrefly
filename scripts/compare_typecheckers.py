@@ -4,7 +4,11 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-"""Compare pyrefly vs pyright error counts on mypy_primer projects.
+"""Compare pyrefly vs pyright on mypy_primer projects.
+
+Two output modes:
+  Error counts (default):  prints a summary table with error counts per project.
+  Full errors (--output-json):  writes structured JSON with every error message.
 
 Local-only script. Two-phase usage:
 
@@ -15,7 +19,10 @@ Local-only script. Two-phase usage:
     python3 compare_typecheckers.py --clone-only --cache-dir /tmp/primer_cache
 
   Phase 2 — Run checkers on cached repos (run inside conda):
+    # Error counts (table):
     python3 compare_typecheckers.py --cache-dir /tmp/primer_cache --reuse-cache -o /tmp/results.txt
+    # Full error messages (JSON):
+    python3 compare_typecheckers.py --cache-dir /tmp/primer_cache --reuse-cache --output-json /tmp/errors.json
 
   Or if cloning works in your env, do it all at once:
     python3 compare_typecheckers.py --pyrefly /path/to/pyrefly --cache-dir /tmp/primer_cache -o /tmp/results.txt
@@ -27,6 +34,7 @@ Local-only script. Two-phase usage:
 import argparse
 import configparser
 import csv
+import json
 import logging
 import os
 import re
@@ -35,6 +43,7 @@ import subprocess
 import tempfile
 import time
 import venv
+from datetime import datetime, timezone
 
 from projects import get_mypy_primer_projects, Project
 
@@ -219,6 +228,89 @@ def parse_error_count(output: str) -> int:
     return -1
 
 
+def parse_full_errors_pyrefly(stdout: str) -> list[dict[str, object]]:
+    """Parse pyrefly --output-format json output into structured error list.
+
+    Pyrefly JSON format:
+    {
+      "errors": [
+        {
+          "line": 1, "column": 3, "stop_line": 1, "stop_column": 5,
+          "path": "file.py", "name": "bad-return",
+          "description": "...", "severity": "error"
+        }
+      ]
+    }
+    """
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        logging.warning("Failed to parse pyrefly JSON output")
+        return []
+    errors = []
+    for e in data.get("errors", []):
+        errors.append(
+            {
+                "file": e.get("path", ""),
+                "line": e.get("line", 0),
+                "col": e.get("column", 0),
+                "kind": e.get("name", ""),
+                "message": e.get("description", ""),
+                "severity": e.get("severity", "error"),
+            }
+        )
+    return errors
+
+
+def parse_full_errors_pyright(stdout: str, repo_dir: str) -> list[dict[str, object]]:
+    """Parse pyright --outputjson output into structured error list.
+
+    Pyright JSON format:
+    {
+      "generalDiagnostics": [
+        {
+          "file": "/absolute/path/to/file.py",
+          "severity": "error",
+          "message": "...",
+          "range": {"start": {"line": 0, "character": 0}},
+          "rule": "reportReturnType"
+        }
+      ]
+    }
+
+    Pyright uses 0-based line/col numbers; we normalize to 1-based.
+    Absolute file paths are made relative to repo_dir.
+    """
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError:
+        logging.warning("Failed to parse pyright JSON output")
+        return []
+    errors = []
+    # Ensure repo_dir ends with separator for clean prefix stripping.
+    # Use realpath to resolve symlinks (e.g. /tmp -> /private/tmp on macOS)
+    # so that the prefix matches pyright's resolved absolute paths.
+    prefix = os.path.realpath(repo_dir) + os.sep
+    for d in data.get("generalDiagnostics", []):
+        range_info = d.get("range", {})
+        start = range_info.get("start", {})
+        file_path = d.get("file", "")
+        # Make absolute paths relative to repo_dir
+        if file_path.startswith(prefix):
+            file_path = file_path[len(prefix) :]
+        errors.append(
+            {
+                "file": file_path,
+                "line": start.get("line", 0) + 1,
+                "col": start.get("character", 0) + 1,
+                "kind": d.get("rule", ""),
+                "message": d.get("message", ""),
+                "severity": d.get("severity", "error"),
+            }
+        )
+    return errors
+
+
 def generate_table(
     results: list[dict[str, object]], output_file: str | None, csv_file: str | None
 ) -> None:
@@ -271,6 +363,56 @@ def generate_table(
         logging.info(f"Results written to {csv_file}")
 
 
+def write_json_output(
+    results: list[dict[str, object]],
+    projects: list["Project"],
+    output_path: str,
+) -> None:
+    """Write structured JSON with full error details for all projects.
+
+    Output format:
+    {
+      "timestamp": "...",
+      "projects": [
+        {
+          "name": "...",
+          "url": "...",
+          "pyrefly": {"errors": [...], "error_count": N, "duration_sec": T},
+          "pyright": {"errors": [...], "error_count": N, "duration_sec": T}
+        }
+      ]
+    }
+    """
+    # Build a url lookup from the projects list
+    url_by_name = {p.name: p.location for p in projects}
+    project_entries = []
+    for r in results:
+        name = r["project"]
+        entry: dict[str, object] = {
+            "name": name,
+            "url": url_by_name.get(name, ""),  # type: ignore[arg-type]
+        }
+        for checker in ("pyrefly", "pyright"):
+            error_list = r.get(f"{checker}_error_list", [])
+            entry[checker] = {
+                "errors": error_list,
+                "error_count": r.get(f"{checker}_errors", 0),
+                "duration_sec": r.get(f"{checker}_time", 0),
+            }
+        project_entries.append(entry)
+
+    output = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "projects": project_entries,
+    }
+    with open(output_path, "w") as f:
+        json.dump(output, f, indent=2)
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    logging.info(
+        f"Wrote {len(project_entries)} projects to {output_path} ({size_mb:.1f} MB)"
+    )
+
+
 def _has_pyright_config(repo_dir: str) -> bool:
     """Check whether the repo has a pyright configuration.
 
@@ -295,9 +437,18 @@ def extract_paths_from_cmd(cmd: str) -> list[str]:
 
 
 def check_project(
-    project: Project, repo_dir: str, pyrefly_bin: str, debug: bool
+    project: Project,
+    repo_dir: str,
+    pyrefly_bin: str,
+    debug: bool,
+    full_errors: bool = False,
 ) -> dict[str, object]:
-    """Run pyrefly and pyright on a project, return a results row."""
+    """Run pyrefly and pyright on a project, return a results row.
+
+    When full_errors is True, checkers run in JSON mode and the result
+    includes per-error detail lists under 'pyrefly_error_list' and
+    'pyright_error_list'.
+    """
     site_paths = setup_project(project, repo_dir, debug, reuse=os.path.exists(repo_dir))
 
     paths = extract_paths_from_cmd(project.pyrefly_cmd)
@@ -325,8 +476,11 @@ def check_project(
         # No pyright config; default init (uses mypy config if present)
         logging.info("  No pyright config, using default init")
         run(f"{pyrefly_bin} init --non-interactive", debug, cwd=repo_dir, shell=True)
+
+    # When full_errors is requested, run pyrefly in JSON mode
+    output_format = " --output-format json" if full_errors else ""
     pyrefly_cmd = project.pyrefly_cmd.format(
-        pyrefly=f'{pyrefly_bin} check --project-excludes "**/_primer_venv/**"'
+        pyrefly=f'{pyrefly_bin} check --project-excludes "**/_primer_venv/**"{output_format}'
     )
     if site_paths:
         pyrefly_cmd += " " + site_paths
@@ -336,13 +490,23 @@ def check_project(
         pyrefly_cmd, debug, cwd=repo_dir, shell=True, capture_output=True, text=True
     )
     pyrefly_time = time.time() - start
-    pyrefly_output = (pr.stdout or "") + (pr.stderr or "")
-    pyrefly_errors = parse_error_count(pyrefly_output)
 
-    # Pyright — use same paths as pyrefly for apples-to-apples
+    if full_errors:
+        pyrefly_error_list = parse_full_errors_pyrefly(pr.stdout or "")
+        pyrefly_errors = len(
+            [e for e in pyrefly_error_list if e.get("severity") == "error"]
+        )
+    else:
+        pyrefly_output = (pr.stdout or "") + (pr.stderr or "")
+        pyrefly_errors = parse_error_count(pyrefly_output)
+        pyrefly_error_list = None
+
+    # Pyright — use same paths as pyrefly for apples-to-apples.
+    # When full_errors is requested, run pyright in JSON mode.
+    pyright_json_flag = "--outputjson " if full_errors else ""
     start = time.time()
     pp = run(
-        f"pyright {path_args}",
+        f"pyright {pyright_json_flag}{path_args}",
         debug,
         cwd=repo_dir,
         shell=True,
@@ -350,20 +514,33 @@ def check_project(
         text=True,
     )
     pyright_time = time.time() - start
-    pyright_output = (pp.stdout or "") + (pp.stderr or "")
-    pyright_errors = parse_error_count(pyright_output)
+
+    if full_errors:
+        pyright_error_list = parse_full_errors_pyright(pp.stdout or "", repo_dir)
+        pyright_errors = len(
+            [e for e in pyright_error_list if e.get("severity") == "error"]
+        )
+    else:
+        pyright_output = (pp.stdout or "") + (pp.stderr or "")
+        pyright_errors = parse_error_count(pyright_output)
+        pyright_error_list = None
 
     logging.info(
         f"  pyrefly: {pyrefly_errors} errors in {pyrefly_time:.1f}s | "
         f"pyright: {pyright_errors} errors in {pyright_time:.1f}s"
     )
-    return {
+    result: dict[str, object] = {
         "project": project.name,
         "pyrefly_errors": pyrefly_errors,
         "pyright_errors": pyright_errors,
         "pyrefly_time": round(pyrefly_time, 2),
         "pyright_time": round(pyright_time, 2),
     }
+    if full_errors:
+        result["pyrefly_error_list"] = pyrefly_error_list
+        result["pyright_error_list"] = pyright_error_list
+        result["url"] = project.location
+    return result
 
 
 def get_projects(names: list[str] | None) -> list[Project]:
@@ -423,6 +600,10 @@ def main() -> None:
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--csv", help="Write results to CSV file")
     parser.add_argument("--output", "-o", help="Write summary table to a file")
+    parser.add_argument(
+        "--output-json",
+        help="Write structured JSON with full error messages to this file",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -472,7 +653,13 @@ def main() -> None:
                     project, args.cache_dir, tmp_dir, args.reuse_cache
                 )
                 results.append(
-                    check_project(project, repo_dir, pyrefly_bin, args.debug)
+                    check_project(
+                        project,
+                        repo_dir,
+                        pyrefly_bin,
+                        args.debug,
+                        full_errors=bool(args.output_json),
+                    )
                 )
             except Exception as e:
                 logging.error(f"  FAILED: {e}")
@@ -489,7 +676,10 @@ def main() -> None:
         if tmp_dir:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    generate_table(results, args.output, args.csv)
+    if args.output_json:
+        write_json_output(results, projects, args.output_json)
+    else:
+        generate_table(results, args.output, args.csv)
 
 
 if __name__ == "__main__":
