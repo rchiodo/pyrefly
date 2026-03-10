@@ -1104,20 +1104,17 @@ impl GleanState<'_> {
             .collect()
     }
 
-    fn find_definition_for_imported_module(&self, module: ModuleName) -> Vec<DefinitionLocation> {
+    fn find_definition_for_imported_module(&self, module: ModuleName) -> DefinitionLocation {
         let definition = self.transaction.find_definition_for_imported_module(
             self.handle,
             module,
             find_preference_glean(),
         );
 
-        definition.map_or(
-            vec![DefinitionLocation {
-                name: module.to_string(),
-                file: None,
-            }],
-            |def| self.get_definition_location(def.definition_range, &def.module, None, vec![]),
-        )
+        let name = module.to_string();
+        let file = definition.map(|def| file_fact(&def.module));
+
+        DefinitionLocation { name, file }
     }
 
     fn make_import_fact(
@@ -1151,13 +1148,11 @@ impl GleanState<'_> {
     fn add_xrefs_for_module(&mut self, module_name: ModuleName, position: TextSize, prefix: &str) {
         for (module, range) in all_modules_with_range(module_name, position) {
             let resolved_name = join_names(prefix, &module);
-            let defs =
+            let def =
                 self.find_definition_for_imported_module(ModuleName::from_str(&resolved_name));
 
-            for def in defs {
-                self.record_name(def.name.clone());
-                self.add_xref(def, range);
-            }
+            self.record_name(def.name.clone());
+            self.add_xref(def, range);
         }
     }
 
@@ -1190,7 +1185,7 @@ impl GleanState<'_> {
             .collect()
     }
 
-    fn get_from_module(&mut self, import_from: &StmtImportFrom) -> String {
+    fn get_from_module(&mut self, import_from: &StmtImportFrom) -> DefinitionLocation {
         let resolved_module_prefix = if import_from.level > 0 {
             self.module_name.new_maybe_relative(
                 self.module.path().is_init(),
@@ -1224,10 +1219,8 @@ impl GleanState<'_> {
             && let Some(module_prefix) = resolved_module_prefix
             && !module_prefix_str.is_empty()
         {
-            let defs = self.find_definition_for_imported_module(module_prefix);
-            for def in defs {
-                self.add_xref(def, range);
-            }
+            let def = self.find_definition_for_imported_module(module_prefix);
+            self.add_xref(def, range);
         }
 
         let module_str = import_from
@@ -1240,7 +1233,8 @@ impl GleanState<'_> {
             self.add_xrefs_for_module(ModuleName::from_str(module_id), position, module_prefix_str);
         }
 
-        join_names(module_prefix_str, module_str)
+        let fqname_module = join_names(module_prefix_str, module_str);
+        self.find_definition_for_imported_module(ModuleName::from_str(&fqname_module))
     }
 
     fn import_from_facts(
@@ -1249,6 +1243,8 @@ impl GleanState<'_> {
         top_level_declaration: &python::Declaration,
     ) -> Vec<DeclarationInfo> {
         let from_module = self.get_from_module(import_from);
+        let from_module_name = from_module.name;
+        let from_module_file = from_module.file;
 
         let mut decl_infos = vec![];
         for import in &import_from.names {
@@ -1257,7 +1253,7 @@ impl GleanState<'_> {
 
             if *from_name.id.as_str() == *star_import {
                 let import_star = python::ImportStarStatement::new(
-                    python::Name::new(from_module.clone()),
+                    python::Name::new(from_module_name.clone()),
                     self.facts.module.clone(),
                 );
                 self.facts
@@ -1268,10 +1264,10 @@ impl GleanState<'_> {
                         to_span(import_from.range),
                     ));
             } else {
-                let from_name_string = join_names(&from_module, from_name.id());
+                let from_name_string = join_names(&from_module_name, from_name.id());
                 let from_name_definition = DefinitionLocation {
                     name: from_name_string.clone(),
-                    file: None, // TODO: default to module file
+                    file: from_module_file.clone(),
                 };
                 let as_name = import.asname.as_ref().unwrap_or(from_name);
 
