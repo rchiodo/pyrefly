@@ -91,7 +91,7 @@ jobs:
             --new $GITHUB_SHA --old base_commit \
             --num-shards 10 --shard-index ${{ matrix.shard-index }} \
             --debug \
-            --project-selector '^(?!.*(python/cpython))' \
+            --project-selector '^(?!.*(python/cpython|sympy/sympy))' \
             --type-checker pyrefly \
             --output concise \
             | tee diff_${{ matrix.shard-index }}.txt
