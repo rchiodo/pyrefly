@@ -403,4 +403,12 @@ impl ConfigOverrideArgs {
     pub fn disable_project_excludes_heuristics(&self) -> Option<bool> {
         self.disable_project_excludes_heuristics
     }
+
+    /// Set the `untyped_def_behavior` override, but only if the user hasn't
+    /// already specified one via the CLI.
+    pub fn set_untyped_def_behavior_if_unset(&mut self, behavior: UntypedDefBehavior) {
+        if self.untyped_def_behavior.is_none() {
+            self.untyped_def_behavior = Some(behavior);
+        }
+    }
 }
