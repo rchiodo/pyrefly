@@ -4184,12 +4184,15 @@ impl Server {
                     import_format
                 )
             );
+            let start = Instant::now();
             if let Some(action) =
                 convert_module_package_code_actions(&self.initialize_params.capabilities, uri)
             {
                 actions.push(action);
             }
+            record_code_action_telemetry("convert_module_package", start);
         }
+        let start = Instant::now();
         if let Some(action) = safe_delete_file_code_action(
             &self.initialize_params.capabilities,
             &self.state,
@@ -4198,6 +4201,7 @@ impl Server {
         ) {
             actions.push(action);
         }
+        record_code_action_telemetry("safe_delete_file", start);
         (!actions.is_empty()).then_some(actions)
     }
 
