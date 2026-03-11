@@ -476,7 +476,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         };
         match result {
             Err(_)
-                if !self.solver.strict_callable_subtyping
+                if !self.solver.flags.strict_callable_subtyping
                     && (params_have_any_args_and_kwargs(l_params)
                         || params_have_any_args_and_kwargs(u_params)) =>
             {
