@@ -35,6 +35,7 @@
 
 use std::sync::Arc;
 
+use arc_swap::Guard;
 use dupe::Dupe;
 use pyrefly_util::lock::Condvar;
 use pyrefly_util::lock::Mutex;
@@ -152,6 +153,12 @@ impl ModuleStateMut {
 
     pub fn get_answers(&self) -> Option<Arc<(Bindings, Arc<Answers>)>> {
         self.steps.answers.load_full()
+    }
+
+    /// Borrow the answers via a Guard, avoiding Arc refcount operations.
+    /// The Guard keeps the data alive without incrementing the Arc refcount.
+    pub fn load_answers(&self) -> Guard<Option<Arc<(Bindings, Arc<Answers>)>>> {
+        self.steps.answers.load()
     }
 
     pub fn get_solutions(&self) -> Option<Arc<Solutions>> {

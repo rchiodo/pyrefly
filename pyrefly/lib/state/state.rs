@@ -1395,8 +1395,11 @@ impl<'a> Transaction<'a> {
         // Ensure answers (or solutions) are computed. Cheap if already done.
         self.demand(module_data, Step::Answers);
 
-        // If answers is None, solutions must exist.
-        let Some(answers) = module_data.state.get_answers() else {
+        // Load answers via Guard to avoid Arc refcount operations.
+        // The Guard borrows from the ArcSwap without incrementing the refcount.
+        let answers_guard = module_data.state.load_answers();
+        let Some(answers) = answers_guard.as_ref() else {
+            // If answers is None, solutions must exist.
             let solutions = module_data
                 .state
                 .get_solutions()
