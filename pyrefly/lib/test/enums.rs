@@ -752,6 +752,55 @@ class IntEnum(int, Enum):
 );
 
 testcase!(
+    test_enum_call_uses_metaclass_signature,
+    r#"
+from enum import Enum
+from typing import Callable, assert_type
+
+class SeFileType(Enum):
+    ALL = ("a", "all files")
+    REGULAR = ("f", "regular file")
+    DIRECTORY = ("d", "directory")
+
+    def __new__(cls, code: str, description: str) -> "SeFileType":
+        obj = object.__new__(cls)
+        obj._value_ = code
+        return obj
+
+    @classmethod
+    def from_code(cls, code: str) -> "SeFileType":
+        assert_type(cls(code), SeFileType)
+        return cls(code)
+
+assert_type(SeFileType("a"), SeFileType)
+constructor: Callable[[str], SeFileType] = SeFileType
+    "#,
+);
+
+testcase!(
+    test_enum_call_with_self_type,
+    r#"
+from enum import Enum
+from typing import Self, assert_type
+
+class SeFileType(Enum):
+    ALL = ("a", "all files")
+    REGULAR = ("f", "regular file")
+
+    def __new__(cls, code: str, description: str) -> "SeFileType":
+        obj = object.__new__(cls)
+        obj._value_ = code
+        return obj
+
+    @classmethod
+    def from_code(cls, code: str) -> Self:
+        assert_type(cls, type[Self])
+        assert_type(cls(code), Self)
+        return cls(code)
+    "#,
+);
+
+testcase!(
     test_enum_alias,
     r#"
 from typing import assert_type, Literal
