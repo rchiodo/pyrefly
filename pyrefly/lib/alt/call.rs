@@ -694,7 +694,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if class_metadata.is_enum() {
                 if let Err(e) = self
                     .solver()
-                    .finish_quantified(vs, self.solver().infer_with_first_use)
+                    .finish_quantified(vs, self.solver().flags.infer_with_first_use)
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
@@ -704,7 +704,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Got something other than an instance of the class under construction.
                 if let Err(e) = self
                     .solver()
-                    .finish_quantified(vs, self.solver().infer_with_first_use)
+                    .finish_quantified(vs, self.solver().flags.infer_with_first_use)
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
@@ -756,7 +756,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .finish_class_targs(cls.targs_mut(), self.uniques);
                     if let Err(e) = self
                         .solver()
-                        .finish_quantified(vs, self.solver().infer_with_first_use)
+                        .finish_quantified(vs, self.solver().flags.infer_with_first_use)
                     {
                         self.add_specialization_errors(e, arguments_range, errors, context);
                     }
@@ -816,7 +816,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .finish_class_targs(cls.targs_mut(), self.uniques);
         if let Err(e) = self
             .solver()
-            .finish_quantified(vs, self.solver().infer_with_first_use)
+            .finish_quantified(vs, self.solver().flags.infer_with_first_use)
         {
             self.add_specialization_errors(e, arguments_range, errors, context);
         }
@@ -883,7 +883,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .finish_class_targs(typed_dict.targs_mut(), self.uniques);
         if let Err(e) = self
             .solver()
-            .finish_quantified(vs, self.solver().infer_with_first_use)
+            .finish_quantified(vs, self.solver().flags.infer_with_first_use)
         {
             self.add_specialization_errors(e, arguments_range, errors, context);
         }

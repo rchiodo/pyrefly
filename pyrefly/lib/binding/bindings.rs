@@ -743,12 +743,12 @@ impl CurrentIdx {
 impl<'a> BindingsBuilder<'a> {
     /// Whether to infer empty container types and unsolved type variables based on first use.
     pub fn infer_with_first_use(&self) -> bool {
-        self.solver.infer_with_first_use
+        self.solver.flags.infer_with_first_use
     }
 
     /// Whether tensor shape type inference is enabled.
     pub fn tensor_shapes(&self) -> bool {
-        self.solver.tensor_shapes
+        self.solver.flags.tensor_shapes
     }
 
     /// Given a `key: K = impl Keyed`, get an `Idx<K>` for it. The intended use case

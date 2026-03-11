@@ -317,7 +317,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         name_range: TextRange,
         errors: &ErrorCollector,
     ) -> Arc<TParams> {
-        if !self.solver().tensor_shapes {
+        if !self.solver().flags.tensor_shapes {
             return tparams.dupe();
         }
 

@@ -317,14 +317,19 @@ pub enum PinError {
     UnfinishedQuantified(Quantified),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct SolverFlags {
+    pub infer_with_first_use: bool,
+    pub tensor_shapes: bool,
+    pub strict_callable_subtyping: bool,
+}
+
 #[derive(Debug)]
 pub struct Solver {
     variables: Mutex<Variables>,
     instantiation_errors: RwLock<SmallMap<Var, TypeVarSpecializationError>>,
-    pub infer_with_first_use: bool,
+    pub flags: SolverFlags,
     pub heap: TypeHeap,
-    pub tensor_shapes: bool,
-    pub strict_callable_subtyping: bool,
 }
 
 impl Display for Solver {
@@ -350,10 +355,12 @@ impl Solver {
         Self {
             variables: Default::default(),
             instantiation_errors: Default::default(),
-            infer_with_first_use,
+            flags: SolverFlags {
+                infer_with_first_use,
+                tensor_shapes,
+                strict_callable_subtyping,
+            },
             heap: TypeHeap::new(),
-            tensor_shapes,
-            strict_callable_subtyping,
         }
     }
 
@@ -919,7 +926,7 @@ impl Solver {
 
     pub fn finish_all_quantified(&self, ty: &Type) -> Result<(), Vec1<TypeVarSpecializationError>> {
         let vs = QuantifiedHandle(ty.collect_maybe_quantified_vars());
-        self.finish_quantified(vs, self.infer_with_first_use)
+        self.finish_quantified(vs, self.flags.infer_with_first_use)
     }
 
     /// Given targs which contain quantified (as come from `instantiate`), replace the quantifieds
@@ -1013,7 +1020,7 @@ impl Solver {
                         }
                     });
                     Some(t)
-                } else if self.infer_with_first_use {
+                } else if self.flags.infer_with_first_use {
                     let v = Var::new(uniques);
                     self.variables.lock().insert_fresh(v, Variable::finished(q));
                     Some(v.to_type(&self.heap))
@@ -2077,6 +2084,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         vs: QuantifiedHandle,
     ) -> Result<(), Vec1<TypeVarSpecializationError>> {
         self.solver
-            .finish_quantified(vs, self.solver.infer_with_first_use)
+            .finish_quantified(vs, self.solver.flags.infer_with_first_use)
     }
 }
