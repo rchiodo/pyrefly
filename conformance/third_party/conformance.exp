@@ -2083,17 +2083,6 @@
     },
     {
       "code": -2,
-      "column": 20,
-      "concise_description": "`Proto4[Ellipsis]` is not assignable to `Proto3`",
-      "description": "`Proto4[Ellipsis]` is not assignable to `Proto3`\n  `Proto4[Ellipsis].__call__` has type `(Proto4[Ellipsis], int, ...) -> None`, which is not assignable to `(self: Proto4[Ellipsis], a: int, *args: Any, **kwargs: Any) -> None`, the type of `Proto3.__call__`",
-      "line": 156,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 22,
-      "stop_line": 156
-    },
-    {
-      "code": -2,
       "column": 26,
       "concise_description": "`() -> str` is not assignable to `(int, ...) -> str`",
       "description": "`() -> str` is not assignable to `(int, ...) -> str`",
