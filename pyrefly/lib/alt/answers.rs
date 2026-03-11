@@ -86,7 +86,7 @@ pub struct Index {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct OverloadTrace {
+pub struct OverloadTrace {
     pub(crate) callable: Callable,
     pub(crate) tparams: Option<Arc<TParams>>,
 }
@@ -107,8 +107,8 @@ impl OverloadTrace {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum OverloadedCallee {
+#[derive(Debug, Clone)]
+pub enum OverloadedCallee {
     Resolved {
         callable: OverloadTrace,
     },
@@ -145,8 +145,8 @@ impl Traces {
 
 /// Accumulates trace events during a single calculation.
 /// Published to `Traces` only when the calculation result is committed.
-#[derive(Debug, Default)]
-pub(crate) struct TraceSideEffects {
+#[derive(Debug, Default, Clone)]
+pub struct TraceSideEffects {
     pub types: SmallMap<TextRange, Arc<Type>>,
     pub overloaded_callees: SmallMap<TextRange, OverloadedCallee>,
     pub invoked_properties: SmallMap<TextRange, Arc<Type>>,

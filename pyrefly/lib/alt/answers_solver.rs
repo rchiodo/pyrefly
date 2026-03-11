@@ -1052,6 +1052,7 @@ impl CalcStack {
         target: &CalcId,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
@@ -1059,9 +1060,14 @@ impl CalcStack {
             .iterative
             .as_mut()
             .expect("top SCC is not iterating");
-        iter_state
-            .node_states
-            .insert(target.dupe(), IterationNodeState::Done { answer, errors });
+        iter_state.node_states.insert(
+            target.dupe(),
+            IterationNodeState::Done {
+                answer,
+                errors,
+                traces,
+            },
+        );
     }
 
     /// Set `has_changed = true` on the top SCC's iteration state.
@@ -1428,6 +1434,9 @@ pub enum IterationNodeState {
         answer: Arc<dyn Any + Send + Sync>,
         /// Errors collected during this iteration. None for cold-start.
         errors: Option<Arc<ErrorCollector>>,
+        /// Trace side effects collected during this iteration.
+        /// None for cold-start iteration (traces are swallowed).
+        traces: Option<TraceSideEffects>,
     },
 }
 
@@ -2462,8 +2471,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
                 // Store as Done in iteration state. Errors are None because
                 // this is cold-start iteration 1 (errors are swallowed).
+                // Traces are None because this is cold-start (traces are swallowed).
                 self.stack()
-                    .set_iteration_node_done(&current, answer_erased.clone(), None);
+                    .set_iteration_node_done(&current, answer_erased.clone(), None, None);
 
                 // Downcast back to Arc<K::Answer>. This code path only
                 // executes when K = Key (guarded by AnyIdx::Key match), so
@@ -2479,6 +2489,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let binding = self.bindings().get(idx);
         let range = K::range_with(idx, self.bindings());
 
+        // Install trace sink if tracing is enabled for this module.
+        let tracing_enabled = self.current().tracing_enabled();
+        if tracing_enabled {
+            self.thread_state.install_trace_sink();
+        }
+
         // Error handling strategy:
         // - Iteration 1 (cold): suppress all errors because cold-start answers
         //   (from placeholders) produce spurious diagnostics.
@@ -2490,6 +2506,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.error_collector()
         };
         let raw_answer = K::solve(self, binding, range, &local_errors);
+
+        // Take accumulated traces.
+        let trace_side_effects = if tracing_enabled {
+            if self.stack().is_cold_iteration() {
+                // Discard cold-start traces (matching error swallowing).
+                self.thread_state.take_trace_sink();
+                None
+            } else {
+                self.thread_state.take_trace_sink()
+            }
+        } else {
+            None
+        };
 
         // If a placeholder was created for this node during cycle breaking,
         // finalize the recursive answer (unify the placeholder with the actual
@@ -2537,7 +2566,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(Arc::new(local_errors))
         };
         self.stack()
-            .set_iteration_node_done(&current, answer_erased, errors);
+            .set_iteration_node_done(&current, answer_erased, errors, trace_side_effects);
 
         answer
     }
@@ -2576,12 +2605,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         calc_id: CalcId,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) -> bool {
         let CalcId(_, ref any_idx) = calc_id;
         if self.is_same_module(&calc_id) {
-            dispatch_anyidx!(any_idx, self, write_unlock_same_module, answer, errors)
+            dispatch_anyidx!(
+                any_idx,
+                self,
+                write_unlock_same_module,
+                answer,
+                errors,
+                traces
+            )
         } else {
             self.answers.write_unlock_in_module(calc_id, answer, errors)
+            // Cross-module traces are dropped for now. Publishing them
+            // requires access to the target module's Answers, which will
+            // be addressed in a follow-up.
         }
     }
 
@@ -2591,6 +2631,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         idx: Idx<K>,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) -> bool
     where
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
@@ -2603,12 +2644,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         );
         let calculation = self.get_calculation(idx);
         let (_answer, did_write) = calculation.write_unlock(typed_answer);
-        if did_write && let Some(errors) = errors {
-            let errors = Arc::try_unwrap(errors).expect(
-                "Arc<ErrorCollector> refcount > 1 during write_unlock; \
-                 errors would be silently lost.",
-            );
-            self.base_errors.extend(errors);
+        if did_write {
+            if let Some(errors) = errors {
+                let errors = Arc::try_unwrap(errors).expect(
+                    "Arc<ErrorCollector> refcount > 1 during write_unlock; \
+                     errors would be silently lost.",
+                );
+                self.base_errors.extend(errors);
+            }
+            if let Some(traces) = traces {
+                self.current().merge_trace_side_effects(traces);
+            }
         }
         did_write
     }
@@ -2651,11 +2697,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             CalcId,
             Arc<dyn Any + Send + Sync>,
             Option<Arc<ErrorCollector>>,
+            Option<TraceSideEffects>,
         )> = iter_state
             .node_states
             .into_iter()
             .map(|(calc_id, node_state)| match node_state {
-                IterationNodeState::Done { answer, errors } => (calc_id, answer, errors),
+                IterationNodeState::Done {
+                    answer,
+                    errors,
+                    traces,
+                } => (calc_id, answer, errors, traces),
                 IterationNodeState::Fresh | IterationNodeState::InProgress { .. } => {
                     panic!(
                         "commit_final_answers: node {} is {:?} at commit time",
@@ -2670,19 +2721,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             solver: self,
             locked: Vec::new(),
         };
-        for (calc_id, _, _) in &members {
+        for (calc_id, _, _, _) in &members {
             if self.write_lock_single(calc_id) {
                 guard.locked.push(calc_id.dupe());
             }
         }
 
-        // Phase 2: Write answers to locked cells. Cells that weren't locked
-        // are already Calculated (write_lock returned false), so writing
-        // would be a no-op — skip them.
+        // Phase 2: Write answers to locked cells + publish traces.
+        // Cells that weren't locked are already Calculated (write_lock
+        // returned false), so writing would be a no-op — skip them.
         let mut did_write_any = false;
-        for (calc_id, answer, errors) in members {
+        for (calc_id, answer, errors, traces) in members {
             if guard.locked.contains(&calc_id) {
-                did_write_any |= self.write_unlock_single(calc_id, answer, errors);
+                did_write_any |= self.write_unlock_single(calc_id, answer, errors, traces);
             }
         }
         guard.disarm();
