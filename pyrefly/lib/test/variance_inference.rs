@@ -630,7 +630,6 @@ class Foo(
 );
 
 testcase!(
-    bug = "Program should fully typecheck: https://github.com/facebook/pyrefly/issues/2756",
     test_inherited_contravariance_from_parent,
     r#"
 from typing import Self
@@ -641,10 +640,10 @@ class SupportsLT[ComparableT]:  # contravariant
 def upcast_lt(arg: SupportsLT[object]) -> SupportsLT[float]:
     return arg
 
-class Impl[T](SupportsLT[T]):  ...  # should be contravariant via inheritance
+class Impl[T](SupportsLT[T]):  ...  # contravariant via inheritance
 
 def upcast(x: Impl[object]) -> Impl[float]:
-    return x  # E: Returned type `Impl[object]` is not assignable to declared return type `Impl[float]`
+    return x
 "#,
 );
 
