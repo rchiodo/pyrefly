@@ -93,12 +93,11 @@ fn params_have_any_args_and_kwargs(params: &Params) -> bool {
     match params {
         Params::List(args) => has_any_args_and_kwargs(args.items()),
         Params::Ellipsis | Params::Materialization => false,
-        Params::ParamSpec(prefix, pspec) => {
-            prefix.is_empty()
-                && matches!(
-                    pspec,
-                    Type::ParamSpecValue(args) if has_any_args_and_kwargs(args.items())
-                )
+        Params::ParamSpec(_prefix, pspec) => {
+            matches!(
+                pspec,
+                Type::ParamSpecValue(args) if has_any_args_and_kwargs(args.items())
+            )
         }
     }
 }

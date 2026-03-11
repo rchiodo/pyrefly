@@ -114,6 +114,7 @@ pub struct TestEnv {
     open_unpacking_error: bool,
     missing_override_decorator_error: bool,
     not_required_key_access_error: bool,
+    strict_callable_subtyping: bool,
     default_require_level: Require,
 }
 
@@ -137,6 +138,7 @@ impl TestEnv {
             open_unpacking_error: false,
             missing_override_decorator_error: false,
             not_required_key_access_error: false,
+            strict_callable_subtyping: false,
             default_require_level: Require::Exports,
         }
     }
@@ -216,6 +218,11 @@ impl TestEnv {
         self
     }
 
+    pub fn enable_strict_callable_subtyping(mut self) -> Self {
+        self.strict_callable_subtyping = true;
+        self
+    }
+
     pub fn with_default_require_level(mut self, level: Require) -> Self {
         self.default_require_level = level;
         self
@@ -287,6 +294,7 @@ impl TestEnv {
         config.python_environment.site_package_path = Some(self.site_package_path.clone());
         config.root.untyped_def_behavior = Some(self.untyped_def_behavior);
         config.root.infer_with_first_use = Some(self.infer_with_first_use);
+        config.root.strict_callable_subtyping = Some(self.strict_callable_subtyping);
         if config.root.errors.is_none() {
             config.root.errors = Some(ErrorDisplayConfig::new(HashMap::new()));
         };
