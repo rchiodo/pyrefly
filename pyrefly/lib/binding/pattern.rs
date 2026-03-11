@@ -182,7 +182,7 @@ impl<'a> BindingsBuilder<'a> {
                             );
                             let subject_for_subpattern = match_subject.clone().and_then(|s| {
                                 if !seen_star {
-                                    Some(s.with_facet(UnresolvedFacetKind::Index(i)))
+                                    Some(s.with_facet(UnresolvedFacetKind::Index(i as i64)))
                                 } else {
                                     None
                                 }

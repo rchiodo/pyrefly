@@ -75,6 +75,7 @@ use crate::binding::binding::Key;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::binding::LambdaParamId;
+use crate::binding::narrow::int_from_slice;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -1348,12 +1349,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> TypeInfo {
-        if let Expr::NumberLiteral(ExprNumberLiteral {
-            value: Number::Int(idx),
-            ..
-        }) = slice
-            && let Some(idx) = idx.as_usize()
-        {
+        if let Some(idx) = int_from_slice(slice) {
             TypeInfo::at_facet(base, &FacetKind::Index(idx), || {
                 self.subscript_infer_for_type(base.ty(), slice, range, errors)
             })

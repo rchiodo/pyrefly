@@ -18,16 +18,15 @@ use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprCall;
 use ruff_python_ast::ExprDict;
-use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::ExprStringLiteral;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::ModModule;
-use ruff_python_ast::Number;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 
 use crate::binding::binding::Key;
+use crate::binding::narrow::int_from_slice;
 use crate::lsp::wasm::completion::RankedCompletion;
 use crate::state::state::Transaction;
 use crate::types::types::Type;
@@ -251,17 +250,12 @@ impl<'a> Transaction<'a> {
         loop {
             match current {
                 Expr::Subscript(sub) => {
-                    match sub.slice.as_ref() {
-                        Expr::NumberLiteral(ExprNumberLiteral {
-                            value: Number::Int(idx),
-                            ..
-                        }) if idx.as_usize().is_some() => {
-                            facets.push(FacetKind::Index(idx.as_usize().unwrap()))
-                        }
-                        Expr::StringLiteral(lit) => {
-                            facets.push(FacetKind::Key(lit.value.to_string()))
-                        }
-                        _ => return None,
+                    if let Some(idx) = int_from_slice(sub.slice.as_ref()) {
+                        facets.push(FacetKind::Index(idx));
+                    } else if let Expr::StringLiteral(lit) = sub.slice.as_ref() {
+                        facets.push(FacetKind::Key(lit.value.to_string()));
+                    } else {
+                        return None;
                     }
                     current = sub.value.as_ref();
                 }

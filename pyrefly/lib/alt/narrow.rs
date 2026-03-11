@@ -28,9 +28,11 @@ use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprBinOp;
 use ruff_python_ast::ExprNumberLiteral;
+use ruff_python_ast::ExprUnaryOp;
 use ruff_python_ast::Int;
 use ruff_python_ast::Number;
 use ruff_python_ast::Operator;
+use ruff_python_ast::UnaryOp;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -62,6 +64,31 @@ use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
 use crate::types::types::CalleeKind;
 use crate::types::types::Type;
+
+/// Synthesize an `Expr` for an integer index, producing a `NumberLiteral` for
+/// non-negative values and `UnaryOp(USub, NumberLiteral)` for negative values.
+fn synthesize_int_slice(idx: i64) -> Expr {
+    let fake_range = TextRange::empty(TextSize::from(0));
+    let node_index = AtomicNodeIndex::default();
+    if idx >= 0 {
+        Expr::NumberLiteral(ExprNumberLiteral {
+            node_index,
+            range: fake_range,
+            value: Number::Int(Int::from(idx as u64)),
+        })
+    } else {
+        Expr::UnaryOp(ExprUnaryOp {
+            node_index,
+            range: fake_range,
+            op: UnaryOp::USub,
+            operand: Box::new(Expr::NumberLiteral(ExprNumberLiteral {
+                node_index: AtomicNodeIndex::default(),
+                range: fake_range,
+                value: Number::Int(Int::from(idx.unsigned_abs())),
+            })),
+        })
+    }
+}
 
 /// Beyond this size, don't try and narrow an enum.
 ///
@@ -1337,13 +1364,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             },
             FacetKind::Index(idx) => {
-                // We synthesize a slice expression for the subscript here
-                // Use a synthesized fake range to avoid overwriting typing traces
-                let synthesized_slice = Expr::NumberLiteral(ExprNumberLiteral {
-                    node_index: AtomicNodeIndex::default(),
-                    range: TextRange::empty(TextSize::from(0)),
-                    value: Number::Int(Int::from(*idx as u64)),
-                });
+                // We synthesize a slice expression for the subscript here.
+                // For negative indices, we must produce `UnaryOp(USub, NumberLiteral(abs))`
+                // to match what the parser generates for e.g. `xs[-1]`.
+                // Use a synthesized fake range to avoid overwriting typing traces.
+                let synthesized_slice = synthesize_int_slice(*idx);
                 match remaining_facets.split_first() {
                     None => match base.type_at_facet(first_facet) {
                         Some(ty) => self.force_for_narrowing(ty, range, errors),
@@ -1811,10 +1836,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let suppress_errors = self.error_swallower();
                 let ty = self.expr_infer(&Expr::Name(expr_name), &suppress_errors);
                 match &ty {
-                    Type::Literal(lit) if let Lit::Int(lit_int) = &lit.value => lit_int
-                        .as_i64()
-                        .and_then(|i| i.to_usize())
-                        .map(FacetKind::Index),
+                    Type::Literal(lit) if let Lit::Int(lit_int) = &lit.value => {
+                        lit_int.as_i64().map(FacetKind::Index)
+                    }
                     Type::Literal(lit) if let Lit::Str(s) = &lit.value => {
                         Some(FacetKind::Key(s.to_string()))
                     }

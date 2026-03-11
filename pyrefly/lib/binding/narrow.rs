@@ -1076,6 +1076,34 @@ impl NarrowOps {
     }
 }
 
+/// Extract an integer index from a subscript slice expression.
+/// Handles both positive literals like `0` and negative literals like `-1`
+/// (which the AST represents as `UnaryOp(USub, NumberLiteral)`).
+pub(crate) fn int_from_slice(slice: &Expr) -> Option<i64> {
+    match slice {
+        Expr::NumberLiteral(ExprNumberLiteral {
+            value: Number::Int(idx),
+            ..
+        }) => idx.as_i64(),
+        Expr::UnaryOp(ExprUnaryOp {
+            op: UnaryOp::USub,
+            operand,
+            ..
+        }) => {
+            if let Expr::NumberLiteral(ExprNumberLiteral {
+                value: Number::Int(idx),
+                ..
+            }) = &**operand
+            {
+                idx.as_i64().and_then(|i| i.checked_neg())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Given an expression, determine whether it is a chain of properties (attribute/concrete index) rooted at a name,
 /// and if so, return the name and the chain of properties.
 /// For example: x.y.[0].z
@@ -1104,11 +1132,7 @@ pub fn identifier_and_chain_for_expr(expr: &Expr) -> Option<(Identifier, Unresol
                 _ => None,
             }
         } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
-            && let Expr::NumberLiteral(ExprNumberLiteral {
-                value: Number::Int(idx),
-                ..
-            }) = &**slice
-            && let Some(idx) = idx.as_usize()
+            && let Some(idx) = int_from_slice(slice)
         {
             match &*subscript.value {
                 Expr::Name(name) => {
@@ -1199,11 +1223,7 @@ pub fn identifier_and_chain_prefix_for_expr(
                 _ => None,
             }
         } else if let Expr::Subscript(subscript @ ExprSubscript { slice, .. }) = expr
-            && let Expr::NumberLiteral(ExprNumberLiteral {
-                value: Number::Int(idx),
-                ..
-            }) = &**slice
-            && let Some(idx) = idx.as_usize()
+            && let Some(idx) = int_from_slice(slice)
         {
             match &*subscript.value {
                 Expr::Name(name) => {
