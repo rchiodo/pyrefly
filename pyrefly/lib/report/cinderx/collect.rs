@@ -13,17 +13,23 @@
 use std::sync::Arc;
 
 use pyrefly_build::handle::Handle;
+use pyrefly_python::ast::Ast;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::class::Class;
 use pyrefly_types::facet::FacetKind;
 use pyrefly_types::type_info::TypeInfo;
 use pyrefly_types::types::Type;
 use pyrefly_util::visit::Visit;
+use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprName;
-use ruff_python_ast::Identifier;
+use ruff_python_ast::ExprNumberLiteral;
+use ruff_python_ast::Int;
 use ruff_python_ast::ModModule;
+use ruff_python_ast::Number;
 use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
+use ruff_text_size::TextSize;
 
 use crate::alt::answers::Answers;
 use crate::binding::binding::Key;
@@ -94,10 +100,11 @@ pub(crate) fn collect_module_types(
 
 /// Walk all expressions in the AST and collect types.
 ///
-/// For `Expr::Attribute` chains rooted at an `Expr::Name` (e.g. `x.foo`,
-/// `x.foo.bar`), also detects facet narrows: if any level in the chain has
-/// a narrowed facet, re-resolves the full chain on the unnarrowed base type
-/// and records the result so CinderX can distinguish sound from unsound narrows.
+/// For `Expr::Attribute` or `Expr::Subscript` chains rooted at an `Expr::Name`
+/// (e.g. `x.foo`, `x.foo.bar`, `x[0]`, `x["key"].bar`), also detects facet
+/// narrows: if any level in the chain has a narrowed facet, re-resolves the
+/// full chain on the unnarrowed base type and records the result so CinderX
+/// can distinguish sound from unsound narrows.
 fn walk_expressions(
     ast: &Arc<ModModule>,
     module_info: &ModuleInfo,
@@ -140,22 +147,44 @@ fn walk_expressions(
         answers.get_type_trace(x.range())
     }
 
-    /// Walk an `Expr::Attribute` chain to find the root `Expr::Name` and
-    /// collect the attribute `Identifier` references from root to leaf.
+    /// Walk an expression chain of `Expr::Attribute` and `Expr::Subscript`
+    /// nodes to find the root `Expr::Name` and collect `FacetKind`s from
+    /// root to leaf.
+    ///
+    /// Handles all three facet kinds:
+    /// - `Attribute(name)` from `x.foo`
+    /// - `Index(n)` from `x[0]` (integer literal subscript)
+    /// - `Key(s)` from `x["key"]` (string literal subscript)
     ///
     /// Returns `None` if the chain doesn't root at an `Expr::Name`
-    /// (e.g. `f().attr`). Simple `x.foo` is a chain of length 1.
-    fn extract_attr_chain(expr: &Expr) -> Option<(&ExprName, Vec<&Identifier>)> {
-        let Expr::Attribute(attr) = expr else {
+    /// (e.g. `f().attr`) or contains a non-literal subscript.
+    fn extract_facet_chain(expr: &Expr) -> Option<(&ExprName, Vec<FacetKind>)> {
+        // Must start with Attribute or Subscript to have a facet chain.
+        if !matches!(expr, Expr::Attribute(_) | Expr::Subscript(_)) {
             return None;
-        };
-        let mut chain = vec![&attr.attr];
-        let mut current = attr.value.as_ref();
+        }
+        let mut chain = Vec::new();
+        let mut current = expr;
         loop {
             match current {
-                Expr::Attribute(inner) => {
-                    chain.push(&inner.attr);
-                    current = inner.value.as_ref();
+                Expr::Attribute(attr) => {
+                    chain.push(FacetKind::Attribute(attr.attr.id.clone()));
+                    current = attr.value.as_ref();
+                }
+                Expr::Subscript(sub) => {
+                    match sub.slice.as_ref() {
+                        Expr::NumberLiteral(ExprNumberLiteral {
+                            value: Number::Int(idx),
+                            ..
+                        }) if idx.as_usize().is_some() => {
+                            chain.push(FacetKind::Index(idx.as_usize().unwrap()));
+                        }
+                        Expr::StringLiteral(lit) => {
+                            chain.push(FacetKind::Key(lit.value.to_string()));
+                        }
+                        _ => return None,
+                    }
+                    current = sub.value.as_ref();
                 }
                 Expr::Name(name) => {
                     chain.reverse();
@@ -166,19 +195,18 @@ fn walk_expressions(
         }
     }
 
-    /// Check whether any level in an attribute chain has a facet narrow.
+    /// Check whether any level in a facet chain has a facet narrow.
     ///
     /// Walks the facet tree level by level using `type_at_facet` to check
     /// for narrows and `at_facet` to descend. Returns `true` as soon as
     /// any level has a narrowed type.
-    fn has_facet_narrow_in_chain(type_info: &TypeInfo, chain: &[&Identifier]) -> bool {
+    fn has_facet_narrow_in_chain(type_info: &TypeInfo, chain: &[FacetKind]) -> bool {
         let mut current = type_info.clone();
-        for ident in chain {
-            let facet = FacetKind::Attribute(ident.id.clone());
-            if current.type_at_facet(&facet).is_some() {
+        for facet in chain {
+            if current.type_at_facet(facet).is_some() {
                 return true;
             }
-            current = current.at_facet(&facet, Type::never);
+            current = current.at_facet(facet, Type::never);
         }
         false
     }
@@ -186,10 +214,11 @@ fn walk_expressions(
     /// Recursive expression visitor: looks up type, converts to structured
     /// form, records location, then recurses into child expressions.
     ///
-    /// For attribute access chains rooted at a name (`x.attr`, `x.a.b`, etc.),
-    /// checks whether any level in the chain has a facet narrow. If so,
-    /// re-resolves the full chain on the unnarrowed base type to populate
-    /// `unnarrowed_type` and `is_narrowed_mismatch` on the `LocatedType`.
+    /// For attribute/subscript chains rooted at a name (`x.attr`, `x[0]`,
+    /// `x["key"].bar`, etc.), checks whether any level in the chain has a
+    /// facet narrow. If so, re-resolves the full chain on the unnarrowed
+    /// base type to populate `unnarrowed_type` and `is_narrowed_mismatch`
+    /// on the `LocatedType`.
     fn visit_expr(
         x: &Expr,
         parent: Option<&Expr>,
@@ -209,32 +238,57 @@ fn walk_expressions(
                 .python_ast_range_for_expr(range, x, parent);
             let type_index = type_to_structured(&ty, table, pending_class_traits);
 
-            // Detect facet narrows on attribute access chains (x.attr, x.a.b, etc.).
+            // Detect facet narrows on attribute/subscript chains (x.attr, x[0], etc.).
             // When any level in the chain has a facet narrow, re-resolve the full
             // chain on the unnarrowed base type so CinderX can handle the unsound
             // narrow appropriately.
             let (unnarrowed_type, is_narrowed_mismatch) = if let Some((name, chain)) =
-                extract_attr_chain(x)
+                extract_facet_chain(x)
                 && let Some(key) = try_find_key_for_name(name, bindings)
                 && let Some(type_info) = answers.get_idx(bindings.key_to_idx(&key))
                 && type_info.has_facets()
                 && has_facet_narrow_in_chain(&type_info, &chain)
             {
                 // Some level in the chain has a facet narrow.
-                // Re-resolve the full attribute chain on the unnarrowed base type.
+                // Re-resolve the full chain on the unnarrowed base type.
                 let base_type = type_info.ty().clone();
                 let unnarrowed_ty =
                     transaction.ad_hoc_solve(handle, "cinderx_unnarrow", |solver| {
                         let errors = solver.error_swallower();
                         let mut current_ty = base_type;
-                        for ident in &chain {
-                            current_ty = solver.attr_infer_for_type(
-                                &current_ty,
-                                &ident.id,
-                                ident.range(),
-                                &errors,
-                                None,
-                            );
+                        for facet in &chain {
+                            current_ty = match facet {
+                                FacetKind::Attribute(name) => solver.attr_infer_for_type(
+                                    &current_ty,
+                                    name,
+                                    range,
+                                    &errors,
+                                    None,
+                                ),
+                                FacetKind::Index(idx) => {
+                                    let synth = Expr::NumberLiteral(ExprNumberLiteral {
+                                        node_index: AtomicNodeIndex::default(),
+                                        range: TextRange::empty(TextSize::from(0)),
+                                        value: Number::Int(Int::from(*idx as u64)),
+                                    });
+                                    solver.subscript_infer_for_type(
+                                        &current_ty,
+                                        &synth,
+                                        range,
+                                        &errors,
+                                    )
+                                }
+                                FacetKind::Key(key) => {
+                                    let synth =
+                                        Ast::str_expr(key, TextRange::empty(TextSize::from(0)));
+                                    solver.subscript_infer_for_type(
+                                        &current_ty,
+                                        &synth,
+                                        range,
+                                        &errors,
+                                    )
+                                }
+                            };
                         }
                         current_ty
                     });

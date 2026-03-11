@@ -570,3 +570,121 @@ y = x
         );
     }
 }
+
+#[test]
+fn test_facet_narrow_index() {
+    let state = create_state(
+        "test",
+        r#"
+from typing import Tuple
+
+def f(t: tuple[int | None, str]) -> None:
+    if t[0] is not None:
+        y = t[0]
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Find the located type for `t[0]` inside the if-branch (the narrowed access).
+    // It should have unnarrowed_type set and is_narrowed_mismatch == true because
+    // the narrowed type (int) differs from the unnarrowed type (int | None).
+    let narrowed_locs: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.unnarrowed_type.is_some())
+        .collect();
+    assert!(
+        !narrowed_locs.is_empty(),
+        "expected at least one location with unnarrowed_type set for index facet, got locations: {:#?}",
+        data.locations,
+    );
+
+    let has_mismatch = narrowed_locs.iter().any(|loc| loc.is_narrowed_mismatch);
+    assert!(
+        has_mismatch,
+        "expected is_narrowed_mismatch == true for the narrowed t[0] access",
+    );
+}
+
+#[test]
+fn test_facet_narrow_key() {
+    let state = create_state(
+        "test",
+        r#"
+from typing import TypedDict
+
+class MyDict(TypedDict):
+    x: int | None
+
+def f(d: MyDict) -> None:
+    if d["x"] is not None:
+        y = d["x"]
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Find the located type for `d["x"]` inside the if-branch (the narrowed access).
+    // It should have unnarrowed_type set and is_narrowed_mismatch == true because
+    // the narrowed type (int) differs from the unnarrowed type (int | None).
+    let narrowed_locs: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.unnarrowed_type.is_some())
+        .collect();
+    assert!(
+        !narrowed_locs.is_empty(),
+        "expected at least one location with unnarrowed_type set for key facet, got locations: {:#?}",
+        data.locations,
+    );
+
+    let has_mismatch = narrowed_locs.iter().any(|loc| loc.is_narrowed_mismatch);
+    assert!(
+        has_mismatch,
+        "expected is_narrowed_mismatch == true for the narrowed d[\"x\"] access",
+    );
+}
+
+#[test]
+fn test_facet_narrow_mixed_chain() {
+    let state = create_state(
+        "test",
+        r#"
+class Inner:
+    value: int | None
+
+def f(t: tuple[Inner, str]) -> None:
+    if t[0].value is not None:
+        y = t[0].value
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Find the located type for `t[0].value` inside the if-branch.
+    // This is a mixed chain (Index then Attribute) with a facet narrow:
+    // the narrowed type (int) differs from the unnarrowed type (int | None).
+    let narrowed_locs: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.unnarrowed_type.is_some())
+        .collect();
+    assert!(
+        !narrowed_locs.is_empty(),
+        "expected at least one location with unnarrowed_type set for mixed chain, got locations: {:#?}",
+        data.locations,
+    );
+
+    let has_mismatch = narrowed_locs.iter().any(|loc| loc.is_narrowed_mismatch);
+    assert!(
+        has_mismatch,
+        "expected is_narrowed_mismatch == true for the narrowed t[0].value access",
+    );
+}
