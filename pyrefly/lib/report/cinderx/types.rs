@@ -83,8 +83,11 @@ pub enum StructuredType {
         bounds: Vec<usize>,
     },
     /// Literal value (used as type arg of `typing_extensions.Literal`).
+    /// `promoted_type` points to the class entry for the literal's runtime type
+    /// (e.g. `builtins.int` for `Literal[42]`), so CinderX can compile
+    /// operations without re-deriving the type.
     #[serde(rename = "literal")]
-    Literal { value: String },
+    Literal { value: String, promoted_type: usize },
 }
 
 // ---------------------------------------------------------------------------
@@ -255,10 +258,15 @@ pub(crate) fn hash_variable(name: &str, bound_hashes: &[u64]) -> u64 {
 }
 
 /// Compute structural hash for a literal-kind type.
-pub(crate) fn hash_literal(value: &str) -> u64 {
+///
+/// The promoted type's hash is included so that two literals with the same
+/// string representation but different promoted types (which shouldn't happen
+/// in practice, but could in theory) get distinct hashes.
+pub(crate) fn hash_literal(value: &str, promoted_hash: u64) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_LITERAL);
     h.write(value.as_bytes());
+    h.write_u64(promoted_hash);
     h.finish()
 }
 

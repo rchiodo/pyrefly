@@ -10,6 +10,7 @@
 
 use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
+use pyrefly_types::literal::Lit;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::type_alias::TypeAliasData;
@@ -384,9 +385,22 @@ pub(crate) fn type_to_structured(
         }
         // Literal kind
         Type::Literal(box Literal { value, .. }) => {
+            let promoted_idx = match value {
+                Lit::Str(_) => insert_simple_class("builtins.str", table),
+                Lit::Int(_) => insert_simple_class("builtins.int", table),
+                Lit::Bool(_) => insert_simple_class("builtins.bool", table),
+                Lit::Bytes(_) => insert_simple_class("builtins.bytes", table),
+                Lit::Enum(e) => {
+                    type_to_structured(&e.class.clone().to_type(), table, pending_class_traits)
+                }
+            };
             let value_str = format!("{}", value);
-            let hash = hash_literal(&value_str);
-            let sty = StructuredType::Literal { value: value_str };
+            let promoted_hash = table.hash_at(promoted_idx);
+            let hash = hash_literal(&value_str, promoted_hash);
+            let sty = StructuredType::Literal {
+                value: value_str,
+                promoted_type: promoted_idx,
+            };
             table.insert(sty, hash)
         }
         // TODO(stroxler): These uncommon / internal types silently collapse to

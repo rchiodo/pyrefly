@@ -140,7 +140,7 @@ fn test_literal_type() {
     let has_literal = data
         .entries
         .iter()
-        .any(|entry| matches!(&entry.ty, StructuredType::Literal { value } if value == "42"));
+        .any(|entry| matches!(&entry.ty, StructuredType::Literal { value, .. } if value == "42"));
     assert!(
         has_literal,
         "expected Literal(42) in the type table, got: {:#?}",
@@ -747,5 +747,38 @@ def f(t: tuple[Inner, str]) -> None:
     assert!(
         has_mismatch,
         "expected is_narrowed_mismatch == true for the narrowed t[0].value access",
+    );
+}
+
+#[test]
+fn test_literal_promoted_type() {
+    let state = create_state("test", "x = 42");
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Find the Literal entry for "42" and verify its promoted_type points to builtins.int
+    let literal_entry = data
+        .entries
+        .iter()
+        .find(|entry| matches!(&entry.ty, StructuredType::Literal { value, .. } if value == "42"));
+    assert!(
+        literal_entry.is_some(),
+        "expected Literal(42) in the type table, got: {:#?}",
+        data.entries,
+    );
+
+    let promoted_idx = match &literal_entry.unwrap().ty {
+        StructuredType::Literal { promoted_type, .. } => *promoted_type,
+        _ => unreachable!("already matched as Literal"),
+    };
+
+    // The promoted_type index should point to a builtins.int Class entry
+    let promoted_entry = &data.entries[promoted_idx];
+    assert!(
+        matches!(&promoted_entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.int" && args.is_empty()),
+        "expected promoted_type to point to builtins.int, got: {:#?}",
+        promoted_entry.ty,
     );
 }
