@@ -1365,31 +1365,6 @@ pub fn lsp_loop(
     Ok(())
 }
 
-/// Records a telemetry event for an individual code action sub-operation.
-/// Called after each code action block with the `Instant` captured before the block.
-fn record_code_action_telemetry(
-    name: &str,
-    start: Instant,
-    server_state: &TelemetryServerState,
-    telemetry: &dyn Telemetry,
-    activity_key: Option<&ActivityKey>,
-    file_stats: Option<&TelemetryFileStats>,
-    queue_name: QueueName,
-) {
-    let mut event = TelemetryEvent::new_task(
-        TelemetryEventKind::CodeAction(name.to_owned()),
-        server_state.clone(),
-        queue_name,
-        None,
-        start,
-    );
-    event.set_activity_key(activity_key.cloned());
-    if let Some(stats) = file_stats {
-        event.set_file_stats(stats.clone());
-    }
-    event.finish_and_record(telemetry, None);
-}
-
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
@@ -1810,19 +1785,17 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        let activity_key = telemetry_event.activity_key.as_ref();
-                        let file_stats = telemetry_event.file_stats.as_ref();
+                        let sub_task_telemetry = SubTaskTelemetry::new(
+                            telemetry,
+                            self.telemetry_state(),
+                            QueueName::LspQueue,
+                            telemetry_event.task_id,
+                            telemetry_event.activity_key.clone(),
+                        );
                         self.send_response(new_response(
                             x.id,
                             Ok(self
-                                .code_action(
-                                    &mut transaction,
-                                    params,
-                                    telemetry,
-                                    activity_key,
-                                    file_stats,
-                                    QueueName::LspQueue,
-                                )
+                                .code_action(&mut transaction, params, sub_task_telemetry)
                                 .unwrap_or_default()),
                         ));
                     }
@@ -3967,10 +3940,7 @@ impl Server {
         &self,
         transaction: &mut Transaction<'_>,
         params: CodeActionParams,
-        telemetry: &dyn Telemetry,
-        activity_key: Option<&ActivityKey>,
-        file_stats: Option<&TelemetryFileStats>,
-        queue_name: QueueName,
+        sub_task_telemetry: SubTaskTelemetry,
     ) -> Option<CodeActionResponse> {
         let uri = &params.text_document.uri;
         let (handle, lsp_config) = self.make_handle_with_lsp_analysis_config_if_enabled(
@@ -3994,7 +3964,12 @@ impl Server {
                 .any(|kind| kind.as_str().starts_with("refactor"))
         });
         let mut actions = Vec::new();
-        let server_state = self.telemetry_state();
+
+        let record_code_action_telemetry = |name: &'static str, start: Instant| {
+            let event = sub_task_telemetry.new_task(TelemetryEventKind::CodeAction(name), start);
+            sub_task_telemetry.finish_task(event, None);
+        };
+
         let start = Instant::now();
         // If the code action is triggered from a notebook cell, we need the cell's
         // index so that import quick-fixes can be redirected to the current cell
@@ -4062,15 +4037,7 @@ impl Server {
                     }))
                 },
             ));
-            record_code_action_telemetry(
-                "quickfix",
-                start,
-                &server_state,
-                telemetry,
-                activity_key,
-                file_stats,
-                queue_name,
-            );
+            record_code_action_telemetry("quickfix", start);
         }
         let start = Instant::now();
         if allow_fix_all && let Some(edits) = transaction.redundant_cast_fix_all_edits(&handle) {
@@ -4098,15 +4065,7 @@ impl Server {
                     ..Default::default()
                 }));
             }
-            record_code_action_telemetry(
-                "fix_all",
-                start,
-                &server_state,
-                telemetry,
-                activity_key,
-                file_stats,
-                queue_name,
-            );
+            record_code_action_telemetry("fix_all", start);
         }
         // Optimization: do not calculate refactors for automated codeactions since they're expensive
         // If we had lazy code actions, we could keep them.
@@ -4151,15 +4110,7 @@ impl Server {
                     if let Some(refactors) = $call {
                         push_refactor_actions(refactors);
                     }
-                    record_code_action_telemetry(
-                        $name,
-                        start,
-                        &server_state,
-                        telemetry,
-                        activity_key,
-                        file_stats,
-                        queue_name,
-                    );
+                    record_code_action_telemetry($name, start);
                 }};
             }
             timed_refactor_action!(
