@@ -692,6 +692,16 @@ def main() -> None:
         "--output-json",
         help="Write structured JSON with full error messages to this file",
     )
+    parser.add_argument(
+        "--shard-index",
+        type=int,
+        help="Run only this shard (0-indexed). Requires --num-shards.",
+    )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        help="Total number of shards to split projects across.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -704,6 +714,21 @@ def main() -> None:
     if not projects:
         logging.info("No matching projects found")
         return
+
+    # Apply sharding if requested
+    if args.shard_index is not None or args.num_shards is not None:
+        if args.shard_index is None or args.num_shards is None:
+            parser.error("--shard-index and --num-shards must be used together")
+        if args.num_shards <= 0:
+            parser.error("--num-shards must be positive")
+        if args.shard_index < 0 or args.shard_index >= args.num_shards:
+            parser.error(
+                f"--shard-index must be in [0, {args.num_shards}), got {args.shard_index}"
+            )
+        projects = projects[args.shard_index :: args.num_shards]
+        logging.info(
+            f"Shard {args.shard_index}/{args.num_shards}: {len(projects)} projects"
+        )
 
     # Cleanup mode: remove cache dir and exit
     if args.cleanup:
