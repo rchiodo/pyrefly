@@ -176,8 +176,8 @@ fn walk_expressions(
                         Expr::NumberLiteral(ExprNumberLiteral {
                             value: Number::Int(idx),
                             ..
-                        }) if idx.as_usize().is_some() => {
-                            chain.push(FacetKind::Index(idx.as_usize().unwrap()));
+                        }) if idx.as_i64().is_some() => {
+                            chain.push(FacetKind::Index(idx.as_i64().unwrap()));
                         }
                         Expr::StringLiteral(lit) => {
                             chain.push(FacetKind::Key(lit.value.to_string()));

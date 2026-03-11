@@ -110,7 +110,7 @@ fn test_get_declared_type_stale_snapshot() {
 
 #[test]
 fn test_get_declared_type_invalid_params() {
-    let (mut tsp, _file_uri, _snapshot) = setup_project("x = 1\n");
+    let (tsp, _file_uri, _snapshot) = setup_project("x = 1\n");
 
     tsp.server
         .send_message(crate::lsp::non_wasm::protocol::Message::Request(
