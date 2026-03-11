@@ -49,10 +49,16 @@ pub enum StructuredType {
         traits: Vec<String>,
     },
     /// Callable type with parameter types and return type.
+    /// `defining_func` is the fully qualified name of the function that
+    /// defines this callable (for dispatch purposes). Only set for
+    /// `Type::Function`; `Type::Callable` is purely structural and has no
+    /// identity, so it stays `None`.
     #[serde(rename = "callable")]
     Callable {
         params: Vec<usize>,
         return_type: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        defining_func: Option<String>,
     },
     /// Type operators, special forms, and other non-class type constructs.
     /// These do not have an MRO and are not real Python classes.
@@ -216,13 +222,24 @@ pub(crate) fn hash_class(qname: &str, arg_hashes: &[u64], traits: &[&str]) -> u6
 }
 
 /// Compute structural hash for a callable-kind type.
-pub(crate) fn hash_callable(param_hashes: &[u64], return_hash: u64) -> u64 {
+///
+/// When `defining_func` is present, it is included in the hash so that
+/// two functions with the same signature but different identities get
+/// distinct table entries (CinderX needs this for dispatch).
+pub(crate) fn hash_callable(
+    param_hashes: &[u64],
+    return_hash: u64,
+    defining_func: Option<&str>,
+) -> u64 {
     let mut h = Xxh64::new(0);
     h.write_u8(HASH_KIND_CALLABLE);
     for &ph in param_hashes {
         h.write_u64(ph);
     }
     h.write_u64(return_hash);
+    if let Some(df) = defining_func {
+        h.write(df.as_bytes());
+    }
     h.finish()
 }
 

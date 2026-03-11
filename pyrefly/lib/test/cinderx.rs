@@ -651,6 +651,67 @@ def f(d: MyDict) -> None:
 }
 
 #[test]
+fn test_callable_defining_func() {
+    let state = create_state(
+        "test",
+        r#"
+def greet(name: str) -> str:
+    return "hello " + name
+
+x = greet
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // A Type::Function should produce a Callable entry with defining_func set
+    let has_defining_func = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Callable { defining_func: Some(df), .. } if df == "test.greet"
+        )
+    });
+    assert!(
+        has_defining_func,
+        "expected a Callable with defining_func 'test.greet', got: {:#?}",
+        data.entries
+    );
+}
+
+#[test]
+fn test_callable_defining_func_method() {
+    let state = create_state(
+        "test",
+        r#"
+class MyClass:
+    def greet(self) -> str:
+        return "hello"
+
+f = MyClass.greet
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Accessing MyClass.greet (unbound) should produce a Callable with class prefix
+    let has_method_defining_func = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Callable { defining_func: Some(df), .. } if df == "test.MyClass.greet"
+        )
+    });
+    assert!(
+        has_method_defining_func,
+        "expected a Callable with defining_func 'test.MyClass.greet', got: {:#?}",
+        data.entries
+    );
+}
+
+#[test]
 fn test_facet_narrow_mixed_chain() {
     let state = create_state(
         "test",
