@@ -48,6 +48,7 @@ use crate::error::context::ErrorContext;
 use crate::error::context::ErrorInfo;
 use crate::error::context::TypeCheckContext;
 use crate::error::context::TypeCheckKind;
+use crate::error::style::ErrorStyle;
 use crate::solver::solver::SubsetError;
 use crate::state::loader::FindingOrError;
 use crate::types::callable::FuncMetadata;
@@ -727,6 +728,36 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return lookup_result.internal_error.is_empty() && lookup_result.not_found.is_empty();
         }
         false
+    }
+
+    /// Compute the narrowed attribute type for `hasattr` narrowing.
+    /// Returns `None` if the attribute exists on all union members (no narrowing needed).
+    /// Otherwise returns `Some(ty)` where `ty` is the union of attribute types from
+    /// members that have the attribute, plus `Any` for members that don't. This
+    /// preserves specific type information and ensures fixpoint convergence when
+    /// `hasattr` is used in loops with reassignment.
+    pub fn hasattr_narrow_type(
+        &self,
+        base: &Type,
+        attr_name: &Name,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Option<Type> {
+        let attr_base = self.as_attribute_base(base.clone())?;
+        let lookup_result = self.lookup_attr_from_base(attr_base, attr_name);
+        if lookup_result.internal_error.is_empty() && lookup_result.not_found.is_empty() {
+            return None;
+        }
+        let suppress_errors = ErrorCollector::new(errors.module().clone(), ErrorStyle::Never);
+        let mut types = vec![self.heap.mk_any_implicit()];
+        for (found_attr, _) in lookup_result.found {
+            if let Ok(ty) =
+                self.resolve_get_access(attr_name, found_attr, range, &suppress_errors, None)
+            {
+                types.push(ty);
+            }
+        }
+        Some(self.unions(types))
     }
 
     /// Compute the get (i.e., read) type of a magic dunder attribute, if it can

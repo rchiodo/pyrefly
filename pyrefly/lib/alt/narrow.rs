@@ -1492,8 +1492,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (Some(_), None) => return type_info.clone(),
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
-                // We only narrow the attribute to `Any` if the attribute does not exist
-                if !self.has_attr(&base_ty, attr) {
+                // Narrow the attribute facet only if it doesn't exist on all members.
+                // The facet type is the union of attribute types from members that DO
+                // have the attribute, plus `Any` for members that don't. Preserving
+                // specific attribute types (rather than using a blanket `Any`) ensures
+                // fixpoint convergence when `hasattr` is used in loops with reassignment.
+                if let Some(narrow_ty) = self.hasattr_narrow_type(&base_ty, attr, range, errors) {
                     let attr_facet = FacetKind::Attribute(attr.clone());
                     let facets = match resolved_chain {
                         Some(chain) => {
@@ -1503,7 +1507,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                         None => Vec1::new(attr_facet),
                     };
-                    type_info.with_narrow(&facets, self.heap.mk_any_implicit())
+                    type_info.with_narrow(&facets, narrow_ty)
                 } else {
                     type_info.clone()
                 }
