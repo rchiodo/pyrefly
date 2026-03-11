@@ -202,26 +202,26 @@ $ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_concat_flatten_types.py"
 27 |     reveal_type(x)
    |                ---
    |
- INFO revealed type: Tensor[(5 + 2), 3] [reveal-type]
+ INFO revealed type: Tensor[7, 3] [reveal-type]
   --> *test_concat_flatten_types.py:36:16 (glob)
    |
 36 |     reveal_type(z)  # Expected: Tensor[7, 3], but might be Tensor[N + M, 3]?
    |                ---
    |
-ERROR Returned type `Tensor[(5 + 2), 3]` is not assignable to declared return type `Tensor[100, 3]` [bad-return]
+ERROR Returned type `Tensor[7, 3]` is not assignable to declared return type `Tensor[100, 3]` [bad-return]
   --> *test_concat_flatten_types.py:39:12 (glob)
    |
 39 |     return z  # Should ERROR if z is Tensor[7, 3]
    |            ^
    |
   Size mismatch: expected 100, got 7
- INFO revealed type: Tensor[((2 * 4) * 3)] [reveal-type]
+ INFO revealed type: Tensor[24] [reveal-type]
   --> *test_concat_flatten_types.py:46:16 (glob)
    |
 46 |     reveal_type(y)  # Expected: Tensor[24], but might be Tensor[B * N * M]?
    |                ---
    |
-ERROR Returned type `Tensor[((2 * 4) * 3)]` is not assignable to declared return type `Tensor[999]` [bad-return]
+ERROR Returned type `Tensor[24]` is not assignable to declared return type `Tensor[999]` [bad-return]
   --> *test_concat_flatten_types.py:49:12 (glob)
    |
 49 |     return y  # Should ERROR if y is Tensor[24]

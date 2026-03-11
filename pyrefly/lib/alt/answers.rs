@@ -272,6 +272,40 @@ table!(
     pub struct AnswerTable(pub AnswerEntry)
 );
 
+/// Prepare an answer for writing into shared `Calculation` state.
+///
+/// Invariants:
+/// - Before writing into shared `Calculation` state, we deep-force embedded
+///   `Type`s for all key kinds.
+/// - After forcing, we assert that no `Type::Var` remains.
+pub(crate) fn prepare_answer_for_calculation_write<K: Keyed>(
+    solver: &Solver,
+    answer: Arc<K::Answer>,
+    write_context: &str,
+) -> Arc<K::Answer> {
+    let mut forced = Arc::unwrap_or_clone(answer);
+    forced.visit_mut(&mut |ty| solver.deep_force_mut(ty));
+    let forced = Arc::new(forced);
+    assert_answer_has_no_var_for_calculation::<K>(&forced, write_context);
+    forced
+}
+
+fn assert_answer_has_no_var_for_calculation<K: Keyed>(
+    answer: &Arc<K::Answer>,
+    write_context: &str,
+) {
+    let mut checked = Arc::unwrap_or_clone(answer.dupe());
+    checked.visit_mut(&mut |ty| {
+        if let Type::Var(var) = ty {
+            panic!(
+                "{write_context}: unresolved Type::Var({var:?}) in answer \
+                 crossing thread boundary via Calculation (K = {})",
+                std::any::type_name::<K>(),
+            );
+        }
+    });
+}
+
 impl DisplayWith<Bindings> for Answers {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, bindings: &Bindings) -> fmt::Result {
         fn go<K: Keyed>(
@@ -963,6 +997,8 @@ impl Answers {
                 .downcast::<Arc<K::Answer>>()
                 .expect("Answers::commit_typed: type mismatch in cross-module batch commit"),
         );
+        let typed_answer =
+            prepare_answer_for_calculation_write::<K>(&self.solver, typed_answer, "commit_typed");
         // Get the calculation cell from the answer table
         if let Some(calculation) = self.table.get::<K>().get(idx) {
             // No recursive placeholder can exist in the Calculation cell because
@@ -1015,6 +1051,11 @@ impl Answers {
             answer
                 .downcast::<Arc<K::Answer>>()
                 .expect("Answers::write_unlock_typed: type mismatch"),
+        );
+        let typed_answer = prepare_answer_for_calculation_write::<K>(
+            &self.solver,
+            typed_answer,
+            "write_unlock_typed",
         );
         if let Some(calculation) = self.table.get::<K>().get(idx) {
             let (_answer, did_write) = calculation.write_unlock(typed_answer);
