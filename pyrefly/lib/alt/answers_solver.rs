@@ -75,6 +75,7 @@ use crate::error::style::ErrorStyle;
 use crate::export::exports::LookupExport;
 use crate::module::module_info::ModuleInfo;
 use crate::solver::solver::VarRecurser;
+use crate::solver::solver::Variables;
 use crate::solver::type_order::TypeOrder;
 use crate::types::class::Class;
 use crate::types::equality::TypeEq;
@@ -1890,6 +1891,8 @@ impl Scc {
 /// we always pass the current `ThreadState`.
 pub struct ThreadState {
     stack: CalcStack,
+    #[allow(dead_code)] // Used by upcoming thread-local solver plumbing.
+    variables: RefCell<Variables>,
     /// For debugging only: thread-global that allows us to control debug logging across components.
     debug: RefCell<bool>,
     /// Configuration for recursion depth limiting. None means disabled.
@@ -1918,6 +1921,7 @@ impl ThreadState {
     pub fn new(recursion_limit_config: Option<RecursionLimitConfig>) -> Self {
         Self {
             stack: CalcStack::new(),
+            variables: RefCell::new(Variables::default()),
             debug: RefCell::new(false),
             recursion_limit_config,
             partial_answers: RefCell::new(FxHashMap::default()),
@@ -1970,6 +1974,11 @@ impl ThreadState {
         if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
             sink.invoked_properties.insert(loc, ty);
         }
+    }
+
+    #[allow(dead_code)] // Used by upcoming thread-local solver plumbing.
+    pub(crate) fn variables(&self) -> &RefCell<Variables> {
+        &self.variables
     }
 }
 
