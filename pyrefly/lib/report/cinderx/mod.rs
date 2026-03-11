@@ -26,8 +26,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
+use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::class::Class;
 use pyrefly_util::display::Fmt;
 use pyrefly_util::fs_anyhow;
@@ -105,11 +107,14 @@ fn collect_class_metadata(
     classes: Vec<Class>,
     transaction: &Transaction,
 ) -> Vec<ClassMetadataEntry> {
-    // Build a handle lookup by module name for cross-module resolution.
+    // Build a handle lookup by (module name, module path) for cross-module
+    // resolution. Keying by both name and path avoids collisions when
+    // multiple handles exist for the same module name (e.g. a real package
+    // and a typeshed stub).
     let handle_by_module: HashMap<_, _> = transaction
         .handles()
         .into_iter()
-        .map(|h| (h.module(), h))
+        .map(|h| ((h.module(), h.path().dupe()), h))
         .collect();
 
     // Deduplicate classes by canonicalized qname, keeping the first seen.
@@ -122,7 +127,8 @@ fn collect_class_metadata(
 
     let mut entries: Vec<ClassMetadataEntry> = Vec::with_capacity(seen_qnames.len());
     for (qname, cls) in &seen_qnames {
-        let Some(defining_handle) = handle_by_module.get(&cls.module_name()) else {
+        let key = (cls.module_name(), cls.module_path().dupe());
+        let Some(defining_handle) = handle_by_module.get(&key) else {
             continue;
         };
         let Some(solutions) = transaction.get_solutions(defining_handle) else {
@@ -169,12 +175,13 @@ fn collect_class_metadata(
 /// present in `__mro__`.
 fn has_protocol_ancestor(
     mro: &ClassMro,
-    handle_by_module: &HashMap<ModuleName, Handle>,
+    handle_by_module: &HashMap<(ModuleName, ModulePath), Handle>,
     transaction: &Transaction,
 ) -> bool {
     for ancestor in mro.ancestors_no_object() {
         let cls = ancestor.class_object();
-        let Some(handle) = handle_by_module.get(&cls.module_name()) else {
+        let key = (cls.module_name(), cls.module_path().dupe());
+        let Some(handle) = handle_by_module.get(&key) else {
             continue;
         };
         let Some(solutions) = transaction.get_solutions(handle) else {
