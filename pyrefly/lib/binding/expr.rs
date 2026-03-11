@@ -469,9 +469,10 @@ impl<'a> BindingsBuilder<'a> {
             }
         }
         self.scopes.push(Scope::lambda(lambda.range, false));
+        let owner = usage.current_idx();
         if let Some(parameters) = &lambda.parameters {
             for x in parameters {
-                self.bind_lambda_param(x.name());
+                self.bind_lambda_param(x.name(), owner);
             }
         }
         self.ensure_expr(&mut lambda.body, usage);

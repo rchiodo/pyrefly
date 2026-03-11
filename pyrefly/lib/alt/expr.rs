@@ -74,6 +74,7 @@ use crate::alt::unwrap::HintRef;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
+use crate::binding::binding::LambdaParamId;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -99,6 +100,7 @@ use crate::types::type_var::TypeVar;
 use crate::types::type_var_tuple::TypeVarTuple;
 use crate::types::types::AnyStyle;
 use crate::types::types::Type;
+use crate::types::types::Var;
 
 #[derive(Debug, Clone, Copy)]
 pub enum TypeOrExpr<'a> {
@@ -385,14 +387,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Expr::BinOp(x) => self.binop_infer(x, hint, errors),
             Expr::UnaryOp(x) => self.unop_infer(x, errors),
             Expr::Lambda(lambda) => {
-                let param_vars = if let Some(parameters) = &lambda.parameters {
+                let param_ids = if let Some(parameters) = &lambda.parameters {
                     parameters
                         .iter_non_variadic_params()
-                        .map(|x| (&x.name().id, self.bindings().get_lambda_param(x.name())))
+                        .map(|x| (&x.name().id, self.bindings().get_lambda_param_id(x.name())))
                         .collect()
                 } else {
                     Vec::new()
                 };
+                let param_vars = self.allocate_lambda_param_vars(&param_ids);
 
                 // Pass any contextual information to the parameter bindings used in the lambda body as a side
                 // effect, by setting an answer for the vars created at binding time.
@@ -416,18 +419,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 if let Some(parameters) = &lambda.parameters {
                     params.extend(parameters.vararg.iter().map(|x| {
-                        Param::VarArg(
-                            Some(x.name.id.clone()),
-                            self.solver()
-                                .force_var(self.bindings().get_lambda_param(&x.name)),
-                        )
+                        let var = self.get_or_create_lambda_param_var(
+                            self.bindings().get_lambda_param_id(&x.name),
+                        );
+                        Param::VarArg(Some(x.name.id.clone()), self.solver().force_var(var))
                     }));
                     params.extend(parameters.kwarg.iter().map(|x| {
-                        Param::Kwargs(
-                            Some(x.name.id.clone()),
-                            self.solver()
-                                .force_var(self.bindings().get_lambda_param(&x.name)),
-                        )
+                        let var = self.get_or_create_lambda_param_var(
+                            self.bindings().get_lambda_param_id(&x.name),
+                        );
+                        Param::Kwargs(Some(x.name.id.clone()), self.solver().force_var(var))
                     }));
                 }
                 let params = Params::List(ParamList::new(params));
@@ -2816,5 +2817,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 format!("{reason}"),
             );
         }
+    }
+}
+
+impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
+    fn allocate_lambda_param_vars<'b>(
+        &self,
+        param_ids: &[(&'b Name, LambdaParamId)],
+    ) -> Vec<(&'b Name, Var)> {
+        param_ids
+            .iter()
+            .map(|(name, id)| {
+                let var = self.get_or_create_lambda_param_var(*id);
+                (*name, var)
+            })
+            .collect()
     }
 }

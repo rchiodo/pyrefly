@@ -67,6 +67,7 @@ use crate::binding::binding::KeyUndecoratedFunction;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::binding::Keyed;
+use crate::binding::binding::LambdaParamId;
 use crate::binding::binding::LastStmt;
 use crate::binding::binding::NarrowUseLocation;
 use crate::binding::binding::TypeAliasParams;
@@ -101,7 +102,6 @@ use crate::table_try_for_each;
 use crate::types::globals::ImplicitGlobal;
 use crate::types::quantified::QuantifiedKind;
 use crate::types::types::AnyStyle;
-use crate::types::types::Var;
 
 /// The result of looking up a name. Similar to `NameReadInfo`, but
 /// differs because the `BindingsBuilder` layer is responsible for both
@@ -255,6 +255,7 @@ pub struct BindingsBuilder<'a> {
     deferred_bound_names: Vec<DeferredBoundName>,
     /// Yield and yield-from indices for lambdas that contain yields.
     lambda_yield_keys: Vec<(TextRange, Box<[Idx<KeyYield>]>, Box<[Idx<KeyYieldFrom>]>)>,
+    next_lambda_param_id: u32,
     /// See `BindingsInner::subsequently_initialized`.
     subsequently_initialized: SmallSet<Idx<KeyAnnotation>>,
 }
@@ -426,10 +427,10 @@ impl Bindings {
         self.0.table.get::<K>().0.items().map(|(k, _)| k)
     }
 
-    pub fn get_lambda_param(&self, name: &Identifier) -> Var {
+    pub fn get_lambda_param_id(&self, name: &Identifier) -> LambdaParamId {
         let b = self.get(self.key_to_idx(&Key::Definition(ShortIdentifier::new(name))));
-        if let Binding::LambdaParameter(var) = b {
-            *var
+        if let Binding::LambdaParameter(id, _) = b {
+            *id
         } else {
             panic!(
                 "Internal error: unexpected binding for lambda parameter `{}` @  {:?}: {}, module={}, path={}",
@@ -511,6 +512,7 @@ impl Bindings {
             semantic_syntax_errors: RefCell::new(Vec::new()),
             deferred_bound_names: Vec::new(),
             lambda_yield_keys: Vec::new(),
+            next_lambda_param_id: 0,
             subsequently_initialized: SmallSet::new(),
         };
         builder.init_static_scope(&x.body, true);
@@ -1549,14 +1551,12 @@ impl<'a> BindingsBuilder<'a> {
         }
     }
 
-    pub fn bind_lambda_param(&mut self, name: &Identifier) {
-        // Create a parameter var; the binding for the lambda expr itself will use this to pass
-        // any contextual typing information as a side-effect to the parameter binding used in
-        // the lambda body.
-        let var = self.solver.fresh_unwrap(self.uniques);
+    pub fn bind_lambda_param(&mut self, name: &Identifier, owner: Option<Idx<Key>>) {
+        let id = LambdaParamId(self.next_lambda_param_id);
+        self.next_lambda_param_id += 1;
         let idx = self.insert_binding(
             Key::Definition(ShortIdentifier::new(name)),
-            Binding::LambdaParameter(var),
+            Binding::LambdaParameter(id, owner),
         );
         self.scopes.add_parameter_to_current_static(name, None);
         self.bind_name(&name.id, idx, FlowStyle::Other);

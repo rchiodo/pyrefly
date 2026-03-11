@@ -59,6 +59,7 @@ use crate::binding::binding::Exported;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::KeyTypeAlias;
+use crate::binding::binding::LambdaParamId;
 use crate::binding::bindings::BindingEntry;
 use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::Bindings;
@@ -1898,6 +1899,9 @@ pub struct ThreadState {
     /// as the NameAssign's solve_binding can see the partial answer (offset 0 in get_idx,
     /// which checks before pushing its own frame).
     partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
+    /// Solve-time mapping from per-module lambda parameter IDs to the
+    /// thread-local Var that represents that parameter in the current solve.
+    lambda_param_vars: RefCell<FxHashMap<(ModuleName, LambdaParamId), Var>>,
     /// Active trace side-effect sink for the current calculation.
     /// Set before `K::solve`, taken after. `None` when tracing is disabled
     /// or between calculations. Saved sinks form a stack to handle recursive
@@ -1917,6 +1921,7 @@ impl ThreadState {
             debug: RefCell::new(false),
             recursion_limit_config,
             partial_answers: RefCell::new(FxHashMap::default()),
+            lambda_param_vars: RefCell::new(FxHashMap::default()),
             trace_sink: RefCell::new(None),
             trace_sink_stack: RefCell::new(Vec::new()),
         }
@@ -2134,6 +2139,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn module(&self) -> &ModuleInfo {
         self.bindings.module()
+    }
+
+    pub(crate) fn set_lambda_param_var(&self, id: LambdaParamId, var: Var) {
+        self.thread_state
+            .lambda_param_vars
+            .borrow_mut()
+            .insert((self.module().name(), id), var);
+    }
+
+    pub(crate) fn get_lambda_param_var(&self, id: LambdaParamId) -> Option<Var> {
+        self.thread_state
+            .lambda_param_vars
+            .borrow()
+            .get(&(self.module().name(), id))
+            .copied()
+    }
+
+    pub(crate) fn get_or_create_lambda_param_var(&self, id: LambdaParamId) -> Var {
+        if let Some(var) = self.get_lambda_param_var(id) {
+            var
+        } else {
+            let var = self.solver().fresh_unwrap(self.uniques);
+            self.set_lambda_param_var(id, var);
+            var
+        }
     }
 
     pub fn stack(&self) -> &CalcStack {

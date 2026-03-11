@@ -88,7 +88,6 @@ use crate::types::type_info::TypeInfo;
 use crate::types::types::AnyStyle;
 use crate::types::types::TParams;
 use crate::types::types::Type;
-use crate::types::types::Var;
 
 assert_words!(Key, 2);
 assert_bytes!(KeyExpect, 12);
@@ -2013,6 +2012,9 @@ pub struct ExhaustiveBinding {
     pub exhaustiveness_info: Option<(NarrowingSubject, (Box<NarrowOp>, TextRange))>,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct LambdaParamId(pub u32);
+
 #[derive(Clone, Debug)]
 pub enum Binding {
     /// An expression, optionally with a Key saying what the type must be.
@@ -2134,7 +2136,10 @@ pub enum Binding {
     /// Binding for an `except` (if the boolean flag is false) or `except*` (if the boolean flag is true) clause
     ExceptionHandler(Box<Expr>, bool),
     /// Binding for a lambda parameter.
-    LambdaParameter(Var),
+    /// The optional owner is the binding whose expression contains this lambda.
+    /// If the parameter is solved before that owner has established thread-local
+    /// lambda vars, we can force the owner to solve first.
+    LambdaParameter(LambdaParamId, Option<Idx<Key>>),
     /// Binding for a function parameter. We either have an annotation, or we will determine the
     /// parameter type when solving the function type.
     FunctionParameter(Box<FunctionParameter>),
@@ -2360,7 +2365,9 @@ impl DisplayWith<Bindings> for Binding {
                     ctx.display(*key),
                 )
             }
-            Self::LambdaParameter(x) => write!(f, "LambdaParameter({x})"),
+            Self::LambdaParameter(id, owner) => {
+                write!(f, "LambdaParameter(id={id:?}, owner={owner:?})")
+            }
             Self::FunctionParameter(x) => write!(
                 f,
                 "FunctionParameter({})",
@@ -2487,7 +2494,7 @@ impl Binding {
                     Some(SymbolKind::Variable)
                 }
             }
-            Binding::LambdaParameter(_) | Binding::FunctionParameter(_) => {
+            Binding::LambdaParameter(..) | Binding::FunctionParameter(_) => {
                 Some(SymbolKind::Parameter)
             }
             Binding::IterableValueComprehension(_, _, _) | Binding::IterableValueLoop(_, _, _) => {

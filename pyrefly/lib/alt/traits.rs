@@ -169,11 +169,25 @@ impl<Ans: LookupAnswer> Solve<Ans> for Key {
     }
 
     fn check_shortcut(answers: &AnswersSolver<Ans>, binding: &Binding) -> Option<Arc<TypeInfo>> {
-        if let Binding::ForwardToFirstUse(fwd) = binding {
-            let def_idx = answers.def_idx_for_forward_to_first_use(*fwd)?;
-            answers.check_partial_answer(def_idx)
-        } else {
-            None
+        match binding {
+            Binding::ForwardToFirstUse(fwd) => {
+                let def_idx = answers.def_idx_for_forward_to_first_use(*fwd)?;
+                answers.check_partial_answer(def_idx)
+            }
+            Binding::LambdaParameter(id, owner) => {
+                let var = if let Some(var) = answers.get_lambda_param_var(*id) {
+                    var
+                } else if let Some(owner_idx) = owner {
+                    // Solve the containing binding first so lambda parameters are
+                    // initialized in thread-local state before we read this key.
+                    let _ = answers.get_idx(*owner_idx);
+                    answers.get_or_create_lambda_param_var(*id)
+                } else {
+                    answers.get_or_create_lambda_param_var(*id)
+                };
+                Some(Arc::new(TypeInfo::of_ty(var.to_type(answers.heap))))
+            }
+            _ => None,
         }
     }
 }
