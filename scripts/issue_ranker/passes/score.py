@@ -36,11 +36,12 @@ SCORING WEIGHTS:
 | Highest (x3) | False positive impact | Issues where pyrefly errors but pyright/mypy don't. These drive users away — if pyrefly flags valid code, people stop using it. High primer frequency amplifies this. |
 | Highest (x3) | Performance | Memory usage, type check speed, LSP responsiveness. Performance issues directly block adoption at scale. |
 | High (x2) | Team-assigned priority | P0/P1/P2 priorities set by the team in GitHub Projects. These reflect real-world urgency. P0 → score 80+, P1 → score 65+, P2 → score 50+. However, priorities CAN be stale or wrong — if the issue looks trivial or already fixed, override accordingly. Unset priority means no signal (don't penalize). |
-| High (x2) | False negatives + spec compliance | Real type errors pyrefly misses that pyright/mypy catch. Spec compliance gaps (TypeVar, ParamSpec, overloads, narrowing, exhaustiveness). These affect correctness. |
-| High (x2) | Actionability | How ready is this issue to be worked on? Score HIGH if: clear minimal repro, root cause identified, well-scoped, a developer could pick it up and fix it. Score LOW if: vague description, no repro, can't reproduce, unclear root cause, needs more investigation, stale with no resolution. Issues that are NOT actionable should be penalized significantly — even important bugs are low priority if nobody can act on them yet. |
-| Medium (x1.5) | IDE and usability | Language server features: hover, completions, go-to-def, diagnostics. Important for adoption but not as critical as correctness. Score IDE bugs 55-75, IDE features 40-60. |
+| Medium (x1.5) | False negatives + spec compliance | Real type errors pyrefly misses that pyright/mypy catch. Spec compliance gaps (TypeVar, ParamSpec, overloads, narrowing, exhaustiveness). These affect correctness but are less urgent than false positives since users don't notice missing checks. |
+| Medium (x1.5) | Actionability | How ready is this issue to be worked on? Score HIGH if: clear minimal repro, root cause identified, well-scoped, a developer could pick it up and fix it. Score LOW if: vague description, no repro, can't reproduce, unclear root cause, needs more investigation, stale with no resolution. |
+| High (x2) | IDE and usability | Language server features: hover, completions, go-to-def, diagnostics. Important for adoption — a broken IDE experience drives users away. Score IDE bugs 60-80, IDE features 45-65. |
 | Medium (x1.5) | Primer breadth | How many primer projects are affected. More projects = wider real-world impact. |
-| Medium (x1.5) | Adoption labels | Issues tagged pytorch, google, sqlalchemy, pydantic — key ecosystems for adoption. |
+| High (x2.5) | Strategic adoption | Issues tagged pytorch or google — these are top-priority adoption targets. Blocking issues for these ecosystems should score 75+. |
+| Medium (x1.5) | Ecosystem adoption | Issues tagged pydantic, sqlalchemy, or other framework labels — important but lower priority than strategic targets. |
 | Lower (x0.5) | Edge cases | Few projects affected, low engagement, stale issues, niche scenarios. |
 
 BONUS SIGNALS (additive):
