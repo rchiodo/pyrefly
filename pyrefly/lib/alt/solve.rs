@@ -4849,9 +4849,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let tparams = self.create_type_alias_params_recursive(&x.tparams);
                 Forallable::TypeAlias(TypeAliasData::Ref(r)).forall(tparams)
             }
-            Binding::LambdaParameter(id, _) => {
-                self.get_or_create_lambda_param_var(*id).to_type(self.heap)
-            }
+            Binding::LambdaParameter(id, owner) => self
+                .resolve_lambda_param_var(*id, *owner)
+                .to_type(self.heap),
             Binding::FunctionParameter(param) => self.binding_to_type_function_parameter(param),
             Binding::SuperInstance(x) => self.solve_super_binding(&x.0, x.1, errors),
             // For first-usage-based type inference, we occasionally just want a way to force

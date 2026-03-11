@@ -2166,6 +2166,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    /// Resolve a lambda parameter Var from thread-local state.
+    ///
+    /// If owner exists, force owner evaluation first so this binding
+    /// participates in the same SCC/fixpoint dynamics as the containing
+    /// lambda expression.
+    pub(crate) fn resolve_lambda_param_var(
+        &self,
+        id: LambdaParamId,
+        owner: Option<Idx<Key>>,
+    ) -> Var {
+        if let Some(owner_idx) = owner {
+            let _ = self.get_idx(owner_idx);
+        }
+        self.get_or_create_lambda_param_var(id)
+    }
+
     pub fn stack(&self) -> &CalcStack {
         &self.thread_state.stack
     }

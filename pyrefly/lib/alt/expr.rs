@@ -419,14 +419,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 if let Some(parameters) = &lambda.parameters {
                     params.extend(parameters.vararg.iter().map(|x| {
-                        let var = self.get_or_create_lambda_param_var(
+                        let var = self.solver().fresh_unwrap(self.uniques);
+                        self.set_lambda_param_var(
                             self.bindings().get_lambda_param_id(&x.name),
+                            var,
                         );
                         Param::VarArg(Some(x.name.id.clone()), self.solver().force_var(var))
                     }));
                     params.extend(parameters.kwarg.iter().map(|x| {
-                        let var = self.get_or_create_lambda_param_var(
+                        let var = self.solver().fresh_unwrap(self.uniques);
+                        self.set_lambda_param_var(
                             self.bindings().get_lambda_param_id(&x.name),
+                            var,
                         );
                         Param::Kwargs(Some(x.name.id.clone()), self.solver().force_var(var))
                     }));
@@ -2828,7 +2832,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         param_ids
             .iter()
             .map(|(name, id)| {
-                let var = self.get_or_create_lambda_param_var(*id);
+                let var = self.solver().fresh_unwrap(self.uniques);
+                self.set_lambda_param_var(*id, var);
                 (*name, var)
             })
             .collect()
