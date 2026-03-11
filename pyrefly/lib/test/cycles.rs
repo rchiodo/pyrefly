@@ -61,6 +61,23 @@ assert_type(x, int | None)
 "#,
 );
 
+// Regression test against lambda parameters not being inferred in a way that reflects
+// fixpoint semantics.
+testcase!(
+    bug = "self.b and self.c are equivalent, but don't behave the same. This is also nondeterministic if exports were to force a different order.",
+    class_field_lambda_param_scc_consistent_errors,
+    r#"
+from typing import Callable
+
+class A:
+    def __init__(self):
+        self.a: Callable[[Callable[[int], int]], int] = lambda f: self.b
+        self.b = self.a(lambda x: x + "foo")  # missing type error here!
+        self.c = self.z(lambda x: x + "foo")  # E: `+` is not supported between `int` and `Literal['foo']`
+        self.z: Callable[[Callable[[int], int]], int] = lambda f: self.c
+"#,
+);
+
 fn env_import_cycle() -> TestEnv {
     let mut env = TestEnv::new();
     env.add(
