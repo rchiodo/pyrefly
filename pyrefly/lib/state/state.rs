@@ -701,7 +701,7 @@ impl<'a> Transaction<'a> {
                 let mut thread_local_results = Vec::new();
                 for (handle, module_data) in modules {
                     let exports_data = self.lookup_export(module_data);
-                    let exports = exports_data.exports(&self.lookup(module_data.dupe()));
+                    let exports = exports_data.exports(&self.lookup(module_data));
                     thread_local_results.extend(searcher(handle, &exports_data, &exports));
                 }
                 if !thread_local_results.is_empty() {
@@ -1065,7 +1065,7 @@ impl<'a> Transaction<'a> {
                 memory: &self.memory_lookup(),
                 uniques: &self.data.state.uniques,
                 stdlib: &stdlib,
-                lookup: &self.lookup(module_data.dupe()),
+                lookup: &self.lookup(module_data),
                 untyped_def_behavior: config
                     .untyped_def_behavior(module_data.handle.path().as_path()),
                 infer_with_first_use: config
@@ -1149,7 +1149,7 @@ impl<'a> Transaction<'a> {
                     if !should_invalidate {
                         continue;
                     }
-                    self.try_mark_module_dirty(&rdep_module, &mut dirtied);
+                    self.try_mark_module_dirty(rdep_module, &mut dirtied);
                 }
 
                 self.stats.lock().dirty_rdeps += dirtied.len();
@@ -1241,17 +1241,17 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    fn get_module(&self, handle: &Handle) -> ArcId<ModuleDataMut> {
+    fn get_module(&self, handle: &Handle) -> &ArcId<ModuleDataMut> {
         self.get_module_ex(handle, self.data.default_require).0
     }
 
     /// Get a module discovered via an import.
-    fn get_imported_module(&self, handle: &Handle) -> ArcId<ModuleDataMut> {
+    fn get_imported_module(&self, handle: &Handle) -> &ArcId<ModuleDataMut> {
         self.get_module_ex(handle, self.data.default_require).0
     }
 
     /// Return the module, plus true if the module was newly created.
-    fn get_module_ex(&self, handle: &Handle, require: Require) -> (ArcId<ModuleDataMut>, bool) {
+    fn get_module_ex(&self, handle: &Handle, require: Require) -> (&ArcId<ModuleDataMut>, bool) {
         let mut created = false;
         let (res, inserted) = self.data.updated_modules.ensure(handle, || {
             if let Some(m) = self.readable.modules.get(handle) {
@@ -1275,7 +1275,7 @@ impl<'a> Transaction<'a> {
                 subscriber.start_work(handle);
             }
         }
-        (res.dupe(), created)
+        (res, created)
     }
 
     fn add_error(
@@ -1289,7 +1289,7 @@ impl<'a> Transaction<'a> {
         load.errors.add(range, ErrorInfo::Kind(kind), vec1![msg]);
     }
 
-    fn lookup<'b>(&'b self, module_data: ArcId<ModuleDataMut>) -> TransactionHandle<'b> {
+    fn lookup<'b>(&'b self, module_data: &'b ArcId<ModuleDataMut>) -> TransactionHandle<'b> {
         TransactionHandle {
             transaction: self,
             module_data,
@@ -1305,12 +1305,12 @@ impl<'a> Transaction<'a> {
     ) -> Option<(Class, Arc<TParams>)> {
         let module_data = self.get_module(handle);
         if !self
-            .lookup_export(&module_data)
-            .exports(&self.lookup(module_data.dupe()))
+            .lookup_export(module_data)
+            .exports(&self.lookup(module_data))
             .contains_key(name)
         {
             self.add_error(
-                &module_data,
+                module_data,
                 TextRange::default(),
                 format!(
                     "Stdlib import failure, was expecting `{}` to contain `{name}`",
@@ -1321,12 +1321,12 @@ impl<'a> Transaction<'a> {
             return None;
         }
 
-        let t = self.lookup_answer(module_data.dupe(), &KeyExport(name.clone()), thread_state);
+        let t = self.lookup_answer(module_data, &KeyExport(name.clone()), thread_state);
         let class = match t.as_deref() {
             Some(Type::ClassDef(cls)) => Some(cls.dupe()),
             ty => {
                 self.add_error(
-                    &module_data,
+                    module_data,
                     TextRange::default(),
                     format!(
                         "Did not expect non-class type `{}` for stdlib import `{}.{name}`",
@@ -1342,7 +1342,7 @@ impl<'a> Transaction<'a> {
             let tparams = match class.precomputed_tparams() {
                 Some(tparams) => tparams.dupe(),
                 None => self
-                    .lookup_answer(module_data.dupe(), &KeyTParams(class.index()), thread_state)
+                    .lookup_answer(module_data, &KeyTParams(class.index()), thread_state)
                     .unwrap_or_default(),
             };
             (class, tparams)
@@ -1359,8 +1359,8 @@ impl<'a> Transaction<'a> {
     /// Returns the module and text range where the name is defined.
     fn lookup_export_location(&self, handle: &Handle, name: &Name) -> Option<(Module, TextRange)> {
         let module_data = self.get_module(handle);
-        let exports = self.lookup_export(&module_data);
-        let export_map = exports.exports(&self.lookup(module_data.dupe()));
+        let exports = self.lookup_export(module_data);
+        let export_map = exports.exports(&self.lookup(module_data));
 
         match export_map.get(name)? {
             ExportLocation::ThisModule(export) => {
@@ -1381,7 +1381,7 @@ impl<'a> Transaction<'a> {
 
     fn lookup_answer<'b, K: Solve<TransactionHandle<'b>> + Exported>(
         &'b self,
-        module_data: ArcId<ModuleDataMut>,
+        module_data: &'b ArcId<ModuleDataMut>,
         key: &K,
         thread_state: &ThreadState,
     ) -> Option<Arc<<K as Keyed>::Answer>>
@@ -1393,7 +1393,7 @@ impl<'a> Transaction<'a> {
         let key = Hashed::new(key);
 
         // Ensure answers (or solutions) are computed. Cheap if already done.
-        self.demand(&module_data, Step::Answers);
+        self.demand(module_data, Step::Answers);
 
         // If answers is None, solutions must exist.
         let Some(answers) = module_data.state.get_answers() else {
@@ -1519,8 +1519,8 @@ impl<'a> Transaction<'a> {
             for h in handles {
                 let (m, created) = self.get_module_ex(h, require);
                 let dirty_require = m.state.increase_require(require);
-                if (created || dirty_require) && !dirty.contains(&m) {
-                    self.data.todo.push_fifo(Step::first(), m);
+                if (created || dirty_require) && !dirty.contains(m) {
+                    self.data.todo.push_fifo(Step::first(), m.dupe());
                     todo_count += 1;
                 }
             }
@@ -1718,7 +1718,7 @@ impl<'a> Transaction<'a> {
         solve: F,
     ) -> Option<R> {
         let module_data = self.get_module(handle);
-        let lookup = self.lookup(module_data.dupe());
+        let lookup = self.lookup(module_data);
         let load = module_data.state.get_load()?;
         let answers = module_data.state.get_answers()?;
         let errors = &load.errors;
@@ -1959,7 +1959,7 @@ impl<'a> Transaction<'a> {
                 memory: &self.memory_lookup(),
                 uniques: &self.data.state.uniques,
                 stdlib: &stdlib,
-                lookup: &self.lookup(m.dupe()),
+                lookup: &self.lookup(m),
                 untyped_def_behavior: config.untyped_def_behavior(m.handle.path().as_path()),
                 infer_with_first_use: config.infer_with_first_use(m.handle.path().as_path()),
                 tensor_shapes: config.tensor_shapes(m.handle.path().as_path()),
@@ -2039,24 +2039,24 @@ impl<'a> Transaction<'a> {
 
     pub fn get_exports(&self, handle: &Handle) -> Arc<SmallMap<Name, ExportLocation>> {
         let module_data = self.get_module(handle);
-        self.lookup_export(&module_data)
+        self.lookup_export(module_data)
             .exports(&self.lookup(module_data))
     }
 
     pub(crate) fn get_exports_data(&self, handle: &Handle) -> Arc<Exports> {
         let module_data = self.get_module(handle);
-        self.lookup_export(&module_data)
+        self.lookup_export(module_data)
     }
 
     pub fn get_module_docstring_range(&self, handle: &Handle) -> Option<TextRange> {
         let module_data = self.get_module(handle);
-        self.lookup_export(&module_data).docstring_range()
+        self.lookup_export(module_data).docstring_range()
     }
 }
 
 pub(crate) struct TransactionHandle<'a> {
     transaction: &'a Transaction<'a>,
-    module_data: ArcId<ModuleDataMut>,
+    module_data: &'a ArcId<ModuleDataMut>,
     /// Locally accumulated deps, flushed to `module_data.deps` on drop.
     /// This batches N lock acquisitions per handle lifetime into 1.
     /// Keyed by ModulePath (cheap to hash — discriminant + interned u64) rather
@@ -2067,7 +2067,7 @@ pub(crate) struct TransactionHandle<'a> {
 
 /// Result of looking up a target module's `Answers` for a cross-module
 /// operation (commit or solve). See `TransactionHandle::lookup_target_answers`.
-enum TargetAnswers {
+enum TargetAnswers<'a> {
     /// The target module was not found (e.g., import resolution failed or the
     /// module has been invalidated). The caller should return `false`.
     ModuleNotFound,
@@ -2077,7 +2077,7 @@ enum TargetAnswers {
         bindings: Bindings,
         answers: Arc<Answers>,
         load: Option<Arc<Load>>,
-        module_data: ArcId<ModuleDataMut>,
+        module_data: &'a ArcId<ModuleDataMut>,
     },
     /// The target module's `Answers` have been evicted but `Solutions` exist.
     /// This is a benign race: another thread already solved everything, so the
@@ -2091,7 +2091,7 @@ impl<'a> TransactionHandle<'a> {
         module: ModuleName,
         path: Option<&ModulePath>,
         dep: ModuleDep,
-    ) -> FindingOrError<ArcId<ModuleDataMut>> {
+    ) -> FindingOrError<&'a ArcId<ModuleDataMut>> {
         let handle = match path {
             Some(path) => {
                 // Explicit path — already resolved. Bypass imports entirely.
@@ -2149,7 +2149,7 @@ impl<'a> TransactionHandle<'a> {
         dep: ModuleDep,
     ) -> Option<T> {
         let module_data = self.get_module(module, None, dep).finding()?;
-        let exports = self.transaction.lookup_export(&module_data);
+        let exports = self.transaction.lookup_export(module_data);
         let lookup = TransactionHandle {
             transaction: self.transaction,
             module_data,
@@ -2168,7 +2168,7 @@ impl<'a> TransactionHandle<'a> {
     ///
     /// This helper centralizes that logic and returns a `TargetAnswers`
     /// enum so callers only need to handle the "answers available" case.
-    fn lookup_target_answers(&self, calc_id: &CalcId) -> TargetAnswers {
+    fn lookup_target_answers(&self, calc_id: &CalcId) -> TargetAnswers<'a> {
         let CalcId(ref bindings, _) = *calc_id;
         let module = bindings.module().name();
         let path = bindings.module().path();
@@ -2273,7 +2273,7 @@ impl<'a> LookupExport for TransactionHandle<'a> {
     fn module_exists(&self, module: ModuleName) -> FindingOrError<()> {
         self.get_module(module, None, ModuleDep::Exists)
             .map(|module_data| {
-                self.transaction.lookup_export(&module_data);
+                self.transaction.lookup_export(module_data);
             })
     }
 
