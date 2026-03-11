@@ -275,19 +275,15 @@ table!(
 /// Prepare an answer for writing into shared `Calculation` state.
 ///
 /// Invariants:
-/// - Before writing into shared `Calculation` state, we deep-force embedded
-///   `Type`s for all key kinds.
-/// - After forcing, we assert that no `Type::Var` remains.
+/// - Producers are responsible for deep-forcing embedded `Type`s before
+///   crossing this boundary.
+/// - At this boundary, we enforce that no unresolved `Type::Var` remains.
 pub(crate) fn prepare_answer_for_calculation_write<K: Keyed>(
-    solver: &Solver,
     answer: Arc<K::Answer>,
     write_context: &str,
 ) -> Arc<K::Answer> {
-    let mut forced = Arc::unwrap_or_clone(answer);
-    forced.visit_mut(&mut |ty| solver.deep_force_mut(ty));
-    let forced = Arc::new(forced);
-    assert_answer_has_no_var_for_calculation::<K>(&forced, write_context);
-    forced
+    assert_answer_has_no_var_for_calculation::<K>(&answer, write_context);
+    answer
 }
 
 fn assert_answer_has_no_var_for_calculation<K: Keyed>(
@@ -997,8 +993,7 @@ impl Answers {
                 .downcast::<Arc<K::Answer>>()
                 .expect("Answers::commit_typed: type mismatch in cross-module batch commit"),
         );
-        let typed_answer =
-            prepare_answer_for_calculation_write::<K>(&self.solver, typed_answer, "commit_typed");
+        let typed_answer = prepare_answer_for_calculation_write::<K>(typed_answer, "commit_typed");
         // Get the calculation cell from the answer table
         if let Some(calculation) = self.table.get::<K>().get(idx) {
             // No recursive placeholder can exist in the Calculation cell because
@@ -1052,11 +1047,8 @@ impl Answers {
                 .downcast::<Arc<K::Answer>>()
                 .expect("Answers::write_unlock_typed: type mismatch"),
         );
-        let typed_answer = prepare_answer_for_calculation_write::<K>(
-            &self.solver,
-            typed_answer,
-            "write_unlock_typed",
-        );
+        let typed_answer =
+            prepare_answer_for_calculation_write::<K>(typed_answer, "write_unlock_typed");
         if let Some(calculation) = self.table.get::<K>().get(idx) {
             let (_answer, did_write) = calculation.write_unlock(typed_answer);
             did_write
@@ -1196,7 +1188,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        prepare_answer_for_calculation_write::<K>(self.solver(), answer, write_context)
+        let mut forced = Arc::unwrap_or_clone(answer);
+        forced.visit_mut(&mut |ty| self.solver().deep_force_mut(ty));
+        let forced = Arc::new(forced);
+        prepare_answer_for_calculation_write::<K>(forced, write_context)
     }
 
     pub fn record_resolved_trace(&self, loc: TextRange, ty: Type) {
