@@ -492,6 +492,58 @@ def f(foo: Foo) -> None:
 }
 
 #[test]
+fn test_facet_narrow_chained_attr() {
+    let state = create_state(
+        "test",
+        r#"
+class Inner:
+    value: int | None
+
+class Outer:
+    inner: Inner
+
+def f(outer: Outer) -> None:
+    if outer.inner.value is not None:
+        y = outer.inner.value
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // Find the located type for `outer.inner.value` inside the if-branch.
+    // It should have unnarrowed_type set and is_narrowed_mismatch == true because
+    // the narrowed type (int) differs from the unnarrowed type (int | None).
+    let narrowed_locs: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.unnarrowed_type.is_some())
+        .collect();
+    assert!(
+        !narrowed_locs.is_empty(),
+        "expected at least one location with unnarrowed_type set for chained attr, got locations: {:#?}",
+        data.locations,
+    );
+
+    let has_mismatch = narrowed_locs.iter().any(|loc| loc.is_narrowed_mismatch);
+    assert!(
+        has_mismatch,
+        "expected is_narrowed_mismatch == true for the narrowed outer.inner.value access",
+    );
+
+    // The unnarrowed type index should be valid.
+    for loc in &narrowed_locs {
+        let unnarrowed_idx = loc.unnarrowed_type.unwrap();
+        assert!(
+            unnarrowed_idx < data.entries.len(),
+            "unnarrowed_type index {unnarrowed_idx} is out of bounds (table has {} entries)",
+            data.entries.len(),
+        );
+    }
+}
+
+#[test]
 fn test_no_facets_no_reresolution() {
     let state = create_state(
         "test",

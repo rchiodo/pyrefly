@@ -16,10 +16,12 @@ use pyrefly_build::handle::Handle;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::class::Class;
 use pyrefly_types::facet::FacetKind;
+use pyrefly_types::type_info::TypeInfo;
 use pyrefly_types::types::Type;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprName;
+use ruff_python_ast::Identifier;
 use ruff_python_ast::ModModule;
 use ruff_text_size::Ranged;
 
@@ -92,10 +94,10 @@ pub(crate) fn collect_module_types(
 
 /// Walk all expressions in the AST and collect types.
 ///
-/// For `Expr::Attribute` nodes where the base is `Expr::Name`, also detects
-/// facet narrows: if the base name has a narrowed facet for the accessed
-/// attribute, re-resolves the attribute on the unnarrowed base type and
-/// records the result so CinderX can distinguish sound from unsound narrows.
+/// For `Expr::Attribute` chains rooted at an `Expr::Name` (e.g. `x.foo`,
+/// `x.foo.bar`), also detects facet narrows: if any level in the chain has
+/// a narrowed facet, re-resolves the full chain on the unnarrowed base type
+/// and records the result so CinderX can distinguish sound from unsound narrows.
 fn walk_expressions(
     ast: &Arc<ModModule>,
     module_info: &ModuleInfo,
@@ -138,13 +140,56 @@ fn walk_expressions(
         answers.get_type_trace(x.range())
     }
 
+    /// Walk an `Expr::Attribute` chain to find the root `Expr::Name` and
+    /// collect the attribute `Identifier` references from root to leaf.
+    ///
+    /// Returns `None` if the chain doesn't root at an `Expr::Name`
+    /// (e.g. `f().attr`). Simple `x.foo` is a chain of length 1.
+    fn extract_attr_chain(expr: &Expr) -> Option<(&ExprName, Vec<&Identifier>)> {
+        let Expr::Attribute(attr) = expr else {
+            return None;
+        };
+        let mut chain = vec![&attr.attr];
+        let mut current = attr.value.as_ref();
+        loop {
+            match current {
+                Expr::Attribute(inner) => {
+                    chain.push(&inner.attr);
+                    current = inner.value.as_ref();
+                }
+                Expr::Name(name) => {
+                    chain.reverse();
+                    return Some((name, chain));
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    /// Check whether any level in an attribute chain has a facet narrow.
+    ///
+    /// Walks the facet tree level by level using `type_at_facet` to check
+    /// for narrows and `at_facet` to descend. Returns `true` as soon as
+    /// any level has a narrowed type.
+    fn has_facet_narrow_in_chain(type_info: &TypeInfo, chain: &[&Identifier]) -> bool {
+        let mut current = type_info.clone();
+        for ident in chain {
+            let facet = FacetKind::Attribute(ident.id.clone());
+            if current.type_at_facet(&facet).is_some() {
+                return true;
+            }
+            current = current.at_facet(&facet, Type::never);
+        }
+        false
+    }
+
     /// Recursive expression visitor: looks up type, converts to structured
     /// form, records location, then recurses into child expressions.
     ///
-    /// For attribute accesses on names (`x.attr`), also checks whether
-    /// the base name has a facet narrow for the attribute. If so, re-resolves
-    /// the attribute on the unnarrowed base type to populate `unnarrowed_type`
-    /// and `is_narrowed_mismatch` on the `LocatedType`.
+    /// For attribute access chains rooted at a name (`x.attr`, `x.a.b`, etc.),
+    /// checks whether any level in the chain has a facet narrow. If so,
+    /// re-resolves the full chain on the unnarrowed base type to populate
+    /// `unnarrowed_type` and `is_narrowed_mismatch` on the `LocatedType`.
     fn visit_expr(
         x: &Expr,
         parent: Option<&Expr>,
@@ -164,32 +209,34 @@ fn walk_expressions(
                 .python_ast_range_for_expr(range, x, parent);
             let type_index = type_to_structured(&ty, table, pending_class_traits);
 
-            // Detect facet narrows on simple attribute access (x.attr where x is a Name).
-            // When the base name has a facet narrow for this attribute, re-resolve the
-            // attribute on the unnarrowed base type so CinderX can handle the unsound
+            // Detect facet narrows on attribute access chains (x.attr, x.a.b, etc.).
+            // When any level in the chain has a facet narrow, re-resolve the full
+            // chain on the unnarrowed base type so CinderX can handle the unsound
             // narrow appropriately.
-            let (unnarrowed_type, is_narrowed_mismatch) = if let Expr::Attribute(attr) = x
-                && let Expr::Name(name) = attr.value.as_ref()
+            let (unnarrowed_type, is_narrowed_mismatch) = if let Some((name, chain)) =
+                extract_attr_chain(x)
                 && let Some(key) = try_find_key_for_name(name, bindings)
                 && let Some(type_info) = answers.get_idx(bindings.key_to_idx(&key))
                 && type_info.has_facets()
-                && type_info
-                    .type_at_facet(&FacetKind::Attribute(attr.attr.id.clone()))
-                    .is_some()
+                && has_facet_narrow_in_chain(&type_info, &chain)
             {
-                // The base name has a facet narrow for this attribute.
-                // Re-resolve the attribute on the unnarrowed base type.
+                // Some level in the chain has a facet narrow.
+                // Re-resolve the full attribute chain on the unnarrowed base type.
                 let base_type = type_info.ty().clone();
                 let unnarrowed_ty =
                     transaction.ad_hoc_solve(handle, "cinderx_unnarrow", |solver| {
                         let errors = solver.error_swallower();
-                        solver.attr_infer_for_type(
-                            &base_type,
-                            &attr.attr.id,
-                            attr.range(),
-                            &errors,
-                            None,
-                        )
+                        let mut current_ty = base_type;
+                        for ident in &chain {
+                            current_ty = solver.attr_infer_for_type(
+                                &current_ty,
+                                &ident.id,
+                                ident.range(),
+                                &errors,
+                                None,
+                            );
+                        }
+                        current_ty
                     });
                 match unnarrowed_ty {
                     Some(unnarrowed_ty) => {
