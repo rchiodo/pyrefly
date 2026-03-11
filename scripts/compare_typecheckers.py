@@ -130,7 +130,7 @@ def setup_project(
         venv.create(venv_dir, with_pip=True, clear=True)
         if deps:
             result = run(
-                f"source {activate} && pip install " + " ".join(deps),
+                f". {activate} && pip install " + " ".join(deps),
                 debug,
                 shell=True,
                 capture_output=True,
@@ -146,7 +146,7 @@ def setup_project(
 
     # Get site-package paths for pyrefly
     site_paths = run(
-        f"source {activate} && python -c \"import site; print(' '.join('--site-package-path=' + p for p in site.getsitepackages()))\"",
+        f". {activate} && python -c \"import site; print(' '.join('--site-package-path=' + p for p in site.getsitepackages()))\"",
         debug,
         shell=True,
         capture_output=True,
@@ -167,7 +167,7 @@ def _install_and_uninstall_project(
         f"Installing runtime deps for {project_name} (pip install . then uninstall)"
     )
     result = run(
-        f"source {activate} && pip install .",
+        f". {activate} && pip install .",
         debug,
         cwd=repo_dir,
         shell=True,
@@ -184,7 +184,7 @@ def _install_and_uninstall_project(
     if pkg_name:
         logging.debug(f"Uninstalling {pkg_name} (keeping transitive deps)")
         run(
-            f"source {activate} && pip uninstall -y {pkg_name}",
+            f". {activate} && pip uninstall -y {pkg_name}",
             debug,
             cwd=repo_dir,
             shell=True,
@@ -648,7 +648,7 @@ def check_project(
     mypy_cmd = project.mypy_cmd.format(mypy="mypy")
     start = time.time()
     pm = run(
-        f"source {activate} && {mypy_cmd}",
+        f". {activate} && {mypy_cmd}",
         debug,
         cwd=repo_dir,
         shell=True,
