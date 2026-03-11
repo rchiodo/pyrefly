@@ -3744,7 +3744,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             return None;
         }
-        self.get_class_member(td.class_object(), name)
+        self.get_non_synthesized_class_member(td.class_object(), name)
             .map(|field| self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td)))
             .and_then(|attr| attr.as_instance_method())
     }

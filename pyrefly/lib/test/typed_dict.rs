@@ -2389,3 +2389,25 @@ assert_type(updated["val"], int)
 assert_type(updated, dict[str, int])
 "#,
 );
+
+testcase!(
+    test_typed_dict_inherited_field_shadows_dict_method,
+    r#"
+from typing import TypedDict, assert_type
+
+class BaseConfig(TypedDict):
+    values: list[str]
+    items: list[int]
+
+class ExtendedConfig(BaseConfig):
+    version: int
+
+def foo(x: BaseConfig) -> None: ...
+
+def test(x: ExtendedConfig) -> None:
+    # Inherited fields whose names collide with dict methods should still be accessible.
+    foo(x)
+    assert_type(x["values"], list[str])
+    assert_type(x["items"], list[int])
+"#,
+);
