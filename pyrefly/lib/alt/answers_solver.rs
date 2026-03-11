@@ -2396,7 +2396,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if did_write {
                 self.base_errors.extend(local_errors);
                 // Publish trace side effects alongside errors.
-                if let Some(traces) = trace_side_effects {
+                if let Some(mut traces) = trace_side_effects {
+                    traces.finalize(self.current().solver());
+                    traces.debug_assert_var_free();
                     self.current().merge_trace_side_effects(traces);
                 }
             }
@@ -2618,10 +2620,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 traces
             )
         } else {
-            self.answers.write_unlock_in_module(calc_id, answer, errors)
-            // Cross-module traces are dropped for now. Publishing them
-            // requires access to the target module's Answers, which will
-            // be addressed in a follow-up.
+            self.answers
+                .write_unlock_in_module(calc_id, answer, errors, traces)
         }
     }
 
@@ -2652,7 +2652,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
                 self.base_errors.extend(errors);
             }
-            if let Some(traces) = traces {
+            if let Some(mut traces) = traces {
+                traces.finalize(self.current().solver());
+                traces.debug_assert_var_free();
                 self.current().merge_trace_side_effects(traces);
             }
         }

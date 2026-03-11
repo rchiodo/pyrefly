@@ -22,6 +22,8 @@ use pyrefly_util::display::DisplayWith;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::uniques::UniqueFactory;
+use pyrefly_util::visit::Visit;
+use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -150,6 +152,102 @@ pub struct TraceSideEffects {
     pub types: SmallMap<TextRange, Arc<Type>>,
     pub overloaded_callees: SmallMap<TextRange, OverloadedCallee>,
     pub invoked_properties: SmallMap<TextRange, Arc<Type>>,
+}
+
+impl TraceSideEffects {
+    /// Deep-force all embedded types, resolving any remaining `Type::Var`
+    /// references using the given solver. Must be called before publishing
+    /// to the persisted `Traces` store so that read APIs can return
+    /// fully-resolved types without touching the solver.
+    pub(crate) fn finalize(&mut self, solver: &Solver) {
+        for ty in self.types.values_mut() {
+            let mut t = ty.as_ref().clone();
+            solver.deep_force_mut(&mut t);
+            *ty = Arc::new(t);
+        }
+        for callee in self.overloaded_callees.values_mut() {
+            match callee {
+                OverloadedCallee::Resolved { callable } => {
+                    callable
+                        .callable
+                        .visit_mut(&mut |t: &mut Type| solver.deep_force_mut(t));
+                }
+                OverloadedCallee::Candidates { all, closest, .. } => {
+                    for trace in all.iter_mut() {
+                        trace
+                            .callable
+                            .visit_mut(&mut |t: &mut Type| solver.deep_force_mut(t));
+                    }
+                    closest
+                        .callable
+                        .visit_mut(&mut |t: &mut Type| solver.deep_force_mut(t));
+                }
+            }
+        }
+        for ty in self.invoked_properties.values_mut() {
+            let mut t = ty.as_ref().clone();
+            solver.deep_force_mut(&mut t);
+            *ty = Arc::new(t);
+        }
+    }
+
+    /// Assert that no trace payload contains unresolved `Type::Var`.
+    /// Only runs in debug builds to avoid production overhead.
+    /// Panics if any Var is found, indicating a bug in finalization.
+    #[cfg(debug_assertions)]
+    pub(crate) fn debug_assert_var_free(&self) {
+        fn has_var(ty: &Type) -> bool {
+            let mut found = false;
+            ty.visit(&mut |t: &Type| {
+                if matches!(t, Type::Var(_)) {
+                    found = true;
+                }
+            });
+            found
+        }
+
+        for (range, ty) in &self.types {
+            assert!(
+                !has_var(ty),
+                "Type trace at {range:?} contains unresolved Var after finalization: {ty}"
+            );
+        }
+        for (range, ty) in &self.invoked_properties {
+            assert!(
+                !has_var(ty),
+                "Property getter trace at {range:?} contains unresolved Var after finalization: {ty}"
+            );
+        }
+        for (range, callee) in &self.overloaded_callees {
+            match callee {
+                OverloadedCallee::Resolved { callable } => {
+                    let ty = callable.as_type();
+                    assert!(
+                        !has_var(&ty),
+                        "Resolved callee trace at {range:?} contains unresolved Var: {ty}"
+                    );
+                }
+                OverloadedCallee::Candidates { all, closest, .. } => {
+                    for trace in all {
+                        let ty = trace.as_type();
+                        assert!(
+                            !has_var(&ty),
+                            "Overload candidate trace at {range:?} contains unresolved Var: {ty}"
+                        );
+                    }
+                    let ty = closest.as_type();
+                    assert!(
+                        !has_var(&ty),
+                        "Closest overload trace at {range:?} contains unresolved Var: {ty}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// No-op in release builds.
+    #[cfg(not(debug_assertions))]
+    pub(crate) fn debug_assert_var_free(&self) {}
 }
 
 /// Invariants:
@@ -585,7 +683,8 @@ pub trait LookupAnswer: Sized {
     }
 
     /// Write a value to a write-locked cross-module Calculation cell and
-    /// release the lock. Also extends errors if the write wins.
+    /// release the lock. Also extends errors and publishes traces if the
+    /// write wins.
     ///
     /// Default implementation is a no-op.
     fn write_unlock_in_module(
@@ -593,6 +692,7 @@ pub trait LookupAnswer: Sized {
         _calc_id: CalcId,
         _answer: Arc<dyn Any + Send + Sync>,
         _errors: Option<Arc<ErrorCollector>>,
+        _traces: Option<TraceSideEffects>,
     ) -> bool {
         false
     }
@@ -960,23 +1060,23 @@ impl Answers {
 
     pub fn get_type_trace(&self, range: TextRange) -> Option<Type> {
         let lock = self.trace.as_ref()?.lock();
-        Some(self.deep_force(lock.types.get(&range)?.as_ref().clone()))
+        Some(lock.types.get(&range)?.as_ref().clone())
     }
 
     pub fn try_get_getter_for_range(&self, range: TextRange) -> Option<Type> {
         let lock = self.trace.as_ref()?.lock();
-        Some(self.deep_force(lock.invoked_properties.get(&range)?.as_ref().clone()))
+        Some(lock.invoked_properties.get(&range)?.as_ref().clone())
     }
 
     pub fn get_chosen_overload_trace(&self, range: TextRange) -> Option<Type> {
         let lock = self.trace.as_ref()?.lock();
         match lock.overloaded_callees.get(&range)? {
-            OverloadedCallee::Resolved { callable } => Some(self.deep_force(callable.as_type())),
+            OverloadedCallee::Resolved { callable } => Some(callable.as_type()),
             OverloadedCallee::Candidates {
                 closest,
                 is_closest_chosen,
                 ..
-            } if *is_closest_chosen => Some(self.deep_force(closest.as_type())),
+            } if *is_closest_chosen => Some(closest.as_type()),
             _ => None,
         }
     }

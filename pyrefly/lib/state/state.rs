@@ -70,6 +70,7 @@ use crate::alt::answers::LookupAnswer;
 use crate::alt::answers::Solutions;
 use crate::alt::answers::SolutionsEntry;
 use crate::alt::answers::SolutionsTable;
+use crate::alt::answers::TraceSideEffects;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::answers_solver::CalcId;
 use crate::alt::answers_solver::ThreadState;
@@ -2529,17 +2530,27 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
         calc_id: CalcId,
         answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) -> bool {
         let CalcId(_, ref any_idx) = calc_id;
         match self.lookup_target_answers(&calc_id) {
             TargetAnswers::ModuleNotFound | TargetAnswers::Evicted => false,
             TargetAnswers::Available { answers, load, .. } => {
                 let did_write = answers.write_unlock_preliminary(any_idx, answer);
-                if did_write && let (Some(errors), Some(target_load)) = (errors, load) {
-                    let errors = Arc::try_unwrap(errors).expect(
-                        "cross-module write_unlock: errors Arc has unexpected extra references",
-                    );
-                    target_load.errors.extend(errors);
+                if did_write {
+                    if let (Some(errors), Some(target_load)) = (errors, load) {
+                        let errors = Arc::try_unwrap(errors).expect(
+                            "cross-module write_unlock: errors Arc has unexpected extra references",
+                        );
+                        target_load.errors.extend(errors);
+                    }
+                    if let Some(mut traces) = traces {
+                        // Finalize traces using the target module's solver,
+                        // then merge into the target module's trace store.
+                        traces.finalize(answers.solver());
+                        traces.debug_assert_var_free();
+                        answers.merge_trace_side_effects(traces);
+                    }
                 }
                 did_write
             }
