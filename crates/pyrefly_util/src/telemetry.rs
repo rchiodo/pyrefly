@@ -322,6 +322,7 @@ pub struct SubTaskTelemetry<'a> {
     queue_name: QueueName,
     task_id: Option<usize>,
     activity_key: Option<ActivityKey>,
+    file_stats: Option<TelemetryFileStats>,
 }
 
 impl<'a> SubTaskTelemetry<'a> {
@@ -331,6 +332,7 @@ impl<'a> SubTaskTelemetry<'a> {
         queue_name: QueueName,
         task_id: Option<usize>,
         activity_key: Option<ActivityKey>,
+        file_stats: Option<TelemetryFileStats>,
     ) -> Self {
         Self {
             telemetry,
@@ -338,6 +340,7 @@ impl<'a> SubTaskTelemetry<'a> {
             queue_name,
             task_id,
             activity_key,
+            file_stats,
         }
     }
 
@@ -350,6 +353,7 @@ impl<'a> SubTaskTelemetry<'a> {
             start,
         );
         event.set_activity_key(self.activity_key.clone());
+        event.file_stats = self.file_stats.clone();
         event
     }
 

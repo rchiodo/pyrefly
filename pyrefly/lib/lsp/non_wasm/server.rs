@@ -1791,6 +1791,7 @@ impl Server {
                             QueueName::LspQueue,
                             telemetry_event.task_id,
                             telemetry_event.activity_key.clone(),
+                            telemetry_event.file_stats.clone(),
                         );
                         self.send_response(new_response(
                             x.id,
@@ -3088,6 +3089,7 @@ impl Server {
                 queue_name,
                 task_id,
                 telemetry_event.activity_key.clone(),
+                None,
             );
             let (new_invalidated_source_dbs, rebuild_stats) =
                 ConfigFile::query_source_db(&configs_to_paths, force, Some(task_telemetry));
@@ -4361,6 +4363,7 @@ impl Server {
                     QueueName::FindReferenceQueue,
                     None,
                     activity_key,
+                    None,
                 );
 
                 // Use std::thread::scope so we can borrow sub_task_telemetry.
