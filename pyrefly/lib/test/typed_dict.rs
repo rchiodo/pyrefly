@@ -2411,3 +2411,22 @@ def test(x: ExtendedConfig) -> None:
     assert_type(x["items"], list[int])
 "#,
 );
+
+testcase!(
+    test_typed_dict_field_shadows_dict_method_attribute_access,
+    r#"
+from typing import TypedDict
+
+class Config(TypedDict):
+    values: list[str]
+    items: list[int]
+
+def test(c: Config) -> None:
+    # TypedDict fields shadow dict methods by name, but attribute access should
+    # still resolve to the dict method (fields are only accessible via subscript).
+    c.values
+    c.items
+    c.keys
+    c.get
+"#,
+);

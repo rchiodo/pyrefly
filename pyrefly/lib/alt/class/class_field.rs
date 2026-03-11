@@ -3711,7 +3711,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             })
     }
 
-    /// This function is for getting non-field attributes of a TypedDict
+    /// Get a non-field attribute of a TypedDict instance. TypedDict fields are dict key
+    /// declarations and are not accessible as attributes. However, if a field name shadows
+    /// a dict method (e.g. `values`, `items`), the method should still be accessible.
     pub fn get_typed_dict_attribute(
         &self,
         td: &TypedDictInner,
@@ -3722,8 +3724,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .typed_dict_metadata()
             && meta.fields.contains_key(name)
         {
-            // TypedDict fields are dictionary key declarations, not real fields.
-            return None;
+            // TypedDict fields are dictionary key declarations, not real attributes.
+            // But they may shadow a synthesized dict method (e.g. `values`, `items`),
+            // which should still be accessible as an attribute.
+            return self
+                .get_synthesized_field_from_current_class_only(td.class_object(), name)
+                .map(|field| {
+                    self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td))
+                });
         }
         self.get_class_member(td.class_object(), name)
             .map(|field| self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td)))
