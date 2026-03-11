@@ -87,8 +87,8 @@ pub struct Index {
 
 #[derive(Debug, Clone)]
 pub(crate) struct OverloadTrace {
-    callable: Callable,
-    tparams: Option<Arc<TParams>>,
+    pub(crate) callable: Callable,
+    pub(crate) tparams: Option<Arc<TParams>>,
 }
 
 impl OverloadTrace {
@@ -108,7 +108,7 @@ impl OverloadTrace {
 }
 
 #[derive(Debug)]
-enum OverloadedCallee {
+pub(crate) enum OverloadedCallee {
     Resolved {
         callable: OverloadTrace,
     },
@@ -126,6 +126,30 @@ pub struct Traces {
     overloaded_callees: SmallMap<TextRange, OverloadedCallee>,
     /// A map of text ranges that correspond to 'b' portion in expressions a.b where b is a property access -> getter type
     invoked_properties: SmallMap<TextRange, Arc<Type>>,
+}
+
+impl Traces {
+    /// Merge accumulated side effects into the persisted trace store.
+    pub(crate) fn merge(&mut self, side_effects: TraceSideEffects) {
+        for (k, v) in side_effects.types {
+            self.types.insert(k, v);
+        }
+        for (k, v) in side_effects.overloaded_callees {
+            self.overloaded_callees.insert(k, v);
+        }
+        for (k, v) in side_effects.invoked_properties {
+            self.invoked_properties.insert(k, v);
+        }
+    }
+}
+
+/// Accumulates trace events during a single calculation.
+/// Published to `Traces` only when the calculation result is committed.
+#[derive(Debug, Default)]
+pub(crate) struct TraceSideEffects {
+    pub types: SmallMap<TextRange, Arc<Type>>,
+    pub overloaded_callees: SmallMap<TextRange, OverloadedCallee>,
+    pub invoked_properties: SmallMap<TextRange, Arc<Type>>,
 }
 
 /// Invariants:
@@ -917,6 +941,19 @@ impl Answers {
         &self.solver
     }
 
+    /// Returns `true` if tracing is enabled for this module.
+    pub(crate) fn tracing_enabled(&self) -> bool {
+        self.trace.is_some()
+    }
+
+    /// Merge accumulated trace side effects into the persisted trace store.
+    /// No-op if tracing is not enabled.
+    pub(crate) fn merge_trace_side_effects(&self, side_effects: TraceSideEffects) {
+        if let Some(trace_store) = &self.trace {
+            trace_store.lock().merge(side_effects);
+        }
+    }
+
     pub fn get_type_at(&self, idx: Idx<Key>) -> Option<Type> {
         Some(self.deep_force(self.get_idx(idx)?.arc_clone_ty()))
     }
@@ -1004,10 +1041,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn record_resolved_trace(&self, loc: TextRange, ty: Type) {
-        if let Some(trace) = &self.current().trace
+        if self.current().trace.is_some()
             && let Some(callable) = ty.to_callable()
         {
-            trace.lock().overloaded_callees.insert(
+            self.trace_state().record_resolved_trace(
                 loc,
                 OverloadedCallee::Resolved {
                     callable: OverloadTrace::new(callable, None),
@@ -1025,8 +1062,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         closest_overload: OverloadTrace,
         is_closest_overload_chosen: bool,
     ) {
-        if let Some(trace) = &self.current().trace {
-            trace.lock().overloaded_callees.insert(
+        if self.current().trace.is_some() {
+            self.trace_state().record_overload_trace(
                 loc,
                 OverloadedCallee::Candidates {
                     all: all_overloads,
@@ -1093,19 +1130,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn record_property_getter(&self, loc: TextRange, getter_ty: &Type) {
-        if let Some(trace) = &self.current().trace {
-            trace
-                .lock()
-                .invoked_properties
-                .insert(loc, Arc::new(getter_ty.clone()));
+        if self.current().trace.is_some() {
+            self.trace_state()
+                .record_property_getter_trace(loc, Arc::new(getter_ty.clone()));
         }
     }
 
     pub fn record_type_trace(&self, loc: TextRange, ty: &Type) {
-        if let Some(trace) = &self.current().trace
-            && !loc.is_empty()
-        {
-            trace.lock().types.insert(loc, Arc::new(ty.clone()));
+        if self.current().trace.is_some() && !loc.is_empty() {
+            self.trace_state()
+                .record_type_trace(loc, Arc::new(ty.clone()));
         }
     }
 }

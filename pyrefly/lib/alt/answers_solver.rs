@@ -48,8 +48,10 @@ use crate::alt::answers::AnswerEntry;
 use crate::alt::answers::AnswerTable;
 use crate::alt::answers::Answers;
 use crate::alt::answers::LookupAnswer;
+use crate::alt::answers::OverloadedCallee;
 use crate::alt::answers::SolutionsEntry;
 use crate::alt::answers::SolutionsTable;
+use crate::alt::answers::TraceSideEffects;
 use crate::alt::traits::Solve;
 use crate::binding::binding::AnyIdx;
 use crate::binding::binding::Binding;
@@ -1887,6 +1889,16 @@ pub struct ThreadState {
     /// as the NameAssign's solve_binding can see the partial answer (offset 0 in get_idx,
     /// which checks before pushing its own frame).
     partial_answers: RefCell<FxHashMap<(Idx<Key>, usize), Arc<TypeInfo>>>,
+    /// Active trace side-effect sink for the current calculation.
+    /// Set before `K::solve`, taken after. `None` when tracing is disabled
+    /// or between calculations. Saved sinks form a stack to handle recursive
+    /// calls to `calculate_and_record_answer`.
+    trace_sink: RefCell<Option<TraceSideEffects>>,
+    /// Stack of saved trace sinks from outer calculations. When a nested
+    /// `calculate_and_record_answer` installs a new sink, the current sink
+    /// is pushed here. When the nested call takes its sink, the previous
+    /// one is restored.
+    trace_sink_stack: RefCell<Vec<Option<TraceSideEffects>>>,
 }
 
 impl ThreadState {
@@ -1896,6 +1908,53 @@ impl ThreadState {
             debug: RefCell::new(false),
             recursion_limit_config,
             partial_answers: RefCell::new(FxHashMap::default()),
+            trace_sink: RefCell::new(None),
+            trace_sink_stack: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Install a fresh trace sink for the current calculation, saving any
+    /// existing sink for later restoration.
+    pub(crate) fn install_trace_sink(&self) {
+        let previous = self.trace_sink.borrow_mut().take();
+        self.trace_sink_stack.borrow_mut().push(previous);
+        *self.trace_sink.borrow_mut() = Some(TraceSideEffects::default());
+    }
+
+    /// Take the accumulated trace side effects, restoring any saved sink
+    /// from an outer calculation.
+    pub(crate) fn take_trace_sink(&self) -> Option<TraceSideEffects> {
+        let result = self.trace_sink.borrow_mut().take();
+        let restored = self.trace_sink_stack.borrow_mut().pop().flatten();
+        *self.trace_sink.borrow_mut() = restored;
+        result
+    }
+
+    /// Append a type trace to the active sink. No-op if no sink is installed.
+    pub(crate) fn record_type_trace(&self, loc: TextRange, ty: Arc<Type>) {
+        if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
+            sink.types.insert(loc, ty);
+        }
+    }
+
+    /// Append a resolved callee trace to the active sink.
+    pub(crate) fn record_resolved_trace(&self, loc: TextRange, callee: OverloadedCallee) {
+        if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
+            sink.overloaded_callees.insert(loc, callee);
+        }
+    }
+
+    /// Append an overload trace to the active sink.
+    pub(crate) fn record_overload_trace(&self, loc: TextRange, callee: OverloadedCallee) {
+        if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
+            sink.overloaded_callees.insert(loc, callee);
+        }
+    }
+
+    /// Append a property getter trace to the active sink.
+    pub(crate) fn record_property_getter_trace(&self, loc: TextRange, ty: Arc<Type>) {
+        if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
+            sink.invoked_properties.insert(loc, ty);
         }
     }
 }
@@ -2070,6 +2129,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn stack(&self) -> &CalcStack {
         &self.thread_state.stack
+    }
+
+    /// Access the thread-local state for trace recording.
+    pub(crate) fn trace_state(&self) -> &ThreadState {
+        self.thread_state
     }
 
     /// Store a partial answer for inline first-use pinning.
@@ -2253,6 +2317,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return self.calculate_and_record_answer_iterative(current, idx);
         }
 
+        // Install trace sink if tracing is enabled for this module.
+        let tracing_enabled = self.current().tracing_enabled();
+        if tracing_enabled {
+            self.thread_state.install_trace_sink();
+        }
+
         let binding = self.bindings().get(idx);
         // Note that we intentionally do not pass in the key when solving the binding,
         // as the result of a binding should not depend on the key it was bound to.
@@ -2261,6 +2331,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         let local_errors = self.error_collector();
         let raw_answer = K::solve(self, binding, range, &local_errors);
+
+        // Take accumulated traces.
+        let trace_side_effects = if tracing_enabled {
+            self.thread_state.take_trace_sink()
+        } else {
+            None
+        };
 
         // For exported keys, eagerly resolve all type variables in the answer.
         // This avoids redundant clone+force work in solve_exported_key and post_solve,
@@ -2276,6 +2353,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         if self.stack().is_scc_participant(&current) {
             // SCC path: store in NodeState::Done with batch commits to Calculation.
+            // Phase 0 traces are discarded; only final iterative traces are kept.
             //
             // If this is a break_at node (has a placeholder Var), we must finalize
             // the recursive answer now, before storing. Finalization mutates solver
@@ -2308,6 +2386,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let (answer, did_write) = calculation.record_value(raw_answer);
             if did_write {
                 self.base_errors.extend(local_errors);
+                // Publish trace side effects alongside errors.
+                if let Some(traces) = trace_side_effects {
+                    self.current().merge_trace_side_effects(traces);
+                }
             }
             self.stack().on_calculation_finished(&current, None);
             answer
