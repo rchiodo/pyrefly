@@ -93,13 +93,14 @@ use crate::export::exports::Exports;
 use crate::export::exports::LookupExport;
 use crate::export::special::SpecialExport;
 use crate::module::module_info::ModuleInfo;
-use crate::solver::solver::Solver;
+use crate::solver::solver::SolverFlags;
 use crate::state::loader::FindError;
 use crate::state::loader::FindingOrError;
 use crate::table;
 use crate::table_for_each;
 use crate::table_try_for_each;
 use crate::types::globals::ImplicitGlobal;
+use crate::types::heap::TypeHeap;
 use crate::types::quantified::QuantifiedKind;
 use crate::types::types::AnyStyle;
 
@@ -176,6 +177,8 @@ table! {
 #[derive(Clone, Debug)]
 struct BindingsInner {
     module_info: ModuleInfo,
+    solver_flags: SolverFlags,
+    heap: Arc<TypeHeap>,
     table: BindingTable,
     scope_trace: Option<ScopeTrace>,
     unused_parameters: Vec<UnusedParameter>,
@@ -240,7 +243,7 @@ pub struct BindingsBuilder<'a> {
     type_alias_count: u32,
     await_context: AwaitContext,
     errors: &'a ErrorCollector,
-    solver: &'a Solver,
+    solver_flags: SolverFlags,
     uniques: &'a UniqueFactory,
     pub has_docstring: bool,
     pub scopes: Scopes,
@@ -300,6 +303,12 @@ impl Bindings {
         let module_info = Module::new(module_name, module_path, contents);
         Self(Arc::new(BindingsInner {
             module_info,
+            solver_flags: SolverFlags {
+                infer_with_first_use: false,
+                tensor_shapes: false,
+                strict_callable_subtyping: false,
+            },
+            heap: Arc::new(TypeHeap::new()),
             table: Default::default(),
             scope_trace: None,
             unused_parameters: Vec::new(),
@@ -319,6 +328,14 @@ impl Bindings {
 
     pub fn module(&self) -> &ModuleInfo {
         &self.0.module_info
+    }
+
+    pub fn solver_flags(&self) -> SolverFlags {
+        self.0.solver_flags
+    }
+
+    pub fn heap(&self) -> &TypeHeap {
+        self.0.heap.as_ref()
     }
 
     pub fn unused_parameters(&self) -> &[UnusedParameter] {
@@ -482,7 +499,7 @@ impl Bindings {
         x: ModModule,
         module_info: ModuleInfo,
         exports: &Exports,
-        solver: &Solver,
+        solver_flags: SolverFlags,
         lookup: &dyn LookupExport,
         sys_info: SysInfo,
         errors: &ErrorCollector,
@@ -495,7 +512,7 @@ impl Bindings {
             lookup,
             sys_info,
             errors,
-            solver,
+            solver_flags,
             uniques,
             class_count: 0,
             func_count: 0,
@@ -582,6 +599,8 @@ impl Bindings {
         }
         Self(Arc::new(BindingsInner {
             module_info,
+            solver_flags,
+            heap: Arc::new(TypeHeap::new()),
             table: builder.table,
             scope_trace: if enable_trace {
                 Some(scope_trace)
@@ -743,12 +762,12 @@ impl CurrentIdx {
 impl<'a> BindingsBuilder<'a> {
     /// Whether to infer empty container types and unsolved type variables based on first use.
     pub fn infer_with_first_use(&self) -> bool {
-        self.solver.flags.infer_with_first_use
+        self.solver_flags.infer_with_first_use
     }
 
     /// Whether tensor shape type inference is enabled.
     pub fn tensor_shapes(&self) -> bool {
-        self.solver.flags.tensor_shapes
+        self.solver_flags.tensor_shapes
     }
 
     /// Given a `key: K = impl Keyed`, get an `Idx<K>` for it. The intended use case
