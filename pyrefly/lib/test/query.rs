@@ -403,6 +403,39 @@ def f(foos: list[Foo]) -> int:
 }
 
 #[test]
+fn test_lambda_param_var_leak_regression() {
+    let tdir = TempDir::new().unwrap();
+    let file_path = tdir.path().join("main.py");
+    // Minimal reproducer from mypy-primer: a lambda used as an argument can
+    // leave a Binding::LambdaParameter Var that is not present in the solving
+    // thread's Variables map.
+    let code = r#"
+from typing import Callable
+
+def find_self_type(t: object, f: Callable[[str], object]) -> bool:
+    return True
+
+class A:
+    def m(self, t: object) -> None:
+        if find_self_type(t, lambda name: name):
+            pass
+"#;
+    fs_anyhow::write(&file_path, code).unwrap();
+
+    let query = create_query();
+    let module_name = ModuleName::from_str("main");
+    let path = ModulePath::filesystem(file_path.clone());
+
+    let errors = query.add_files(vec![(module_name, path.clone())]);
+    assert!(errors.is_empty(), "Unexpected errors: {:?}", errors);
+
+    // This currently panics with:
+    // "Internal error: a variable has leaked across thread boundaries."
+    // Keep as a regression to ensure lambda-parameter Vars cannot leak.
+    let _ = query.get_types_in_file(module_name, path).unwrap();
+}
+
+#[test]
 fn test_callees_annotated_type() {
     let tdir = TempDir::new().unwrap();
     let file_path = tdir.path().join("main.py");
