@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [primer-merge]
     if: ${{ always() && !cancelled() }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
       issues: read
