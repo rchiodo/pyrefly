@@ -98,12 +98,24 @@ pub struct TypeTableEntry {
 // ---------------------------------------------------------------------------
 
 /// A located type reference: source range paired with an index into the type table.
+///
+/// When a facet narrow is detected (e.g. `foo.x` where `foo.x` has been narrowed
+/// in a conditional), `unnarrowed_type` holds the type that would be resolved
+/// without the narrow and `is_narrowed_mismatch` indicates whether the narrowed
+/// and unnarrowed types differ structurally.
 #[derive(Debug, Clone, Serialize)]
 pub struct LocatedType {
     #[serde(rename = "loc")]
     pub location: PythonASTRange,
     #[serde(rename = "type")]
     pub type_index: usize,
+    /// Index into the type table for the unnarrowed type, if a facet narrow
+    /// was detected on this expression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unnarrowed_type: Option<usize>,
+    /// True when the narrowed and unnarrowed types have different structural hashes.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_narrowed_mismatch: bool,
 }
 
 // ---------------------------------------------------------------------------
