@@ -1350,9 +1350,7 @@ impl Type {
 
     /// If a Protocol method lacks an implementation and does not come from a `.pyi` file, then it cannot be called
     pub fn is_non_callable_protocol_method(&self) -> bool {
-        self.visit_toplevel_func_metadata(&|meta| {
-            meta.flags.lacks_implementation && !meta.flags.defined_in_stub_file
-        })
+        self.visit_toplevel_func_metadata(&|meta| meta.flags.lacks_runtime_implementation())
     }
 
     /// Transforms this type's function metadata, if it is a function. Note that we do *not*

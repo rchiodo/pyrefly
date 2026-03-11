@@ -400,6 +400,15 @@ pub struct FuncFlags {
     pub dataclass_transform_metadata: Option<DataclassTransformMetadata>,
 }
 
+impl FuncFlags {
+    /// Whether the function lacks a runtime implementation and is not defined in a stub file.
+    /// This indicates a method that cannot actually be called at runtime (e.g. an abstract
+    /// method or protocol method with a `...` or `pass` body in a `.py` file).
+    pub fn lacks_runtime_implementation(&self) -> bool {
+        self.lacks_implementation && !self.defined_in_stub_file
+    }
+}
+
 /// The index of a function definition (`def ..():` statement) within the module,
 /// used as a reference to data associated with the function.
 #[derive(Debug, Clone, Dupe, Copy, Eq, PartialEq, Hash, PartialOrd, Ord)]
