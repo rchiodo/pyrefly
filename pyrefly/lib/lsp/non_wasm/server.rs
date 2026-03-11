@@ -3970,100 +3970,103 @@ impl Server {
             sub_task_telemetry.finish_task(event, None);
         };
 
-        let start = Instant::now();
-        // If the code action is triggered from a notebook cell, we need the cell's
-        // index so that import quick-fixes can be redirected to the current cell
-        // instead of always targeting cell 1 (position 0 of the combined AST).
-        let triggered_cell_index = self.maybe_get_cell_index(uri);
-        if allow_quickfix
-            && let Some(quickfixes) = transaction.local_quickfix_code_actions_sorted(
+        if allow_quickfix {
+            let start = Instant::now();
+            // If the code action is triggered from a notebook cell, we need the cell's
+            // index so that import quick-fixes can be redirected to the current cell
+            // instead of always targeting cell 1 (position 0 of the combined AST).
+            let triggered_cell_index = self.maybe_get_cell_index(uri);
+            if let Some(quickfixes) = transaction.local_quickfix_code_actions_sorted(
                 &handle,
                 range,
                 import_format,
                 Some(&self.lsp_thread_pool),
-            )
-        {
-            actions.extend(quickfixes.into_iter().filter_map(
-                |(title, info, range, insert_text)| {
-                    let lsp_location = self.to_lsp_location(&TextRangeWithModule {
-                        module: info.clone(),
-                        range,
-                    })?;
-                    let mut edit_uri = lsp_location.uri;
-                    let mut edit_range = lsp_location.range;
-                    // For notebook cells: if the import quick-fix targets a different
-                    // cell than the one where the action was triggered, redirect the
-                    // edit to the top of the current cell.  This mirrors Pylance's
-                    // behaviour where "insert import" always goes into the active cell.
-                    if let Some(current_cell_idx) = triggered_cell_index {
-                        let edit_cell_idx = info.to_cell_for_lsp(range.start());
-                        if edit_cell_idx != Some(current_cell_idx) {
-                            // Redirect to the current cell, inserting at line 0.
-                            let open_files = self.open_files.read();
-                            let notebook_path = self.open_notebook_cells.read().get(uri).cloned();
-                            let cell_url = notebook_path.and_then(|path| {
-                                if let Some(LspFile::Notebook(notebook)) =
-                                    open_files.get(&path).map(|f| &**f)
-                                {
-                                    notebook.get_cell_url(current_cell_idx).cloned()
-                                } else {
-                                    None
+            ) {
+                actions.extend(quickfixes.into_iter().filter_map(
+                    |(title, info, range, insert_text)| {
+                        let lsp_location = self.to_lsp_location(&TextRangeWithModule {
+                            module: info.clone(),
+                            range,
+                        })?;
+                        let mut edit_uri = lsp_location.uri;
+                        let mut edit_range = lsp_location.range;
+                        // For notebook cells: if the import quick-fix targets a different
+                        // cell than the one where the action was triggered, redirect the
+                        // edit to the top of the current cell.  This mirrors Pylance's
+                        // behaviour where "insert import" always goes into the active cell.
+                        if let Some(current_cell_idx) = triggered_cell_index {
+                            let edit_cell_idx = info.to_cell_for_lsp(range.start());
+                            if edit_cell_idx != Some(current_cell_idx) {
+                                // Redirect to the current cell, inserting at line 0.
+                                let open_files = self.open_files.read();
+                                let notebook_path =
+                                    self.open_notebook_cells.read().get(uri).cloned();
+                                let cell_url = notebook_path.and_then(|path| {
+                                    if let Some(LspFile::Notebook(notebook)) =
+                                        open_files.get(&path).map(|f| &**f)
+                                    {
+                                        notebook.get_cell_url(current_cell_idx).cloned()
+                                    } else {
+                                        None
+                                    }
+                                });
+                                if let Some(cell_url) = cell_url {
+                                    let top_of_cell = lsp_types::Range {
+                                        start: lsp_types::Position::new(0, 0),
+                                        end: lsp_types::Position::new(0, 0),
+                                    };
+                                    edit_uri = cell_url;
+                                    edit_range = top_of_cell;
                                 }
-                            });
-                            if let Some(cell_url) = cell_url {
-                                let top_of_cell = lsp_types::Range {
-                                    start: lsp_types::Position::new(0, 0),
-                                    end: lsp_types::Position::new(0, 0),
-                                };
-                                edit_uri = cell_url;
-                                edit_range = top_of_cell;
                             }
-                        }
+                        };
+                        Some(CodeActionOrCommand::CodeAction(CodeAction {
+                            title,
+                            kind: Some(CodeActionKind::QUICKFIX),
+                            edit: Some(WorkspaceEdit {
+                                changes: Some(HashMap::from([(
+                                    edit_uri,
+                                    vec![TextEdit {
+                                        range: edit_range,
+                                        new_text: insert_text,
+                                    }],
+                                )])),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }))
+                    },
+                ));
+            }
+            record_code_action_telemetry("quickfix", start);
+        }
+        if allow_fix_all {
+            let start = Instant::now();
+            if let Some(edits) = transaction.redundant_cast_fix_all_edits(&handle) {
+                let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+                for (module, edit_range, new_text) in edits {
+                    let Some(lsp_location) = self.to_lsp_location(&TextRangeWithModule {
+                        module,
+                        range: edit_range,
+                    }) else {
+                        continue;
                     };
-                    Some(CodeActionOrCommand::CodeAction(CodeAction {
-                        title,
-                        kind: Some(CodeActionKind::QUICKFIX),
+                    changes.entry(lsp_location.uri).or_default().push(TextEdit {
+                        range: lsp_location.range,
+                        new_text,
+                    });
+                }
+                if !changes.is_empty() {
+                    actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+                        title: "Remove all redundant casts".to_owned(),
+                        kind: Some(CodeActionKind::SOURCE_FIX_ALL),
                         edit: Some(WorkspaceEdit {
-                            changes: Some(HashMap::from([(
-                                edit_uri,
-                                vec![TextEdit {
-                                    range: edit_range,
-                                    new_text: insert_text,
-                                }],
-                            )])),
+                            changes: Some(changes),
                             ..Default::default()
                         }),
                         ..Default::default()
-                    }))
-                },
-            ));
-            record_code_action_telemetry("quickfix", start);
-        }
-        let start = Instant::now();
-        if allow_fix_all && let Some(edits) = transaction.redundant_cast_fix_all_edits(&handle) {
-            let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
-            for (module, edit_range, new_text) in edits {
-                let Some(lsp_location) = self.to_lsp_location(&TextRangeWithModule {
-                    module,
-                    range: edit_range,
-                }) else {
-                    continue;
-                };
-                changes.entry(lsp_location.uri).or_default().push(TextEdit {
-                    range: lsp_location.range,
-                    new_text,
-                });
-            }
-            if !changes.is_empty() {
-                actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title: "Remove all redundant casts".to_owned(),
-                    kind: Some(CodeActionKind::SOURCE_FIX_ALL),
-                    edit: Some(WorkspaceEdit {
-                        changes: Some(changes),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                }));
+                    }));
+                }
             }
             record_code_action_telemetry("fix_all", start);
         }
