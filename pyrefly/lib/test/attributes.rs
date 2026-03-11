@@ -1672,6 +1672,23 @@ assert_type(A.f(0), int)
 );
 
 testcase!(
+    test_parametrized_class_init_call,
+    r#"
+from typing import reveal_type
+
+class Foo[T]:
+    def __init__(self, /) -> None:
+        pass
+
+class Bar[S](Foo[S]):
+    def __init__(self, /) -> None:
+        Foo[S].__init__(self)
+
+Foo[int].__init__(Foo[int]())
+    "#,
+);
+
+testcase!(
     test_invalid_augmented_assign_in_init,
     r#"
 class C:

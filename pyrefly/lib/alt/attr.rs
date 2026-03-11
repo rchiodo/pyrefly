@@ -1789,9 +1789,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             },
             AttributeBase1::Intersect(bases, fallback) => {
-                // For now, only handle the simplest case: if exactly one base has a successful lookup, use it.
+                // Try each base and collect successful lookups, filtering out
+                // GenericAlias lookups when the found attribute is inherited from
+                // `object`. Parametrized classes like `Foo[int]` are an intersection of
+                // a GenericAlias instance + the Foo class object. GenericAlias inherits
+                // dunders from `object` (e.g. `__init__`) that would shadow the class's
+                // own definitions, so we exclude those to let the class's version win.
                 let mut candidates = Vec::new();
-                for b in bases {
+                for b in bases.iter() {
+                    let exclude = match b {
+                        AttributeBase1::ClassInstance(cls)
+                            if cls.has_qname("types", "GenericAlias") =>
+                        {
+                            self.field_is_inherited_from(
+                                cls.class_object(),
+                                attr_name,
+                                ("builtins", "object"),
+                            )
+                        }
+                        _ => false,
+                    };
+                    if exclude {
+                        continue;
+                    }
                     let mut acc_candidate = LookupResult::empty();
                     self.lookup_attr_from_attribute_base1(b.clone(), attr_name, &mut acc_candidate);
                     if acc_candidate.not_found.is_empty() && acc_candidate.internal_error.is_empty()
