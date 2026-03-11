@@ -429,6 +429,25 @@ assert_type(f(1), int)
 "#,
 );
 
+// https://github.com/facebook/pyrefly/issues/2722
+testcase!(
+    test_signature_diff_no_panic,
+    r#"
+class TestABC:
+    pass
+
+class Asset(TestABC):
+    @classmethod
+    def _money_desc(cls):
+        return '累计可领(元)'
+
+class PensionAsset(Asset):
+    @classmethod
+    def _money_desc(cls):  # E: `PensionAsset._money_desc` has type `(cls: type[PensionAsset]) -> Literal['90岁累计可领(元)']`, which is not assignable to `(cls: type[PensionAsset]) -> Literal['累计可领(元)']`, the type of `Asset._money_desc`
+        return '90岁累计可领(元)'
+"#,
+);
+
 testcase!(
     test_final_annotated,
     r#"
