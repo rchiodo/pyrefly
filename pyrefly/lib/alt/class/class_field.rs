@@ -3713,7 +3713,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Get a non-field attribute of a TypedDict instance. TypedDict fields are dict key
     /// declarations and are not accessible as attributes. However, if a field name shadows
-    /// a dict method (e.g. `values`, `items`), the method should still be accessible.
+    /// a dict method (e.g. `values`, `items`, `keys`), the method should still be accessible.
     pub fn get_typed_dict_attribute(
         &self,
         td: &TypedDictInner,
@@ -3725,36 +3725,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && meta.fields.contains_key(name)
         {
             // TypedDict fields are dictionary key declarations, not real attributes.
-            // But they may shadow a synthesized dict method (e.g. `values`, `items`),
-            // which should still be accessible as an attribute.
+            // But they may shadow dict methods which should still be accessible.
+            // Walk the MRO, but at each TypedDict class skip its field declarations
+            // and only check synthesized methods. This finds both TypedDict-synthesized
+            // methods (e.g. `values`, `items`) and methods inherited from dict (e.g. `keys`).
             return self
-                .get_synthesized_field_from_current_class_only(td.class_object(), name)
-                .map(|field| {
-                    self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td))
+                .get_field_from_mro(td.class_object(), name, &|cls, name| {
+                    if let Some(cls_meta) = self.get_metadata_for_class(cls).typed_dict_metadata()
+                        && cls_meta.fields.contains_key(name)
+                    {
+                        self.get_synthesized_field_from_current_class_only(cls, name)
+                    } else {
+                        self.get_field_from_current_class_only(cls, name)
+                    }
+                })
+                .map(|member| {
+                    self.as_instance_attribute(name, &member.value, &Instance::of_typed_dict(td))
                 });
         }
         self.get_class_member(td.class_object(), name)
             .map(|field| self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td)))
     }
 
-    /// Get the type of a TypedDict's field, using the given instance's type arguments
-    /// if the TypedDict is generic. Note that this type does not encode requiredness information,
-    /// since that is stored as qualifiers.
-    pub(in crate::alt::class) fn get_instantiated_typed_dict_field_type(
+    /// Compute the instantiated type of a TypedDict field from an already-resolved class member,
+    /// handling generic TypedDicts by substituting type arguments from the instance.
+    /// The returned type does not encode requiredness information (that is stored as qualifiers).
+    pub(in crate::alt::class) fn instantiate_typed_dict_field_type(
         &self,
         td: &TypedDictInner,
         name: &Name,
+        member: &ClassField,
     ) -> Option<Type> {
-        if let Some(meta) = self
-            .get_metadata_for_class(td.class_object())
-            .typed_dict_metadata()
-            && !meta.fields.contains_key(name)
-        {
-            return None;
-        }
-        self.get_non_synthesized_class_member(td.class_object(), name)
-            .map(|field| self.as_instance_attribute(name, &field, &Instance::of_typed_dict(td)))
-            .and_then(|attr| attr.as_instance_method())
+        self.as_instance_attribute(name, member, &Instance::of_typed_dict(td))
+            .as_instance_method()
     }
 
     pub fn get_super_class_member(
