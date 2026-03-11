@@ -52,12 +52,21 @@ from projects import get_mypy_primer_projects, Project
 def run(
     cmd: str | list[str], debug: bool, **kwargs: object
 ) -> subprocess.CompletedProcess[str]:
-    """Run a command, suppressing output unless debug is set."""
+    """Run a command, suppressing output unless debug is set.
+
+    Supports a 'timeout' kwarg (seconds). If the process exceeds the
+    timeout, it is killed and an empty CompletedProcess is returned.
+    """
     logging.debug(cmd)
     if not debug and "capture_output" not in kwargs:
         kwargs.setdefault("stdout", subprocess.DEVNULL)
         kwargs.setdefault("stderr", subprocess.DEVNULL)
-    return subprocess.run(cmd, **kwargs)  # noqa
+    try:
+        return subprocess.run(cmd, **kwargs)  # noqa
+    except subprocess.TimeoutExpired:
+        cmd_str = cmd if isinstance(cmd, str) else " ".join(cmd)
+        logging.warning(f"  Command timed out: {cmd_str[:80]}")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="CHECKER_TIMEOUT")
 
 
 def build_pyrefly() -> str:
@@ -489,6 +498,36 @@ def _has_pyright_config(repo_dir: str) -> bool:
     return False
 
 
+def _remove_pyrefly_section(pyproject_path: str) -> None:
+    """Remove any [tool.pyrefly] section from a pyproject.toml file.
+
+    Needed because repos may have [tool.pyrefly] with error codes from a
+    newer pyrefly version that cause config parse errors on older versions.
+    """
+    with open(pyproject_path) as f:
+        lines = f.readlines()
+
+    result = []
+    in_pyrefly = False
+    for line in lines:
+        # Detect start of [tool.pyrefly] or [[tool.pyrefly.*]]
+        if re.match(r"\s*\[+tool\.pyrefly", line):
+            in_pyrefly = True
+            continue
+        # Detect start of a new section (not pyrefly)
+        if (
+            in_pyrefly
+            and re.match(r"\s*\[", line)
+            and not re.match(r"\s*\[+tool\.pyrefly", line)
+        ):
+            in_pyrefly = False
+        if not in_pyrefly:
+            result.append(line)
+
+    with open(pyproject_path, "w") as f:
+        f.writelines(result)
+
+
 def extract_paths_from_cmd(cmd: str) -> list[str]:
     """Extract file/directory paths from a checker command like '{pyrefly} src tests'."""
     parts = cmd.split()
@@ -525,19 +564,20 @@ def check_project(
 
     # Pyrefly — init to auto-detect configs, exclude venv via CLI flag
     # (config-file project-excludes is unreliable, CLI flag works)
+    # Clean any existing pyrefly config first to avoid version-incompatible
+    # error codes (e.g., repos with [tool.pyrefly] using newer error names).
+    pyrefly_toml = os.path.join(repo_dir, "pyrefly.toml")
+    if os.path.exists(pyrefly_toml):
+        os.remove(pyrefly_toml)
+    pyproject_toml = os.path.join(repo_dir, "pyproject.toml")
+    if os.path.exists(pyproject_toml):
+        _remove_pyrefly_section(pyproject_toml)
+
     if _has_pyright_config(repo_dir):
-        # Migrate from pyright config for apples-to-apples comparison
         logging.info("  Found pyright config, migrating")
-        run(
-            f"{pyrefly_bin} init --non-interactive --migrate-from pyright",
-            debug,
-            cwd=repo_dir,
-            shell=True,
-        )
     else:
-        # No pyright config; default init (uses mypy config if present)
         logging.info("  No pyright config, using default init")
-        run(f"{pyrefly_bin} init --non-interactive", debug, cwd=repo_dir, shell=True)
+    run(f"{pyrefly_bin} init", debug, cwd=repo_dir, shell=True)
 
     # When full_errors is requested, run pyrefly in JSON mode
     output_format = " --output-format json" if full_errors else ""
@@ -549,7 +589,13 @@ def check_project(
 
     start = time.time()
     pr = run(
-        pyrefly_cmd, debug, cwd=repo_dir, shell=True, capture_output=True, text=True
+        pyrefly_cmd,
+        debug,
+        cwd=repo_dir,
+        shell=True,
+        capture_output=True,
+        text=True,
+        timeout=600,
     )
     pyrefly_time = time.time() - start
 
@@ -565,15 +611,24 @@ def check_project(
 
     # Pyright — use same paths as pyrefly for apples-to-apples.
     # When full_errors is requested, run pyright in JSON mode.
+    # 10 minute timeout — large projects can hang.
+    # For projects where pyright hangs on '.', use a targeted path instead.
+    _PYRIGHT_PATH_OVERRIDES = {
+        # scipy-stubs: match pyrefly project-includes to avoid analyzing the
+        # entire repo (which causes pyright to hang/OOM on JSON output)
+        "scipy-stubs": "scipy-stubs scripts tests",
+    }
     pyright_json_flag = "--outputjson " if full_errors else ""
+    pyright_path_args = _PYRIGHT_PATH_OVERRIDES.get(project.name, path_args)
     start = time.time()
     pp = run(
-        f"pyright {pyright_json_flag}{path_args}",
+        f"pyright {pyright_json_flag}{pyright_path_args}",
         debug,
         cwd=repo_dir,
         shell=True,
         capture_output=True,
         text=True,
+        timeout=600,
     )
     pyright_time = time.time() - start
 
@@ -589,6 +644,7 @@ def check_project(
 
     # Mypy — run inside the project's venv so it can resolve installed deps.
     # The mypy_cmd uses {mypy} placeholder, replaced with just "mypy" from the venv.
+    # 10 minute timeout to avoid hanging on large projects.
     mypy_cmd = project.mypy_cmd.format(mypy="mypy")
     start = time.time()
     pm = run(
@@ -598,6 +654,7 @@ def check_project(
         shell=True,
         capture_output=True,
         text=True,
+        timeout=600,
     )
     mypy_time = time.time() - start
 
@@ -661,6 +718,74 @@ def resolve_repo_dir(
     return repo_dir
 
 
+def _apply_sharding(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    projects: list,
+) -> list:
+    """Validate sharding args and return the sharded project list."""
+    if args.shard_index is None and args.num_shards is None:
+        return projects
+    if args.shard_index is None or args.num_shards is None:
+        parser.error("--shard-index and --num-shards must be used together")
+    if args.num_shards <= 0:
+        parser.error("--num-shards must be positive")
+    if args.shard_index < 0 or args.shard_index >= args.num_shards:
+        parser.error(
+            f"--shard-index must be in [0, {args.num_shards}), got {args.shard_index}"
+        )
+    projects = projects[args.shard_index :: args.num_shards]
+    logging.info(
+        f"Shard {args.shard_index}/{args.num_shards}: {len(projects)} projects"
+    )
+    return projects
+
+
+def _run_checkers(
+    projects: list,
+    pyrefly_bin: str,
+    args: argparse.Namespace,
+) -> list[dict[str, object]]:
+    """Run all three type checkers on each project."""
+    results: list[dict[str, object]] = []
+    tmp_dir = None if args.cache_dir else tempfile.mkdtemp()
+
+    try:
+        for project in projects:
+            logging.info(f"=== {project.name} ===")
+            try:
+                repo_dir = resolve_repo_dir(
+                    project, args.cache_dir, tmp_dir, args.reuse_cache
+                )
+                results.append(
+                    check_project(
+                        project,
+                        repo_dir,
+                        pyrefly_bin,
+                        args.debug,
+                        full_errors=bool(args.output_json),
+                    )
+                )
+            except Exception as e:
+                logging.error(f"  FAILED: {e}")
+                results.append(
+                    {
+                        "project": project.name,
+                        "pyrefly_errors": "ERR",
+                        "pyright_errors": "ERR",
+                        "mypy_errors": "ERR",
+                        "pyrefly_time": 0,
+                        "pyright_time": 0,
+                        "mypy_time": 0,
+                    }
+                )
+    finally:
+        if tmp_dir:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    return results
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Compare pyrefly vs pyright vs mypy on mypy_primer projects"
@@ -715,20 +840,7 @@ def main() -> None:
         logging.info("No matching projects found")
         return
 
-    # Apply sharding if requested
-    if args.shard_index is not None or args.num_shards is not None:
-        if args.shard_index is None or args.num_shards is None:
-            parser.error("--shard-index and --num-shards must be used together")
-        if args.num_shards <= 0:
-            parser.error("--num-shards must be positive")
-        if args.shard_index < 0 or args.shard_index >= args.num_shards:
-            parser.error(
-                f"--shard-index must be in [0, {args.num_shards}), got {args.shard_index}"
-            )
-        projects = projects[args.shard_index :: args.num_shards]
-        logging.info(
-            f"Shard {args.shard_index}/{args.num_shards}: {len(projects)} projects"
-        )
+    projects = _apply_sharding(parser, args, projects)
 
     # Cleanup mode: remove cache dir and exit
     if args.cleanup:
@@ -758,41 +870,7 @@ def main() -> None:
         parser.error("mypy not found on PATH. Install it with: pip install mypy")
 
     pyrefly_bin = os.path.abspath(args.pyrefly) if args.pyrefly else build_pyrefly()
-    results: list[dict[str, object]] = []
-    tmp_dir = None if args.cache_dir else tempfile.mkdtemp()
-
-    try:
-        for project in projects:
-            logging.info(f"=== {project.name} ===")
-            try:
-                repo_dir = resolve_repo_dir(
-                    project, args.cache_dir, tmp_dir, args.reuse_cache
-                )
-                results.append(
-                    check_project(
-                        project,
-                        repo_dir,
-                        pyrefly_bin,
-                        args.debug,
-                        full_errors=bool(args.output_json),
-                    )
-                )
-            except Exception as e:
-                logging.error(f"  FAILED: {e}")
-                results.append(
-                    {
-                        "project": project.name,
-                        "pyrefly_errors": "ERR",
-                        "pyright_errors": "ERR",
-                        "mypy_errors": "ERR",
-                        "pyrefly_time": 0,
-                        "pyright_time": 0,
-                        "mypy_time": 0,
-                    }
-                )
-    finally:
-        if tmp_dir:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+    results = _run_checkers(projects, pyrefly_bin, args)
 
     if args.output_json:
         write_json_output(results, projects, args.output_json)
