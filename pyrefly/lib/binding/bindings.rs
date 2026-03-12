@@ -1482,9 +1482,16 @@ impl<'a> BindingsBuilder<'a> {
     fn check_for_imported_final_reassignment(&self, name: &Name, idx: Idx<Key>) {
         let prev_idx = self.scopes.current_flow_idx(name);
         if let Some(prev_idx) = prev_idx
-            && let Some(Binding::Import(x)) = self.idx_to_binding(prev_idx)
-            && self.lookup.is_final(x.0, &x.1)
+            && let Some(Binding::Import(prev)) = self.idx_to_binding(prev_idx)
+            && self.lookup.is_final(prev.0, &prev.1)
         {
+            // A duplicate import of the same symbol is not a reassignment.
+            if let Some(Binding::Import(cur)) = self.idx_to_binding(idx)
+                && cur.0 == prev.0
+                && cur.1 == prev.1
+            {
+                return;
+            }
             self.error(
                 self.idx_to_key(idx).range(),
                 ErrorInfo::Kind(ErrorKind::BadAssignment),

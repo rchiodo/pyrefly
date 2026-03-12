@@ -1166,6 +1166,24 @@ y = 10  # E: Cannot assign to `y` because it is imported as final
 "#,
 );
 
+testcase!(
+    test_duplicate_import_of_final_value,
+    env_final_value(),
+    r#"
+from foo import X
+from foo import X
+"#,
+);
+
+testcase!(
+    test_duplicate_import_of_final_value_as,
+    env_final_value(),
+    r#"
+from foo import X as Y
+from foo import X as Y
+"#,
+);
+
 fn env_all_binop_add() -> TestEnv {
     let mut t = TestEnv::new();
     t.add(
