@@ -577,7 +577,19 @@ testcase!(
 def f(x: str) -> str:
     return x
 
-x = f"abc{f(1)}def"
+x = f"abc{f(1)}def"  # E: `Literal[1]` is not assignable to parameter `x` with type `str`
+"#,
+);
+
+// Regression test for https://github.com/facebook/pyrefly/issues/2669
+testcase!(
+    test_fstring_type_errors,
+    r#"
+arr = [1, 2, 3]
+
+a = f"{len(False)}"  # E: Protocol `Sized` requires attribute `__len__`
+b = f"{2 + 'Foo'}"  # E: `+` is not supported between `Literal[2]` and `Literal['Foo']`
+c = f"{arr['foo']}"  # E: Cannot index into `list[int]`
 "#,
 );
 
