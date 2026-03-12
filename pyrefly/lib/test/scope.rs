@@ -580,6 +580,43 @@ def test(cond: bool):
 );
 
 testcase!(
+    test_initialize_on_usage,
+    r#"
+def test1(cond: bool) -> None:
+    if cond:
+        x: int
+    else:
+        x = 1
+    print(x)  # E: `x` may be uninitialized
+    print(x)
+
+def test2(cond: bool) -> None:
+    x: int
+    if cond:
+        print(x)  # E: `x` is uninitialized
+    else:
+        print(x)  # E: `x` is uninitialized
+    print(x)
+
+def test3(cond: bool) -> None:
+    if cond:
+        x: int
+        print(x)  # E: `x` is uninitialized
+    else:
+        x = 1
+    print(x)
+
+def test4(cond: bool) -> None:
+    x: int
+    if cond:
+        print(x)  # E: `x` is uninitialized
+    else:
+        x = 1
+    print(x)
+"#,
+);
+
+testcase!(
     test_local_defined_by_mutation_no_shadowing,
     r#"
 def f() -> None:
@@ -671,7 +708,7 @@ def try_except_finally():
     finally:
         e2 # E: `e2` is uninitialized
 
-    e2 # E: `e2` is uninitialized
+    e2
 
 def try_except_twice():
     try:
@@ -696,8 +733,8 @@ def try_except_multiple_finally():
         e4 # E: `e4` is uninitialized
         e5 # E: `e5` is uninitialized
 
-    e4 # E: `e4` is uninitialized
-    e5 # E: `e5` is uninitialized
+    e4
+    e5
 
 def try_except_else():
     try:
@@ -723,7 +760,7 @@ def try_except_else_finally():
     finally:
         e7 # E: `e7` is uninitialized
 
-    e7 # E: `e7` is uninitialized
+    e7
 "#,
 );
 
