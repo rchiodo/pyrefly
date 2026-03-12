@@ -1038,7 +1038,18 @@ impl CalcStack {
 
     /// Mark a target node as `Done` in the top SCC's iteration state.
     ///
-    /// Panics if the top SCC is not iterating.
+    /// Silently does nothing if the top SCC is not iterating, which has never
+    /// been observed but seems to occur in the LSP (possibly related to indexing).
+    ///
+    /// This shouldn't be a correctness bug, because if no Scc is found or the top
+    /// Scc is not iterating, then there's nothing to set - almost certainly it
+    /// already finished, and skipping the update is fine.
+    ///
+    /// TODO(stroxler): while I'm fairly confident that it's not a correctness bug
+    /// to skip this update, it would be good to understand more clearly what the
+    /// flow is where we try to update an iteration state on an Scc that does not
+    /// exist. It's likely related to the discovery phase and possibly something
+    /// in our handling of `anchor_pos`.
     fn set_iteration_node_done(
         &self,
         target: &CalcId,
@@ -1047,11 +1058,12 @@ impl CalcStack {
         traces: Option<TraceSideEffects>,
     ) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_mut()
-            .expect("top SCC is not iterating");
+        let Some(top_scc) = scc_stack.last_mut() else {
+            return;
+        };
+        let Some(iter_state) = top_scc.iterative.as_mut() else {
+            return;
+        };
         iter_state.node_states.insert(
             target.dupe(),
             IterationNodeState::Done {
@@ -1067,14 +1079,19 @@ impl CalcStack {
     /// Called when a node's answer differs from its previous-iteration answer,
     /// indicating the fixpoint has not yet converged.
     ///
-    /// Panics if the top SCC is not iterating.
+    /// Silently does nothing if the top SCC is not iterating. This can occur
+    /// in the LSP when the SCC is prematurely popped from the stack due to a
+    /// stale `anchor_pos` (see pyrefly-docs/scc-stack-invariants/v0-doc.md).
+    /// In that case the SCC has already been committed by a nested driver, so
+    /// there is no iteration state left to update and skipping is safe.
     fn mark_iteration_changed(&self) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_mut()
-            .expect("top SCC is not iterating");
+        let Some(top_scc) = scc_stack.last_mut() else {
+            return;
+        };
+        let Some(iter_state) = top_scc.iterative.as_mut() else {
+            return;
+        };
         iter_state.has_changed = true;
     }
 
