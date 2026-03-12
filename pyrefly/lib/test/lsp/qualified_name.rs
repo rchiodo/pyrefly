@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 use pyrefly_build::handle::Handle;
 use ruff_text_size::TextSize;
 
-use crate::lsp::non_wasm::external_references::compute_qualified_name;
+use crate::lsp::non_wasm::external_provider::compute_qualified_name;
 use crate::state::lsp::FindPreference;
 use crate::state::state::State;
 use crate::test::util::get_batched_lsp_operations_report;

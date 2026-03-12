@@ -9,7 +9,7 @@ mod build_system;
 pub mod call_hierarchy;
 pub mod convert_module_package;
 pub mod document_symbols;
-pub mod external_references;
+pub mod external_provider;
 pub mod folding_ranges;
 pub mod lsp;
 pub mod module_helpers;

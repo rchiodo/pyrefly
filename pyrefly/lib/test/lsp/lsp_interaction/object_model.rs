@@ -63,7 +63,7 @@ use pretty_assertions::assert_eq;
 use pyrefly::commands::lsp::IndexingMode;
 use pyrefly::commands::lsp::LspArgs;
 use pyrefly::commands::lsp::run_lsp;
-use pyrefly::lsp::non_wasm::external_references::NoExternalReferences;
+use pyrefly::lsp::non_wasm::external_provider::NoExternalProvider;
 use pyrefly::lsp::non_wasm::protocol::JsonRpcMessage;
 use pyrefly::lsp::non_wasm::protocol::Message;
 use pyrefly::lsp::non_wasm::protocol::Notification;
@@ -1264,7 +1264,7 @@ impl LspInteraction {
                 None,
                 None,
                 &NoTelemetry,
-                Arc::new(NoExternalReferences),
+                Arc::new(NoExternalProvider),
                 None,
             );
             finish_server.notify_finished();

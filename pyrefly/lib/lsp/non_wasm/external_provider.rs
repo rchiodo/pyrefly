@@ -26,7 +26,7 @@ use crate::state::lsp::DefinitionMetadata;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::state::Transaction;
 
-pub trait ExternalReferences: Send + Sync {
+pub trait ExternalProvider: Send + Sync {
     fn find_references(
         &self,
         qualified_name: &str,
@@ -36,9 +36,9 @@ pub trait ExternalReferences: Send + Sync {
     ) -> Vec<(Url, Vec<Range>)>;
 }
 
-pub struct NoExternalReferences;
+pub struct NoExternalProvider;
 
-impl ExternalReferences for NoExternalReferences {
+impl ExternalProvider for NoExternalProvider {
     fn find_references(
         &self,
         _qualified_name: &str,
@@ -101,7 +101,7 @@ fn qualified_name_at_position(
 }
 
 /// Derive a fully-qualified name string from a resolved definition, suitable
-/// for use with external reference providers (see [`ExternalReferences`]).
+/// for use with external reference providers (see [`ExternalProvider`]).
 /// Returns `None` if the name cannot be determined.
 #[allow(dead_code)]
 pub(crate) fn compute_qualified_name(

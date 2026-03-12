@@ -22,7 +22,7 @@ use crate::commands::report::ReportArgs;
 use crate::commands::suppress::SuppressArgs;
 use crate::commands::tsp::TspArgs;
 use crate::commands::util::CommandExitStatus;
-use crate::lsp::non_wasm::external_references::NoExternalReferences;
+use crate::lsp::non_wasm::external_provider::NoExternalProvider;
 
 /// Subcommands to run Pyrefly with.
 #[deny(clippy::missing_docs_in_private_items)]
@@ -72,7 +72,7 @@ impl Command {
                 version,
                 None,
                 telemetry,
-                Arc::new(NoExternalReferences),
+                Arc::new(NoExternalProvider),
                 config_configurer_wrapper,
             ),
             Command::Tsp(args) => args.run(telemetry, config_configurer_wrapper),

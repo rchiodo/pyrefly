@@ -15,7 +15,7 @@ use pyrefly_util::telemetry::Telemetry;
 
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::util::CommandExitStatus;
-use crate::lsp::non_wasm::external_references::ExternalReferences;
+use crate::lsp::non_wasm::external_provider::ExternalProvider;
 use crate::lsp::non_wasm::module_helpers::PathRemapper;
 use crate::lsp::non_wasm::server::Connection;
 use crate::lsp::non_wasm::server::InitializeInfo;
@@ -76,7 +76,7 @@ pub fn run_lsp(
     server_info: Option<ServerInfo>,
     path_remapper: Option<PathRemapper>,
     telemetry: &impl Telemetry,
-    external_references: Arc<dyn ExternalReferences>,
+    external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
 ) -> anyhow::Result<()> {
     if let Some(initialize_info) =
@@ -123,7 +123,7 @@ impl LspArgs {
         version: &str,
         path_remapper: Option<PathRemapper>,
         telemetry: &impl Telemetry,
-        external_references: Arc<dyn ExternalReferences>,
+        external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
     ) -> anyhow::Result<CommandExitStatus> {
         // Note that we must have our logging only write out to stderr.

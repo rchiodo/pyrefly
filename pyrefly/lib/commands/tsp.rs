@@ -14,7 +14,7 @@ use pyrefly_util::telemetry::Telemetry;
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::lsp::IndexingMode;
 use crate::commands::util::CommandExitStatus;
-use crate::lsp::non_wasm::external_references::NoExternalReferences;
+use crate::lsp::non_wasm::external_provider::NoExternalProvider;
 use crate::lsp::non_wasm::queue::LspQueue;
 use crate::lsp::non_wasm::server::Connection;
 use crate::lsp::non_wasm::server::InitializeInfo;
@@ -61,7 +61,7 @@ pub fn run_tsp(
             false,
             surface,
             None, // No path remapping for TSP
-            Arc::new(NoExternalReferences),
+            Arc::new(NoExternalProvider),
             wrapper,
         );
 

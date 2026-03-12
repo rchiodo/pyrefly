@@ -249,8 +249,8 @@ use crate::lsp::non_wasm::call_hierarchy::prepare_call_hierarchy_item;
 use crate::lsp::non_wasm::call_hierarchy::transform_incoming_calls;
 use crate::lsp::non_wasm::call_hierarchy::transform_outgoing_calls;
 use crate::lsp::non_wasm::convert_module_package::convert_module_package_code_actions;
-use crate::lsp::non_wasm::external_references::ExternalReferences;
-use crate::lsp::non_wasm::external_references::compute_qualified_name;
+use crate::lsp::non_wasm::external_provider::ExternalProvider;
+use crate::lsp::non_wasm::external_provider::compute_qualified_name;
 use crate::lsp::non_wasm::lsp::apply_change_events;
 use crate::lsp::non_wasm::lsp::as_notification;
 use crate::lsp::non_wasm::lsp::as_request;
@@ -827,7 +827,7 @@ pub struct Server {
     /// Accumulated file watcher events waiting to be processed as a batch.
     pending_watched_file_changes: Mutex<Vec<FileEvent>>,
     /// An external source which may be included to assist in finding global references
-    external_references: Arc<dyn ExternalReferences>,
+    external_references: Arc<dyn ExternalProvider>,
     /// The time at which the server was started, for telemetry.
     server_start_time: Instant,
 }
@@ -1276,7 +1276,7 @@ pub fn lsp_loop(
     build_system_blocking: bool,
     path_remapper: Option<PathRemapper>,
     telemetry: &impl Telemetry,
-    external_references: Arc<dyn ExternalReferences>,
+    external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
 ) -> anyhow::Result<()> {
     info!("Reading messages");
@@ -2252,7 +2252,7 @@ impl Server {
         build_system_blocking: bool,
         surface: Option<String>,
         path_remapper: Option<PathRemapper>,
-        external_references: Arc<dyn ExternalReferences>,
+        external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
     ) -> Self {
         let folders = if let Some(capability) = &initialize_params.capabilities.workspace
