@@ -1143,26 +1143,80 @@ def f():
 );
 
 testcase!(
-    bug = "We approximate flow for tests in a lossy way - the first test actually runs in the base flow",
     test_walrus_on_first_branch_of_if,
     r#"
 def condition() -> bool: ...
-def f() -> bool:
+def f1() -> bool:
     if (b := condition()):
         pass
-    # In our approximation, `b` is defined in the branch but actually the test always evaluates
-    return b  # E: `b` may be uninitialized
+    return b
+
+def f2() -> bool:
+    if (a := condition()) and condition() and (b := condition()):
+        return b
+    return a
+
+def f3() -> bool:
+    if (a := condition()) and (b := condition()):
+        return b
+    return a
     "#,
 );
 
+// When a variable is PossiblyUninitialized (defined in only one branch of an
+// if/else) and then redefined via walrus in a BoolOp, the PossiblyUninitialized
+// from the short-circuit branch poisons the BoolOp merge via the early return in
+// FlowStyle::merged (line that matches PossiblyUninitialized), bypassing the
+// BoolOp laxness. Inside the if-body all `and` operands succeeded, so the walrus
+// must have executed and the variable is definitely initialized.
 testcase!(
+    test_walrus_in_boolop_after_possibly_uninitialized,
+    r#"
+def condition() -> bool: ...
+def get() -> int: ...
+
+def f1(x: bool) -> None:
+    if x:
+        viewer = 1
+    # viewer is PossiblyUninitialized here
+    if condition() and (viewer := get()):
+        print(viewer)
+
+def f2(x: bool) -> None:
+    """Same pattern but the first definition is in the else branch."""
+    if x:
+        pass
+    else:
+        if condition() and (viewer := get()):
+            pass
+    # viewer is PossiblyUninitialized here
+    if condition() and (viewer := get()):
+        print(viewer)
+
+def f3(x: bool) -> None:
+    """Three-way and chain, matching the real-world pattern."""
+    if x:
+        pass
+    else:
+        viewer = 1
+    if get() and get() and (viewer := get()):
+        print(viewer)
+    "#,
+);
+
+// Short-circuit prevents `value := v` from executing when the lhs is `False`.
+// However, processing the test before the fork applies BoolOp lax semantics, so
+// `value` appears maybe-initialized — a known false negative from BoolOp laxness.
+// This is the same trade-off as test_walrus_names_in_bool_op_straight_line.
+testcase!(
+    bug = "BoolOp laxness causes false negative for walrus in short-circuit context, see #1251",
     test_false_and_walrus,
     r#"
 def f(v):
     if False and (value := v):
         print(value)
     else:
-        print(value)  # E: `value` is uninitialized
+        print(value)
     "#,
 );
 
@@ -1241,6 +1295,67 @@ def condition() -> bool: ...
 def get() -> int: ...
 def f() -> int:
     return (b if (b := get()) > 0 else 0) if condition() else -1
+    "#,
+);
+
+// Regression tests for https://github.com/facebook/pyrefly/issues/2382
+// Walrus operator in if-statement test conditions
+
+// The first `if` test always evaluates, so walrus bindings should be in base flow.
+testcase!(
+    test_walrus_in_if_basic,
+    r#"
+def f(a: int) -> int:
+    if (x := a) > 0:
+        pass
+    return x
+    "#,
+);
+
+testcase!(
+    test_walrus_in_if_both_branches,
+    r#"
+def f(a: int) -> int:
+    if (x := a) > 0:
+        result = x + 1
+    else:
+        result = x - 1
+    return result
+    "#,
+);
+
+testcase!(
+    test_walrus_in_if_with_narrowing,
+    r#"
+def get() -> int | None: ...
+def f() -> int:
+    if (x := get()) is not None:
+        return x
+    return 0
+    "#,
+);
+
+// elif condition only executes if the first `if` was False — walrus may not run.
+testcase!(
+    test_walrus_in_elif,
+    r#"
+def condition() -> bool: ...
+def f() -> bool:
+    if condition():
+        pass
+    elif (x := condition()):
+        pass
+    return x  # E: `x` may be uninitialized
+    "#,
+);
+
+testcase!(
+    test_walrus_in_if_no_else,
+    r#"
+def f(a: int) -> int:
+    if (x := a) > 0:
+        return x
+    return x
     "#,
 );
 

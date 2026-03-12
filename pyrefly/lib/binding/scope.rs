@@ -683,9 +683,24 @@ impl FlowStyle {
                 // Uninitialized-like branches merge into PossiblyUninitialized.
                 // Must come before MaybeInitialized catch-all to avoid masking
                 // valid uninitialized paths.
+                //
+                // Do not early-return here for BoolOp merges. When a variable
+                // is PossiblyUninitialized in the base flow and a walrus in one
+                // BoolOp branch redefines it, the short-circuit branch inherits
+                // PossiblyUninitialized while the evaluated branch has Other. An
+                // early return would produce a false positive inside `if` bodies
+                // where all `and` operands succeeded (so the walrus definitely ran).
+                //
+                // Treating it as Other reduces false positives at the expense of
+                // some false negatives.
                 (FlowStyle::Uninitialized | FlowStyle::PossiblyUninitialized, _)
                 | (_, FlowStyle::Uninitialized | FlowStyle::PossiblyUninitialized) => {
-                    return FlowStyle::PossiblyUninitialized;
+                    match merge_style {
+                        MergeStyle::BoolOp => {
+                            merged = FlowStyle::Other;
+                        }
+                        _ => return FlowStyle::PossiblyUninitialized,
+                    }
                 }
                 // Two MaybeInitialized: combine termination keys from both branches.
                 // Each branch independently needs its keys to be Never for that path
