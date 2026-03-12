@@ -123,7 +123,7 @@ def setup_project(
             run(["git", "checkout", project.revision], debug, cwd=repo_dir)
 
     deps = [dep.format(repo=repo_dir) for dep in project.deps or []]
-    venv_dir = os.path.join(repo_dir, "_primer_venv")
+    venv_dir = os.path.join(repo_dir, ".venv")
     activate = os.path.join(venv_dir, "bin", "activate")
 
     if not reuse or not os.path.exists(venv_dir):
@@ -559,7 +559,7 @@ def check_project(
     path_args = " ".join(existing) if existing else "."
 
     # Venv activate path for running mypy inside the project's venv
-    venv_dir = os.path.join(repo_dir, "_primer_venv")
+    venv_dir = os.path.join(repo_dir, ".venv")
     activate = os.path.join(venv_dir, "bin", "activate")
 
     # Pyrefly — init to auto-detect configs, exclude venv via CLI flag
@@ -582,7 +582,7 @@ def check_project(
     # When full_errors is requested, run pyrefly in JSON mode
     output_format = " --output-format json" if full_errors else ""
     pyrefly_cmd = project.pyrefly_cmd.format(
-        pyrefly=f'{pyrefly_bin} check --project-excludes "**/_primer_venv/**"{output_format}'
+        pyrefly=f'{pyrefly_bin} check --project-excludes "**/.venv/**"{output_format}'
     )
     if site_paths:
         pyrefly_cmd += " " + site_paths
@@ -610,6 +610,7 @@ def check_project(
         pyrefly_error_list = None
 
     # Pyright — use same paths as pyrefly for apples-to-apples.
+    # Point pyright at the project's venv Python so it resolves installed deps.
     # When full_errors is requested, run pyright in JSON mode.
     # 10 minute timeout — large projects can hang.
     # For projects where pyright hangs on '.', use a targeted path instead.
@@ -620,9 +621,13 @@ def check_project(
     }
     pyright_json_flag = "--outputjson " if full_errors else ""
     pyright_path_args = _PYRIGHT_PATH_OVERRIDES.get(project.name, path_args)
+    venv_python = os.path.join(venv_dir, "bin", "python")
+    pyright_venv_flag = (
+        f"--pythonpath {venv_python} " if os.path.exists(venv_python) else ""
+    )
     start = time.time()
     pp = run(
-        f"pyright {pyright_json_flag}{pyright_path_args}",
+        f"pyright {pyright_venv_flag}{pyright_json_flag}{pyright_path_args}",
         debug,
         cwd=repo_dir,
         shell=True,
