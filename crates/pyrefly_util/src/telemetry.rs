@@ -198,6 +198,13 @@ pub struct ActivityKey {
     pub name: String,
 }
 
+/// Telemetry metadata for a queued task, bundled to avoid adding new callback
+/// parameters each time telemetry is extended.
+pub struct TelemetryTaskContext {
+    pub activity_key: Option<ActivityKey>,
+    pub task_id: Option<usize>,
+}
+
 impl TelemetryEvent {
     pub fn new_dequeued(
         kind: TelemetryEventKind,
@@ -330,16 +337,15 @@ impl<'a> SubTaskTelemetry<'a> {
         telemetry: &'a dyn Telemetry,
         server_state: TelemetryServerState,
         queue_name: QueueName,
-        task_id: Option<usize>,
-        activity_key: Option<ActivityKey>,
+        ctx: TelemetryTaskContext,
         file_stats: Option<TelemetryFileStats>,
     ) -> Self {
         Self {
             telemetry,
             server_state,
             queue_name,
-            task_id,
-            activity_key,
+            task_id: ctx.task_id,
+            activity_key: ctx.activity_key,
             file_stats,
         }
     }

@@ -216,6 +216,7 @@ use pyrefly_util::telemetry::TelemetryEventKind;
 use pyrefly_util::telemetry::TelemetryFileStats;
 use pyrefly_util::telemetry::TelemetryFileWatcherStats;
 use pyrefly_util::telemetry::TelemetryServerState;
+use pyrefly_util::telemetry::TelemetryTaskContext;
 use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::watch_pattern::WatchPattern;
@@ -1789,8 +1790,10 @@ impl Server {
                             telemetry,
                             self.telemetry_state(),
                             QueueName::LspQueue,
-                            telemetry_event.task_id,
-                            telemetry_event.activity_key.clone(),
+                            TelemetryTaskContext {
+                                activity_key: telemetry_event.activity_key.clone(),
+                                task_id: telemetry_event.task_id,
+                            },
                             telemetry_event.file_stats.clone(),
                         );
                         self.send_response(new_response(
@@ -3087,8 +3090,10 @@ impl Server {
                 telemetry,
                 server.telemetry_state(),
                 queue_name,
-                task_id,
-                telemetry_event.activity_key.clone(),
+                TelemetryTaskContext {
+                    activity_key: telemetry_event.activity_key.clone(),
+                    task_id,
+                },
                 None,
             );
             let (new_invalidated_source_dbs, rebuild_stats) =
@@ -3828,7 +3833,7 @@ impl Server {
                 ..Default::default()
             },
             activity_key,
-            move |transaction, handle, definition, _telemetry, _activity_key| {
+            move |transaction, handle, definition, _telemetry, _ctx| {
                 let FindDefinitionItemWithDocstring {
                     metadata: _,
                     definition_range,
@@ -4254,7 +4259,7 @@ impl Server {
             &Handle,
             FindDefinitionItemWithDocstring,
             &dyn Telemetry,
-            Option<ActivityKey>,
+            TelemetryTaskContext,
         ) -> Result<T, Cancelled>
         + Send
         + Sync
@@ -4275,7 +4280,7 @@ impl Server {
         };
         self.find_reference_queue.queue_task(
             TelemetryEventKind::FindFromDefinition,
-            Box::new(move |server, telemetry, telemetry_event, _, _| {
+            Box::new(move |server, telemetry, telemetry_event, _, task_id| {
                 telemetry_event.set_activity_key(activity_key);
                 let mut transaction = server.state.cancellable_transaction();
                 server
@@ -4287,13 +4292,11 @@ impl Server {
                     telemetry_event,
                     None,
                 );
-                match find_fn(
-                    &mut transaction,
-                    &handle,
-                    definition,
-                    telemetry,
-                    telemetry_event.activity_key.clone(),
-                ) {
+                let ctx = TelemetryTaskContext {
+                    activity_key: telemetry_event.activity_key.clone(),
+                    task_id,
+                };
+                match find_fn(&mut transaction, &handle, definition, telemetry, ctx) {
                     Ok(results) => {
                         server.cancellation_handles.lock().remove(&request_id);
                         server.connection.send(Message::Response(new_response(
@@ -4345,7 +4348,7 @@ impl Server {
                 ..Default::default()
             },
             activity_key,
-            move |transaction, handle, definition, telemetry, activity_key| {
+            move |transaction, handle, definition, telemetry, ctx| {
                 let qualified_name =
                     compute_qualified_name(transaction.as_ref(), handle, &definition);
 
@@ -4361,8 +4364,7 @@ impl Server {
                     telemetry,
                     server_state,
                     QueueName::FindReferenceQueue,
-                    None,
-                    activity_key,
+                    ctx,
                     None,
                 );
 
@@ -5224,7 +5226,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             activity_key,
-            |transaction, handle, definition, _telemetry, _activity_key| {
+            |transaction, handle, definition, _telemetry, _ctx| {
                 let target_def =
                     TextRangeWithModule::new(definition.module.dupe(), definition.definition_range);
 
@@ -5272,7 +5274,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             activity_key,
-            move |transaction, handle, definition, _telemetry, _activity_key| {
+            move |transaction, handle, definition, _telemetry, _ctx| {
                 // find_global_outgoing_calls_from_function_definition expects a position
                 let position = definition.definition_range.start();
 
@@ -5534,7 +5536,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             activity_key,
-            move |transaction, handle, definition, _telemetry, _activity_key| {
+            move |transaction, handle, definition, _telemetry, _ctx| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
@@ -5591,7 +5593,7 @@ impl Server {
             params.item.selection_range.start,
             FindPreference::default(),
             activity_key,
-            move |transaction, handle, definition, _telemetry, _activity_key| {
+            move |transaction, handle, definition, _telemetry, _ctx| {
                 transaction.run(&[handle.dupe()], Require::Everything, None)?;
                 let Some(target) =
                     Self::type_hierarchy_target_from_definition(transaction, handle, &definition)
