@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
@@ -15,9 +16,14 @@ use pyrefly_config::error_kind::ErrorKind;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::ignore::find_comment_start_in_line;
 use pyrefly_python::module::GENERATED_TOKEN;
+use pyrefly_python::module::Module;
+use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::module_path::ModulePath;
 use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_util::fs_anyhow;
+use pyrefly_util::lined_buffer::LineNumber;
 use regex::Regex;
+use ruff_python_ast::ModModule;
 use ruff_python_ast::PySourceType;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,6 +32,8 @@ use starlark_map::small_set::SmallSet;
 use tracing::info;
 
 use crate::error::error::Error;
+use crate::state::errors::find_containing_range;
+use crate::state::errors::sorted_multi_line_fstring_ranges;
 
 /// Regex to match pyrefly/type ignore comments with optional error codes and trailing text.
 /// Consumes all non-`#` characters after the ignore pattern, so trailing comment text is
@@ -109,8 +117,9 @@ fn dedup_errors(errors: &[SerializedError]) -> SmallMap<usize, String> {
     formatted_errors
 }
 
-// TODO: In future have this return an ast as well as the string for comparison
-fn read_and_validate_file(path: &Path) -> anyhow::Result<String> {
+/// Reads and validates a Python source file. Returns both the source text and
+/// the parsed AST (used for extracting f-string ranges).
+fn read_and_validate_file(path: &Path) -> anyhow::Result<(String, ModModule)> {
     let source_type = if path.extension().and_then(|e| e.to_str()) == Some("ipynb") {
         return Err(anyhow!("Cannot suppress errors in notebook file"));
     } else {
@@ -120,14 +129,14 @@ fn read_and_validate_file(path: &Path) -> anyhow::Result<String> {
     match file {
         Ok(file) => {
             // Check for generated + parsable files
-            let (_ast, parse_errors, _unsupported_syntax_errors) = Ast::parse(&file, source_type);
+            let (ast, parse_errors, _unsupported_syntax_errors) = Ast::parse(&file, source_type);
             if !parse_errors.is_empty() {
                 return Err(anyhow!("File is not parsable"));
             }
             if file.contains(GENERATED_TOKEN) {
                 return Err(anyhow!("Generated file"));
             }
-            Ok(file)
+            Ok((file, ast))
         }
         Err(e) => Err(e),
     }
@@ -235,14 +244,40 @@ fn add_suppressions(
     let mut failures = vec![];
     let mut successes = vec![];
     for (path, errors) in path_errors {
-        let file = match read_and_validate_file(path) {
-            Ok(f) => f,
+        let (file, ast) = match read_and_validate_file(path) {
+            Ok(result) => result,
             Err(e) => {
                 failures.push((path, e));
                 continue;
             }
         };
-        let mut deduped_errors = dedup_errors(errors);
+
+        // Build a temporary Module to convert AST TextRanges to line numbers.
+        let module = Module::new(
+            ModuleName::from_str("_suppress_tmp"),
+            ModulePath::filesystem(path.clone()),
+            Arc::from(file.clone()),
+        );
+        let fstring_ranges = sorted_multi_line_fstring_ranges(&ast, &module);
+
+        // Remap error lines inside multi-line f/t-strings to the
+        // f-string's start line so the suppression comment is placed
+        // above the string, not inside it.
+        let remapped_errors: Vec<SerializedError> = errors
+            .iter()
+            .map(|e| {
+                let error_line = LineNumber::from_zero_indexed(e.line as u32);
+                let new_line = find_containing_range(&fstring_ranges, error_line)
+                    .map_or(error_line, |(start, _)| start);
+                SerializedError {
+                    path: e.path.clone(),
+                    line: new_line.to_zero_indexed() as usize,
+                    name: e.name.clone(),
+                    message: e.message.clone(),
+                }
+            })
+            .collect();
+        let mut deduped_errors = dedup_errors(&remapped_errors);
 
         // Pre-scan to find existing suppressions and merge with new error codes
         let lines: Vec<&str> = file.lines().collect();
@@ -445,7 +480,7 @@ pub fn remove_unused_ignores_from_serialized(unused_ignore_errors: Vec<Serialize
             line_errors.insert(error.line, *error);
         }
 
-        if let Ok(file) = read_and_validate_file(path) {
+        if let Ok((file, _ast)) = read_and_validate_file(path) {
             let line_ending = detect_line_ending(&file);
             let mut buf = String::with_capacity(file.len());
             let lines: Vec<&str> = file.lines().collect();
@@ -1299,10 +1334,8 @@ y = "# pyrefly: ignore [bad-assignment]"
 
     #[test]
     fn test_suppress_inside_multiline_fstring() {
-        // Errors inside multi-line f-strings are reported by the type checker.
-        // The suppress system currently inserts comments inside the string literal
-        // because it doesn't track multi-line string context. This is a known
-        // limitation of the suppress system (not the type checker).
+        // Errors inside multi-line f-strings are remapped to the f-string's
+        // start line, so the suppression comment is placed above the string.
         let input = r#"
 def foo() -> str:
     return f"""
@@ -1313,8 +1346,8 @@ result: {1 + "a"}
             input,
             r#"
 def foo() -> str:
+    # pyrefly: ignore [unsupported-operation]
     return f"""
-# pyrefly: ignore [unsupported-operation]
 result: {1 + "a"}
 """
 "#,
@@ -1323,8 +1356,8 @@ result: {1 + "a"}
 
     #[test]
     fn test_suppress_inside_multiline_fstring_variable() {
-        // Errors inside multi-line f-strings are reported. The suppress system
-        // inserts comments inside the string (known limitation).
+        // Errors inside multi-line f-strings are remapped to the f-string's
+        // start line, so the suppression comment is placed above the string.
         let input = r#"
 def bar() -> None:
     x = f"""
@@ -1335,8 +1368,8 @@ value: {1 + "a"}
             input,
             r#"
 def bar() -> None:
+    # pyrefly: ignore [unsupported-operation]
     x = f"""
-# pyrefly: ignore [unsupported-operation]
 value: {1 + "a"}
 """
 "#,
@@ -1345,8 +1378,8 @@ value: {1 + "a"}
 
     #[test]
     fn test_suppress_inside_multiline_fstring_multiple_errors() {
-        // Multiple errors inside the same multi-line f-string are reported.
-        // The suppress system inserts comments inside the string (known limitation).
+        // Multiple errors inside the same multi-line f-string are remapped
+        // to the f-string's start line and deduped into one comment above.
         let input = r#"
 def baz() -> str:
     return f"""
@@ -1358,10 +1391,9 @@ b: {1 + "y"}
             input,
             r#"
 def baz() -> str:
+    # pyrefly: ignore [unsupported-operation]
     return f"""
-# pyrefly: ignore [unsupported-operation]
 a: {1 + "x"}
-# pyrefly: ignore [unsupported-operation]
 b: {1 + "y"}
 """
 "#,
@@ -1424,8 +1456,8 @@ x: str = f"""{1 + "a"}"""
     #[test]
     fn test_suppress_inside_and_outside_multiline_fstring() {
         // The error outside the f-string is suppressed normally. The error
-        // inside the multi-line f-string also gets a suppression comment,
-        // but it is placed inside the string (known suppress system limitation).
+        // inside the multi-line f-string gets a suppression comment above the
+        // f-string's opening line.
         let input = r#"
 def foo() -> str:
     x: int = "not an int"
@@ -1439,8 +1471,8 @@ result: {1 + "a"}
 def foo() -> str:
     # pyrefly: ignore [bad-assignment]
     x: int = "not an int"
+    # pyrefly: ignore [unsupported-operation]
     return f"""
-# pyrefly: ignore [unsupported-operation]
 result: {1 + "a"}
 """
 "#,
@@ -1449,8 +1481,8 @@ result: {1 + "a"}
 
     #[test]
     fn test_suppress_inside_multiline_fstring_single_quotes() {
-        // Errors inside single-quote triple-quoted f-strings are reported.
-        // The suppress system inserts comments inside the string (known limitation).
+        // Errors inside single-quote triple-quoted f-strings get a suppression
+        // comment above the f-string's opening line.
         let input = r#"
 def foo() -> str:
     return f'''
@@ -1461,8 +1493,8 @@ result: {1 + "a"}
             input,
             r#"
 def foo() -> str:
+    # pyrefly: ignore [unsupported-operation]
     return f'''
-# pyrefly: ignore [unsupported-operation]
 result: {1 + "a"}
 '''
 "#,
@@ -1471,8 +1503,8 @@ result: {1 + "a"}
 
     #[test]
     fn test_suppress_multiline_fstring_error_on_closing_line() {
-        // Error on the closing line of a multi-line f-string is reported.
-        // The suppress system inserts a comment inside the string (known limitation).
+        // Error on the closing line of a multi-line f-string gets a suppression
+        // comment above the f-string's opening line.
         let input = r#"
 def foo() -> str:
     return f"""
@@ -1483,10 +1515,152 @@ result: {1 + "a"}"""
             input,
             r#"
 def foo() -> str:
+    # pyrefly: ignore [unsupported-operation]
     return f"""
 text
-# pyrefly: ignore [unsupported-operation]
 result: {1 + "a"}"""
+"#,
+        );
+    }
+
+    #[test]
+    fn test_suppress_nested_fstring_single_line_inner() {
+        // Error inside a single-line nested f-string within a multi-line
+        // outer f-string gets a suppression comment above the outer f-string.
+        let input = r#"
+def foo() -> str:
+    return f"""
+result: {f"{1 + 'a'}"}
+"""
+"#;
+        assert_suppress_errors(
+            input,
+            r#"
+def foo() -> str:
+    # pyrefly: ignore [unsupported-operation]
+    return f"""
+result: {f"{1 + 'a'}"}
+"""
+"#,
+        );
+    }
+
+    #[test]
+    fn test_suppress_nested_fstring_multi_line_inner() {
+        // Error inside a multi-line nested f-string within a multi-line
+        // outer f-string gets a suppression comment above the outer f-string.
+        let input = r#"
+def foo() -> str:
+    return f"""
+result: {f'''
+{1 + "a"}
+'''}
+"""
+"#;
+        assert_suppress_errors(
+            input,
+            r#"
+def foo() -> str:
+    # pyrefly: ignore [unsupported-operation]
+    return f"""
+result: {f'''
+{1 + "a"}
+'''}
+"""
+"#,
+        );
+    }
+
+    #[test]
+    fn test_suppress_consecutive_fstrings_error_in_second() {
+        // Two consecutive f-strings with an error only in the second one.
+        // The suppression comment should be placed above the second f-string.
+        let input = r#"
+def foo():
+    f"""hello"""
+    f"result: {1 + "a"}"
+"#;
+        assert_suppress_errors(
+            input,
+            r#"
+def foo():
+    f"""hello"""
+    # pyrefly: ignore [unsupported-operation]
+    f"result: {1 + "a"}"
+"#,
+        );
+    }
+
+    #[test]
+    fn test_suppress_consecutive_fstrings_errors_in_both() {
+        // Two consecutive f-strings with errors in both.
+        // Each gets its own suppression comment.
+        let input = r#"
+def foo():
+    f"first: {1 + "a"}"
+    f"second: {1 + "b"}"
+"#;
+        assert_suppress_errors(
+            input,
+            r#"
+def foo():
+    # pyrefly: ignore [unsupported-operation]
+    f"first: {1 + "a"}"
+    # pyrefly: ignore [unsupported-operation]
+    f"second: {1 + "b"}"
+"#,
+        );
+    }
+
+    #[test]
+    fn test_suppress_deeply_nested_multiline_fstring_with_comprehension() {
+        // Errors inside a nested multi-line f-string (f''' inside f""")
+        // that is part of a list comprehension should be remapped to the
+        // outermost f-string's start line, not the inner one.
+        let input = r#"
+f"""
+build_query(
+    items=[
+        {
+    ",".join(
+        [
+            f'''
+            make_item(
+                label="item_{1 + "x"}",
+                key={1 + "y"},
+            )
+            '''
+            for value in [1, 2, 3]
+        ]
+    )
+}
+    ]
+)
+"""
+"#;
+        assert_suppress_errors(
+            input,
+            r#"
+# pyrefly: ignore [unsupported-operation]
+f"""
+build_query(
+    items=[
+        {
+    ",".join(
+        [
+            f'''
+            make_item(
+                label="item_{1 + "x"}",
+                key={1 + "y"},
+            )
+            '''
+            for value in [1, 2, 3]
+        ]
+    )
+}
+    ]
+)
+"""
 "#,
         );
     }
