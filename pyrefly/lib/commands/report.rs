@@ -670,6 +670,42 @@ impl ReportArgs {
             .collect()
     }
 
+    /// When a `.pyi` stub only covers a subset of a `.py` file's public
+    /// symbols, add the uncovered symbols from the `.py` so that completeness
+    /// metrics reflect the full module interface.
+    fn merge_uncovered_py_symbols(
+        stub_functions: &mut Vec<Function>,
+        stub_variables: &mut Vec<Variable>,
+        stub_classes: &mut Vec<ReportClass>,
+        py_functions: Vec<Function>,
+        py_variables: Vec<Variable>,
+        py_classes: Vec<ReportClass>,
+    ) {
+        let stub_func_names: HashSet<String> =
+            stub_functions.iter().map(|f| f.name.clone()).collect();
+        for py_func in py_functions {
+            if !stub_func_names.contains(&py_func.name) {
+                stub_functions.push(py_func);
+            }
+        }
+
+        let stub_var_names: HashSet<String> =
+            stub_variables.iter().map(|v| v.name.clone()).collect();
+        for py_var in py_variables {
+            if !stub_var_names.contains(&py_var.name) {
+                stub_variables.push(py_var);
+            }
+        }
+
+        let stub_class_names: HashSet<String> =
+            stub_classes.iter().map(|c| c.name.clone()).collect();
+        for py_class in py_classes {
+            if !stub_class_names.contains(&py_class.name) {
+                stub_classes.push(py_class);
+            }
+        }
+    }
+
     fn run_inner(
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
@@ -702,6 +738,29 @@ impl ReportArgs {
         } else {
             HashSet::new()
         };
+
+        // When prefer_stubs is true, build a mapping from .pyi paths to their
+        // corresponding .py handles. This allows us to cross-reference exports
+        // and include uncovered .py symbols in the completeness calculations.
+        let pyi_to_py: HashMap<PathBuf, &Handle> = if prefer_stubs {
+            let py_by_path: HashMap<PathBuf, &Handle> = handles
+                .iter()
+                .filter(|h| !h.path().is_interface())
+                .map(|h| (h.path().as_path().to_path_buf(), h))
+                .collect();
+            handles
+                .iter()
+                .filter(|h| h.path().is_interface())
+                .filter_map(|h| {
+                    let py_path = h.path().as_path().with_extension("py");
+                    py_by_path
+                        .get(&py_path)
+                        .map(|&py_h| (h.path().as_path().to_path_buf(), py_h))
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
         for handle in &handles {
             if shadowed.contains(handle.path().as_path()) {
                 continue;
@@ -713,11 +772,42 @@ impl ReportArgs {
             {
                 let line_count = module.lined_buffer().line_index().line_count();
                 let exports = transaction.get_exports(handle);
-                let functions = Self::parse_functions(&module, &bindings, &answers, &exports);
-                let classes = Self::parse_classes(&module, bindings.dupe(), answers.dupe());
-                let variables =
+                let mut functions = Self::parse_functions(&module, &bindings, &answers, &exports);
+                let mut classes = Self::parse_classes(&module, bindings.dupe(), answers.dupe());
+                let mut variables =
                     Self::parse_variables(&module, &bindings, &exports, &functions, &classes);
                 let suppressions = Self::parse_suppressions(&module);
+
+                // When a .pyi stub shadows a .py file, the stub may only cover
+                // a subset of the .py's public symbols. Include uncovered .py
+                // symbols so that the completeness denominator reflects the full
+                // module interface.
+                if let Some(py_handle) = pyi_to_py.get(&handle.path().as_path().to_path_buf())
+                    && let Some(py_bindings) = transaction.get_bindings(py_handle)
+                    && let Some(py_module) = transaction.get_module_info(py_handle)
+                    && let Some(py_answers) = transaction.get_answers(py_handle)
+                {
+                    let py_exports = transaction.get_exports(py_handle);
+                    let py_functions =
+                        Self::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
+                    let py_classes =
+                        Self::parse_classes(&py_module, py_bindings.dupe(), py_answers.dupe());
+                    let py_variables = Self::parse_variables(
+                        &py_module,
+                        &py_bindings,
+                        &py_exports,
+                        &py_functions,
+                        &py_classes,
+                    );
+                    Self::merge_uncovered_py_symbols(
+                        &mut functions,
+                        &mut variables,
+                        &mut classes,
+                        py_functions,
+                        py_variables,
+                        py_classes,
+                    );
+                }
 
                 let annotated_count = functions
                     .iter()
@@ -858,6 +948,92 @@ mod tests {
         }
     }
 
+    /// Build a `FileReport` that merges a `.pyi` stub with its `.py` source,
+    /// mirroring the production pipeline in `run_inner` when `prefer_stubs` is
+    /// true and both files exist for the same module.
+    fn build_stub_report(pyi_file: &str, py_file: &str) -> FileReport {
+        // Parse the stub
+        let pyi_code = load_test_file(pyi_file);
+        let (pyi_state, pyi_handle_fn) = TestEnv::one_with_path("test", "test.pyi", &pyi_code)
+            .with_default_require_level(Require::Everything)
+            .to_state();
+        let pyi_handle = pyi_handle_fn("test");
+        let pyi_txn = pyi_state.transaction();
+
+        let module = pyi_txn.get_module_info(&pyi_handle).unwrap();
+        let bindings = pyi_txn.get_bindings(&pyi_handle).unwrap();
+        let answers = pyi_txn.get_answers(&pyi_handle).unwrap();
+        let exports = pyi_txn.get_exports(&pyi_handle);
+
+        let line_count = module.lined_buffer().line_index().line_count();
+        let mut functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
+        let mut classes = ReportArgs::parse_classes(&module, bindings.dupe(), answers.dupe());
+        let mut variables =
+            ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
+        let suppressions = ReportArgs::parse_suppressions(&module);
+
+        // Parse the .py source
+        let py_code = load_test_file(py_file);
+        let (py_state, py_handle_fn) = TestEnv::one("test", &py_code)
+            .with_default_require_level(Require::Everything)
+            .to_state();
+        let py_handle = py_handle_fn("test");
+        let py_txn = py_state.transaction();
+
+        let py_module = py_txn.get_module_info(&py_handle).unwrap();
+        let py_bindings = py_txn.get_bindings(&py_handle).unwrap();
+        let py_answers = py_txn.get_answers(&py_handle).unwrap();
+        let py_exports = py_txn.get_exports(&py_handle);
+
+        let py_functions =
+            ReportArgs::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
+        let py_classes =
+            ReportArgs::parse_classes(&py_module, py_bindings.dupe(), py_answers.dupe());
+        let py_variables = ReportArgs::parse_variables(
+            &py_module,
+            &py_bindings,
+            &py_exports,
+            &py_functions,
+            &py_classes,
+        );
+
+        // Merge uncovered symbols from .py into the stub report
+        ReportArgs::merge_uncovered_py_symbols(
+            &mut functions,
+            &mut variables,
+            &mut classes,
+            py_functions,
+            py_variables,
+            py_classes,
+        );
+
+        let annotated_count = functions
+            .iter()
+            .filter(|f| ReportArgs::is_fully_annotated(f))
+            .count();
+        let annotation_completeness = if functions.is_empty() {
+            100.0
+        } else {
+            (annotated_count as f64 / functions.len() as f64) * 100.0
+        };
+        let type_completeness = if annotated_count == 0 {
+            100.0
+        } else {
+            let type_complete = functions.iter().filter(|f| f.is_type_known).count();
+            (type_complete as f64 / annotated_count as f64) * 100.0
+        };
+
+        FileReport {
+            variables,
+            line_count,
+            functions,
+            classes,
+            suppressions,
+            annotation_completeness,
+            type_completeness,
+        }
+    }
+
     #[test]
     fn test_report_suppressions() {
         let report = build_file_report("suppressions.py");
@@ -898,6 +1074,14 @@ mod tests {
     fn test_report_nested_exclusions() {
         let report = build_file_report("nested_exclusions.py");
         compare_snapshot("nested_exclusions.expected.json", &report);
+    }
+
+    /// When a .pyi stub only covers a subset of the .py file's exports,
+    /// the uncovered symbols appear as unannotated and reduce completeness.
+    #[test]
+    fn test_report_partial_stub() {
+        let report = build_stub_report("partial_stub.pyi", "partial_stub.py");
+        compare_snapshot("partial_stub.expected.json", &report);
     }
 
     /// When both test.py and test.pyi exist, the .py file is shadowed.
