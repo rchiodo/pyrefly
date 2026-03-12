@@ -72,6 +72,7 @@ pub enum TelemetryEventKind {
     SourceDbRebuildInstance,
     FindFromDefinition,
     ExternalReferences,
+    ExternalWorkspaceSymbols,
 }
 
 pub struct TelemetryEvent {
@@ -90,6 +91,7 @@ pub struct TelemetryEvent {
     pub file_watcher_stats: Option<TelemetryFileWatcherStats>,
     pub did_change_watched_files_stats: Option<TelemetryDidChangeWatchedFilesStats>,
     pub external_references_stats: Option<TelemetryExternalReferencesStats>,
+    pub external_workspace_symbols_stats: Option<TelemetryExternalWorkspaceSymbolsStats>,
     pub activity_key: Option<ActivityKey>,
     pub canceled: bool,
 }
@@ -182,6 +184,15 @@ pub struct TelemetryDidChangeWatchedFilesStats {
 }
 
 #[derive(Default)]
+pub struct TelemetryExternalWorkspaceSymbolsStats {
+    pub query: String,
+    pub db_name: Option<String>,
+    pub result_count: usize,
+    pub find_repo_ms: Option<Duration>,
+    pub angle_query_ms: Option<Duration>,
+}
+
+#[derive(Default)]
 pub struct TelemetryExternalReferencesStats {
     pub qualified_name: String,
     pub db_name: Option<String>,
@@ -231,6 +242,7 @@ impl TelemetryEvent {
                 file_watcher_stats: None,
                 did_change_watched_files_stats: None,
                 external_references_stats: None,
+                external_workspace_symbols_stats: None,
                 activity_key: None,
                 canceled: false,
             },
@@ -261,6 +273,7 @@ impl TelemetryEvent {
             file_watcher_stats: None,
             did_change_watched_files_stats: None,
             external_references_stats: None,
+            external_workspace_symbols_stats: None,
             activity_key: None,
             canceled: false,
         }
@@ -314,6 +327,13 @@ impl TelemetryEvent {
 
     pub fn set_external_references_stats(&mut self, stats: TelemetryExternalReferencesStats) {
         self.external_references_stats = Some(stats);
+    }
+
+    pub fn set_external_workspace_symbols_stats(
+        &mut self,
+        stats: TelemetryExternalWorkspaceSymbolsStats,
+    ) {
+        self.external_workspace_symbols_stats = Some(stats);
     }
 
     pub fn finish_and_record(self, telemetry: &dyn Telemetry, error: Option<&Error>) -> Duration {
