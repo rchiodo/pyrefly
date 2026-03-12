@@ -6945,17 +6945,6 @@
     {
       "code": -2,
       "column": 17,
-      "concise_description": "`T` is uninitialized",
-      "description": "`T` is uninitialized",
-      "line": 44,
-      "name": "unbound-name",
-      "severity": "error",
-      "stop_column": 18,
-      "stop_line": 44
-    },
-    {
-      "code": -2,
-      "column": 17,
       "concise_description": "Expected a type form, got instance of `int`",
       "description": "Expected a type form, got instance of `int`",
       "line": 44,

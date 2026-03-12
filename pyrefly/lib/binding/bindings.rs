@@ -1194,10 +1194,16 @@ impl<'a> BindingsBuilder<'a> {
                 self.scopes.mark_parameter_used(name.key());
                 self.scopes.mark_import_used(name.key());
                 self.scopes.mark_variable_used(name.key());
-                NameLookupResult::Found {
-                    idx: self.idx_for_promise(key),
-                    initialized,
+                let idx = self.idx_for_promise(key);
+                // NameReadInfo::Anywhere can only be InitializedInFlow::Yes or InitializedInFlow::No
+                if may_prove_initialized && matches!(initialized, InitializedInFlow::No) {
+                    // When we use a variable, we mark it as initialized
+                    // If the variable was uninitialized before, this will
+                    // prevent us from emitting errors for every subsequent usage
+                    self.scopes
+                        .define_in_current_flow(name, idx, FlowStyle::Other);
                 }
+                NameLookupResult::Found { idx, initialized }
             }
             NameReadInfo::NotFound => NameLookupResult::NotFound,
         }

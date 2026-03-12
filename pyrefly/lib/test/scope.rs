@@ -479,7 +479,7 @@ x = 42
 def f():
     # We should really be producing an error more like the compiler's, which says you can't use `x` before the declaration
     print(x)  # E: `x` is uninitialized
-    global x
+    global x  # E: `x` was assigned in the current scope before the global declaration
 "#,
 );
 
@@ -718,7 +718,7 @@ def try_except_twice():
     except Exception:
         e3 # E: `e3` is uninitialized
 
-    e3 # E: `e3` is uninitialized
+    e3 # E: `e3` may be uninitialized
 
 def try_except_multiple_finally():
     try:
@@ -746,7 +746,7 @@ def try_except_else():
     else:
         e6 # E: `e6` is uninitialized
 
-    e6 # E: `e6` is uninitialized
+    e6 # E: `e6` may be uninitialized
 
 def try_except_else_finally():
     try:
@@ -758,7 +758,7 @@ def try_except_else_finally():
     else:
         e7 # E: `e7` is uninitialized
     finally:
-        e7 # E: `e7` is uninitialized
+        e7 # E: `e7` may be uninitialized
 
     e7
 "#,
@@ -791,7 +791,7 @@ testcase!(
 from typing import assert_type, Any
 def f():
     assert_type(x, Any)  # E: `x` is uninitialized
-    x += 5  # E: `x` is uninitialized
+    x += 5
     assert_type(x, Any)
 "#,
 );
@@ -804,8 +804,8 @@ x = 5
 def f():
     assert_type(y, Any)  # E: `y` is uninitialized
     assert_type(x, Any)  # E: `x` is uninitialized
-    del y  # E: `y` is uninitialized
-    del x  # E: `x` is uninitialized
+    del y
+    del x
 f()
 "#,
 );

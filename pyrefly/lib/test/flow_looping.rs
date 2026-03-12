@@ -870,7 +870,7 @@ def foo(cond: bool):
         if cond:
             if x is not None:  # E: `x` is uninitialized
                 pass
-    print(x)  # (Note there's no error here, but that's probably ok since we error above)
+    print(x)  # E: `x` may be uninitialized
     x: int | None = None
     assert_type(x, int | None)
     "#,

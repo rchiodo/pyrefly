@@ -2034,3 +2034,136 @@ def demo_pyre_narrowing_failure() -> int:
     return use_success(success)
     "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2261
+testcase!(
+    test_walrus_in_if_with_is_none,
+    r#"
+def fun(**kwargs):
+    if x := kwargs.get("x") is None:
+        x = "a"
+    print(x)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/1397
+testcase!(
+    test_walrus_in_chained_if_re_match,
+    r#"
+from re import compile
+
+interface_re = compile(r"^foo")
+ipv4_re = compile(r"bar$")
+line = str()
+
+if match := interface_re.match(line):
+    pass
+
+if line and (match := ipv4_re.search(line)):
+    print(match)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/1397
+testcase!(
+    test_walrus_in_negated_if_with_isinstance,
+    r#"
+from typing import Any
+
+def test(thing: Any) -> None:
+    if not (items := getattr(thing, "items")):
+        return
+    if not isinstance(items, tuple|list):
+        items = (items,)
+    for item in items:
+        print(item)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/1397
+testcase!(
+    test_walrus_bool_in_if,
+    r#"
+def f() -> None:
+    if a := True:
+        print(a)
+    print(a)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_in_method_call_chain,
+    r#"
+import pathlib
+
+def f(mod: str, stubs_path: pathlib.Path):
+    _, *submods = mod.split(".")
+    if (path := stubs_path.joinpath(*submods, "__init__.pyi")).is_file():
+        return path
+    assert submods, path
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_in_comparison,
+    r#"
+def check():
+    if (y := 2) <= 1:
+        return
+    print(y)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_with_and_condition,
+    r#"
+def f(v):
+    x: int
+    if (x := v) and v:
+        print(x)
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_in_compound_and_condition,
+    r#"
+def hello(x: int, y: int) -> int | None:
+    if x == 5 and (z := x + y) == 7:
+        return z
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_with_none_reassignment,
+    r#"
+d: dict[str, str] = {}
+def func(key: str) -> str:
+    if (name := d.get(key)) is None:
+        name = 'missing'
+    d[key] = name
+    return name
+    "#,
+);
+
+// https://github.com/facebook/pyrefly/issues/913
+testcase!(
+    test_walrus_in_loop_with_narrowing,
+    r#"
+from typing import assert_type
+d1 = {0: '0', 1:'1', 3:'3'}
+d2 = {'0': 0, '1': 1, '2': 2, '3':3}
+for x in range(10):
+    if not (y := d1.get(x)):
+        continue
+    assert_type(y, str)
+    if (z := d2[y]) < 2:
+        assert_type(z, int)
+        continue
+    assert_type(z, int)
+    "#,
+);
