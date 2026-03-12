@@ -1740,7 +1740,7 @@ impl<'a> Transaction<'a> {
             &recurser,
             &stdlib,
             &thread_state,
-            answers.0.heap(),
+            answers.1.heap(),
         );
         let start = Instant::now();
         let result = solve(solver);

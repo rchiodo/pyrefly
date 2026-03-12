@@ -411,7 +411,7 @@ impl Step {
             Arc::unwrap_or_clone(ast),
             load.module_info.dupe(),
             &exports,
-            solver.flags,
+            &solver,
             ctx.lookup,
             *ctx.sys_info,
             &load.errors,

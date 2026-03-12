@@ -838,7 +838,7 @@ impl Answers {
             recurser,
             stdlib,
             thread_state,
-            bindings.heap(),
+            self.heap(),
         );
         table_mut_for_each!(&mut res, |items| pre_solve(
             items,
@@ -929,7 +929,7 @@ impl Answers {
             recurser,
             stdlib,
             thread_state,
-            bindings.heap(),
+            self.heap(),
         );
         solver.get_hashed_opt(key)
     }
@@ -976,7 +976,7 @@ impl Answers {
             recurser,
             stdlib,
             thread_state,
-            bindings.heap(),
+            self.heap(),
         );
         dispatch_anyidx!(any_idx, solver, solve_idx_erased_typed);
     }
