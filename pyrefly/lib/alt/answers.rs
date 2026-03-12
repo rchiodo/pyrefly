@@ -1181,24 +1181,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self.current().solver
     }
 
-    /// Prepare an answer for writing into shared `Calculation` state.
-    ///
-    /// This helper centralizes solve-time finalization for answer producers:
-    /// deep-force all embedded types using the current thread-local solver
-    /// state, then assert that no unresolved `Type::Var` crosses the
-    /// Calculation boundary.
-    pub fn finalize_answer_for_calculation_write<K: Keyed>(
-        &self,
-        answer: Arc<K::Answer>,
-        write_context: &str,
-    ) -> Arc<K::Answer>
-    where
-        AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
-        BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
-    {
-        prepare_answer_for_calculation_write::<K>(self.solver(), answer, write_context)
-    }
-
     pub fn record_resolved_trace(&self, loc: TextRange, ty: Type) {
         if self.current().trace.is_some()
             && let Some(callable) = ty.to_callable()
