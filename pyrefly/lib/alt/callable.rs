@@ -1100,7 +1100,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Look up meta-shape early so we can conditionally collect bound args.
         // Only consult the registry when tensor_shapes is enabled to avoid
         // unnecessary DSL parsing and per-call HashMap lookups.
-        let meta_shape_func = if self.solver().flags.tensor_shapes {
+        let meta_shape_func = if self.solver().tensor_shapes {
             Self::lookup_meta_shape(callable_name)
         } else {
             None
@@ -1256,11 +1256,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         let mut errors = self
             .solver()
-            .finish_quantified(callable_qs, self.solver().flags.infer_with_first_use)
+            .finish_quantified(callable_qs, self.solver().infer_with_first_use)
             .map_or_else(|e| e.to_vec(), |_| Vec::new());
         if let Err(e) = self
             .solver()
-            .finish_quantified(ctor_qs, self.solver().flags.infer_with_first_use)
+            .finish_quantified(ctor_qs, self.solver().infer_with_first_use)
         {
             errors.extend(e);
         }

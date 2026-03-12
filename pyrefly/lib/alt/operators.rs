@@ -79,7 +79,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Returns Some(result_type) if the operation was handled, None otherwise.
     fn try_symint_binop(&self, op: Operator, lhs: &Type, rhs: &Type) -> Option<Type> {
         // Only handle if tensor shapes feature is enabled
-        if !self.solver().flags.tensor_shapes {
+        if !self.solver().tensor_shapes {
             return None;
         }
 

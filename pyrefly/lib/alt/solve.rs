@@ -1942,7 +1942,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         // Inline first-use pinning for NameAssign.
         let mut type_info = if let Binding::NameAssign(na) = binding
-            && self.solver().flags.infer_with_first_use
+            && self.solver().infer_with_first_use
             && na.def_idx.is_some()
             && na.annotation.is_none()
             && let FirstUse::UsedBy(first_use_idx) = &na.first_use
@@ -5536,7 +5536,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // We convert them directly to Type::Size to distinguish from Literal[6]
             Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. })
                 if matches!(type_form_context, TypeFormContext::TypeArgument)
-                    && self.solver().flags.tensor_shapes =>
+                    && self.solver().tensor_shapes =>
             {
                 match value {
                     ruff_python_ast::Number::Int(i) => {

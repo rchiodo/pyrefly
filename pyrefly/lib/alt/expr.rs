@@ -1992,7 +1992,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Jaxtyping annotation parsing: Float[Tensor, "batch channels"] syntax
                 Type::ClassDef(ref cls)
                     if self.is_jaxtyping_wrapper(cls)
-                        && self.solver().flags.tensor_shapes =>
+                        && self.solver().tensor_shapes =>
                 {
                     Type::type_form(self.parse_jaxtyping_annotation(xs, range, errors))
                 }

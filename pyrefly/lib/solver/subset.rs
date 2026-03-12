@@ -138,7 +138,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let result = self.is_subset_param_list_impl(l_args, u_args);
         match result {
             Err(_)
-                if !self.solver.flags.strict_callable_subtyping
+                if !self.solver.strict_callable_subtyping
                     && (has_any_args_and_kwargs(l_args) || has_any_args_and_kwargs(u_args)) =>
             {
                 Ok(())
@@ -476,7 +476,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         };
         match result {
             Err(_)
-                if !self.solver.flags.strict_callable_subtyping
+                if !self.solver.strict_callable_subtyping
                     && (params_have_any_args_and_kwargs(l_params)
                         || params_have_any_args_and_kwargs(u_params)) =>
             {
@@ -1401,9 +1401,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     self.is_subset_eq(l, &u.as_type())
                 });
                 match result {
-                    Err(_)
-                        if !self.solver.flags.strict_callable_subtyping && has_any_args_kwargs =>
-                    {
+                    Err(_) if !self.solver.strict_callable_subtyping && has_any_args_kwargs => {
                         Ok(())
                     }
                     _ => result,
