@@ -7623,3 +7623,69 @@ def foo():
         )]
     }
 );
+
+call_graph_testcase!(
+    test_override_classtype_union,
+    TEST_MODULE_NAME,
+    r#"
+from typing import Type
+class A:
+    @classmethod
+    def create(cls) -> None:
+        pass
+class B(A):
+    @classmethod
+    def create(cls) -> None:
+        pass
+def foo(cls: Type[A | B]):
+    cls.create()
+"#,
+    &|context: &ModuleContext| {
+        vec![(
+            "test.foo",
+            vec![
+                (
+                    "12:5-12:8|identifier|cls",
+                    ExpressionCallees::Identifier(IdentifierCallees {
+                        if_called: CallCallees {
+                            call_targets: vec![],
+                            init_targets: vec![
+                                create_call_target(
+                                    "builtins.object.__init__",
+                                    TargetType::Function,
+                                )
+                                .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                                .with_receiver_class_for_test("test.A", context),
+                                create_call_target(
+                                    "builtins.object.__init__",
+                                    TargetType::Function,
+                                )
+                                .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                                .with_receiver_class_for_test("test.B", context),
+                            ],
+                            new_targets: vec![
+                                create_call_target("builtins.object.__new__", TargetType::Function)
+                                    .with_is_static_method(true),
+                            ],
+                            higher_order_parameters: HashMap::new(),
+                            unresolved: Unresolved::False,
+                        },
+                        global_targets: vec![],
+                        captured_variables: vec![],
+                    }),
+                ),
+                (
+                    "12:5-12:17",
+                    // TODO: Should be AllOverrides with receiver_class test.A,
+                    // but union inside Type[A | B] loses receiver_class (set to None),
+                    // which prevents override dispatch.
+                    regular_call_callees(vec![
+                        create_call_target("test.A.create", TargetType::Function)
+                            .with_implicit_receiver(ImplicitReceiver::TrueWithObjectReceiver)
+                            .with_is_class_method(true),
+                    ]),
+                ),
+            ],
+        )]
+    }
+);
