@@ -546,6 +546,11 @@ impl<'a> Transaction<'a> {
                                 self.filter_parameters(param_with_default, handle)
                             })
                             .collect();
+                        // Skip expensive reference collection and type inference
+                        // for functions where every parameter is already annotated.
+                        if func_args.iter().all(|arg| arg.has_annotation) {
+                            return vec![];
+                        }
                         let references =
                             self.collect_references(handle, idx, bindings.clone(), transaction);
                         let ranges: Vec<&TextRange> =

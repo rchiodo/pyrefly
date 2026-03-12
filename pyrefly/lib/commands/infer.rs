@@ -276,8 +276,10 @@ impl InferArgs {
         let state = State::new(config_finder);
         let holder = Forgetter::new(state, false);
         let handles = Handles::new(expanded_file_list);
+        // Use Exports as the default require level for dependency modules —
+        // only the files being inferred need Everything.
         let mut forgetter = Forgetter::new(
-            holder.as_ref().new_transaction(Require::Everything, None),
+            holder.as_ref().new_transaction(Require::Exports, None),
             true,
         );
 
@@ -291,8 +293,10 @@ impl InferArgs {
             }
             return Err(anyhow::anyhow!("Failed to query sourcedb."));
         }
+        // Type-check all handles at once so the work can be parallelised across
+        // the thread pool, instead of checking one file at a time sequentially.
+        transaction.run(&handles, Require::Everything, None);
         for handle in handles {
-            transaction.run(&[handle.dupe()], Require::Everything, None);
             let stdlib = transaction.get_stdlib(&handle);
             let inferred_types: Option<Vec<(ruff_text_size::TextSize, Type, AnnotationKind)>> =
                 transaction.inferred_types(&handle, flags.return_types(), flags.containers());
@@ -619,6 +623,25 @@ def foo() -> str:
     def example(c = None) -> None:
         pass
     example(None)
+    "#,
+            None,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_fully_annotated_function_skipped() -> anyhow::Result<()> {
+        // Parameters on a fully annotated function should not be re-inferred.
+        assert_annotations(
+            r#"
+    def example(a: int, b: str) -> None:
+        pass
+    example(1, "hello")
+    "#,
+            r#"
+    def example(a: int, b: str) -> None:
+        pass
+    example(1, "hello")
     "#,
             None,
         );
