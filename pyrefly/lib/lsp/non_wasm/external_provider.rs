@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use dupe::Dupe;
 use lsp_types::Range;
+use lsp_types::SymbolInformation;
 use lsp_types::Url;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
@@ -34,6 +35,17 @@ pub trait ExternalProvider: Send + Sync {
         timeout: Duration,
         telemetry: Option<SubTaskTelemetry>,
     ) -> Vec<(Url, Vec<Range>)>;
+
+    /// Search for workspace symbols matching `query` using an external index.
+    /// `workspace_uri` is a workspace folder URI used to identify which
+    /// external database to query.
+    fn workspace_symbols(
+        &self,
+        query: &str,
+        workspace_uri: &Url,
+        timeout: Duration,
+        telemetry: Option<SubTaskTelemetry>,
+    ) -> Vec<SymbolInformation>;
 }
 
 pub struct NoExternalProvider;
@@ -46,6 +58,16 @@ impl ExternalProvider for NoExternalProvider {
         _timeout: Duration,
         _telemetry: Option<SubTaskTelemetry>,
     ) -> Vec<(Url, Vec<Range>)> {
+        Vec::new()
+    }
+
+    fn workspace_symbols(
+        &self,
+        _query: &str,
+        _workspace_uri: &Url,
+        _timeout: Duration,
+        _telemetry: Option<SubTaskTelemetry>,
+    ) -> Vec<SymbolInformation> {
         Vec::new()
     }
 }
