@@ -2353,7 +2353,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return self.calculate_and_record_answer_iterative(current, idx);
         }
 
-        // Install trace sink if tracing is enabled for this module.
+        // Skip trace sink setup during cold-start iterations: their answers and
+        // diagnostics are intentionally discarded, so collecting trace side
+        // effects would only add avoidable allocation churn.
         let tracing_enabled = self.current().tracing_enabled();
         if tracing_enabled {
             self.thread_state.install_trace_sink();
@@ -2520,7 +2522,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let range = K::range_with(idx, self.bindings());
 
         // Install trace sink if tracing is enabled for this module.
-        let tracing_enabled = self.current().tracing_enabled();
+        let tracing_enabled = self.current().tracing_enabled() && !self.stack().is_cold_iteration();
         if tracing_enabled {
             self.thread_state.install_trace_sink();
         }
@@ -2539,13 +2541,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Take accumulated traces.
         let trace_side_effects = if tracing_enabled {
-            if self.stack().is_cold_iteration() {
-                // Discard cold-start traces (matching error swallowing).
-                self.thread_state.take_trace_sink();
-                None
-            } else {
-                self.thread_state.take_trace_sink()
-            }
+            self.thread_state.take_trace_sink()
         } else {
             None
         };
