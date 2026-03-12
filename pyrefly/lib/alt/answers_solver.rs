@@ -53,7 +53,6 @@ use crate::alt::answers::OverloadedCallee;
 use crate::alt::answers::SolutionsEntry;
 use crate::alt::answers::SolutionsTable;
 use crate::alt::answers::TraceSideEffects;
-use crate::alt::answers::prepare_answer_for_calculation_write;
 use crate::alt::traits::Solve;
 use crate::binding::binding::AnyIdx;
 use crate::binding::binding::Binding;
@@ -2421,12 +2420,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Non-SCC path: write directly to Calculation as before.
             // No recursive placeholder can exist in the Calculation cell because
             // placeholders are stored only in SCC-local NodeState::HasPlaceholder.
-            let answer_for_write = prepare_answer_for_calculation_write::<K>(
-                self.solver(),
-                raw_answer,
-                "calculate_and_record_answer non-SCC path",
-            );
-            let (answer, did_write) = calculation.record_value(answer_for_write);
+            let (answer, did_write) = calculation.record_value(raw_answer);
             if did_write {
                 self.base_errors.extend(local_errors);
                 // Publish trace side effects alongside errors.
@@ -2675,11 +2669,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             answer
                 .downcast::<Arc<K::Answer>>()
                 .expect("write_unlock_same_module: type mismatch in batch commit"),
-        );
-        let typed_answer = prepare_answer_for_calculation_write::<K>(
-            self.solver(),
-            typed_answer,
-            "write_unlock_same_module",
         );
         let calculation = self.get_calculation(idx);
         let (_answer, did_write) = calculation.write_unlock(typed_answer);
