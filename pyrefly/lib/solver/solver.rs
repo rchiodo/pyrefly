@@ -183,7 +183,7 @@ impl QuantifiedHandle {
 /// variables. Access is "mutable xor shared" like ordinary references,
 /// except with runtime instead of static enforcement.
 #[derive(Debug, Default)]
-pub(crate) struct Variables(SmallMap<Var, RefCell<VariableNode>>);
+struct Variables(SmallMap<Var, RefCell<VariableNode>>);
 
 /// A union-find node. We store the parent pointer in a Cell so that we
 /// can implement path compression. We use a separate Cell instead of using
