@@ -161,9 +161,7 @@ impl TraceSideEffects {
     /// fully-resolved types without touching the solver.
     pub(crate) fn finalize(&mut self, solver: &Solver) {
         for ty in self.types.values_mut() {
-            let mut t = ty.as_ref().clone();
-            solver.deep_force_mut(&mut t);
-            *ty = Arc::new(t);
+            solver.deep_force_mut(Arc::make_mut(ty));
         }
         for callee in self.overloaded_callees.values_mut() {
             match callee {
@@ -185,9 +183,7 @@ impl TraceSideEffects {
             }
         }
         for ty in self.invoked_properties.values_mut() {
-            let mut t = ty.as_ref().clone();
-            solver.deep_force_mut(&mut t);
-            *ty = Arc::new(t);
+            solver.deep_force_mut(Arc::make_mut(ty));
         }
     }
 
