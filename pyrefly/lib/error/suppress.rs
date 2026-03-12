@@ -258,7 +258,7 @@ fn add_suppressions(
         // Track which suppression lines should be skipped because they're being merged
         let mut lines_to_skip: SmallSet<usize> = SmallSet::new();
         // Track which error lines have inline suppressions that were merged (so we replace inline)
-        let mut has_inline_suppression: SmallSet<usize> = SmallSet::new();
+        let mut has_inline_suppression = SmallSet::new();
 
         // Merge existing suppressions with new ones
         for (&error_line, new_comment) in deduped_errors.iter_mut() {

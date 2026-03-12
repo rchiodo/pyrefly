@@ -41,6 +41,7 @@ use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::fs_anyhow;
+use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
 use pyrefly_util::locked_map::LockedMap;
@@ -108,6 +109,7 @@ use crate::module::typeshed::BundledTypeshedStdlib;
 use crate::solver::solver::VarRecurser;
 use crate::state::epoch::Epoch;
 use crate::state::errors::Errors;
+use crate::state::errors::sorted_multi_line_fstring_ranges;
 use crate::state::load::FileContents;
 use crate::state::load::Load;
 use crate::state::loader::FindingOrError;
@@ -619,7 +621,12 @@ impl<'a> Transaction<'a> {
                 .into_iter()
                 .filter_map(|handle| {
                     self.with_module_config_inner(handle, |config, x| {
-                        Some((x.get_load()?, config.dupe()))
+                        let load = x.get_load()?;
+                        let fstring_ranges = x
+                            .get_ast()
+                            .map(|ast| sorted_multi_line_fstring_ranges(&ast, &load.module_info))
+                            .unwrap_or_default();
+                        Some((load, config.dupe(), fstring_ranges))
                     })
                 })
                 .collect(),
@@ -627,13 +634,28 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn get_all_errors(&self) -> Errors {
+        /// Extract f-string ranges from the AST if available.
+        fn fstring_ranges_from(
+            state: &dyn ModuleStateReader,
+            load: &Load,
+        ) -> Vec<(LineNumber, LineNumber)> {
+            state
+                .get_ast()
+                .map(|ast| sorted_multi_line_fstring_ranges(&ast, &load.module_info))
+                .unwrap_or_default()
+        }
+
         if self.data.updated_modules.is_empty() {
             // Optimized path
             return Errors::new(
                 self.readable
                     .modules
                     .values()
-                    .filter_map(|x| Some((x.state.get_load()?, x.config.dupe())))
+                    .filter_map(|x| {
+                        let load = x.state.get_load()?;
+                        let ranges = fstring_ranges_from(&x.state, &load);
+                        Some((load, x.config.dupe(), ranges))
+                    })
                     .collect(),
             );
         }
@@ -641,13 +663,18 @@ impl<'a> Transaction<'a> {
             .data
             .updated_modules
             .iter_unordered()
-            .filter_map(|x| Some((x.1.state.get_load()?, x.1.config.read().dupe())))
+            .filter_map(|x| {
+                let load = x.1.state.get_load()?;
+                let ranges = fstring_ranges_from(&x.1.state, &load);
+                Some((load, x.1.config.read().dupe(), ranges))
+            })
             .collect::<Vec<_>>();
         for (k, v) in self.readable.modules.iter() {
             if self.data.updated_modules.get(k).is_none()
                 && let Some(load) = v.state.get_load()
             {
-                res.push((load, v.config.dupe()));
+                let ranges = fstring_ranges_from(&v.state, &load);
+                res.push((load, v.config.dupe(), ranges));
             }
         }
         Errors::new(res)
