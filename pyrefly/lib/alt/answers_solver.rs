@@ -2443,9 +2443,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if did_write {
                 self.base_errors.extend(local_errors);
                 // Publish trace side effects alongside errors.
-                if let Some(mut traces) = trace_side_effects {
-                    traces.finalize(self.current().solver());
-                    traces.debug_assert_var_free();
+                if let Some(traces) = trace_side_effects {
                     self.current().merge_trace_side_effects(traces);
                 }
             }
@@ -2693,9 +2691,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
                 self.base_errors.extend(errors);
             }
-            if let Some(mut traces) = traces {
-                traces.finalize(self.current().solver());
-                traces.debug_assert_var_free();
+            if let Some(traces) = traces {
                 self.current().merge_trace_side_effects(traces);
             }
         }

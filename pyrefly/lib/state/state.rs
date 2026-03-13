@@ -2571,11 +2571,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
                         );
                         target_load.errors.extend(errors);
                     }
-                    if let Some(mut traces) = traces {
-                        // Finalize traces using the target module's solver,
-                        // then merge into the target module's trace store.
-                        traces.finalize(answers.solver());
-                        traces.debug_assert_var_free();
+                    if let Some(traces) = traces {
                         answers.merge_trace_side_effects(traces);
                     }
                 }
