@@ -1956,42 +1956,26 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         let bound =
                             restriction.as_type(self.type_order.stdlib(), &self.solver.heap);
                         drop(v2_ref);
+                        drop(variables);
 
                         // For constrained TypeVars, promote to the matching constraint type.
-                        if let Restriction::Constraints(ref constraints) = restriction {
-                            variables.update(*v2, Variable::Answer(t1_p.clone()));
-                            drop(variables);
+                        let answer = if let Restriction::Constraints(ref constraints) = restriction
+                        {
                             // Try promoted type first, then fall back to original (for literal bounds).
                             if let Some(constraint) =
                                 self.find_matching_constraint(&t1_p, constraints)
                             {
-                                let constraint = constraint.clone();
-                                self.solver
-                                    .variables
-                                    .lock()
-                                    .update(*v2, Variable::Answer(constraint));
+                                constraint.clone()
                             } else if let Some(constraint) =
                                 self.find_matching_constraint(t1, constraints)
                             {
-                                let constraint = constraint.clone();
-                                self.solver
-                                    .variables
-                                    .lock()
-                                    .update(*v2, Variable::Answer(constraint));
+                                constraint.clone()
                             } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
                                 // No individual constraint matched, but the type may still
                                 // be assignable to the constraint union (e.g. an abstract
                                 // `AnyStr` satisfies `str | bytes`). Fall back to bound
                                 // checking, mirroring the non-constraint code path.
-                                self.solver
-                                    .variables
-                                    .lock()
-                                    .update(*v2, Variable::Answer(t1.clone()));
                                 if self.is_subset_eq(t1, &bound).is_err() {
-                                    self.solver
-                                        .variables
-                                        .lock()
-                                        .update(*v2, Variable::Answer(t1_p.clone()));
                                     self.solver.instantiation_errors.write().insert(
                                         *v2,
                                         TypeVarSpecializationError {
@@ -2001,36 +1985,38 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                             error: err_p,
                                         },
                                     );
+                                    t1_p.clone()
+                                } else {
+                                    t1.clone()
                                 }
+                            } else {
+                                t1_p.clone()
+                            }
+                        } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
+                            // If the promoted type fails, try again with the original type, in case the bound itself is literal.
+                            // This could be more optimized, but errors are rare, so this code path should not be hot.
+                            if self.is_subset_eq(t1, &bound).is_err() {
+                                // If the original type is also an error, use the promoted type.
+                                self.solver.instantiation_errors.write().insert(
+                                    *v2,
+                                    TypeVarSpecializationError {
+                                        name,
+                                        got: t1_p.clone(),
+                                        want: bound,
+                                        error: err_p,
+                                    },
+                                );
+                                t1_p.clone()
+                            } else {
+                                t1.clone()
                             }
                         } else {
-                            variables.update(*v2, Variable::Answer(t1_p.clone()));
-                            drop(variables);
-                            if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
-                                // If the promoted type fails, try again with the original type, in case the bound itself is literal.
-                                // This could be more optimized, but errors are rare, so this code path should not be hot.
-                                self.solver
-                                    .variables
-                                    .lock()
-                                    .update(*v2, Variable::Answer(t1.clone()));
-                                if self.is_subset_eq(t1, &bound).is_err() {
-                                    // If the original type is also an error, use the promoted type.
-                                    self.solver
-                                        .variables
-                                        .lock()
-                                        .update(*v2, Variable::Answer(t1_p.clone()));
-                                    self.solver.instantiation_errors.write().insert(
-                                        *v2,
-                                        TypeVarSpecializationError {
-                                            name,
-                                            got: t1_p.clone(),
-                                            want: bound,
-                                            error: err_p,
-                                        },
-                                    );
-                                }
-                            }
-                        }
+                            t1_p.clone()
+                        };
+                        self.solver
+                            .variables
+                            .lock()
+                            .update(*v2, Variable::Answer(answer));
                         // Widen None to None | Any for PartialQuantified, matching
                         // the PartialContained behavior (see comment there).
                         if is_partial {
