@@ -530,7 +530,6 @@ mod tests {
     ///
     /// On the click repo, this improves go-to-def accuracy by 15% (83% -> 98%).
     #[test]
-    #[ignore] // Enable after PythonToolMarker is implemented
     fn test_python_tool_marker_beats_bare_marker() {
         let tempdir = tempfile::tempdir().unwrap();
         let root = tempdir.path();
@@ -566,8 +565,8 @@ mod tests {
         // The parent's pyproject.toml with [tool.ruff] should win because
         // PythonToolMarker (Group 2) takes priority over bare Marker (Group 3).
         assert_eq!(
-            config.source.root(),
-            Some(root),
+            config.source,
+            ConfigSource::PythonToolMarker(root.join("pyproject.toml")),
             "parent's pyproject.toml with [tool.ruff] should take priority over bare child pyproject.toml"
         );
     }
