@@ -282,6 +282,51 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    /// Extract element expressions from a literal container (list, tuple, set)
+    /// or a builtin container constructor call wrapping one (list/tuple/set/frozenset).
+    /// Returns `None` if the expression is not a container whose elements can
+    /// be statically enumerated.
+    fn literal_membership_exprs(&self, expr: &Expr, errors: &ErrorCollector) -> Option<Vec<Expr>> {
+        match expr {
+            Expr::List(list) => Some(list.elts.clone()),
+            Expr::Tuple(tuple) => Some(tuple.elts.clone()),
+            Expr::Set(set) => Some(set.elts.clone()),
+            Expr::Call(call) => {
+                const CONTAINER_NAMES: &[&str] = &["list", "tuple", "set", "frozenset"];
+                // Cheap syntactic pre-check: only proceed when the callee looks like
+                // it *could* be a builtin container constructor (bare name or
+                // `builtins.<name>`). This avoids an expensive `expr_infer` call for
+                // the common case of arbitrary function calls.
+                let callee_name = match &*call.func {
+                    Expr::Name(name) => name.id.as_str(),
+                    Expr::Attribute(attr) => attr.attr.as_str(),
+                    _ => return None,
+                };
+                if !CONTAINER_NAMES.contains(&callee_name) {
+                    return None;
+                }
+                if !call.arguments.keywords.is_empty() {
+                    return None;
+                }
+                // Confirm via type inference that it's actually the builtin, to guard
+                // against shadowing or unrelated attributes with the same name.
+                let is_builtin_container = match self.expr_infer(&call.func, errors) {
+                    Type::ClassDef(cls) => CONTAINER_NAMES.iter().any(|n| cls.is_builtin(n)),
+                    _ => false,
+                };
+                if !is_builtin_container {
+                    return None;
+                }
+                match &*call.arguments.args {
+                    [] => Some(Vec::new()),
+                    [expr] => self.literal_membership_exprs(expr, errors),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn narrow_isinstance(&self, left: &Type, right: &Type) -> Type {
         let mut res = Vec::new();
         for right in self.as_class_info(right.clone()) {
@@ -888,15 +933,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.is_not_type_for_pattern(ty, |t| self.is_subset_eq(t, &mapping))
             }
             AtomicNarrowOp::In(v) => {
-                // First, check for List, Tuple, and Set literal expressions (syntactic check,
-                // avoids type inference on the container itself)
-                let exprs = match v {
-                    Expr::List(list) => Some(list.elts.clone()),
-                    Expr::Tuple(tuple) => Some(tuple.elts.clone()),
-                    Expr::Set(set) => Some(set.elts.clone()),
-                    _ => None,
-                };
-                if let Some(exprs) = exprs {
+                // First, check for literal containers. We also unwrap builtin
+                // container constructor calls (list/tuple/set/frozenset) when
+                // their argument is itself a literal container.
+                if let Some(exprs) = self.literal_membership_exprs(v, errors) {
                     // Bail out if any element is a starred expression (e.g., `x in [*y, 1]`).
                     // We can't know all values at compile time when unpacking occurs.
                     if exprs.iter().any(|e| matches!(e, Expr::Starred(_))) {
@@ -954,15 +994,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             AtomicNarrowOp::NotIn(v) => {
-                // First, check for List, Tuple, and Set literal expressions (syntactic check,
-                // avoids type inference on the container itself)
-                let exprs = match v {
-                    Expr::List(list) => Some(list.elts.clone()),
-                    Expr::Tuple(tuple) => Some(tuple.elts.clone()),
-                    Expr::Set(set) => Some(set.elts.clone()),
-                    _ => None,
-                };
-                if let Some(exprs) = exprs {
+                // First, check for literal containers. We also unwrap builtin
+                // container constructor calls (list/tuple/set/frozenset) when
+                // their argument is itself a literal container.
+                if let Some(exprs) = self.literal_membership_exprs(v, errors) {
                     // Bail out if any element is a starred expression (e.g., `x not in [*y, 1]`).
                     // We can't know all values at compile time when unpacking occurs.
                     if exprs.iter().any(|e| matches!(e, Expr::Starred(_))) {

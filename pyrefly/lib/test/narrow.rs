@@ -1885,6 +1885,62 @@ def test(x: Literal["a", "b", "c", "d"]) -> None:
 );
 
 testcase!(
+    test_narrow_in_frozenset_literal_iterable,
+    r#"
+from typing import assert_type, Literal, Never, TypedDict
+
+VALUES = dict(
+    autoremove="The following packages will be REMOVED",
+    autoclean="Del ",
+)
+
+def cleanup(operation: str | None = None) -> bool:
+    if operation not in frozenset(["autoremove", "autoclean"]):
+        raise AssertionError(f"Bad operation: {operation}")
+    return VALUES[operation] in "some output"
+
+def positive_narrowing(x: int | str) -> None:
+    if x in frozenset([1, 2]):
+        assert_type(x, Literal[1, 2])
+
+def tuple_arg(x: int | str) -> None:
+    if x in frozenset((1, 2)):
+        assert_type(x, Literal[1, 2])
+
+def set_arg(x: int | str) -> None:
+    if x in frozenset({1, 2}):
+        assert_type(x, Literal[1, 2])
+
+def set_constructor(x: int | str) -> None:
+    if x in set([1, 2]):
+        assert_type(x, Literal[1, 2])
+
+def list_constructor(x: int | str) -> None:
+    if x in list((1, 2)):
+        assert_type(x, Literal[1, 2])
+
+def tuple_constructor(x: int | str) -> None:
+    if x in tuple([1, 2]):
+        assert_type(x, Literal[1, 2])
+
+def empty_frozenset(x: int | str) -> None:
+    if x in frozenset():
+        assert_type(x, Never)
+
+def qualified_builtins_frozenset(x: int | str) -> None:
+    import builtins
+    if x in builtins.frozenset([1, 2]):
+        assert_type(x, Literal[1, 2])
+
+def non_literal_arg(x: int | str) -> None:
+    y = [1, 2]
+    if x in frozenset(y):
+        # Can't statically enumerate elements, no narrowing.
+        assert_type(x, int | str)
+"#,
+);
+
+testcase!(
     test_narrow_len,
     r#"
 from typing import assert_type, Never, NamedTuple
