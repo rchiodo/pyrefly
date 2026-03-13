@@ -4676,28 +4676,66 @@ impl Server {
         transaction.symbols(&handle)
     }
 
-    #[allow(deprecated)] // The `deprecated` field
+    /// Run local and external workspace symbol queries in parallel, merging
+    /// results with local results taking priority (external results for files
+    /// already covered by local results are skipped).
+    #[allow(deprecated)] // SymbolInformation's `deprecated` field is itself marked #[deprecated]
     fn workspace_symbols(
         &self,
         transaction: &Transaction<'_>,
         query: &str,
     ) -> Vec<SymbolInformation> {
-        transaction
-            .workspace_symbols(query, Some(&self.lsp_thread_pool))
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(name, kind, location)| {
-                self.to_lsp_location(&location)
-                    .map(|location| SymbolInformation {
-                        name,
-                        kind,
-                        location,
-                        tags: None,
-                        deprecated: None,
-                        container_name: None,
-                    })
-            })
-            .collect()
+        let external_provider = self.external_references.clone();
+        let workspace_uri = self
+            .initialize_params
+            .workspace_folders
+            .as_ref()
+            .and_then(|folders| folders.first())
+            .map(|f| f.uri.clone());
+
+        // Use std::thread::scope so we can borrow from the current stack frame.
+        let (local_results, external_results) = std::thread::scope(|s| {
+            let ext_handle = workspace_uri.as_ref().map(|uri| {
+                s.spawn(|| {
+                    external_provider.workspace_symbols(query, uri, Duration::from_secs(5), None)
+                })
+            });
+
+            let local_results: Vec<SymbolInformation> = transaction
+                .workspace_symbols(query, Some(&self.lsp_thread_pool))
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|(name, kind, location)| {
+                    self.to_lsp_location(&location)
+                        .map(|location| SymbolInformation {
+                            name,
+                            kind,
+                            location,
+                            tags: None,
+                            deprecated: None,
+                            container_name: None,
+                        })
+                })
+                .collect();
+
+            let external_results = ext_handle
+                .map(|h| h.join().unwrap_or_default())
+                .unwrap_or_default();
+            (local_results, external_results)
+        });
+
+        // Local results take priority; skip external results for files already covered.
+        let local_uris: HashSet<Url> = local_results
+            .iter()
+            .map(|s| s.location.uri.clone())
+            .collect();
+        let mut merged = local_results;
+        for sym in external_results {
+            if !local_uris.contains(&sym.location.uri) {
+                merged.push(sym);
+            }
+        }
+        merged
     }
 
     fn append_unreachable_diagnostics(
