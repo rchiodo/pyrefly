@@ -98,8 +98,11 @@ enum Variable {
     /// A variable due to generic instantiation, `def f[T](x: T): T` with `f(1)`
     Quantified {
         quantified: Quantified,
-        /// Does this variable have `typing.Any` as a lower bound?
-        has_any_lower_bound: bool,
+        // TODO(https://github.com/facebook/pyrefly/issues/105): This will eventually be used to
+        // collect lower bounds for typevars rather than eagerly pinning them. Currently, the only
+        // thing it does is store `Any` lower bounds to avoid pinning to `Any` unless we have no
+        // other solution.
+        lower_bounds: Vec<Type>,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
     Recursive,
@@ -143,7 +146,7 @@ impl Display for Variable {
             Variable::PartialQuantified(q)
             | Variable::Quantified {
                 quantified: q,
-                has_any_lower_bound: _,
+                lower_bounds: _,
             } => {
                 let label = if matches!(self, Variable::PartialQuantified(_)) {
                     "PartialQuantified"
@@ -374,7 +377,7 @@ impl Solver {
             }
             Variable::Quantified {
                 quantified: q,
-                has_any_lower_bound: _,
+                lower_bounds: _,
             } => {
                 // A Variable::Quantified should always be finished (see `finish_quantified`) by
                 // the code that creates it, because we need to know when we're done collecting
@@ -492,7 +495,7 @@ impl Solver {
                 let ty = match &mut *e {
                     Variable::Quantified {
                         quantified: q,
-                        has_any_lower_bound: _,
+                        lower_bounds: _,
                     } => q.as_gradual_type(),
                     Variable::PartialQuantified(q) => q.as_gradual_type(),
                     _ => self.heap.mk_any_implicit(),
@@ -765,7 +768,7 @@ impl Solver {
                 *v,
                 Variable::Quantified {
                     quantified: (*q).clone(),
-                    has_any_lower_bound: false,
+                    lower_bounds: Vec::new(),
                 },
             );
         }
@@ -857,16 +860,16 @@ impl Solver {
         }
     }
 
-    /// Add `Any` as a lower bound to the variable if it is a Quantified
-    pub fn add_any_lower_bound(&self, v: Var) {
+    /// Add a lower bound to the variable if it is a Quantified
+    pub fn add_lower_bound(&self, v: Var, bound: Type) {
         let lock = self.variables.lock();
         let mut e = lock.get_mut(v);
         match &mut *e {
             Variable::Quantified {
                 quantified: _,
-                has_any_lower_bound,
+                lower_bounds,
             } => {
-                *has_any_lower_bound = true;
+                lower_bounds.push(bound);
             }
             _ => {}
         }
@@ -896,16 +899,15 @@ impl Solver {
                 }
                 Variable::Quantified {
                     quantified: q,
-                    has_any_lower_bound: false,
-                } if infer_with_first_use => {
+                    lower_bounds,
+                } if infer_with_first_use && lower_bounds.is_empty() => {
                     *e = Variable::finished(q);
                 }
                 Variable::Quantified {
                     quantified: q,
-                    has_any_lower_bound: _,
+                    lower_bounds: _,
                 } => {
-                    // Either `infer_with_first_use` is false or the variable has already been
-                    // solved to `Any`.
+                    // Either `infer_with_first_use` is false or the variable has already been solved.
                     *e = Variable::Answer(q.as_gradual_type());
                 }
                 _ => {}
@@ -943,7 +945,7 @@ impl Solver {
                     v,
                     Variable::Quantified {
                         quantified: param.clone(),
-                        has_any_lower_bound: false,
+                        lower_bounds: Vec::new(),
                     },
                 );
             }
@@ -965,9 +967,10 @@ impl Solver {
             if let Type::Var(v) = t
                 && let Variable::Quantified {
                     quantified: q,
-                    // If the variable has already been solved to `Any`, do not generalize it.
-                    has_any_lower_bound: false,
+                    lower_bounds,
                 } = &*lock.get(*v)
+                // If the variable has already been solved, do not generalize it.
+                && lower_bounds.is_empty()
                 && *q == *param
             {
                 *t = param.clone().to_type(&self.heap);
@@ -1698,11 +1701,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     (
                         Variable::Quantified {
                             quantified: q1,
-                            has_any_lower_bound: _,
+                            lower_bounds: _,
                         },
                         Variable::Quantified {
                             quantified: q2,
-                            has_any_lower_bound: _,
+                            lower_bounds: _,
                         },
                     )
                     | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
@@ -1756,7 +1759,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         _,
                         Variable::Quantified {
                             quantified: _,
-                            has_any_lower_bound: _,
+                            lower_bounds: _,
                         },
                     ) => {
                         drop(variable1);
@@ -1787,7 +1790,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Quantified {
                         quantified: q,
-                        has_any_lower_bound: _,
+                        lower_bounds: _,
                     }
                     | Variable::PartialQuantified(q) => {
                         let is_partial = matches!(&*v1_ref, Variable::PartialQuantified(_));
@@ -1941,7 +1944,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Quantified {
                         quantified: q,
-                        has_any_lower_bound: _,
+                        lower_bounds: _,
                     }
                     | Variable::PartialQuantified(q) => {
                         let is_partial = matches!(&*v2_ref, Variable::PartialQuantified(_));
