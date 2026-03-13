@@ -101,16 +101,19 @@ def generate_reasons(ranked_issues: list[dict], v1_gap: dict) -> dict:
 
     system_prompt = (
         "You are a technical analyst reviewing a type checker's issue backlog. "
-        "Given two lists of issues, provide a concise reason (1 sentence, max 15 words) "
-        "for each issue explaining why it should be reconsidered.\n\n"
-        "For Q2 (consider removing from V1 milestone): explain why the issue may be "
-        "less impactful than originally thought. Look for: stale issues, epics/trackers "
-        "that aren't directly actionable, borderline scores, blocked/needs-discussion, "
-        "false negatives (less urgent than false positives), niche scenarios.\n\n"
-        "For Q3 (consider adding to V1 milestone): explain why the issue deserves "
-        "inclusion. Look for: high primer impact (many projects/errors), strategic "
-        "adoption tags (google, pytorch, pydantic), false positive patterns, "
-        "common Python idioms affected.\n\n"
+        "Given two lists of issues, provide a concise reason (1-2 sentences, max 25 words) "
+        "for each issue.\n\n"
+        "For Q2 (consider REMOVING from V1 milestone): explain the WEAKNESS — why this "
+        "issue is LESS important than it seems. Focus on why it should be deprioritized: "
+        "stale/inactive, epic/tracker not directly actionable, blocked/needs-discussion, "
+        "false negative (less urgent than false positive), niche scenario, low engagement, "
+        "borderline score. Do NOT describe the issue's importance or impact — describe "
+        "what makes it a weak candidate for V1. Do NOT cite implementation difficulty or "
+        "complexity as a reason to deprioritize — difficulty is not a deterrent for V1.\n\n"
+        "For Q3 (consider ADDING to V1 milestone): explain the STRENGTH — why this "
+        "issue is MORE important than its current milestone suggests. Focus on: "
+        "high primer impact (N projects, N errors), strategic adoption tags (google, "
+        "pytorch, pydantic), false positive driving users away, common Python idiom.\n\n"
         "Return JSON with exactly this structure:\n"
         '{"q2_reasons": {"123": "reason...", ...}, "q3_reasons": {"456": "reason...", ...}}'
     )
@@ -289,6 +292,11 @@ def apply_labels(repo: str, analysis: dict, github_token: str) -> dict:
     return applied
 
 
+def _escape_md_table(text: str) -> str:
+    """Escape characters that break markdown table cells."""
+    return text.replace("|", "\\|").replace("`", "\\`")
+
+
 def format_v1_report(analysis: dict) -> str:
     """Generate a markdown report for the V1 gap analysis with reasons.
 
@@ -332,7 +340,7 @@ def format_v1_report(analysis: dict) -> str:
             reverse=True,
         ):
             issue = issues_by_num.get(num, {})
-            title = issue.get("title", f"Issue #{num}")[:60]
+            title = _escape_md_table(issue.get("title", f"Issue #{num}")[:60])
             score = issue.get("final_score", "?")
             tier = issue.get("tier", "?")
             lines.append(
@@ -353,10 +361,10 @@ def format_v1_report(analysis: dict) -> str:
             reverse=True,
         ):
             issue = issues_by_num.get(num, {})
-            title = issue.get("title", f"Issue #{num}")[:60]
+            title = _escape_md_table(issue.get("title", f"Issue #{num}")[:60])
             score = issue.get("final_score", "?")
             tier = issue.get("tier", "?")
-            reason = q2_reasons.get(num, "")
+            reason = _escape_md_table(q2_reasons.get(num, ""))
             lines.append(
                 f"| [#{num}](https://github.com/facebook/pyrefly/issues/{num}) "
                 f"| {title} | {score} | {tier} | {reason} |"
@@ -375,10 +383,10 @@ def format_v1_report(analysis: dict) -> str:
             reverse=True,
         ):
             issue = issues_by_num.get(num, {})
-            title = issue.get("title", f"Issue #{num}")[:60]
+            title = _escape_md_table(issue.get("title", f"Issue #{num}")[:60])
             score = issue.get("final_score", "?")
             tier = issue.get("tier", "?")
-            reason = q3_reasons.get(num, "")
+            reason = _escape_md_table(q3_reasons.get(num, ""))
             lines.append(
                 f"| [#{num}](https://github.com/facebook/pyrefly/issues/{num}) "
                 f"| {title} | {score} | {tier} | {reason} |"
