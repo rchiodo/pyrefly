@@ -2928,3 +2928,29 @@ class Constraint:
         completion_labels
     );
 }
+
+#[test]
+fn completion_namedtuple_spread_fields() {
+    let code = r#"
+import collections
+
+BaseFieldInfo = collections.namedtuple("BaseFieldInfo", ["name", "type_code", "size"])
+ExtendedFieldInfo = collections.namedtuple(
+    "ExtendedFieldInfo",
+    [*BaseFieldInfo._fields, "extra", "comment"],
+)
+
+info = ExtendedFieldInfo()
+info.
+#    ^
+"#;
+    let report =
+        get_batched_lsp_operations_report_allow_error(&[("main", code)], get_default_test_report());
+    let trimmed = report.trim();
+    for expected in ["- (Field) extra", "- (Field) comment"] {
+        assert!(
+            trimmed.contains(expected),
+            "missing {expected} in completions:\n{trimmed}"
+        );
+    }
+}

@@ -95,14 +95,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .collect()
     }
 
-    fn get_named_tuple_new(&self, cls: &Class, elements: &SmallSet<Name>) -> ClassSynthesizedField {
+    /// Synthesize `__new__` for a namedtuple. When `has_dynamic_fields` is true,
+    /// the field list couldn't be fully resolved statically (e.g. starred
+    /// unpacking), so we use `*args, **kwargs` instead of specific field params.
+    /// We can't know the positions of the known fields relative to the dynamic
+    /// ones, so requiring them as leading positional params would be incorrect.
+    fn get_named_tuple_new(
+        &self,
+        cls: &Class,
+        elements: &SmallSet<Name>,
+        has_dynamic_fields: bool,
+    ) -> ClassSynthesizedField {
         let mut params = vec![Param::Pos(
             Name::new_static("cls"),
             self.heap
                 .mk_type_form(self.heap.mk_self_type(self.as_class_type_unchecked(cls))),
             Required::Required,
         )];
-        params.extend(self.get_named_tuple_field_params(cls, elements));
+        if has_dynamic_fields {
+            // The known fields are interleaved with dynamically-resolved fields
+            // at unknown positions, so we can't synthesize accurate positional
+            // params. Accept everything and rely on runtime behavior.
+            params.push(Param::VarArg(None, self.heap.mk_any_implicit()));
+            params.push(Param::Kwargs(None, self.heap.mk_any_implicit()));
+        } else {
+            params.extend(self.get_named_tuple_field_params(cls, elements));
+        }
         let ty = self.heap.mk_function(Function {
             signature: Callable::list(
                 ParamList::new(params),
@@ -170,7 +188,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let metadata = self.get_metadata_for_class(cls);
         let named_tuple = metadata.named_tuple_metadata()?;
         Some(ClassSynthesizedFields::new(smallmap! {
-            dunder::NEW => self.get_named_tuple_new(cls, &named_tuple.elements),
+            dunder::NEW => self.get_named_tuple_new(cls, &named_tuple.elements, named_tuple.has_dynamic_fields),
             dunder::INIT => self.get_named_tuple_init(cls),
             dunder::MATCH_ARGS => self.get_named_tuple_match_args(&named_tuple.elements),
             dunder::ITER => self.get_named_tuple_iter(cls, &named_tuple.elements)
