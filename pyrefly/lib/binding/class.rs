@@ -615,6 +615,15 @@ impl<'a> BindingsBuilder<'a> {
             {
                 Vec::new()
             }
+            // namedtuple('Point', [*Base._fields, 'z'])
+            // Starred expressions can't be resolved statically, so treat
+            // the namedtuple as having dynamic fields (like Pyright/ty do).
+            [Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. })]
+                if elts.iter().any(|elt| matches!(elt, Expr::Starred(_))) =>
+            {
+                has_dynamic_fields = true;
+                Vec::new()
+            }
             // namedtuple('Point', ['x', 'y'])
             [Expr::List(ExprList { elts, .. })]
                 if matches!(elts.as_slice(), [Expr::StringLiteral(_), ..]) =>
