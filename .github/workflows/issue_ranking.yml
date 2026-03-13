@@ -17,6 +17,10 @@ on:
         required: false
         type: boolean
         default: true
+      v1_analysis_run_id:
+        description: 'Run ID to pull ranking.json from (V1 analysis only, skips primer+ranking)'
+        required: false
+        default: ''
 
 permissions: {}
 
@@ -25,7 +29,7 @@ jobs:
   primer:
     name: Primer shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
-    if: ${{ inputs.run_primer }}
+    if: ${{ inputs.run_primer && inputs.v1_analysis_run_id == '' }}
     timeout-minutes: 300
     permissions:
       contents: read
@@ -83,7 +87,7 @@ jobs:
     name: Merge primer shards
     runs-on: ubuntu-latest
     needs: [primer]
-    if: ${{ inputs.run_primer }}
+    if: ${{ inputs.run_primer && inputs.v1_analysis_run_id == '' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -124,11 +128,11 @@ jobs:
     name: Collect and rank issues
     runs-on: ubuntu-latest
     needs: [primer-merge]
-    if: ${{ always() && !cancelled() }}
+    if: ${{ always() && !cancelled() && inputs.v1_analysis_run_id == '' }}
     timeout-minutes: 120
     permissions:
       contents: read
-      issues: read
+      issues: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -253,7 +257,21 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.PRIMER_CLASSIFIER_API_KEY }}
 
-      # Phase 3: Summary
+      # Phase 3: V1 gap analysis (1 Haiku call + label management)
+      - name: V1 gap analysis
+        run: |
+          echo "=== V1 Gap Analysis ==="
+          python -m scripts.issue_ranker --mode v1-analysis \
+            --ranking-json /tmp/ranking.json \
+            --output /tmp/v1_analysis.md \
+            --apply-labels \
+            2>&1 | tee /tmp/v1_analysis_log.txt
+          cat /tmp/v1_analysis.md >> $GITHUB_STEP_SUMMARY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.PRIMER_CLASSIFIER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Phase 4: Summary
       - name: Print ranking summary
         run: |
           echo "=== Ranking Summary ==="
@@ -292,3 +310,54 @@ jobs:
             /tmp/issue_data.json
             /tmp/collect_log.txt
             /tmp/ranking_log.txt
+            /tmp/v1_analysis.md
+            /tmp/v1_analysis_log.txt
+
+  # Job 4: Standalone V1 analysis (reuse ranking artifacts from a previous run)
+  v1-analysis-standalone:
+    name: V1 analysis (standalone)
+    runs-on: ubuntu-latest
+    if: ${{ inputs.v1_analysis_run_id != '' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            scripts/issue_ranker
+            scripts/llm_transport.py
+            scripts/primer_classifier
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Download ranking artifacts from previous run
+        run: |
+          gh run download ${{ inputs.v1_analysis_run_id }} \
+            -n issue-ranking -D /tmp/prev_run
+          ls -la /tmp/prev_run/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run V1 analysis
+        run: |
+          python -m scripts.issue_ranker --mode v1-analysis \
+            --ranking-json /tmp/prev_run/ranking.json \
+            --output /tmp/v1_analysis.md \
+            --apply-labels \
+            2>&1 | tee /tmp/v1_analysis_log.txt
+          cat /tmp/v1_analysis.md >> $GITHUB_STEP_SUMMARY
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.PRIMER_CLASSIFIER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: v1-analysis
+          path: |
+            /tmp/v1_analysis.md
+            /tmp/v1_analysis_log.txt

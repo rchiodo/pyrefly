@@ -23,6 +23,17 @@ Usage:
     --pyrefly /path/to/pyrefly \
     --primer-data /tmp/primer_errors.json \
     --output /tmp/ranking.md --output-json /tmp/ranking.json
+
+  # V1 gap analysis (post-processing, needs ANTHROPIC_API_KEY)
+  python3 -m scripts.issue_ranker --mode v1-analysis \
+    --ranking-json /tmp/ranking.json \
+    --output /tmp/v1_analysis.md
+
+  # V1 gap analysis with label management (needs GITHUB_TOKEN too)
+  python3 -m scripts.issue_ranker --mode v1-analysis \
+    --ranking-json /tmp/ranking.json \
+    --output /tmp/v1_analysis.md \
+    --apply-labels
 """
 
 from __future__ import annotations
@@ -30,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 
@@ -294,9 +306,10 @@ def main() -> None:
     )
     parser.add_argument(
         "--mode",
-        choices=["collect", "rank", "full"],
+        choices=["collect", "rank", "full", "v1-analysis"],
         required=True,
-        help="collect: fetch+enrich issues; rank: run LLM pipeline; full: both",
+        help="collect: fetch+enrich issues; rank: run LLM pipeline; "
+        "full: both; v1-analysis: post-process ranking.json for V1 gap report",
     )
     parser.add_argument(
         "--labels",
@@ -336,6 +349,16 @@ def main() -> None:
         "If the file exists with valid data, passes 1-4 are skipped.",
     )
     parser.add_argument(
+        "--ranking-json",
+        help="Path to ranking.json (for v1-analysis mode)",
+    )
+    parser.add_argument(
+        "--apply-labels",
+        action="store_true",
+        help="Apply V1 analysis labels to GitHub issues "
+        "(only manages v1-verified/consider-adding/removing labels)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -354,6 +377,23 @@ def main() -> None:
     elif args.mode == "full":
         issue_data = collect_issue_data(args)
         run_ranking(args, issue_data)
+    elif args.mode == "v1-analysis":
+        from .v1_analysis import run_v1_analysis
+
+        ranking_json = args.ranking_json or args.output_json
+        if not ranking_json:
+            print(
+                "Error: --ranking-json (or --output-json) required for v1-analysis mode",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        run_v1_analysis(
+            ranking_json=ranking_json,
+            output_md=args.output or "",
+            repo="facebook/pyrefly",
+            github_token=os.environ.get("GITHUB_TOKEN", ""),
+            apply=args.apply_labels,
+        )
 
 
 if __name__ == "__main__":

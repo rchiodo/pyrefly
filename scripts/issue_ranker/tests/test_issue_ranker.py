@@ -16,9 +16,12 @@ Tests cover:
 - report_formatter: markdown/JSON output
 """
 
+import io
+import json
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -36,6 +39,15 @@ from relationship_resolver import (
 )
 from report_formatter import format_json, format_markdown
 from status_classifier import _format_errors, _heuristic_classify
+from v1_analysis import (
+    _cleanup_managed_labels,
+    _ensure_labels_exist,
+    _github_api,
+    apply_labels,
+    format_v1_report,
+    generate_reasons,
+    run_v1_analysis,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -706,6 +718,474 @@ class TestFormatJson(unittest.TestCase):
         self.assertEqual(output["ranked_issues"][0]["number"], 100)
         self.assertIn("timestamp", output)
         self.assertEqual(output["cost_estimate"], 1.00)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# v1_analysis tests
+# ──────────────────────────────────────────────────────────────────────
+class TestFormatV1Report(unittest.TestCase):
+    """Test V1 gap analysis report generation."""
+
+    def _make_analysis(self):
+        """Build a minimal analysis dict for testing."""
+        return {
+            "v1_gap": {
+                "v1_issue_count": 3,
+                "top_n_compared": 3,
+                "overlap_count": 1,
+                "overlap_percentage": 33.3,
+                "overlap_issues": [100],
+                "in_v1_not_top_ranked": [200],
+                "in_top_ranked_not_v1": [300],
+            },
+            "ranked_issues": [
+                {
+                    "number": 100,
+                    "title": "Overlap issue",
+                    "final_score": 90,
+                    "tier": "critical",
+                },
+                {
+                    "number": 200,
+                    "title": "Consider removing",
+                    "final_score": 40,
+                    "tier": "low",
+                },
+                {
+                    "number": 300,
+                    "title": "Consider adding",
+                    "final_score": 85,
+                    "tier": "critical",
+                },
+            ],
+            "reasons": {
+                "q2_reasons": {200: "stale, no activity"},
+                "q3_reasons": {300: "high primer impact, 50 projects"},
+            },
+        }
+
+    def test_contains_overview(self):
+        md = format_v1_report(self._make_analysis())
+        self.assertIn("V1 Gap Analysis with Reasons", md)
+        self.assertIn("V1 issues: 3", md)
+        self.assertIn("Overlap: 1 (33.3%)", md)
+
+    def test_contains_verified_section(self):
+        md = format_v1_report(self._make_analysis())
+        self.assertIn("Verified V1 Issues (1)", md)
+        self.assertIn("#100", md)
+        self.assertIn("Overlap issue", md)
+
+    def test_contains_q2_with_reason(self):
+        md = format_v1_report(self._make_analysis())
+        self.assertIn("Consider Removing from V1 (1)", md)
+        self.assertIn("#200", md)
+        self.assertIn("stale, no activity", md)
+
+    def test_contains_q3_with_reason(self):
+        md = format_v1_report(self._make_analysis())
+        self.assertIn("Consider Adding to V1 (1)", md)
+        self.assertIn("#300", md)
+        self.assertIn("high primer impact, 50 projects", md)
+
+    def test_empty_gap(self):
+        """No V1 issues should produce empty sections."""
+        analysis = {
+            "v1_gap": {
+                "v1_issue_count": 0,
+                "top_n_compared": 0,
+                "overlap_count": 0,
+                "overlap_percentage": 0,
+                "overlap_issues": [],
+                "in_v1_not_top_ranked": [],
+                "in_top_ranked_not_v1": [],
+            },
+            "ranked_issues": [],
+            "reasons": {"q2_reasons": {}, "q3_reasons": {}},
+        }
+        md = format_v1_report(analysis)
+        self.assertIn("Verified V1 Issues (0)", md)
+        self.assertIn("Consider Removing from V1 (0)", md)
+        self.assertIn("Consider Adding to V1 (0)", md)
+
+    def test_missing_reasons(self):
+        """Issues without LLM reasons should still appear (empty reason column)."""
+        analysis = self._make_analysis()
+        analysis["reasons"] = {"q2_reasons": {}, "q3_reasons": {}}
+        md = format_v1_report(analysis)
+        # Issue still appears even without a reason
+        self.assertIn("#200", md)
+        self.assertIn("#300", md)
+
+    def test_sorted_by_score_descending(self):
+        """Issues within each section should be sorted by score (highest first)."""
+        analysis = self._make_analysis()
+        analysis["v1_gap"]["in_v1_not_top_ranked"] = [200, 201]
+        analysis["ranked_issues"].append(
+            {
+                "number": 201,
+                "title": "Higher scored removal",
+                "final_score": 60,
+                "tier": "medium",
+            }
+        )
+        analysis["reasons"]["q2_reasons"][201] = "borderline"
+        md = format_v1_report(analysis)
+        # #201 (score 60) should appear before #200 (score 40)
+        pos_201 = md.index("#201")
+        pos_200 = md.index("#200")
+        self.assertLess(pos_201, pos_200)
+
+
+class TestGithubApi(unittest.TestCase):
+    """Test _github_api HTTP wrapper."""
+
+    @patch("v1_analysis.urllib.request.urlopen")
+    def test_returns_parsed_json(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"id": 1}'
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        result = _github_api("GET", "https://api.github.com/test", "tok123")
+        self.assertEqual(result, {"id": 1})
+
+    @patch("v1_analysis.urllib.request.urlopen")
+    def test_returns_none_on_204(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 204
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        result = _github_api("DELETE", "https://api.github.com/test", "tok123")
+        self.assertIsNone(result)
+
+    @patch("v1_analysis.urllib.request.urlopen")
+    def test_returns_none_on_404(self, mock_urlopen):
+        import urllib.error
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "url", 404, "Not Found", {}, io.BytesIO(b"")
+        )
+        result = _github_api("GET", "https://api.github.com/test", "tok123")
+        self.assertIsNone(result)
+
+    @patch("v1_analysis.urllib.request.urlopen")
+    def test_raises_on_500(self, mock_urlopen):
+        import urllib.error
+
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "url", 500, "Server Error", {}, io.BytesIO(b"")
+        )
+        with self.assertRaises(urllib.error.HTTPError):
+            _github_api("GET", "https://api.github.com/test", "tok123")
+
+    @patch("v1_analysis.urllib.request.urlopen")
+    def test_sends_body_as_json(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"{}"
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+
+        _github_api("POST", "https://api.github.com/test", "tok", {"key": "val"})
+        # Verify the request was made with JSON body
+        req = mock_urlopen.call_args[0][0]
+        self.assertEqual(req.data, b'{"key": "val"}')
+        self.assertEqual(req.get_header("Content-type"), "application/json")
+
+
+class TestEnsureLabelsExist(unittest.TestCase):
+    """Test _ensure_labels_exist creates missing labels."""
+
+    @patch("v1_analysis._github_api")
+    def test_creates_missing_labels(self, mock_api):
+        # All GET requests return None (label doesn't exist)
+        mock_api.return_value = None
+        _ensure_labels_exist("facebook/pyrefly", "tok")
+
+        # 3 GETs (one per label) + 3 POSTs (create each)
+        self.assertEqual(mock_api.call_count, 6)
+        post_calls = [c for c in mock_api.call_args_list if c[0][0] == "POST"]
+        self.assertEqual(len(post_calls), 3)
+
+    @patch("v1_analysis._github_api")
+    def test_skips_existing_labels(self, mock_api):
+        # All GET requests return a label (already exists)
+        mock_api.return_value = {"name": "exists"}
+        _ensure_labels_exist("facebook/pyrefly", "tok")
+
+        # 3 GETs, 0 POSTs
+        self.assertEqual(mock_api.call_count, 3)
+        post_calls = [c for c in mock_api.call_args_list if c[0][0] == "POST"]
+        self.assertEqual(len(post_calls), 0)
+
+
+class TestCleanupManagedLabels(unittest.TestCase):
+    """Test _cleanup_managed_labels only removes our labels."""
+
+    @patch("v1_analysis._github_api")
+    def test_removes_labels_from_issues(self, mock_api):
+        def side_effect(method, url, token, body=None):
+            if method == "GET" and "v1-verified" in url and "page=1" in url:
+                return [{"number": 10}, {"number": 20}]
+            if method == "GET":
+                return []
+            return None
+
+        mock_api.side_effect = side_effect
+        removed = _cleanup_managed_labels("facebook/pyrefly", "tok")
+
+        # 2 issues had v1-verified, so 2 DELETEs for that label
+        delete_calls = [c for c in mock_api.call_args_list if c[0][0] == "DELETE"]
+        self.assertEqual(len(delete_calls), 2)
+        self.assertEqual(removed, 2)
+        # Verify DELETE URLs target only managed labels
+        for call in delete_calls:
+            self.assertIn("v1-verified", call[0][1])
+
+    @patch("v1_analysis._github_api")
+    def test_no_issues_to_clean(self, mock_api):
+        mock_api.return_value = []
+        removed = _cleanup_managed_labels("facebook/pyrefly", "tok")
+        self.assertEqual(removed, 0)
+
+    @patch("v1_analysis._github_api")
+    def test_paginates(self, mock_api):
+        """Handles multiple pages of labeled issues."""
+        page1 = [{"number": i} for i in range(100)]
+        page2 = [{"number": 100}]
+
+        # Track which page we're on for v1-verified GET requests
+        verified_gets = {"count": 0}
+
+        def side_effect(method, url, token, body=None):
+            if method == "DELETE":
+                return None
+            if method != "GET":
+                return None
+            # Only v1-verified has issues; other labels return empty
+            if "v1-verified" not in url:
+                return []
+            verified_gets["count"] += 1
+            if verified_gets["count"] == 1:
+                return page1
+            if verified_gets["count"] == 2:
+                return page2
+            return []
+
+        mock_api.side_effect = side_effect
+        removed = _cleanup_managed_labels("facebook/pyrefly", "tok")
+        # 100 from page 1 + 1 from page 2
+        self.assertEqual(removed, 101)
+
+
+class TestApplyLabels(unittest.TestCase):
+    """Test apply_labels orchestration."""
+
+    @patch("v1_analysis._cleanup_managed_labels", return_value=0)
+    @patch("v1_analysis._ensure_labels_exist")
+    @patch("v1_analysis._github_api")
+    def test_applies_correct_labels(self, mock_api, mock_ensure, mock_cleanup):
+        analysis = {
+            "overlap_issues": [1, 2],
+            "in_v1_not_top_ranked": [3],
+            "in_top_ranked_not_v1": [4, 5],
+        }
+        result = apply_labels("facebook/pyrefly", analysis, "tok")
+
+        self.assertEqual(result["verified"], 2)
+        self.assertEqual(result["consider_removing"], 1)
+        self.assertEqual(result["consider_adding"], 2)
+        # Total POST calls: 2 + 1 + 2 = 5
+        self.assertEqual(mock_api.call_count, 5)
+
+    @patch("v1_analysis._cleanup_managed_labels", return_value=5)
+    @patch("v1_analysis._ensure_labels_exist")
+    @patch("v1_analysis._github_api")
+    def test_cleans_before_applying(self, mock_api, mock_ensure, mock_cleanup):
+        apply_labels("facebook/pyrefly", {}, "tok")
+        # Ensure + cleanup called before any label application
+        mock_ensure.assert_called_once()
+        mock_cleanup.assert_called_once()
+
+
+class TestGenerateReasons(unittest.TestCase):
+    """Test generate_reasons LLM integration."""
+
+    @patch("v1_analysis.call_llm_json")
+    def test_calls_haiku_and_normalizes_keys(self, mock_llm):
+        mock_llm.return_value = {
+            "q2_reasons": {"200": "stale issue"},
+            "q3_reasons": {"300": "high impact"},
+        }
+        ranked = [
+            {"number": 200, "title": "A", "final_score": 40, "tier": "low"},
+            {"number": 300, "title": "B", "final_score": 85, "tier": "critical"},
+        ]
+        v1_gap = {
+            "in_v1_not_top_ranked": [200],
+            "in_top_ranked_not_v1": [300],
+        }
+        result = generate_reasons(ranked, v1_gap)
+
+        # Keys normalized from str to int
+        self.assertIn(200, result["q2_reasons"])
+        self.assertIn(300, result["q3_reasons"])
+        self.assertEqual(result["q2_reasons"][200], "stale issue")
+        # Verify Haiku model used
+        call_kwargs = mock_llm.call_args
+        self.assertEqual(call_kwargs[1]["model"], "claude-haiku-4-5-20251001")
+
+    @patch("v1_analysis.call_llm_json")
+    def test_empty_issues_skips_llm(self, mock_llm):
+        result = generate_reasons(
+            [], {"in_v1_not_top_ranked": [], "in_top_ranked_not_v1": []}
+        )
+        mock_llm.assert_not_called()
+        self.assertEqual(result, {"q2_reasons": {}, "q3_reasons": {}})
+
+    @patch("v1_analysis.call_llm_json")
+    def test_skips_unknown_issue_numbers(self, mock_llm):
+        """Issue numbers in v1_gap not found in ranked_issues are skipped."""
+        ranked = [{"number": 100, "title": "A", "final_score": 50, "tier": "medium"}]
+        v1_gap = {
+            "in_v1_not_top_ranked": [999],  # not in ranked_issues
+            "in_top_ranked_not_v1": [],
+        }
+        result = generate_reasons(ranked, v1_gap)
+        # 999 not in ranked_issues, so q2 list is empty → early return, no LLM call
+        mock_llm.assert_not_called()
+        self.assertEqual(result, {"q2_reasons": {}, "q3_reasons": {}})
+
+
+class TestRunV1Analysis(unittest.TestCase):
+    """Test run_v1_analysis end-to-end orchestration."""
+
+    def _make_ranking_data(self):
+        return {
+            "ranked_issues": [
+                {"number": 1, "title": "A", "final_score": 90, "tier": "critical"},
+                {"number": 2, "title": "B", "final_score": 40, "tier": "low"},
+                {"number": 3, "title": "C", "final_score": 85, "tier": "critical"},
+            ],
+            "v1_gap_analysis": {
+                "v1_issue_count": 2,
+                "top_n_compared": 2,
+                "overlap_count": 1,
+                "overlap_percentage": 50.0,
+                "overlap_issues": [1],
+                "in_v1_not_top_ranked": [2],
+                "in_top_ranked_not_v1": [3],
+            },
+        }
+
+    @patch("v1_analysis.apply_labels")
+    @patch("v1_analysis.generate_reasons")
+    def test_skips_labels_without_token(self, mock_reasons, mock_labels):
+        mock_reasons.return_value = {"q2_reasons": {}, "q3_reasons": {}}
+        import tempfile
+
+        ranking_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        json.dump(self._make_ranking_data(), ranking_file)
+        ranking_file.close()
+
+        try:
+            result = run_v1_analysis(
+                ranking_json=ranking_file.name,
+                output_md="",
+                repo="facebook/pyrefly",
+                github_token="",
+                apply=True,
+            )
+            mock_labels.assert_not_called()
+            self.assertEqual(result["labels_applied"], {})
+        finally:
+            os.unlink(ranking_file.name)
+
+    @patch("v1_analysis.apply_labels", return_value={"verified": 1})
+    @patch("v1_analysis.generate_reasons")
+    def test_applies_labels_with_token(self, mock_reasons, mock_labels):
+        mock_reasons.return_value = {"q2_reasons": {}, "q3_reasons": {}}
+        import tempfile
+
+        ranking_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        json.dump(self._make_ranking_data(), ranking_file)
+        ranking_file.close()
+
+        try:
+            result = run_v1_analysis(
+                ranking_json=ranking_file.name,
+                output_md="",
+                repo="facebook/pyrefly",
+                github_token="ghp_test",
+                apply=True,
+            )
+            mock_labels.assert_called_once()
+            self.assertEqual(result["labels_applied"], {"verified": 1})
+        finally:
+            os.unlink(ranking_file.name)
+
+    @patch("v1_analysis.generate_reasons")
+    def test_early_return_no_v1_data(self, mock_reasons):
+        import tempfile
+
+        data = {"ranked_issues": [], "v1_gap_analysis": {"v1_issue_count": 0}}
+        ranking_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        json.dump(data, ranking_file)
+        ranking_file.close()
+
+        try:
+            result = run_v1_analysis(
+                ranking_json=ranking_file.name,
+                output_md="",
+                repo="facebook/pyrefly",
+                github_token="",
+                apply=False,
+            )
+            mock_reasons.assert_not_called()
+            self.assertEqual(result["reasons"], {})
+        finally:
+            os.unlink(ranking_file.name)
+
+    @patch("v1_analysis.generate_reasons")
+    def test_writes_report_to_file(self, mock_reasons):
+        mock_reasons.return_value = {"q2_reasons": {}, "q3_reasons": {}}
+        import tempfile
+
+        ranking_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        )
+        json.dump(self._make_ranking_data(), ranking_file)
+        ranking_file.close()
+
+        output_file = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
+        output_file.close()
+
+        try:
+            run_v1_analysis(
+                ranking_json=ranking_file.name,
+                output_md=output_file.name,
+                repo="facebook/pyrefly",
+                github_token="",
+                apply=False,
+            )
+            with open(output_file.name) as f:
+                content = f.read()
+            self.assertIn("V1 Gap Analysis with Reasons", content)
+        finally:
+            os.unlink(ranking_file.name)
+            os.unlink(output_file.name)
 
 
 if __name__ == "__main__":
