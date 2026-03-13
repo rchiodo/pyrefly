@@ -2013,25 +2013,24 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         } else {
                             t1_p.clone()
                         };
-                        self.solver
-                            .variables
-                            .lock()
-                            .update(*v2, Variable::Answer(answer));
                         // Widen None to None | Any for PartialQuantified, matching
                         // the PartialContained behavior (see comment there).
                         if is_partial {
                             let variables = self.solver.variables.lock();
-                            let v2_current = variables.get(*v2);
-                            if let Variable::Answer(t) = &*v2_current
-                                && t.is_none()
-                            {
+                            if answer.is_none() {
                                 let widened = self
                                     .solver
                                     .heap
-                                    .mk_union(vec![t.clone(), Type::any_implicit()]);
-                                drop(v2_current);
+                                    .mk_union(vec![answer.clone(), Type::any_implicit()]);
                                 variables.update(*v2, Variable::Answer(widened));
+                            } else {
+                                variables.update(*v2, Variable::Answer(answer));
                             }
+                        } else {
+                            self.solver
+                                .variables
+                                .lock()
+                                .update(*v2, Variable::Answer(answer));
                         }
                         Ok(())
                     }
