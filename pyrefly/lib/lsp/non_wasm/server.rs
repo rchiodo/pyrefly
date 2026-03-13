@@ -2529,10 +2529,12 @@ impl Server {
             Some(DisplayTypeErrors::Default) | None => match &config.source {
                 // In this case, we don't have a config file.
                 ConfigSource::Synthetic => TypeErrorDisplayStatus::NoConfigFile,
-                // In this case, we have a config file like mypy.ini, but we don't parse it.
-                // We only use it as a sensible project root, and create a default config anyways.
-                // Therefore, we should treat it as if we don't have any config.
-                ConfigSource::Marker(_) => TypeErrorDisplayStatus::NoConfigFile,
+                // In this case, we have a config file like mypy.ini, or a pyproject.toml
+                // with Python tool sections but no [tool.pyrefly]. We don't parse it for
+                // pyrefly config, so treat it as if we don't have any config.
+                ConfigSource::PythonToolMarker(_) | ConfigSource::Marker(_) => {
+                    TypeErrorDisplayStatus::NoConfigFile
+                }
                 // We actually have a pyrefly.toml, so we can decide based on the config.
                 ConfigSource::File(_) => {
                     if config.disable_type_errors_in_ide(path) {

@@ -90,6 +90,13 @@ pub enum ConfigSource {
     /// This config was read from a file
     File(PathBuf),
     /// This config was synthesized with path-specific defaults, based on the location of a
+    /// `pyproject.toml` file that lacks `[tool.pyrefly]` but has sections for other Python
+    /// tools (e.g., `[tool.ruff]`, `[tool.mypy]`, `[tool.pyright]`), making it a strong
+    /// signal that this directory is a Python project root. Treated like `Marker` for
+    /// downstream behavior, but given higher priority during config discovery to prevent
+    /// a parent directory's config from shadowing a nested Python project.
+    PythonToolMarker(PathBuf),
+    /// This config was synthesized with path-specific defaults, based on the location of a
     /// "marker" file that contains no pyrefly configuration but marks a project root (e.g., a
     /// `pyproject.toml` file with no `[tool.pyrefly]` section)
     Marker(PathBuf),
@@ -100,7 +107,7 @@ pub enum ConfigSource {
 impl ConfigSource {
     pub fn root(&self) -> Option<&Path> {
         match &self {
-            Self::File(path) | Self::Marker(path) => path.parent(),
+            Self::File(path) | Self::PythonToolMarker(path) | Self::Marker(path) => path.parent(),
             Self::Synthetic => None,
         }
     }
@@ -1223,25 +1230,35 @@ impl ConfigFile {
     }
 
     pub fn from_file(config_path: &Path) -> (ConfigFile, Vec<ConfigError>) {
-        fn read_path(config_path: &Path) -> anyhow::Result<Option<ConfigFile>> {
+        /// Read a config path and determine both the config content (if any)
+        /// and the appropriate `ConfigSource` classification.
+        fn read_path(config_path: &Path) -> anyhow::Result<(Option<ConfigFile>, ConfigSource)> {
             let config_str = fs_anyhow::read_to_string(config_path)?;
+            let path = config_path.to_path_buf();
             if config_path.file_name() == Some(OsStr::new(ConfigFile::PYPROJECT_FILE_NAME)) {
-                Ok(ConfigFile::parse_pyproject_toml(&config_str)?)
+                let (config, has_python_tools) = ConfigFile::parse_pyproject_toml(&config_str)?;
+                match config {
+                    Some(config) => Ok((Some(config), ConfigSource::File(path))),
+                    None if has_python_tools => Ok((None, ConfigSource::PythonToolMarker(path))),
+                    None => Ok((None, ConfigSource::Marker(path))),
+                }
             } else if config_path.file_name().is_some_and(|fi| {
                 fi.to_str()
                     .is_some_and(|fi| ConfigFile::ADDITIONAL_ROOT_FILE_NAMES.contains(&fi))
             }) {
                 // We'll create a file with default options but treat config_root as the project root.
-                Ok(None)
+                Ok((None, ConfigSource::Marker(path)))
             } else {
-                Ok(Some(ConfigFile::parse_config(&config_str)?))
+                Ok((
+                    Some(ConfigFile::parse_config(&config_str)?),
+                    ConfigSource::File(path),
+                ))
             }
         }
         fn f(config_path: &Path) -> (ConfigFile, Vec<ConfigError>) {
             let mut errors = Vec::new();
             let (maybe_config, config_source) = match read_path(config_path) {
-                Ok(Some(config)) => (Some(config), ConfigSource::File(config_path.to_path_buf())),
-                Ok(None) => (None, ConfigSource::Marker(config_path.to_path_buf())),
+                Ok(result) => result,
                 Err(e) => {
                     errors.push(ConfigError::error(e));
                     (None, ConfigSource::File(config_path.to_path_buf()))
@@ -1295,10 +1312,14 @@ impl ConfigFile {
         toml::from_str::<ConfigFile>(config_str).map_err(|err| anyhow::Error::msg(err.to_string()))
     }
 
-    fn parse_pyproject_toml(config_str: &str) -> anyhow::Result<Option<ConfigFile>> {
-        Ok(toml::from_str::<PyProject>(config_str)
-            .map_err(|err| anyhow::Error::msg(err.to_string()))?
-            .pyrefly())
+    /// Parse a pyproject.toml file. Returns a tuple of:
+    /// - `Option<ConfigFile>`: the pyrefly config, if `[tool.pyrefly]` was present
+    /// - `bool`: whether Python tool sections like `[tool.ruff]` were detected
+    fn parse_pyproject_toml(config_str: &str) -> anyhow::Result<(Option<ConfigFile>, bool)> {
+        let pyproject = toml::from_str::<PyProject>(config_str)
+            .map_err(|err| anyhow::Error::msg(err.to_string()))?;
+        let has_python_tools = pyproject.has_python_tools();
+        Ok((pyproject.pyrefly(), has_python_tools))
     }
 }
 
@@ -1567,6 +1588,7 @@ mod tests {
                  "#;
         let config = ConfigFile::parse_pyproject_toml(config_str)
             .unwrap()
+            .0
             .unwrap();
         assert_eq!(
             config,
@@ -1597,8 +1619,9 @@ mod tests {
     #[test]
     fn deserialize_pyproject_toml_defaults() {
         let config_str = "";
-        let config = ConfigFile::parse_pyproject_toml(config_str).unwrap();
+        let (config, has_python_tools) = ConfigFile::parse_pyproject_toml(config_str).unwrap();
         assert!(config.is_none());
+        assert!(!has_python_tools);
     }
 
     #[test]
@@ -1614,6 +1637,7 @@ mod tests {
         "#;
         let config = ConfigFile::parse_pyproject_toml(config_str)
             .unwrap()
+            .0
             .unwrap();
         assert_eq!(
             config,
@@ -1646,8 +1670,9 @@ mod tests {
                  [tool.pysa]
                  pysa_value = 2
                      ";
-        let config = ConfigFile::parse_pyproject_toml(config_str).unwrap();
+        let (config, has_python_tools) = ConfigFile::parse_pyproject_toml(config_str).unwrap();
         assert!(config.is_none());
+        assert!(!has_python_tools);
     }
 
     #[test]
@@ -1664,6 +1689,7 @@ mod tests {
                          "#;
         let config = ConfigFile::parse_pyproject_toml(config_str)
             .unwrap()
+            .0
             .unwrap();
         assert_eq!(
             config.root.extras.0,
