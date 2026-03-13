@@ -2027,9 +2027,15 @@ impl Server {
                     {
                         self.send_response(new_response(
                             x.id,
-                            Ok(WorkspaceSymbolResponse::Flat(
-                                self.workspace_symbols(&transaction, &params.query),
-                            )),
+                            Ok(WorkspaceSymbolResponse::Flat(self.workspace_symbols(
+                                &transaction,
+                                &params.query,
+                                telemetry,
+                                TelemetryTaskContext {
+                                    activity_key: telemetry_event.activity_key.clone(),
+                                    task_id: telemetry_event.task_id,
+                                },
+                            ))),
                         ));
                     }
                 } else if let Some(params) = as_request::<DocumentDiagnosticRequest>(&x) {
@@ -4684,6 +4690,8 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         query: &str,
+        telemetry: &impl Telemetry,
+        ctx: TelemetryTaskContext,
     ) -> Vec<SymbolInformation> {
         let external_provider = self.external_references.clone();
         let workspace_uri = self
@@ -4692,12 +4700,21 @@ impl Server {
             .as_ref()
             .and_then(|folders| folders.first())
             .map(|f| f.uri.clone());
+        let server_state = self.telemetry_state();
 
-        // Use std::thread::scope so we can borrow from the current stack frame.
+        let sub_task_telemetry =
+            SubTaskTelemetry::new(telemetry, server_state, QueueName::LspQueue, ctx, None);
+
+        // Use std::thread::scope so we can borrow sub_task_telemetry.
         let (local_results, external_results) = std::thread::scope(|s| {
             let ext_handle = workspace_uri.as_ref().map(|uri| {
                 s.spawn(|| {
-                    external_provider.workspace_symbols(query, uri, Duration::from_secs(5), None)
+                    external_provider.workspace_symbols(
+                        query,
+                        uri,
+                        Duration::from_secs(5),
+                        Some(sub_task_telemetry),
+                    )
                 })
             });
 
