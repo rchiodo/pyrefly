@@ -98,9 +98,7 @@ use crate::report::pysa::global_variable::WholeProgramGlobalVariables;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleKey;
-use crate::report::pysa::override_graph::OverrideGraph;
 use crate::report::pysa::types::ScalarTypeProperties;
-use crate::report::pysa::types::has_superclass;
 use crate::report::pysa::types::string_for_type;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::lsp::FindPreference;
@@ -282,26 +280,10 @@ pub trait FunctionTrait:
 
 impl FunctionTrait for FunctionRef {}
 
-/// Maximum number of targets in an override subset before we collapse it into
-/// `OverrideSubsetThreshold`. Large subsets lead to very large call-graph JSON
-/// files and significant slowdowns during both serialization and Pysa's
-/// analysis. When the number of targets exceeds this threshold we fall back to
-/// recording only the base method.
-const OVERRIDE_SUBSET_THRESHOLD: usize = 500;
-
 #[derive(Debug, PartialEq, Eq, Clone, Hash, Serialize, PartialOrd, Ord)]
 pub enum Target<Function: FunctionTrait> {
-    Function(Function),     // Either a function or a method
-    AllOverrides(Function), // All overrides of the given method
-    OverrideSubset {
-        base_method: Function,
-        subset: Vec1<Target<Function>>,
-    },
-    /// Like `OverrideSubset`, but used when the number of targets in the subset
-    /// exceeds `OVERRIDE_SUBSET_THRESHOLD`.
-    OverrideSubsetThreshold {
-        base_method: Function,
-    },
+    Function(Function),  // Either a function or a method
+    Overrides(Function), // All overrides of the given method
     FormatString,
 }
 
@@ -316,17 +298,7 @@ impl<Function: FunctionTrait> Target<Function> {
     {
         match self {
             Target::Function(function) => Target::Function(map(function)),
-            Target::AllOverrides(function) => Target::AllOverrides(map(function)),
-            Target::OverrideSubset {
-                base_method,
-                subset,
-            } => Target::OverrideSubset {
-                base_method: map(base_method),
-                subset: Vec1::mapped(subset, |target| target.map_function(map)),
-            },
-            Target::OverrideSubsetThreshold { base_method } => Target::OverrideSubsetThreshold {
-                base_method: map(base_method),
-            },
+            Target::Overrides(function) => Target::Overrides(map(function)),
             Target::FormatString => Target::FormatString,
         }
     }
@@ -334,9 +306,7 @@ impl<Function: FunctionTrait> Target<Function> {
     fn base_function(&self) -> Option<&Function> {
         match self {
             Target::Function(function) => Some(function),
-            Target::AllOverrides(method) => Some(method),
-            Target::OverrideSubset { base_method, .. }
-            | Target::OverrideSubsetThreshold { base_method } => Some(base_method),
+            Target::Overrides(method) => Some(method),
             Target::FormatString => None,
         }
     }
@@ -1578,7 +1548,6 @@ struct CallGraphVisitor<'a> {
     module_id: ModuleId,
     module_name: ModuleName,
     function_base_definitions: &'a WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
-    override_graph: &'a OverrideGraph,
     global_variables: &'a WholeProgramGlobalVariables,
     captured_variables: &'a ModuleCapturedVariables<FunctionRef>,
     current_function: Option<FunctionRef>, // The current function, if it is exported.
@@ -1758,26 +1727,13 @@ impl<'a> CallGraphVisitor<'a> {
     }
 
     // Figure out what target to pick for an indirect call that resolves to implementation_target.
-    // E.g., if the receiver type is A, and A derives from Base, and the target is Base.method, then
-    // targeting the override tree of Base.method is wrong, as it would include all siblings for A.//
-    // Instead, we have the following cases:
-    // a) receiver type matches implementation_target's declaring type -> override implementation_target
-    // b) no implementation_target override entries are subclasses of A -> real implementation_target
-    // c) some override entries are subclasses of A -> search upwards for actual implementation,
-    //    and override all those where the override name is
-    //  1) the override target if it exists in the override shared mem
-    //  2) the real target otherwise
+    // The receiver_class is already part of the PysaCallTarget, so we just need to decide
+    // between Function (no receiver) and Overrides (has receiver).
     fn compute_targets_for_virtual_call(
         &self,
-        callee_type: Option<&Type>,
-        precise_receiver_type: Option<&Type>,
+        receiver_type: Option<&Type>,
         callee: FunctionRef,
     ) -> Target<FunctionRef> {
-        let receiver_type = if precise_receiver_type.is_some() {
-            precise_receiver_type
-        } else {
-            receiver_type_from_callee_type(callee_type)
-        };
         if receiver_type.is_none() {
             return Target::Function(callee);
         }
@@ -1793,70 +1749,9 @@ impl<'a> CallGraphVisitor<'a> {
         if receiver_class.is_none() {
             return Target::Function(callee);
         }
-        let receiver_class = receiver_class.unwrap();
-
-        let callee_class = self
-            .function_base_definitions
-            .get(callee.module_id, &callee.function_id)
-            .and_then(|definition| definition.defining_class.clone());
-        let callee_class = callee_class
-            .unwrap_or_else(|| panic!("Expect a callee class for callee `{:#?}`", callee));
-
-        let get_actual_target = |callee: FunctionRef| {
-            if self.override_graph.overrides_exist(&callee) {
-                Target::AllOverrides(callee)
-            } else {
-                Target::Function(callee)
-            }
-        };
-        if callee_class == receiver_class {
-            // case a
-            get_actual_target(callee)
-        } else if let Some(overriding_classes) = self.override_graph.get_overriding_classes(&callee)
-        {
-            // case c
-            if overriding_classes.len() > OVERRIDE_SUBSET_THRESHOLD {
-                Target::OverrideSubsetThreshold {
-                    base_method: callee,
-                }
-            } else {
-                let mut callees = overriding_classes
-                    .iter()
-                    .filter_map(|overriding_class| {
-                        if has_superclass(
-                            &overriding_class.class,
-                            &receiver_class.class,
-                            self.module_context,
-                        ) {
-                            self.function_ref_from_class_field(
-                                &overriding_class.class,
-                                &callee.function_name,
-                                /* exclude_object_methods */ false,
-                            )
-                            .ok()
-                            .map(get_actual_target)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>();
-
-                if callees.is_empty() {
-                    Target::Function(callee)
-                } else if callees.len() == overriding_classes.len() {
-                    Target::AllOverrides(callee)
-                } else {
-                    callees.sort();
-                    Target::OverrideSubset {
-                        base_method: callee,
-                        subset: Vec1::try_from_vec(callees).unwrap(),
-                    }
-                }
-            }
-        } else {
-            // case b
-            Target::Function(callee)
-        }
+        // Pysa is responsible for filtering the overridden methods
+        // to only those from classes that extend the receiver_class.
+        Target::Overrides(callee)
     }
 
     fn call_targets_from_callable_type(
@@ -2032,22 +1927,16 @@ impl<'a> CallGraphVisitor<'a> {
                 override_implicit_receiver,
             )
         } else {
-            let target = self.compute_targets_for_virtual_call(
-                callee_type,
-                precise_receiver_type,
-                function_ref,
-            );
+            let target = self.compute_targets_for_virtual_call(receiver_type, function_ref);
             match target {
-                Target::Function(_)
-                | Target::AllOverrides(_)
-                | Target::OverrideSubset { .. }
-                | Target::OverrideSubsetThreshold { .. } => self.call_target_from_function_target(
-                    target,
-                    return_type,
-                    receiver_type,
-                    callee_expr_suffix,
-                    override_implicit_receiver,
-                ),
+                Target::Function(_) | Target::Overrides(_) => self
+                    .call_target_from_function_target(
+                        target,
+                        return_type,
+                        receiver_type,
+                        callee_expr_suffix,
+                        override_implicit_receiver,
+                    ),
                 Target::FormatString => PysaCallTarget {
                     target,
                     implicit_receiver: ImplicitReceiver::False,
@@ -4374,7 +4263,6 @@ fn resolve_call(
     call: &ExprCall,
     function_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     module_context: &ModuleContext,
-    override_graph: &OverrideGraph,
 ) -> Vec<PysaCallTarget<FunctionRef>> {
     let mut call_graphs = CallGraphs::new();
     let visitor = CallGraphVisitor {
@@ -4386,7 +4274,6 @@ fn resolve_call(
         current_function: None,
         debug: false,
         debug_scopes: Vec::new(),
-        override_graph,
         global_variables: &WholeProgramGlobalVariables::new(),
         captured_variables: &ModuleCapturedVariables::new(),
         error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
@@ -4414,7 +4301,6 @@ fn resolve_expression(
     expression: &Expr,
     function_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     module_context: &ModuleContext,
-    override_graph: &OverrideGraph,
     parent_expression: Option<&Expr>,
 ) -> Vec<PysaCallTarget<FunctionRef>> {
     // This needs to be provided. Otherwise the callees won't be registered into `call_graphs`.
@@ -4434,7 +4320,6 @@ fn resolve_expression(
         current_function: Some(current_function.clone()),
         debug: false,
         debug_scopes: Vec::new(),
-        override_graph,
         global_variables: &WholeProgramGlobalVariables::new(),
         captured_variables: &ModuleCapturedVariables::new(),
         error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
@@ -4467,19 +4352,8 @@ pub fn resolve_decorator_callees(
 ) -> HashMap<PysaLocation, Vec<Target<FunctionRef>>> {
     let mut decorator_callees = HashMap::new();
 
-    // We do not care about overrides here
-    let override_graph = OverrideGraph::new();
-
     let is_object_new_or_init_target = |target: &Target<FunctionRef>| match target {
-        Target::Function(function_ref)
-        | Target::AllOverrides(function_ref)
-        | Target::OverrideSubset {
-            base_method: function_ref,
-            ..
-        }
-        | Target::OverrideSubsetThreshold {
-            base_method: function_ref,
-        } => {
+        Target::Function(function_ref) | Target::Overrides(function_ref) => {
             function_ref.module_name == ModuleName::builtins()
                 && (function_ref.function_name == dunder::INIT
                     || function_ref.function_name == dunder::NEW)
@@ -4491,8 +4365,7 @@ pub fn resolve_decorator_callees(
         let (range, callees) = match &decorator.expression {
             Expr::Call(call) => {
                 // Decorator factor, e.g `@foo(1)`. We export the callee of `foo`.
-                let callees =
-                    resolve_call(call, function_base_definitions, context, &override_graph);
+                let callees = resolve_call(call, function_base_definitions, context);
                 (
                     (*call.func).range(),
                     callees
@@ -4507,7 +4380,6 @@ pub fn resolve_decorator_callees(
                     expr,
                     function_base_definitions,
                     context,
-                    &override_graph,
                     /* parent_expression */ None,
                 );
                 (
@@ -4536,7 +4408,6 @@ pub fn resolve_decorator_callees(
 pub fn export_call_graphs(
     context: &ModuleContext,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
-    override_graph: &OverrideGraph,
     global_variables: &WholeProgramGlobalVariables,
     captured_variables: &WholeProgramCapturedVariables,
 ) -> CallGraphs<ExpressionIdentifier, FunctionRef> {
@@ -4552,7 +4423,6 @@ pub fn export_call_graphs(
         current_function: None,
         debug: false,
         debug_scopes: Vec::new(),
-        override_graph,
         global_variables,
         captured_variables: captured_variables
             .get_for_module(context.module_id)
