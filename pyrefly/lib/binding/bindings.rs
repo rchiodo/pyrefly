@@ -1133,9 +1133,9 @@ impl<'a> BindingsBuilder<'a> {
                 .scopes
                 .look_up_name_for_read(hashed_name, &Usage::Narrowing(None));
             if let NameReadInfo::Anywhere { key, .. } = name_read_info {
-                let idx = self
-                    .scopes
-                    .outer_capture_value_idx(hashed_name, inner_fn_range)
+                let capture_info = self.scopes.outer_capture_info(hashed_name, inner_fn_range);
+                let idx = capture_info
+                    .value_idx
                     .unwrap_or_else(|| self.idx_for_promise(key));
                 let style = self
                     .scopes
@@ -1143,10 +1143,7 @@ impl<'a> BindingsBuilder<'a> {
                     .map(FlowStyle::assume_initialized)
                     .unwrap_or(FlowStyle::Other);
                 self.scopes.define_in_current_flow(hashed_name, idx, style);
-                if let Some(narrow_idx) = self
-                    .scopes
-                    .outer_capture_narrow_idx(hashed_name, inner_fn_range)
-                {
+                if let Some(narrow_idx) = capture_info.narrow_idx {
                     // Only propagate type-guard narrows (isinstance, is not None,
                     // etc.), not assignment narrows from subscript/attribute writes.
                     // Assignment narrows track mutations and should not leak into

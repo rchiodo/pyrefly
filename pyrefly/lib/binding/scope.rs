@@ -148,6 +148,18 @@ impl MutableCaptureError {
     }
 }
 
+/// Value and narrow information for a captured variable from an outer scope.
+/// Returned by `Scopes::outer_capture_info`.
+#[derive(Default)]
+pub struct OuterCaptureInfo {
+    /// The flow value idx from the nearest enclosing local scope, if the
+    /// variable is not reassigned after the function definition.
+    pub value_idx: Option<Idx<Key>>,
+    /// The narrow idx, if the outer scope has an active type-guard narrow
+    /// and the variable is not reassigned after the function definition.
+    pub narrow_idx: Option<Idx<Key>>,
+}
+
 /// A name defined in a module, which needs to be convertible to an export.
 #[derive(Debug)]
 pub enum Exportable {
@@ -1322,74 +1334,50 @@ impl Scopes {
             .unwrap_or(true)
     }
 
-    /// Get the outer local scope's current value idx for a captured variable,
-    /// if the variable is not reassigned after the function definition.
-    ///
-    /// This preserves value rebindings like `x = x.clone()` that happen before
-    /// a nested function definition, while still refusing to propagate values
-    /// when a later assignment could change what the closure observes. Module
-    /// scopes continue to use the static binding so conditional top-level
-    /// shadowing keeps its existing behavior.
-    pub fn outer_capture_value_idx(
-        &self,
-        name: Hashed<&Name>,
-        inner_fn_range: TextRange,
-    ) -> Option<Idx<Key>> {
-        for scope in self.iter_rev().skip(1) {
-            match scope.kind {
-                ScopeKind::Class(_) => continue,
-                ScopeKind::Module => return None,
-                _ => {}
-            }
-            if let Some(flow_info) = scope.flow.get_info_hashed(name) {
-                if Self::outer_capture_not_reassigned_after(scope, name, inner_fn_range) {
-                    return flow_info.value().map(|value| value.idx);
-                }
-                return None;
-            }
-            // Name is in stat but not flow — possibly uninitialized, don't propagate.
-            if scope.stat.0.get_hashed(name).is_some() {
-                return None;
-            }
-        }
-        None
-    }
-
-    /// Get the outer scope's narrow idx for a captured variable, if the outer
-    /// scope has an active narrow and the variable is not reassigned after the
-    /// function definition.
+    /// Gather the outer scope's value and narrow idx for a captured variable.
     ///
     /// Walks outer scopes (skipping current and class scopes) to find the
-    /// nearest scope with a narrowed flow entry for `name`. Returns the
-    /// narrow's idx only when it is safe to propagate:
-    /// - The outer scope has an active narrow (isinstance, is not None, etc.)
-    /// - All assignments to the name precede `inner_fn_range`
-    ///
-    /// Returns `None` if there is no active narrow or the variable is
-    /// reassigned after the function definition.
-    pub fn outer_capture_narrow_idx(
+    /// nearest scope with a flow entry for `name`. When the variable is
+    /// not reassigned after `inner_fn_range`:
+    /// - `value_idx`: the flow's current value binding (preserves rebindings
+    ///   like `x = x.clone()` that happen before the nested definition).
+    ///   Only propagated from local (non-module) scopes so that conditional
+    ///   top-level shadowing keeps its existing behavior (the caller falls
+    ///   back to the static binding via `idx_for_promise`).
+    /// - `narrow_idx`: the narrow's idx, if the outer scope has an active
+    ///   type-guard narrow (isinstance, is not None, etc.). Propagated from
+    ///   any scope, including module scope, so that module-level guards like
+    ///   `if x is None: raise` are visible inside nested functions.
+    pub fn outer_capture_info(
         &self,
         name: Hashed<&Name>,
         inner_fn_range: TextRange,
-    ) -> Option<Idx<Key>> {
+    ) -> OuterCaptureInfo {
         for scope in self.iter_rev().skip(1) {
             if matches!(scope.kind, ScopeKind::Class(_)) {
                 continue;
             }
+            let is_module = matches!(scope.kind, ScopeKind::Module);
             if let Some(flow_info) = scope.flow.get_info_hashed(name) {
-                // Only propagate when the outer scope has an active narrow.
-                flow_info.narrow.as_ref()?;
                 if Self::outer_capture_not_reassigned_after(scope, name, inner_fn_range) {
-                    return Some(flow_info.idx());
+                    return OuterCaptureInfo {
+                        // Don't propagate value bindings from module scope.
+                        value_idx: if is_module {
+                            None
+                        } else {
+                            flow_info.value().map(|value| value.idx)
+                        },
+                        narrow_idx: flow_info.narrow.as_ref().map(|_| flow_info.idx()),
+                    };
                 }
-                return None;
+                return OuterCaptureInfo::default();
             }
             // Name is in stat but not flow — possibly uninitialized, don't propagate.
             if scope.stat.0.get_hashed(name).is_some() {
-                return None;
+                return OuterCaptureInfo::default();
             }
         }
-        None
+        OuterCaptureInfo::default()
     }
 
     pub fn in_class_body(&self) -> bool {
