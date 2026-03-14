@@ -2537,7 +2537,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let range = K::range_with(idx, self.bindings());
 
         // Install trace sink if tracing is enabled for this module.
-        let tracing_enabled = self.current().tracing_enabled() && !self.stack().is_cold_iteration();
+        // We must always install a sink (even during cold iteration) to prevent
+        // traces from leaking into an outer trace sink owned by a different module.
+        // During cold iteration, the traces are discarded (just like errors).
+        let tracing_enabled = self.current().tracing_enabled();
         if tracing_enabled {
             self.thread_state.install_trace_sink();
         }
@@ -2554,9 +2557,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         let raw_answer = K::solve(self, binding, range, &local_errors);
 
-        // Take accumulated traces.
+        // Take accumulated traces. Discard during cold iteration (like errors).
         let trace_side_effects = if tracing_enabled {
-            self.thread_state.take_trace_sink()
+            let traces = self.thread_state.take_trace_sink();
+            if self.stack().is_cold_iteration() {
+                None
+            } else {
+                traces
+            }
         } else {
             None
         };
