@@ -39,7 +39,7 @@ SCORING WEIGHTS:
 | Medium (x1.5) | False negatives + spec compliance | Real type errors pyrefly misses that pyright/mypy catch. Spec compliance gaps (TypeVar, ParamSpec, overloads, narrowing, exhaustiveness). These affect correctness but are less urgent than false positives since users don't notice missing checks. |
 | Medium (x1.5) | Actionability | How ready is this issue to be worked on? Score HIGH if: clear minimal repro, root cause identified, well-scoped, a developer could pick it up and start working on it. Score LOW if: vague description, no repro, can't reproduce, unclear root cause, needs more investigation, stale with no resolution. IMPORTANT: Actionability is about clarity and readiness, NOT implementation difficulty. A well-described issue with a clear repro is actionable even if the fix is architecturally complex. Do NOT penalize issues for being hard to implement. |
 | High (x2) | IDE and usability | Language server features: hover, completions, go-to-def, diagnostics. Important for adoption — a broken IDE experience drives users away. Score IDE bugs 60-80, IDE features 45-65. |
-| Medium (x1.5) | Primer breadth | How many primer projects are affected. More projects = wider real-world impact. |
+| Medium (x1.5) | Primer breadth | How many primer projects show this error pattern. Primer counts are matched by error message pattern. Check the pattern specificity assessment: HIGH means this issue likely causes most of those errors, MEDIUM means it is one of several causes, LOW means the pattern is generic with many unrelated root causes. Weight primer counts accordingly. |
 | High (x2.5) | Strategic adoption | Issues tagged pytorch or google — these are top-priority adoption targets. Blocking issues for these ecosystems should score 75+. |
 | Medium (x1.5) | Ecosystem adoption | Issues tagged pydantic, sqlalchemy, or other framework labels — important but lower priority than strategic targets. |
 | Lower (x0.5) | Edge cases | Few projects affected, low engagement, stale issues, niche scenarios. |
@@ -106,6 +106,9 @@ def score_issue(  # noqa: C901
     p_projects = primer_impact.get("primer_project_count", 0)
     p_errors = primer_impact.get("primer_error_count", 0)
     p_kind = primer_impact.get("matched_kind", "")
+    p_template = primer_impact.get("matched_template", "")
+    p_specificity = primer_impact.get("pattern_specificity", "")
+    p_spec_note = primer_impact.get("specificity_note", "")
 
     reactions = issue.get("reactions_count", 0)
     comments = issue.get("comments_count", 0)
@@ -145,8 +148,10 @@ def score_issue(  # noqa: C901
         f"Reactions: {reactions}, Comments: {comments}, Sub-issues: {sub_issues}\n"
         f"Duplicate count: {dup_count}\n"
         f"Blocks count: {blocks_count} (issues blocked by this one)\n"
-        f"Primer impact: {p_projects} projects, {p_errors} total errors"
-        f" (kind: {p_kind})\n"
+        f"Primer impact: {p_projects} projects, {p_errors} errors matching"
+        f" pattern: {p_kind}: {p_template}\n"
+        f"  Pattern specificity: {p_specificity or 'n/a'}"
+        f"{(' — ' + p_spec_note) if p_spec_note else ''}\n"
     )
 
     # Add dep resolution info so LLM knows when to distrust checker results

@@ -28,7 +28,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from code_extractor import _looks_like_python, _parse_code_response, extract_code_blocks
 from dep_resolver import _module_to_package, extract_module_from_error
-from passes.primer_impact import _build_primer_index, _fuzzy_match_kind
+from llm_transport import LLMError
+from passes.primer_impact import (
+    _assess_pattern_specificity,
+    _build_primer_index,
+    _fuzzy_match_kind,
+    _templatize,
+    compute_primer_impact,
+)
 from passes.rank import _mechanical_tier
 from relationship_resolver import (
     _BLOCKED_BY_RE,
@@ -458,8 +465,30 @@ class TestFormatErrors(unittest.TestCase):
 # ──────────────────────────────────────────────────────────────────────
 # primer_impact tests
 # ──────────────────────────────────────────────────────────────────────
+class TestTemplatize(unittest.TestCase):
+    """Test _templatize message generalization."""
+
+    def test_replaces_backtick_identifiers(self):
+        msg = "Argument `x` is not assignable to parameter `y` with type `int`"
+        self.assertEqual(
+            _templatize(msg),
+            "Argument `_` is not assignable to parameter `_` with type `_`",
+        )
+
+    def test_no_backticks(self):
+        msg = "Some plain error message"
+        self.assertEqual(_templatize(msg), "Some plain error message")
+
+    def test_empty_string(self):
+        self.assertEqual(_templatize(""), "")
+
+    def test_adjacent_backtick_groups(self):
+        msg = "`A` and `B`"
+        self.assertEqual(_templatize(msg), "`_` and `_`")
+
+
 class TestBuildPrimerIndex(unittest.TestCase):
-    """Test _build_primer_index."""
+    """Test _build_primer_index with (kind, template) tuple keys."""
 
     def test_basic_index(self):
         primer_data = {
@@ -468,34 +497,265 @@ class TestBuildPrimerIndex(unittest.TestCase):
                     "name": "proj1",
                     "pyrefly": {
                         "errors": [
-                            {"kind": "bad-return"},
-                            {"kind": "bad-return"},
-                            {"kind": "unknown-type"},
+                            {"kind": "bad-return", "message": "Bad return `x`"},
+                            {"kind": "bad-return", "message": "Bad return `y`"},
+                            {"kind": "unknown-type", "message": "Unknown `T`"},
                         ]
                     },
                 },
                 {
                     "name": "proj2",
-                    "pyrefly": {"errors": [{"kind": "bad-return"}]},
+                    "pyrefly": {
+                        "errors": [{"kind": "bad-return", "message": "Bad return `z`"}]
+                    },
                 },
             ]
         }
         index = _build_primer_index(primer_data)
-        self.assertIn("bad-return", index)
-        self.assertEqual(index["bad-return"]["total_count"], 3)
-        self.assertEqual(len(index["bad-return"]["projects"]), 2)
-        self.assertEqual(index["bad-return"]["projects"]["proj1"], 2)
-        self.assertEqual(index["bad-return"]["projects"]["proj2"], 1)
-        self.assertEqual(index["unknown-type"]["total_count"], 1)
+        # All three bad-return errors share the same template
+        key = ("bad-return", "Bad return `_`")
+        self.assertIn(key, index)
+        self.assertEqual(index[key]["total_count"], 3)
+        self.assertEqual(len(index[key]["projects"]), 2)
+        self.assertEqual(index[key]["projects"]["proj1"], 2)
+        self.assertEqual(index[key]["projects"]["proj2"], 1)
+        self.assertIn(("unknown-type", "Unknown `_`"), index)
+
+    def test_different_templates_same_kind(self):
+        """Different message templates within the same kind get separate entries."""
+        primer_data = {
+            "projects": [
+                {
+                    "name": "proj1",
+                    "pyrefly": {
+                        "errors": [
+                            {
+                                "kind": "bad-argument-type",
+                                "message": "Argument `x` is not assignable to parameter `y`",
+                            },
+                            {
+                                "kind": "bad-argument-type",
+                                "message": "Expected `int` arguments, got `str`",
+                            },
+                        ]
+                    },
+                }
+            ]
+        }
+        index = _build_primer_index(primer_data)
+        key1 = (
+            "bad-argument-type",
+            "Argument `_` is not assignable to parameter `_`",
+        )
+        key2 = ("bad-argument-type", "Expected `_` arguments, got `_`")
+        self.assertIn(key1, index)
+        self.assertIn(key2, index)
+        self.assertEqual(index[key1]["total_count"], 1)
+        self.assertEqual(index[key2]["total_count"], 1)
 
     def test_empty_primer(self):
         self.assertEqual(_build_primer_index({}), {})
 
     def test_skips_empty_kind(self):
         primer_data = {
-            "projects": [{"name": "p", "pyrefly": {"errors": [{"kind": ""}]}}]
+            "projects": [
+                {"name": "p", "pyrefly": {"errors": [{"kind": "", "message": "x"}]}}
+            ]
         }
         self.assertEqual(_build_primer_index(primer_data), {})
+
+    def test_missing_message_uses_empty_template(self):
+        """Errors without a message field get an empty-string template."""
+        primer_data = {
+            "projects": [{"name": "p", "pyrefly": {"errors": [{"kind": "bad-return"}]}}]
+        }
+        index = _build_primer_index(primer_data)
+        self.assertIn(("bad-return", ""), index)
+
+
+class TestAssessPatternSpecificity(unittest.TestCase):
+    """Test _assess_pattern_specificity LLM call."""
+
+    @patch("passes.primer_impact.call_llm_json")
+    def test_returns_specificity(self, mock_llm):
+        mock_llm.return_value = {
+            "specificity": "high",
+            "note": "Bug specifically about ParamSpec forwarding",
+        }
+        result = _assess_pattern_specificity(
+            issue_title="ParamSpec forwarding broken",
+            issue_body="When using ParamSpec to forward args...",
+            matched_kind="bad-argument-type",
+            matched_template="Argument `_` is not assignable to parameter `_`",
+            error_count=100,
+            project_count=5,
+        )
+        self.assertEqual(result["specificity"], "high")
+        self.assertIn("ParamSpec", result["note"])
+
+    @patch("passes.primer_impact.call_llm_json")
+    def test_normalizes_invalid_specificity(self, mock_llm):
+        mock_llm.return_value = {"specificity": "banana", "note": "weird"}
+        result = _assess_pattern_specificity("title", "body", "kind", "template", 10, 1)
+        self.assertEqual(result["specificity"], "medium")
+
+    @patch("passes.primer_impact.call_llm_json")
+    def test_handles_llm_failure(self, mock_llm):
+        mock_llm.side_effect = LLMError("timeout")
+        result = _assess_pattern_specificity("title", "body", "kind", "template", 10, 1)
+        self.assertEqual(result["specificity"], "unknown")
+        self.assertEqual(result["note"], "")
+
+
+class TestComputePrimerImpactMatching(unittest.TestCase):
+    """Test that compute_primer_impact matches by (kind, template)."""
+
+    @patch("passes.primer_impact._assess_pattern_specificity")
+    def test_exact_template_match(self, mock_spec):
+        """When checker_results have a matching (kind, template), use precise count."""
+        mock_spec.return_value = {"specificity": "high", "note": "specific bug"}
+        primer_data = {
+            "projects": [
+                {
+                    "name": "proj1",
+                    "pyrefly": {
+                        "errors": [
+                            {
+                                "kind": "bad-argument-type",
+                                "message": "Argument `x` is not assignable to parameter `y`",
+                            },
+                        ]
+                    },
+                },
+                {
+                    "name": "proj2",
+                    "pyrefly": {
+                        "errors": [
+                            {
+                                "kind": "bad-argument-type",
+                                "message": "Expected `int` arguments, got `str`",
+                            },
+                            {
+                                "kind": "bad-argument-type",
+                                "message": "Expected `int` arguments, got `str`",
+                            },
+                        ]
+                    },
+                },
+            ]
+        }
+        issues = [
+            {
+                "number": 1,
+                "title": "Test",
+                "checker_results": {
+                    "pyrefly": [
+                        {
+                            "kind": "bad-argument-type",
+                            "message": "Argument `foo` is not assignable to parameter `bar`",
+                        }
+                    ]
+                },
+            }
+        ]
+        result = compute_primer_impact(issues, primer_data, {})
+        # Should match only the first template (1 error), not all 3
+        self.assertEqual(result[1]["primer_error_count"], 1)
+        self.assertEqual(result[1]["primer_project_count"], 1)
+        self.assertEqual(
+            result[1]["matched_template"],
+            "Argument `_` is not assignable to parameter `_`",
+        )
+        self.assertEqual(result[1]["matched_kind"], "bad-argument-type")
+        # Specificity should be populated
+        self.assertEqual(result[1]["pattern_specificity"], "high")
+        mock_spec.assert_called_once()
+
+    @patch("passes.primer_impact._assess_pattern_specificity")
+    def test_fallback_to_kind_aggregation(self, mock_spec):
+        """When no template matches, fall back to aggregating all patterns for the kind."""
+        mock_spec.return_value = {"specificity": "low", "note": "generic pattern"}
+        primer_data = {
+            "projects": [
+                {
+                    "name": "proj1",
+                    "pyrefly": {
+                        "errors": [
+                            {
+                                "kind": "bad-return",
+                                "message": "Return type `int` mismatch",
+                            },
+                        ]
+                    },
+                },
+            ]
+        }
+        issues = [
+            {
+                "number": 1,
+                "title": "Test",
+                "checker_results": {
+                    "pyrefly": [
+                        {
+                            "kind": "bad-return",
+                            "message": "Completely different message",
+                        }
+                    ]
+                },
+            }
+        ]
+        result = compute_primer_impact(issues, primer_data, {})
+        # No template match, falls back to kind aggregation
+        self.assertEqual(result[1]["primer_error_count"], 1)
+        self.assertEqual(result[1]["matched_kind"], "bad-return")
+        self.assertEqual(result[1]["matched_template"], "(all patterns)")
+        self.assertEqual(result[1]["pattern_specificity"], "low")
+
+    def test_no_primer_data(self):
+        """Without primer data, all counts should be zero."""
+        issues = [{"number": 1, "title": "Test"}]
+        result = compute_primer_impact(issues, None, {})
+        self.assertEqual(result[1]["primer_error_count"], 0)
+        self.assertEqual(result[1]["matched_template"], "")
+        self.assertEqual(result[1]["pattern_specificity"], "")
+
+    @patch("passes.primer_impact._assess_pattern_specificity")
+    def test_picks_highest_count_template(self, mock_spec):
+        """When multiple templates match, pick the one with the highest count."""
+        mock_spec.return_value = {"specificity": "medium", "note": ""}
+        primer_data = {
+            "projects": [
+                {
+                    "name": "proj1",
+                    "pyrefly": {
+                        "errors": [
+                            {"kind": "err", "message": "Pattern `A`"},
+                            {"kind": "err", "message": "Pattern `B`"},
+                            {"kind": "err", "message": "Pattern `B`"},
+                        ]
+                    },
+                },
+            ]
+        }
+        issues = [
+            {
+                "number": 1,
+                "title": "Test",
+                "checker_results": {
+                    "pyrefly": [
+                        {"kind": "err", "message": "Pattern `x`"},
+                        {"kind": "err", "message": "Pattern `y`"},
+                    ]
+                },
+            }
+        ]
+        result = compute_primer_impact(issues, primer_data, {})
+        # Both checker errors templatize to "Pattern `_`", which matches
+        # both primer entries. The "Pattern `_`" template from "Pattern `B`"
+        # has count 2, which is higher than "Pattern `A`" with count 1.
+        # But they both templatize to the same thing, so they're the same key.
+        self.assertEqual(result[1]["primer_error_count"], 3)
+        self.assertEqual(result[1]["matched_template"], "Pattern `_`")
 
 
 class TestFuzzyMatchKind(unittest.TestCase):

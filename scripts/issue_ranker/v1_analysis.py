@@ -114,6 +114,12 @@ def generate_reasons(ranked_issues: list[dict], v1_gap: dict) -> dict:
         "issue is MORE important than its current milestone suggests. Focus on: "
         "high primer impact (N projects, N errors), strategic adoption tags (google, "
         "pytorch, pydantic), false positive driving users away, common Python idiom.\n\n"
+        "NOTE: Primer impact numbers are matched by error message pattern, not by "
+        "specific root cause. Each issue includes a pattern specificity assessment "
+        "(high/medium/low) from an LLM that estimates how likely this issue is the "
+        "primary cause of those errors. When specificity is low, say 'pattern appears "
+        "in N projects' rather than implying this specific issue causes all those "
+        "errors. When specificity is high, the counts are a stronger signal.\n\n"
         "Return JSON with exactly this structure:\n"
         '{"q2_reasons": {"123": "reason...", ...}, "q3_reasons": {"456": "reason...", ...}}'
     )
