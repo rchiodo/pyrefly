@@ -2899,3 +2899,44 @@ def example(variable: str | None) -> str:
     return variable
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/1575
+testcase!(
+    test_typevar_isinstance_narrow_else,
+    r#"
+from typing import TypeVar, assert_type, reveal_type
+
+T = TypeVar("T", int, str, float)
+
+def test(x: T) -> T:
+    if isinstance(x, (int, float)):
+        reveal_type(x)  # E: revealed type: float | int
+        return x
+    else:
+        reveal_type(x)  # E: revealed type: str
+        return x
+
+# Single constraint subtraction
+U = TypeVar("U", int, str)
+
+def test2(x: U) -> U:
+    if isinstance(x, int):
+        assert_type(x, int)
+        return x
+    else:
+        assert_type(x, str)
+        return x
+
+# All constraints matched - else branch is Never
+from typing import Never
+V = TypeVar("V", int, str)
+
+def test3(x: V) -> V:
+    if isinstance(x, (int, str)):
+        assert_type(x, int | str)
+        return x
+    else:
+        assert_type(x, Never)
+        return x
+"#,
+);

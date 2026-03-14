@@ -62,6 +62,7 @@ use crate::types::literal::Lit;
 use crate::types::literal::Literal;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
+use crate::types::type_var::Restriction;
 use crate::types::types::CalleeKind;
 use crate::types::types::Type;
 
@@ -379,7 +380,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let (vs, right) = self
                         .solver()
                         .fresh_quantified(&tparams, right, self.uniques);
-                    let result = self.subtract(l, &right);
+                    // For constrained TypeVars, subtract from the concrete constraints
+                    // so that e.g. isinstance(x, (int, float)) with T(int, str, float)
+                    // narrows the else branch to str instead of leaving it as T.
+                    let result = if let Type::Quantified(q) = l
+                        && let Restriction::Constraints(_) = q.restriction()
+                    {
+                        let concrete = q.restriction().as_type(self.stdlib, self.heap);
+                        self.subtract(&concrete, &right)
+                    } else {
+                        self.subtract(l, &right)
+                    };
                     // These are safe to ignore, as the only possible specialization errors are handled elsewhere:
                     // * If `left` is an invalid specialization, the error has already been reported at its definition site.
                     // * Unsafe runtime protocol overlaps are separately checked for in special_calls.rs.
