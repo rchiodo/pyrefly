@@ -58,6 +58,7 @@ use crate::binding::bindings::NameLookupResult;
 use crate::binding::narrow::AtomicNarrowOp;
 use crate::binding::narrow::NarrowOps;
 use crate::binding::narrow::NarrowSource;
+use crate::binding::scope::FlowStyle;
 use crate::binding::scope::Scope;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
@@ -799,6 +800,18 @@ impl<'a> BindingsBuilder<'a> {
                 self.bind_target_with_expr(&mut x.target, &mut x.value, &|expr, ann| {
                     Binding::Expr(ann, Box::new(expr.clone()))
                 });
+                // PEP 572: walrus operators inside comprehensions bind to
+                // the enclosing (non-comprehension) scope.
+                if self.scopes.in_comprehension()
+                    && let Expr::Name(name) = &*x.target
+                    && let Some(idx) = self.scopes.get_current_flow_idx(&name.id)
+                {
+                    self.scopes.define_in_enclosing_non_comprehension_scope(
+                        Hashed::new(&name.id),
+                        idx,
+                        FlowStyle::Other,
+                    );
+                }
             }
             Expr::Lambda(x) => {
                 self.bind_lambda(x, usage);

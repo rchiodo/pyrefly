@@ -889,15 +889,35 @@ impl DefinitionsBuilder {
             Expr::Name(name) => {
                 self.inner.name_reads.insert(name.id.clone());
             }
-            // These expressions define a scope, so walrus operators only define a name
-            // within that scope, not in the surrounding statement's scope.
-            // Name reads inside them belong to that inner scope, not ours.
-            Expr::Lambda(..)
-            | Expr::SetComp(..)
-            | Expr::DictComp(..)
-            | Expr::ListComp(..)
-            | Expr::Generator(..) => {}
+            // Lambda defines a fully separate scope; walrus operators inside
+            // a lambda are scoped to the lambda, not the enclosing scope.
+            Expr::Lambda(..) => {}
+            // Per PEP 572, walrus operators inside comprehensions assign to
+            // the enclosing scope, not the comprehension scope. We recurse
+            // to find walrus targets but skip name reads (those belong to the
+            // comprehension's own scope).
+            Expr::SetComp(..) | Expr::DictComp(..) | Expr::ListComp(..) | Expr::Generator(..) => {
+                x.recurse(&mut |x| self.walrus_targets_in_expr(x))
+            }
             _ => x.recurse(&mut |x| self.named_in_expr(x)),
+        }
+    }
+
+    /// Find walrus operator targets inside comprehension bodies.
+    /// Only accumulates definitions (not name reads), since name reads inside
+    /// comprehensions belong to the comprehension's own scope.
+    fn walrus_targets_in_expr(&mut self, x: &Expr) {
+        match x {
+            Expr::Named(expr_named) => {
+                self.expr_lvalue(&expr_named.target);
+                expr_named
+                    .value
+                    .recurse(&mut |x| self.walrus_targets_in_expr(x));
+            }
+            // Stop at lambdas — walrus inside lambda-in-comprehension is
+            // scoped to the lambda.
+            Expr::Lambda(..) => {}
+            _ => x.recurse(&mut |x| self.walrus_targets_in_expr(x)),
         }
     }
 }
@@ -1057,10 +1077,10 @@ match (x7 := 42):
     case int(): pass
 (x8 := 42)[y] = 42
 assert (x9 := 42), (x10 := "oops")
-# Named expressions inside expression-level scopes should not appear in definitions.
-# This includes type aliases which create their own scope (PEP 695).
+# Named expressions inside type aliases and lambdas should not appear in definitions.
 type y = (x11 := int)
-lambda x: (z := 42)
+lambda x: (z2 := 42)
+# PEP 572: Named expressions inside comprehensions DO assign to the enclosing scope.
 {z := "str" for _ in [1]}
 {(z := "str"):1 for _ in [1]}
 [z for x in [1, 2, 3] if z := x > 2]
@@ -1070,7 +1090,7 @@ lambda x: (z := 42)
         assert_definition_names(
             &defs,
             &[
-                "x0", "y", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
+                "x0", "y", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "z",
             ],
         );
     }

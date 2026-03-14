@@ -1912,6 +1912,36 @@ impl Scopes {
         Some(static_info.as_name_write_info())
     }
 
+    pub fn get_current_flow_idx(&self, name: &Name) -> Option<Idx<Key>> {
+        self.current().flow.get_value(name).map(|v| v.idx)
+    }
+
+    /// PEP 572: walrus operators inside comprehensions bind to the enclosing
+    /// non-comprehension scope. This method updates the flow of the nearest
+    /// enclosing non-comprehension scope with the given name and binding idx.
+    pub fn define_in_enclosing_non_comprehension_scope(
+        &mut self,
+        name: Hashed<&Name>,
+        idx: Idx<Key>,
+        style: FlowStyle,
+    ) {
+        let len = self.scopes.len();
+        for i in (0..len - 1).rev() {
+            if !matches!(self.scopes[i].scope.kind, ScopeKind::Comprehension { .. }) {
+                let in_loop = !self.scopes[i].scope.loops.is_empty();
+                match self.scopes[i].scope.flow.info.entry_hashed(name.cloned()) {
+                    Entry::Vacant(e) => {
+                        e.insert(FlowInfo::new_value(idx, style));
+                    }
+                    Entry::Occupied(mut e) => {
+                        *e.get_mut() = e.get().updated_value(idx, style, in_loop);
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     /// Handle a delete operation by marking a name as uninitialized in this flow.
     ///
     /// Don't change the type if one is present - downstream we'll emit

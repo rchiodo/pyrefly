@@ -655,10 +655,33 @@ def f(arg: int) -> None:
     x = (y := arg)
     assert_type(y, int)
     w = [z for x in [arg, arg] if (z := x) > 1]
-    z  # E: Could not find name `z`
+    assert_type(z, int)
     assert_type(w, list[int])
-    lambd = lambda x: (z := x) + 1
-    z  # E: Could not find name `z`
+    lambd = lambda x: (z2 := x) + 1
+    z2  # E: Could not find name `z2`
+"#,
+);
+
+testcase!(
+    test_walrus_in_comprehension_outer_scope,
+    r#"
+from typing import assert_type
+
+def f() -> None:
+    var = 33
+    my_list = [var := str("some_str") for _ in [123]]
+    assert_type(var, str)
+    assert_type(my_list, list[str])
+
+def g(xs: list[str]) -> None:
+    last = ""
+    results = [last := x for x in xs]
+    assert_type(last, str)
+    assert_type(results, list[str])
+
+def h(matrix: list[list[int]]) -> None:
+    result = [[y := x for x in row] for row in matrix]
+    assert_type(y, int)
 "#,
 );
 
