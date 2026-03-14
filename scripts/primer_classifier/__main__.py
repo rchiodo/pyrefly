@@ -74,6 +74,11 @@ def main() -> int:
         default=None,
         help="Path to file containing the PR title and description (for intent context)",
     )
+    parser.add_argument(
+        "--cross-check",
+        action="store_true",
+        help="Run mypy/pyright on changed projects and use LLM to match errors (requires mypy, pyright)",
+    )
 
     args = parser.parse_args()
 
@@ -141,6 +146,7 @@ def main() -> int:
         pyrefly_diff=pyrefly_diff,
         generate_suggestion=args.suggest,
         pr_description=pr_description,
+        cross_check=args.cross_check,
     )
 
     # Output

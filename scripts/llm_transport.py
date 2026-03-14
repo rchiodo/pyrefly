@@ -44,7 +44,7 @@ LLAMA_DEFAULT_MODEL = "Llama-4-Maverick-17B-128E-Instruct-FP8"
 
 # ── Anthropic API ────────────────────────────────────────────────────
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_DEFAULT_MODEL = "claude-opus-4-20250514"
 ANTHROPIC_API_VERSION = "2023-06-01"
 
 
@@ -83,12 +83,13 @@ def call_llama_api(
     system_prompt: str,
     user_prompt: str,
     model: Optional[str],
+    max_tokens: int = 16384,
 ) -> dict:
     """Call Meta's Llama API with retry on rate limiting."""
     payload = {
         "model": model or LLAMA_DEFAULT_MODEL,
         "temperature": 0,
-        "max_completion_tokens": 2048,
+        "max_completion_tokens": max_tokens,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -136,7 +137,7 @@ def call_anthropic_api(
     system_prompt: str,
     user_prompt: str,
     model: Optional[str],
-    max_tokens: int = 2048,
+    max_tokens: int = 16384,
     timeout: int = 120,
 ) -> dict:
     """Call the Anthropic Messages API with retry on transient errors."""
@@ -216,6 +217,53 @@ def extract_text(backend: str, result: dict) -> str:
         raise LLMError(f"Unexpected {backend} API response structure: {result}") from e
 
 
+def _extract_json(text: str, expected_type: type, open_char: str, close_char: str):
+    """Extract a JSON structure of the expected type from LLM response text.
+
+    Handles cases where the LLM wraps JSON in markdown fences or
+    surrounds it with analysis text.  Returns the first valid JSON
+    structure of the expected type, or raises LLMError.
+    """
+    # Try the full text first
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, expected_type):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    # Extract content from markdown code fences
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)\n\s*```", text, re.DOTALL)
+    if fence_match:
+        try:
+            parsed = json.loads(fence_match.group(1).strip())
+            if isinstance(parsed, expected_type):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    # Find JSON structures by looking for opening brackets and balancing
+    for i, ch in enumerate(text):
+        if ch == open_char:
+            depth = 0
+            for j in range(i, len(text)):
+                if text[j] == open_char:
+                    depth += 1
+                elif text[j] == close_char:
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[i : j + 1]
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, expected_type):
+                                return parsed
+                        except json.JSONDecodeError:
+                            pass
+                        break
+
+    raise LLMError(f"Could not parse LLM response as JSON: {text[:500]}")
+
+
 def parse_json(text: str) -> dict:
     """Parse a JSON dict from LLM response text.
 
@@ -223,39 +271,16 @@ def parse_json(text: str) -> dict:
     surrounds it with analysis text.  Returns the first valid JSON
     dict found in the text.
     """
-    # Try the full text first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    return _extract_json(text, dict, "{", "}")
 
-    # Strip markdown code fences
-    stripped = re.sub(r"```(?:json)?\s*", "", text).strip()
-    try:
-        return json.loads(stripped)
-    except json.JSONDecodeError:
-        pass
 
-    # Find JSON objects by looking for { and balancing braces
-    for i, ch in enumerate(text):
-        if ch == "{":
-            depth = 0
-            for j in range(i, len(text)):
-                if text[j] == "{":
-                    depth += 1
-                elif text[j] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        candidate = text[i : j + 1]
-                        try:
-                            parsed = json.loads(candidate)
-                            if isinstance(parsed, dict):
-                                return parsed
-                        except json.JSONDecodeError:
-                            pass
-                        break
+def parse_json_list(text: str) -> list:
+    """Parse a JSON list from LLM response text.
 
-    raise LLMError(f"Could not parse LLM response as JSON: {text}")
+    Like parse_json() but looks for a JSON array ([...]) instead of
+    a dict ({...}).
+    """
+    return _extract_json(text, list, "[", "]")
 
 
 # ── convenience wrappers ─────────────────────────────────────────────

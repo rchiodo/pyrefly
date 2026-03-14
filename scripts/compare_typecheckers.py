@@ -108,11 +108,20 @@ def clone_projects(projects: list[Project], cache_dir: str, debug: bool) -> None
 
 
 def setup_project(
-    project: Project, repo_dir: str, debug: bool, reuse: bool
+    project: Project,
+    repo_dir: str,
+    debug: bool,
+    reuse: bool,
+    install_project: bool = True,
 ) -> str | None:
     """Clone project, create venv, install deps + runtime deps.
 
     Returns site-package-path flags for pyrefly, or None if no deps.
+
+    When install_project is False, skip the pip-install-then-uninstall step
+    that pulls in transitive runtime deps.  Useful when only the explicit
+    deps list is needed (e.g. mypy_primer, where a full project build is
+    too slow / fragile).
     """
     if not reuse:
         run(
@@ -142,7 +151,8 @@ def setup_project(
                 )
 
         # Install runtime deps via pip install ., then uninstall just the project package
-        _install_and_uninstall_project(activate, repo_dir, project.name, debug)
+        if install_project:
+            _install_and_uninstall_project(activate, repo_dir, project.name, debug)
 
     # Get site-package paths for pyrefly
     site_paths = run(
@@ -540,13 +550,20 @@ def check_project(
     pyrefly_bin: str,
     debug: bool,
     full_errors: bool = False,
+    install_project: bool = True,
 ) -> dict[str, object]:
     """Run pyrefly, pyright, and mypy on a project, return a results row.
 
     When full_errors is True, checkers run in JSON mode and the result
     includes per-error detail lists under '{checker}_error_list' keys.
     """
-    site_paths = setup_project(project, repo_dir, debug, reuse=os.path.exists(repo_dir))
+    site_paths = setup_project(
+        project,
+        repo_dir,
+        debug,
+        reuse=os.path.exists(repo_dir),
+        install_project=install_project,
+    )
 
     paths = extract_paths_from_cmd(project.pyrefly_cmd)
     # Filter to paths that actually exist — repos restructure over time and

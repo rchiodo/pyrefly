@@ -137,7 +137,11 @@ Your explanations will be read by experienced engineers reviewing PRs. Factual e
 
 You MUST cite the relevant typing spec section with a link (https://typing.readthedocs.io/en/latest/spec/...) when your verdict depends on type system rules. BEFORE applying a type system rule, verify from the spec that the rule applies in this specific context — check all preconditions and scope limitations of the rule.
 
-CRITICAL — MYPY/PYRIGHT CROSS-CHECK: Before classifying a new error as "improvement", ask yourself: would mypy and pyright also flag this exact pattern? If they would NOT — if pyrefly is enforcing a rule more strictly than the ecosystem standard — then the error is a REGRESSION regardless of whether the code has a theoretical type issue. Pyrefly being stricter than established tools creates false positive noise. Use your training data knowledge of mypy/pyright behavior to make this determination.
+CRITICAL — MYPY/PYRIGHT CROSS-CHECK: Each error is annotated with whether mypy and pyright also flag the same file:line (matched semantically — same issue, possibly different line/wording). Use these as one signal among many — they inform but do not override your code analysis.
+- Errors marked [pyrefly-only]: Neither mypy nor pyright flag these. This suggests pyrefly may be too strict or has an inference bug, BUT pyrefly could also be correctly catching something others miss. Analyze the actual error to decide.
+- Errors marked [mypy: yes] and/or [pyright: yes]: Co-reported by other checkers. This is strong evidence the error is a real bug in the user's code, not a pyrefly false positive. Do NOT classify co-reported errors as false positives unless you have specific evidence that all three checkers are wrong.
+- IMPORTANT: Cross-check annotations apply to individual errors, NOT the overall project verdict. The net impact matters most: if a project removes 138 errors and adds 14 (even if pyrefly-only), that is a net improvement — the project has 124 fewer false positives. Do NOT let a few pyrefly-only additions override a large net reduction in errors.
+- If no cross-check annotations are present, fall back to your training data knowledge of mypy/pyright behavior.
 
 INTENTIONAL REGRESSIONS vs SPEC COMPLIANCE: Sometimes a PR intentionally introduces stricter behavior to comply with the typing spec. When the PR description states conformance intent AND cites a specific spec section:
 - If the spec clearly supports the new check, classify as "improvement" — the projects producing new errors were relying on a bug in pyrefly. The old (lenient) behavior was the bug, not the new (correct) behavior.
@@ -159,7 +163,7 @@ If you cannot confidently determine the answer because you need to see source co
 Use the project's file paths (e.g., "dulwich/objects.py", "discord/permissions.py"). Request at most 3 files. Only request files when you genuinely need them to verify the conclusion — if the pattern is clear enough (e.g., 100+ missing-attribute errors on core classes of a well-tested project), classify directly without requesting files.
 
 If you have enough context, respond with your analysis. IMPORTANT: reason through the evidence fully:
-{"spec_check": "which typing spec rule applies, with a link, AND what is its scope — which constructs does it apply to?", "runtime_behavior": "would this cause an actual runtime error or crash? trace the execution path", "mypy_pyright": "would mypy/pyright flag this? yes/no and why", "removal_assessment": "For removed errors ('-'): were they correct (catching real bugs) or incorrect (false positives/too strict)? State which and why. Write 'N/A' if there are no removed errors.", "pr_attribution": "Which specific change(s) in the pyrefly PR diff caused this project's errors to change? Reference specific files, functions, or code patterns from the diff. Write 'N/A' if no PR diff was provided.", "reason": "explanation — if a typing spec rule is relevant, include the link (e.g., https://typing.readthedocs.io/en/latest/spec/...) so reviewers can verify", "categories": [{"category": "short label", "reason": "explanation"}, ...]}
+{"spec_check": "which typing spec rule applies, with a link, AND what is its scope — which constructs does it apply to?", "runtime_behavior": "would this cause an actual runtime error or crash? trace the execution path", "mypy_pyright": "what do the mypy/pyright cross-check annotations show? summarize the data and its implications", "removal_assessment": "For removed errors ('-'): were they correct (catching real bugs) or incorrect (false positives/too strict)? State which and why. Write 'N/A' if there are no removed errors.", "pr_attribution": "Which specific change(s) in the pyrefly PR diff caused this project's errors to change? Reference specific files, functions, or code patterns from the diff. Write 'N/A' if no PR diff was provided.", "reason": "explanation — if a typing spec rule is relevant, include the link (e.g., https://typing.readthedocs.io/en/latest/spec/...) so reviewers can verify", "categories": [{"category": "short label", "reason": "explanation"}, ...]}
 
 The "spec_check", "runtime_behavior", and "mypy_pyright" fields force you to think through the evidence. If the spec doesn't require the check here AND there's no runtime impact AND mypy/pyright wouldn't flag it, it's almost certainly "too strict". The "categories" field is optional — omit it for small diffs with no categories. When present, each entry should correspond to an error category from the input.
 
@@ -463,8 +467,17 @@ ACTIONABILITY REQUIREMENTS — your suggestions MUST be specific:
 BAD (vague): "Add a guard condition to the override checking logic"
 GOOD (actionable): "In check_override_compatibility() in solver/subset.rs, add a short-circuit: when the overriding method has (*args: Any, **kwargs: Any), treat it as compatible with any parameter signature. This eliminates 8 bad-override errors across jax, bokeh, poetry, and artigraph."
 
+CROSS-CHECK DATA: Each project's errors include cross-check stats showing how many
+errors are also reported by mypy/pyright. Use this to prioritize:
+- "pyrefly-only" errors (not in mypy or pyright) are the PRIMARY targets for fixes.
+  These indicate pyrefly is enforcing a rule more strictly than the ecosystem standard.
+- Errors co-reported by mypy/pyright are real bugs in the project code — do NOT
+  suggest pyrefly changes for these.
+- If ALL regression errors are co-reported by mypy/pyright, the regression is likely
+  a real improvement being misclassified — say so instead of suggesting a fix.
+
 Rules:
-- Focus on regressions. Improvements are fine — don't suggest reverting them.
+- Focus on pyrefly-only regressions. Co-reported errors are NOT pyrefly bugs.
 - For intentional/conformance improvements: do NOT suggest reverting or weakening spec-compliant behavior. The ecosystem needs to adapt to the spec, not the other way around.
 - If a rule is applied too broadly (e.g., a protocol-only check applied to regular classes), suggest narrowing its scope with a guard condition, naming the specific function.
 - If type inference regressed, identify which inference path changed and suggest restoring the previous behavior for the affected cases.
@@ -524,6 +537,9 @@ def _build_suggestion_user_prompt(
             parts.append(f"  Reason: {c.reason}")
             if c.pr_attribution and c.pr_attribution != "N/A":
                 parts.append(f"  Attribution: {c.pr_attribution}")
+            # Include cross-check stats for the project
+            if c.cross_check_stats:
+                parts.append(f"  Cross-check: {c.cross_check_stats}")
             if c.categories:
                 for cat in c.categories:
                     parts.append(

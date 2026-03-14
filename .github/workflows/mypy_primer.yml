@@ -21,9 +21,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        shard-index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        shard-index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
       fail-fast: false
-    timeout-minutes: 120
+    timeout-minutes: 150
+    env:
+      PYREFLY_SCRIPTS_DIR: ${{ github.workspace }}/pyrefly_to_test/scripts
     steps:
       - uses: actions/checkout@v6
         with:
@@ -89,7 +91,7 @@ jobs:
             --base-dir $BASE_DIR \
             --cargo-profile release \
             --new $GITHUB_SHA --old base_commit \
-            --num-shards 10 --shard-index ${{ matrix.shard-index }} \
+            --num-shards 15 --shard-index ${{ matrix.shard-index }} \
             --debug \
             --project-selector '^(?!.*(python/cpython|sympy/sympy))' \
             --type-checker pyrefly \
