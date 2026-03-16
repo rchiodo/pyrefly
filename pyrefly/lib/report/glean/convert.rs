@@ -18,6 +18,7 @@ use num_traits::ToPrimitive;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::docstring::Docstring;
+use pyrefly_python::dunder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::types::Union;
 use pyrefly_util::visit::Visit;
@@ -236,6 +237,7 @@ struct GleanState<'a> {
 struct AssignInfo<'a> {
     range: TextRange,
     annotation: Option<&'a Expr>,
+    value: Option<&'a Expr>,
 }
 
 impl Facts {
@@ -788,7 +790,11 @@ impl GleanState<'_> {
         }
     }
 
-    fn make_xrefs(&self, expr: &Expr) -> Vec<(DefinitionLocation, TextRange)> {
+    fn make_xrefs(
+        &self,
+        expr: &Expr,
+        include_str_lit_xrefs: bool,
+    ) -> Vec<(DefinitionLocation, TextRange)> {
         match expr {
             Expr::Attribute(attr) => {
                 if attr.ctx.is_load() {
@@ -810,7 +816,9 @@ impl GleanState<'_> {
                     vec![]
                 }
             }
-            Expr::StringLiteral(str_lit) => self.get_xrefs_for_str_lit(str_lit),
+            Expr::StringLiteral(str_lit) if include_str_lit_xrefs => {
+                self.get_xrefs_for_str_lit(str_lit)
+            }
             Expr::BooleanLiteral(_) | Expr::NoneLiteral(_) => {
                 let range = expr.range();
                 let name = self.module.code_at(range);
@@ -848,6 +856,7 @@ impl GleanState<'_> {
         &mut self,
         expr: &Expr,
         container: &python::DeclarationContainer,
+        include_str_lit_xrefs: bool,
     ) -> Vec<(DefinitionLocation, TextRange)> {
         if let Some(call) = expr.as_call_expr() {
             self.file_call_facts(call);
@@ -855,7 +864,7 @@ impl GleanState<'_> {
                 self.callee_to_caller_facts(call, caller);
             }
         }
-        self.make_xrefs(expr)
+        self.make_xrefs(expr, include_str_lit_xrefs)
     }
 
     fn visit_annotation_expr(
@@ -865,7 +874,7 @@ impl GleanState<'_> {
         offset: TextSize,
         container: &python::DeclarationContainer,
     ) {
-        for (def, abs_range) in self.generate_expr_facts_and_xrefs(expr, container) {
+        for (def, abs_range) in self.generate_expr_facts_and_xrefs(expr, container, true) {
             let rel_range = abs_range.sub(offset);
             xrefs.push(python::XRefViaName {
                 target: python::Name::new(def.name.clone()),
@@ -1099,6 +1108,20 @@ impl GleanState<'_> {
                 next.and_then(|stmt| Docstring::range_from_stmts(slice::from_ref(stmt)));
             let type_info = self.visit_annotation_exprs(info.annotation, &ctx.container);
             def_infos.push(self.variable_info(fqname, info.range, type_info, docstring_range, ctx));
+
+            if name.id == dunder::ALL
+                && let Some(Expr::List(list_expr)) = info.value
+            {
+                for str_lit in list_expr
+                    .elts
+                    .iter()
+                    .filter_map(|e| e.as_string_literal_expr())
+                {
+                    for (definition, range) in self.get_xrefs_for_str_lit(str_lit) {
+                        self.add_xref(definition, range);
+                    }
+                }
+            }
         }
         expr.recurse(&mut |expr| self.variable_facts(expr, info, ctx, next, def_infos));
     }
@@ -1374,7 +1397,7 @@ impl GleanState<'_> {
     }
 
     fn visit_expr(&mut self, expr: &Expr, container: &python::DeclarationContainer) {
-        for (definition, range) in self.generate_expr_facts_and_xrefs(expr, container) {
+        for (definition, range) in self.generate_expr_facts_and_xrefs(expr, container, false) {
             self.add_xref(definition, range);
         }
         expr.recurse(&mut |s| self.visit_expr(s, container));
@@ -1459,6 +1482,7 @@ impl GleanState<'_> {
                 let info = AssignInfo {
                     range: assign.range(),
                     annotation: None,
+                    value: Some(assign.value.as_ref()),
                 };
                 assign.targets.visit(&mut |target| {
                     self.variable_facts(target, &info, context, next, &mut decl_infos)
@@ -1470,6 +1494,7 @@ impl GleanState<'_> {
                 let info = AssignInfo {
                     range: assign.range(),
                     annotation: Some(&assign.annotation),
+                    value: assign.value.as_ref().map(|v| v.as_ref()),
                 };
                 self.variable_facts(&assign.target, &info, context, next, &mut decl_infos);
                 self.visit_exprs(&assign.target, container);
@@ -1479,6 +1504,7 @@ impl GleanState<'_> {
                 let info = AssignInfo {
                     range: assign.range(),
                     annotation: None,
+                    value: Some(assign.value.as_ref()),
                 };
                 self.variable_facts(&assign.target, &info, context, next, &mut decl_infos);
                 self.visit_exprs(&assign.target, container);
@@ -1497,6 +1523,7 @@ impl GleanState<'_> {
                 let info = AssignInfo {
                     range,
                     annotation: None,
+                    value: None,
                 };
                 stmt_for.target.visit(&mut |target| {
                     self.variable_facts(target, &info, context, next, &mut decl_infos)
@@ -1517,6 +1544,7 @@ impl GleanState<'_> {
                         let info = AssignInfo {
                             range: target.range(),
                             annotation: None,
+                            value: None,
                         };
                         self.variable_facts(target, &info, context, next, &mut decl_infos)
                     });
