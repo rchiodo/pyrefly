@@ -138,6 +138,14 @@ pub(crate) fn compute_qualified_name(
     }
 
     let display_name = definition.display_name.as_deref()?;
+
+    // Builtins are indexed without the "builtins." prefix in Glean
+    // (e.g., "Exception" not "builtins.Exception"), matching both
+    // the Python and Pyrefly Glean indexers.
+    if module_name == ModuleName::builtins() {
+        return Some(display_name.to_owned());
+    }
+
     let definition_handle = Handle::new(
         module_name,
         definition.module.path().dupe(),
@@ -235,5 +243,31 @@ mod tests {
 
         let result = compute_qualified_name(&transaction, &handle, &definition);
         assert_eq!(result, Some("defmod.foo".to_owned()));
+    }
+
+    /// Builtins should use bare names (e.g., "Exception" not
+    /// "builtins.Exception") to match the Glean indexer convention.
+    #[test]
+    fn test_compute_qualified_name_builtin_strips_prefix() {
+        let code = "class Exception(BaseException): pass";
+        let module_name = ModuleName::builtins();
+        let module_path = ModulePath::memory(PathBuf::from("builtins.pyi"));
+        let module = Module::new(module_name, module_path.dupe(), Arc::new(code.to_owned()));
+
+        let env = TestEnv::one("unrelated", "");
+        let state = State::new(env.config_finder());
+        let transaction = state.transaction();
+
+        let handle = Handle::new(module_name, module_path, env.sys_info());
+        let definition = FindDefinitionItemWithDocstring {
+            metadata: DefinitionMetadata::Variable(None),
+            definition_range: TextRange::new(TextSize::new(6), TextSize::new(15)),
+            module,
+            docstring_range: None,
+            display_name: Some("Exception".to_owned()),
+        };
+
+        let result = compute_qualified_name(&transaction, &handle, &definition);
+        assert_eq!(result, Some("Exception".to_owned()));
     }
 }
