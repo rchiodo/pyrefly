@@ -36,7 +36,8 @@ use crate::state::state::CancellableTransaction;
 pub struct CallerInfo {
     pub call_range: TextRange,
     pub name: String,
-    pub def_range: TextRange,
+    pub full_range: TextRange,
+    pub name_range: TextRange,
 }
 
 /// Finds a function definition at a specific position in an AST.
@@ -72,23 +73,23 @@ pub fn find_containing_function_for_call(
     module_name: ModuleName,
     ast: &ModModule,
     position: TextSize,
-) -> Option<(String, TextRange)> {
+) -> (String, TextRange, TextRange) {
     let covering_nodes = Ast::locate_node(ast, position);
 
     for (i, node) in covering_nodes.iter().enumerate() {
         if let AnyNodeRef::StmtFunctionDef(func_def) = node {
             if let Some(AnyNodeRef::StmtClassDef(class_def)) = covering_nodes.get(i + 1) {
                 let name = format!("{}.{}.{}", module_name, class_def.name.id, func_def.name.id);
-                return Some((name, func_def.name.range()));
+                return (name, func_def.range(), func_def.name.range());
             } else {
                 let name = format!("{}.{}", module_name, func_def.name.id);
-                return Some((name, func_def.name.range()));
+                return (name, func_def.range(), func_def.name.range());
             }
         }
     }
 
     let name = format!("{}.<module>", module_name);
-    Some((name, ast.range()))
+    (name, ast.range(), ast.range())
 }
 
 /// Converts raw incoming call data to LSP CallHierarchyIncomingCall items.
@@ -117,8 +118,8 @@ pub fn transform_incoming_calls(
                 tags: None,
                 detail: Some(caller.name),
                 uri: caller_uri,
-                range: caller_module.to_lsp_range(caller.def_range),
-                selection_range: caller_module.to_lsp_range(caller.def_range),
+                range: caller_module.to_lsp_range(caller.full_range),
+                selection_range: caller_module.to_lsp_range(caller.name_range),
                 data: None,
             };
 
@@ -250,16 +251,17 @@ impl CancellableTransaction<'_> {
                         && ref_set
                             .iter()
                             .any(|ref_range| call.func.range().contains(ref_range.start()))
-                        && let Some((name, def_range)) = find_containing_function_for_call(
+                    {
+                        let (name, full_range, name_range) = find_containing_function_for_call(
                             module_name,
                             ast,
                             call.range().start(),
-                        )
-                    {
+                        );
                         callers.push(CallerInfo {
                             call_range: call.range(),
                             name,
-                            def_range,
+                            full_range,
+                            name_range,
                         });
                     }
                     expr.recurse(&mut |child| {
@@ -395,12 +397,13 @@ class MyClass:
         let module_name = ModuleName::from_str("test");
 
         let pos_in_func = TextSize::from(30);
-        let (name, _) = find_containing_function_for_call(module_name, &ast, pos_in_func).unwrap();
+        let (name, _full_range, _name_range) =
+            find_containing_function_for_call(module_name, &ast, pos_in_func);
         assert_eq!(name, "test.my_function");
 
         let pos_in_method = TextSize::from(85);
-        let (name, _) =
-            find_containing_function_for_call(module_name, &ast, pos_in_method).unwrap();
+        let (name, _full_range, _name_range) =
+            find_containing_function_for_call(module_name, &ast, pos_in_method);
         assert_eq!(name, "test.MyClass.method");
     }
 
