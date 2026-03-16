@@ -641,8 +641,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn add_class_fields(&self, class: &Class, candidates: &mut SmallSet<Name>) {
         let mut add_fields_for = |cls: &Class| {
-            for name in cls.fields() {
-                candidates.insert(name.clone());
+            if let Some(class_fields) = self.get_class_fields(cls) {
+                for name in class_fields.names() {
+                    candidates.insert(name.clone());
+                }
             }
         };
         add_fields_for(class);
@@ -1230,12 +1232,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     fn has_custom_setattr(&self, cls: &Class) -> bool {
-        if cls.contains(&dunder::SETATTR) {
+        if self
+            .get_class_fields(cls)
+            .is_some_and(|f| f.contains(&dunder::SETATTR))
+        {
             return true;
         }
         let mro = self.get_mro_for_class(cls);
         for ancestor in mro.ancestors_no_object() {
-            if ancestor.class_object().contains(&dunder::SETATTR) {
+            if self
+                .get_class_fields(ancestor.class_object())
+                .is_some_and(|f| f.contains(&dunder::SETATTR))
+            {
                 return true;
             }
         }
@@ -2588,11 +2596,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     {
         let mut seen = SmallSet::new();
         for c in mro {
+            let Some(class_fields) = self.get_class_fields(c) else {
+                continue;
+            };
             match expected_attribute_name {
                 None => {
-                    for fld in c.fields() {
+                    for fld in class_fields.names() {
                         if seen.insert(fld)
-                            && let Some(range) = c.field_decl_range(fld)
+                            && let Some(range) = class_fields.field_decl_range(fld)
                         {
                             res.push(AttrInfo {
                                 name: fld.clone(),
@@ -2601,7 +2612,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 definition: AttrDefinition::FullyResolved {
                                     cls: c.dupe(),
                                     range,
-                                    docstring_range: c.field_docstring_range(fld),
+                                    docstring_range: class_fields.field_docstring_range(fld),
                                 },
                                 is_reexport: false,
                             });
@@ -2609,7 +2620,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
                 Some(expected_attribute_name) => {
-                    if let Some(range) = c.field_decl_range(expected_attribute_name) {
+                    if let Some(range) = class_fields.field_decl_range(expected_attribute_name) {
                         res.push(AttrInfo {
                             name: expected_attribute_name.clone(),
                             ty: None,
@@ -2617,7 +2628,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             definition: AttrDefinition::FullyResolved {
                                 cls: c.dupe(),
                                 range,
-                                docstring_range: c.field_docstring_range(expected_attribute_name),
+                                docstring_range: class_fields
+                                    .field_docstring_range(expected_attribute_name),
                             },
                             is_reexport: false,
                         });
