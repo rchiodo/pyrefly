@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
 use pyrefly_config::error_kind::ErrorKind;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::dunder;
@@ -49,9 +48,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn get_enum_members(&self, cls: &Class) -> SmallSet<Lit> {
-        cls.fields()
-            .filter_map(|f| self.get_enum_member(cls, f))
-            .collect()
+        self.get_class_fields(cls)
+            .map(|class_fields| {
+                class_fields
+                    .names()
+                    .filter_map(|f| self.get_enum_member(cls, f))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn is_valid_enum_member(
@@ -283,7 +287,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             if enum_.has_value
                 && let Some(enum_value_ty) = self.type_of_enum_value(enum_)
-                && !class.fields().contains(&dunder::NEW)
+                && !self
+                    .get_class_fields(class)
+                    .is_some_and(|f| f.contains(&dunder::NEW))
                 && (!matches!(ty, Type::Ellipsis) || !self.module().path().is_interface())
             {
                 self.check_enum_value_annotation(ty, &enum_value_ty, name, range, errors);

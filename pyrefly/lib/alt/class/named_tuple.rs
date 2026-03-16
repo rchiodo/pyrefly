@@ -31,20 +31,22 @@ use crate::types::types::Type;
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn get_named_tuple_elements(&self, cls: &Class, errors: &ErrorCollector) -> SmallSet<Name> {
-        let fields_count = cls.fields().len();
-        let mut elements = Vec::with_capacity(fields_count);
-        for name in cls.fields() {
-            if !cls.is_field_annotated(name) {
+        let Some(class_fields) = self.get_class_fields(cls) else {
+            return SmallSet::new();
+        };
+        let mut elements = Vec::with_capacity(class_fields.len());
+        for name in class_fields.names() {
+            if !class_fields.is_field_annotated(name) {
                 continue;
             }
-            if let Some(range) = cls.field_decl_range(name) {
+            if let Some(range) = class_fields.field_decl_range(name) {
                 elements.push((name.clone(), range));
             }
         }
         elements.sort_by_key(|e: &(Name, ruff_text_size::TextRange)| e.1.start());
         let mut has_seen_default: bool = false;
         for (name, range) in &elements {
-            let has_default = cls.is_field_initialized_on_class(name);
+            let has_default = class_fields.is_field_initialized_on_class(name);
             if !has_default && has_seen_default {
                 self.error(
                     errors,
