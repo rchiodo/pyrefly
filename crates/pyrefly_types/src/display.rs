@@ -1128,7 +1128,6 @@ pub mod tests {
     use crate::callable::Required;
     use crate::class::Class;
     use crate::class::ClassDefIndex;
-    use crate::class::ClassFields;
     use crate::class::ClassType;
     use crate::heap::TypeHeap;
     use crate::literal::Lit;
@@ -1162,7 +1161,6 @@ pub mod tests {
             NestingContext::toplevel(),
             mi,
             None,
-            ClassFields::default(),
         )
     }
 

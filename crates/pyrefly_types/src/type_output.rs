@@ -192,7 +192,6 @@ mod tests {
     use super::*;
     use crate::class::Class;
     use crate::class::ClassDefIndex;
-    use crate::class::ClassFields;
     use crate::class::ClassType;
     use crate::literal::LitEnum;
     use crate::literal::LitStyle;
@@ -217,7 +216,6 @@ mod tests {
             NestingContext::toplevel(),
             mi,
             None,
-            ClassFields::default(),
         )
     }
 

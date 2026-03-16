@@ -2366,7 +2366,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let Some(owner) = class_binding.0.as_ref() else {
                 return;
             };
-            if owner.contains(&expect.attr.id)
+            if self
+                .get_class_fields(owner)
+                .is_some_and(|f| f.contains(&expect.attr.id))
                 && self.is_subset_eq(
                     &value_type,
                     &self.union(

@@ -190,6 +190,13 @@ impl ClassFields {
     }
 }
 
+/// Align to a cache line to prevent false sharing. `ClassInner` is stored
+/// behind `Arc` and accessed concurrently from multiple threads during
+/// type checking. Without alignment, multiple `Arc<ClassInner>` allocations
+/// can land on the same cache line, causing cross-thread invalidation
+/// traffic when any of them are accessed (even read-only, due to the Arc
+/// refcount on adjacent allocations).
+#[repr(align(64))]
 struct ClassInner {
     def_index: ClassDefIndex,
     qname: QName,
@@ -198,7 +205,6 @@ struct ClassInner {
     /// when computing the class tparams). Whenever it is `None`, there will be a corresponding
     /// `KeyTParams` / `BindingTParams` pair to compute the class tparams.
     precomputed_tparams: Option<Arc<TParams>>,
-    fields: ClassFields,
 }
 
 impl Debug for ClassInner {
@@ -269,18 +275,12 @@ impl Class {
         parent: NestingContext,
         module: Module,
         precomputed_tparams: Option<Arc<TParams>>,
-        fields: ClassFields,
     ) -> Self {
         Self(Arc::new(ClassInner {
             def_index,
             qname: QName::new(name, parent, module),
             precomputed_tparams,
-            fields,
         }))
-    }
-
-    pub fn contains(&self, name: &Name) -> bool {
-        self.0.fields.contains(name)
     }
 
     pub fn range(&self) -> TextRange {
@@ -317,30 +317,6 @@ impl Class {
 
     pub fn module(&self) -> &Module {
         self.0.qname.module()
-    }
-
-    pub fn fields(&self) -> impl ExactSizeIterator<Item = &Name> {
-        self.0.fields.fields()
-    }
-
-    pub fn class_body_fields(&self) -> impl Iterator<Item = &Name> {
-        self.0.fields.class_body_fields()
-    }
-
-    pub fn is_field_annotated(&self, name: &Name) -> bool {
-        self.0.fields.is_field_annotated(name)
-    }
-
-    pub fn is_field_initialized_on_class(&self, name: &Name) -> bool {
-        self.0.fields.is_field_initialized_on_class(name)
-    }
-
-    pub fn field_decl_range(&self, name: &Name) -> Option<TextRange> {
-        self.0.fields.field_decl_range(name)
-    }
-
-    pub fn field_docstring_range(&self, name: &Name) -> Option<TextRange> {
-        self.0.fields.field_docstring_range(name)
     }
 
     pub fn has_qname(&self, module: &str, parent: &NestingContext, name: &str) -> bool {

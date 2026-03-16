@@ -24,8 +24,10 @@ class E(enum.Enum):
         "#,
     );
     let cls = get_class("E", &handle, &state);
-    let fields = cls
-        .fields()
+    let bindings = state.transaction().get_bindings(&handle).unwrap();
+    let class_fields = bindings.get_class_fields(cls.index()).unwrap();
+    let fields = class_fields
+        .names()
         .map(|f| f.as_str())
         .sorted()
         .collect::<Vec<_>>();

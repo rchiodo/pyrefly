@@ -72,19 +72,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             Some(self.calculate_class_tparams_no_legacy(name, x.type_params.as_deref(), errors))
         };
-        let fields = self
-            .bindings()
-            .metadata()
-            .get_class(def_index)
-            .fields
-            .clone();
         Class::new(
             def_index,
             x.name.clone(),
             parent.dupe(),
             self.module().dupe(),
             precomputed_tparams,
-            fields,
         )
     }
 
@@ -94,19 +87,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         name: &Identifier,
         parent: &NestingContext,
     ) -> Class {
-        let fields = self
-            .bindings()
-            .metadata()
-            .get_class(def_index)
-            .fields
-            .clone();
         Class::new(
             def_index,
             name.clone(),
             parent.dupe(),
             self.module().dupe(),
             Some(Arc::new(TParams::default())),
-            fields,
         )
     }
 
@@ -131,10 +117,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn get_class_field_map(&self, cls: &Class) -> SmallMap<Name, Arc<ClassField>> {
-        let fields = cls.fields();
-        let mut map = SmallMap::with_capacity(fields.len());
+        let Some(class_fields) = self.get_class_fields(cls) else {
+            return SmallMap::new();
+        };
+        let mut map = SmallMap::with_capacity(class_fields.len());
 
-        for name in fields {
+        for name in class_fields.names() {
             let key = KeyClassField(cls.index(), name.clone());
             if let Some(field) = self.get_from_class(cls, &key) {
                 map.insert(name.clone(), field);
