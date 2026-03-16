@@ -170,6 +170,23 @@ pub fn transform_outgoing_calls(
     outgoing_calls
 }
 
+/// Checks whether a position is inside a `Call` expression's func range.
+///
+/// Returns the call's full range if the position is inside the func part
+/// of a call expression, `None` otherwise. This filters out non-call
+/// references (imports, type annotations, etc.).
+fn find_enclosing_call_range(ast: &ModModule, position: TextSize) -> Option<TextRange> {
+    for node in Ast::locate_node(ast, position) {
+        if let AnyNodeRef::ExprCall(call) = node {
+            if call.func.range().contains(position) {
+                return Some(call.range());
+            }
+            return None;
+        }
+    }
+    None
+}
+
 /// Prepares a CallHierarchyItem for a function definition.
 ///
 /// Creates the LSP CallHierarchyItem representation for a function,
@@ -442,5 +459,29 @@ class MyClass:
         let pos_outside = TextSize::from(0);
         let result = find_function_at_position_in_ast(&ast, pos_outside);
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_enclosing_call_range() {
+        use super::find_enclosing_call_range;
+
+        let source = "foo(bar)\nfoo(bar())\nobj.method()\n";
+        let (ast, _, _) = Ast::parse(source, PySourceType::Python);
+
+        // Position on `foo` in `foo(bar)` — inside func range of the call
+        let pos_foo = TextSize::from(0);
+        assert!(find_enclosing_call_range(&ast, pos_foo).is_some());
+
+        // Position on `bar` in `foo(bar)` — argument, not inside func range
+        let pos_bar_arg = TextSize::from(4);
+        assert!(find_enclosing_call_range(&ast, pos_bar_arg).is_none());
+
+        // Position on inner `bar` in `foo(bar())` — inside func range of inner call
+        let pos_inner_bar = TextSize::from(13);
+        assert!(find_enclosing_call_range(&ast, pos_inner_bar).is_some());
+
+        // Position on `method` in `obj.method()` — inside func range (attribute is part of func)
+        let pos_method = TextSize::from(24);
+        assert!(find_enclosing_call_range(&ast, pos_method).is_some());
     }
 }
