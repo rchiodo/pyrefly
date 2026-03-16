@@ -15,9 +15,37 @@ use crate::report::cinderx::write_results;
 use crate::state::require::Require;
 use crate::test::util::TestEnv;
 
+/// Minimal `__static__` stub for CinderX primitive type tests.
+/// In production, the real `__static__` package is provided by CinderX.
+const STATIC_MODULE_STUB: &str = r#"
+class int8(int): pass
+class int16(int): pass
+class int32(int): pass
+class int64(int): pass
+class uint8(int): pass
+class uint16(int): pass
+class uint32(int): pass
+class uint64(int): pass
+class cbool(int): pass
+class char(int): pass
+class double(float): pass
+class single(float): pass
+"#;
+
 /// Create a type-checked state from a single module's Python source.
 fn create_state(module_name: &str, python_code: &str) -> crate::state::state::State {
     let mut test_env = TestEnv::new();
+    test_env.add(module_name, python_code);
+    let (state, _) = test_env
+        .with_default_require_level(Require::Everything)
+        .to_state();
+    state
+}
+
+/// Create a type-checked state with the `__static__` stub and a test module.
+fn create_state_with_static(module_name: &str, python_code: &str) -> crate::state::state::State {
+    let mut test_env = TestEnv::new();
+    test_env.add("__static__", STATIC_MODULE_STUB);
     test_env.add(module_name, python_code);
     let (state, _) = test_env
         .with_default_require_level(Require::Everything)
@@ -747,6 +775,149 @@ def f(t: tuple[Inner, str]) -> None:
     assert!(
         has_mismatch,
         "expected is_narrowed_mismatch == true for the narrowed t[0].value access",
+    );
+}
+
+/// BUG: When a literal int is assigned to a variable annotated with `__static__.int64`,
+/// the CinderX report should record the contextual type `__static__.int64` for the
+/// literal expression, but currently it records `Literal[42]` / `builtins.int` instead.
+#[test]
+fn test_static_int64_literal_contextual_type() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+x: int64 = 42
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry,
+    // proving that the annotation resolved correctly.
+    let has_int64_class = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Class { qname, .. } if qname == "__static__.int64"
+        )
+    });
+    assert!(
+        has_int64_class,
+        "expected `__static__.int64` in the type table, got: {:#?}",
+        data.entries,
+    );
+
+    // BUG: The literal `42` should have contextual type `__static__.int64`, but
+    // currently it gets `Literal[42]` with promoted type `builtins.int`.
+    // Check that a Literal entry for "42" exists (the current, wrong behavior).
+    let has_literal_42 = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Literal { value, .. } if value == "42"
+        )
+    });
+    assert!(
+        has_literal_42,
+        "expected Literal(42) in the type table (current buggy behavior), got: {:#?}",
+        data.entries,
+    );
+
+    // Verify the literal's promoted type is builtins.int, NOT __static__.int64.
+    // This confirms the bug: the contextual __static__ type is lost.
+    let literal_entry = data
+        .entries
+        .iter()
+        .find(|entry| matches!(&entry.ty, StructuredType::Literal { value, .. } if value == "42"))
+        .expect("Literal(42) should exist");
+    let promoted_idx = match &literal_entry.ty {
+        StructuredType::Literal { promoted_type, .. } => *promoted_type,
+        _ => unreachable!("already matched as Literal"),
+    };
+    let promoted_entry = &data.entries[promoted_idx];
+    // BUG: This should be __static__.int64 but is currently builtins.int.
+    assert!(
+        matches!(
+            &promoted_entry.ty,
+            StructuredType::Class { qname, .. } if qname == "builtins.int"
+        ),
+        "expected promoted_type to be builtins.int (current buggy behavior), got: {:#?}",
+        promoted_entry.ty,
+    );
+}
+
+/// BUG: When a literal float is assigned to a variable annotated with `__static__.double`,
+/// the CinderX report should record the contextual type `__static__.double` for the
+/// literal expression, but currently it records `builtins.float` instead.
+#[test]
+fn test_static_double_literal_contextual_type() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import double
+
+y: double = 3.14
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.double` as a class entry,
+    // proving that the annotation resolved correctly.
+    let has_double_class = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Class { qname, .. } if qname == "__static__.double"
+        )
+    });
+    assert!(
+        has_double_class,
+        "expected `__static__.double` in the type table, got: {:#?}",
+        data.entries,
+    );
+
+    // BUG: The literal `3.14` should have contextual type `__static__.double`, but
+    // currently the located type for the literal expression resolves to `builtins.float`.
+    // Check that a builtins.float class entry exists (used for the literal's type).
+    let has_float_class = data.entries.iter().any(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Class { qname, args, .. } if qname == "builtins.float" && args.is_empty()
+        )
+    });
+    // BUG: This should be __static__.double but is currently builtins.float.
+    assert!(
+        has_float_class,
+        "expected `builtins.float` in the type table (current buggy behavior), got: {:#?}",
+        data.entries,
+    );
+
+    // Find the located type entries whose type resolves to builtins.float.
+    // At least one of these should correspond to the literal `3.14`, confirming
+    // the bug that the contextual __static__.double type is lost.
+    let float_class_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, args, .. } if qname == "builtins.float" && args.is_empty()
+            )
+        })
+        .expect("builtins.float should exist");
+    let float_locations: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.type_index == float_class_idx)
+        .collect();
+    assert!(
+        !float_locations.is_empty(),
+        "expected at least one location with type builtins.float (the literal 3.14), got locations: {:#?}",
+        data.locations,
     );
 }
 
