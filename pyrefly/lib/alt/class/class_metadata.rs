@@ -131,7 +131,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         });
 
         // Compute data that depends on the `BaseClass` representation of base classes.
-        let initial_protocol_metadata = Self::initial_protocol_metadata(cls, bases);
+        let initial_protocol_metadata = self.initial_protocol_metadata(cls, bases);
         let has_generic_base_class = bases.iter().any(|x| x.is_generic());
         let has_typed_dict_base_class = bases.iter().any(|x| x.is_typed_dict());
 
@@ -406,7 +406,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         )
     }
 
-    fn initial_protocol_metadata(cls: &Class, bases: &[BaseClass]) -> Option<ProtocolMetadata> {
+    fn initial_protocol_metadata(
+        &self,
+        cls: &Class,
+        bases: &[BaseClass],
+    ) -> Option<ProtocolMetadata> {
         if bases.iter().any(|x| {
             matches!(
                 x,
@@ -417,7 +421,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             )
         }) {
             Some(ProtocolMetadata {
-                members: cls.class_body_fields().cloned().collect(),
+                members: self
+                    .get_class_fields(cls)
+                    .map(|f| f.class_body_fields().cloned().collect())
+                    .unwrap_or_default(),
                 is_runtime_checkable: false,
             })
         } else {
@@ -694,9 +701,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(EnumMetadata {
                 // A generic enum is an error, but we create Any type args anyway to handle it gracefully.
                 cls: self.promote_nontypeddict_silently_to_classtype(cls),
-                has_value: bases_with_metadata
-                    .iter()
-                    .any(|(base, _)| base.contains(&Name::new_static("_value_"))),
+                has_value: bases_with_metadata.iter().any(|(base, _)| {
+                    self.get_class_fields(base)
+                        .is_some_and(|f| f.contains(&Name::new_static("_value_")))
+                }),
                 is_flag: bases_with_metadata.iter().any(|(base, _)| {
                     self.is_subset_eq(
                         &self
@@ -1216,9 +1224,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 all_fields.extend(td.fields.clone());
             }
         }
-        for name in cls.fields() {
-            if cls.is_field_annotated(name) {
-                all_fields.insert(name.clone(), is_total);
+        if let Some(class_fields) = self.get_class_fields(cls) {
+            for name in class_fields.names() {
+                if class_fields.is_field_annotated(name) {
+                    all_fields.insert(name.clone(), is_total);
+                }
             }
         }
         all_fields
@@ -1344,7 +1354,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let metadata = self.get_metadata_for_class(cls);
         let mut fields_to_check: SmallSet<Name>;
         if metadata.extends_abc() || metadata.is_protocol() {
-            fields_to_check = SmallSet::from_iter(cls.fields().cloned());
+            fields_to_check = self
+                .get_class_fields(cls)
+                .map(|f| SmallSet::from_iter(f.names().cloned()))
+                .unwrap_or_default();
         } else {
             fields_to_check = SmallSet::new();
         }
