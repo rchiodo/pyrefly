@@ -11,6 +11,7 @@
 //! system to resolve types for each declaration.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use pyrefly_build::handle::Handle;
@@ -19,6 +20,7 @@ use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::callable::Param;
 use pyrefly_types::types::Type;
 use ruff_python_ast::Expr;
+use ruff_python_ast::Operator;
 use ruff_python_ast::Stmt;
 use ruff_python_ast::StmtClassDef;
 use ruff_python_ast::StmtFunctionDef;
@@ -56,6 +58,7 @@ pub struct StubImport {
 pub struct StubFunction {
     pub name: String,
     pub is_async: bool,
+    pub type_params: Option<String>,
     pub decorators: Vec<String>,
     pub params: Vec<StubParam>,
     pub return_type: Option<String>,
@@ -71,6 +74,7 @@ pub struct StubParam {
 
 pub struct StubClass {
     pub name: String,
+    pub type_params: Option<String>,
     pub bases: String,
     pub decorators: Vec<String>,
     pub body: Vec<StubItem>,
@@ -141,8 +145,13 @@ struct ExtractionContext<'a> {
 
 fn extract_stmts(stmts: &[Stmt], ctx: &mut ExtractionContext, in_class: bool) -> Vec<StubItem> {
     let mut items = Vec::new();
+    let overloaded = collect_overloaded_names(stmts);
 
     for stmt in stmts {
+        if is_overload_impl(stmt, &overloaded) {
+            continue;
+        }
+
         match stmt {
             Stmt::FunctionDef(func_def) => {
                 if let Some(item) = extract_function(func_def, ctx, in_class) {
@@ -168,8 +177,15 @@ fn extract_stmts(stmts: &[Stmt], ctx: &mut ExtractionContext, in_class: bool) ->
                 }
             }
             Stmt::Assign(assign) => {
-                for item in extract_assign(assign, ctx, in_class) {
-                    items.push(StubItem::Variable(item));
+                // TypeVar/NamedTuple/TypedDict calls and old-style type aliases
+                // (e.g. `X = List[int]`, `X = int | str`) are preserved verbatim.
+                if is_type_constructor_or_alias(assign) {
+                    let text = source_text(ctx.module_info, assign.range()).to_owned();
+                    items.push(StubItem::TypeAlias(StubTypeAlias { text }));
+                } else {
+                    for item in extract_assign(assign, ctx, in_class) {
+                        items.push(StubItem::Variable(item));
+                    }
                 }
             }
             Stmt::TypeAlias(type_alias) => {
@@ -222,9 +238,16 @@ fn extract_function(
         None
     };
 
+    // Extract PEP 695 type parameters (e.g. `def foo[T](...)`).
+    let type_params = func_def
+        .type_params
+        .as_ref()
+        .map(|tp| source_text(ctx.module_info, tp.range()).to_owned());
+
     Some(StubFunction {
         name: name.to_owned(),
         is_async: func_def.is_async,
+        type_params,
         decorators,
         params,
         return_type,
@@ -423,10 +446,9 @@ fn extract_return_type(
         if let Some(idx) = ctx
             .bindings
             .key_to_idx_hashed_opt(starlark_map::Hashed::new(&ret_key))
+            && let Some(ty) = ctx.answers.get_type_at(idx)
         {
-            if let Some(ty) = ctx.answers.get_type_at(idx) {
-                return format_type(&ty, ctx);
-            }
+            return format_type(&ty, ctx);
         }
     }
 
@@ -476,10 +498,17 @@ fn extract_class(class_def: &StmtClassDef, ctx: &mut ExtractionContext) -> Optio
     } else {
         None
     };
+
+    let type_params = class_def
+        .type_params
+        .as_ref()
+        .map(|tp| source_text(ctx.module_info, tp.range()).to_owned());
+
     let body = extract_stmts(&class_def.body, ctx, true);
 
     Some(StubClass {
         name: name.to_owned(),
+        type_params,
         bases,
         decorators,
         body,
@@ -573,10 +602,10 @@ fn simple_value_text(expr: &Expr, module_info: &Module) -> Option<String> {
 }
 
 fn extract_docstring(body: &[Stmt]) -> Option<String> {
-    if let Some(Stmt::Expr(expr_stmt)) = body.first() {
-        if let Expr::StringLiteral(s) = expr_stmt.value.as_ref() {
-            return Some(format!("\"\"\"{}\"\"\"", s.value));
-        }
+    if let Some(Stmt::Expr(expr_stmt)) = body.first()
+        && let Expr::StringLiteral(s) = expr_stmt.value.as_ref()
+    {
+        return Some(format!("\"\"\"{}\"\"\"", s.value));
     }
     None
 }
@@ -594,6 +623,76 @@ fn should_include_name(name: &str, config: &ExtractConfig, in_class: bool) -> bo
         return false;
     }
     true
+}
+
+/// Matches `@overload`, `@typing.overload`, and `@typing_extensions.overload`.
+fn has_overload_decorator(func_def: &StmtFunctionDef) -> bool {
+    func_def.decorator_list.iter().any(|d| {
+        match &d.expression {
+            Expr::Name(name) => name.id.as_str() == "overload",
+            Expr::Attribute(attr) => {
+                attr.attr.as_str() == "overload"
+                    && matches!(&*attr.value, Expr::Name(base) if base.id.as_str() == "typing" || base.id.as_str() == "typing_extensions")
+            }
+            _ => false,
+        }
+    })
+}
+
+/// Collect function names that have at least one `@overload` variant,
+/// so the non-overloaded implementation can be dropped from the stub.
+fn collect_overloaded_names(stmts: &[Stmt]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for stmt in stmts {
+        if let Stmt::FunctionDef(func) = stmt
+            && has_overload_decorator(func)
+        {
+            names.insert(func.name.to_string());
+        }
+    }
+    names
+}
+
+fn is_overload_impl(stmt: &Stmt, overloaded: &HashSet<String>) -> bool {
+    if let Stmt::FunctionDef(func) = stmt {
+        overloaded.contains(func.name.as_str()) && !has_overload_decorator(func)
+    } else {
+        false
+    }
+}
+
+/// Returns `true` for calls to type-variable constructors (`TypeVar`,
+/// `ParamSpec`, `TypeVarTuple`, `NewType`, `NamedTuple`, `TypedDict`).
+fn is_type_constructor_call(value: &Expr) -> bool {
+    if let Expr::Call(call) = value
+        && let Expr::Name(name) = &*call.func
+    {
+        return matches!(
+            name.id.as_str(),
+            "TypeVar" | "ParamSpec" | "TypeVarTuple" | "NewType" | "NamedTuple" | "TypedDict"
+        );
+    }
+    false
+}
+
+/// Subscripts (`List[int]`) or union pipes (`int | str`).
+/// This is intentionally broad — false positives (e.g. `x = d["key"]`)
+/// are benign since they just preserve the assignment verbatim.
+fn is_old_style_type_alias(value: &Expr) -> bool {
+    match value {
+        Expr::Subscript(_) => true,
+        Expr::BinOp(op) if op.op == Operator::BitOr => true,
+        _ => false,
+    }
+}
+
+/// Type constructor calls and old-style type aliases are preserved verbatim.
+fn is_type_constructor_or_alias(assign: &ruff_python_ast::StmtAssign) -> bool {
+    if let [Expr::Name(_)] = assign.targets.as_slice() {
+        is_type_constructor_call(&assign.value) || is_old_style_type_alias(&assign.value)
+    } else {
+        false
+    }
 }
 
 fn source_text(module_info: &Module, range: TextRange) -> &str {

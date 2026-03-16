@@ -26,8 +26,14 @@ mod tests {
     use crate::state::state::State;
     use crate::test::util::TestEnv;
 
-    /// Run stubgen on an input file and return the generated stub text.
     fn run_stubgen(input: &str) -> String {
+        run_stubgen_with_config(input, &ExtractConfig {
+            include_private: false,
+            include_docstrings: false,
+        })
+    }
+
+    fn run_stubgen_with_config(input: &str, config: &ExtractConfig) -> String {
         let tdir = tempfile::tempdir().unwrap();
         let path = tdir.path().join("input.py");
         fs_anyhow::write(&path, input).unwrap();
@@ -50,15 +56,10 @@ mod tests {
 
         let (handles, _, _) = handles_obj.all(holder.as_ref().config_finder());
 
-        let config = ExtractConfig {
-            include_private: false,
-            include_docstrings: false,
-        };
-
         let mut result = String::new();
         for handle in &handles {
             transaction.run(&[handle.dupe()], Require::Everything, None);
-            if let Some(stub) = extract_module_stub(transaction, handle, &config) {
+            if let Some(stub) = extract_module_stub(transaction, handle, config) {
                 result = emit_stub(&stub);
             }
         }
@@ -145,5 +146,76 @@ mod tests {
     #[test]
     fn test_stubgen_mixed() {
         assert_stubgen_snapshot("mixed");
+    }
+
+    #[test]
+    fn test_stubgen_overloads() {
+        assert_stubgen_snapshot("overloads");
+    }
+
+    #[test]
+    fn test_stubgen_typevar() {
+        assert_stubgen_snapshot("typevar");
+    }
+
+    #[test]
+    fn test_stubgen_type_alias_old_style() {
+        assert_stubgen_snapshot("type_alias_old_style");
+    }
+
+    #[test]
+    fn test_stubgen_generics() {
+        assert_stubgen_snapshot("generics");
+    }
+
+    #[test]
+    fn test_stubgen_docstrings() {
+        let input = r#"
+def greet(name: str) -> str:
+    """Say hello."""
+    return f"Hello, {name}!"
+
+def no_doc(x: int) -> int:
+    return x
+
+class MyClass:
+    """A class with a docstring."""
+
+    def method(self) -> None:
+        """Do something."""
+        pass
+"#;
+        let config = ExtractConfig {
+            include_private: false,
+            include_docstrings: true,
+        };
+        let actual = run_stubgen_with_config(input, &config);
+        assert!(
+            actual.contains(r#""""Say hello.""""#),
+            "Function docstring should be emitted:\n{actual}"
+        );
+        assert!(
+            actual.contains(r#""""A class with a docstring.""""#),
+            "Class docstring should be emitted:\n{actual}"
+        );
+        assert!(
+            actual.contains(r#""""Do something.""""#),
+            "Method docstring should be emitted:\n{actual}"
+        );
+
+        // Without docstrings, none should appear.
+        let no_doc_config = ExtractConfig {
+            include_private: false,
+            include_docstrings: false,
+        };
+        let without = run_stubgen_with_config(input, &no_doc_config);
+        assert!(
+            !without.contains("Say hello."),
+            "Function docstring should not appear with include_docstrings=false:\n{without}"
+        );
+        assert!(
+            !without.contains("A class with a docstring."),
+            "Class docstring should not appear with include_docstrings=false:\n{without}"
+        );
     }
 }

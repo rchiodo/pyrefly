@@ -84,6 +84,9 @@ fn emit_function(func: &StubFunction, out: &mut String, indent: &str) {
     }
     out.push_str("def ");
     out.push_str(&func.name);
+    if let Some(tp) = &func.type_params {
+        out.push_str(tp);
+    }
     out.push('(');
     emit_params(&func.params, out);
     out.push(')');
@@ -93,7 +96,17 @@ fn emit_function(func: &StubFunction, out: &mut String, indent: &str) {
         out.push_str(ret);
     }
 
-    out.push_str(": ...\n");
+    if let Some(ds) = &func.docstring {
+        out.push_str(":\n");
+        let body_indent = format!("{}    ", indent);
+        out.push_str(&body_indent);
+        out.push_str(ds);
+        out.push('\n');
+        out.push_str(&body_indent);
+        out.push_str("...\n");
+    } else {
+        out.push_str(": ...\n");
+    }
 }
 
 fn emit_params(params: &[StubParam], out: &mut String) {
@@ -136,6 +149,9 @@ fn emit_class(cls: &StubClass, out: &mut String, indent: &str) {
     out.push_str(indent);
     out.push_str("class ");
     out.push_str(&cls.name);
+    if let Some(tp) = &cls.type_params {
+        out.push_str(tp);
+    }
     if !cls.bases.is_empty() {
         out.push('(');
         out.push_str(&cls.bases);
