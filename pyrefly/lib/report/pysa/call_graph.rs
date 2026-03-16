@@ -22,6 +22,7 @@ use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::callable::Param;
 use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
+use pyrefly_types::class::ClassFields;
 use pyrefly_types::type_var::Restriction;
 use pyrefly_types::typed_dict::TypedDict;
 use pyrefly_types::types::BoundMethod;
@@ -3680,8 +3681,13 @@ impl<'a> CallGraphVisitor<'a> {
                     }),
                 _ => false,
             };
-            let callees: Vec<PysaCallTarget<FunctionRef>> = return_inner_class
-                .fields()
+            let inner_class_fields = class_context
+                .bindings
+                .get_class_fields(return_inner_class.index())
+                .cloned()
+                .unwrap_or_else(ClassFields::empty);
+            let callees: Vec<PysaCallTarget<FunctionRef>> = inner_class_fields
+                .names()
                 .filter_map(|field_name| {
                     if let Some(class_field) = get_class_field_from_current_class_only(
                         &return_inner_class,

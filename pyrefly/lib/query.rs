@@ -31,6 +31,7 @@ use pyrefly_types::callable::Function;
 use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::callable::PropertyRole;
 use pyrefly_types::class::Class;
+use pyrefly_types::class::ClassFields;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
@@ -500,8 +501,11 @@ impl<'a> CalleesWithLocation<'a> {
             && let Type::ClassType(class) = &arg_type
         {
             let repr_callees =
-                self.callee_from_mro(class.class_object(), "__repr__", |_solver, c| {
-                    if c.contains(&REPR) {
+                self.callee_from_mro(class.class_object(), "__repr__", |solver, c| {
+                    if solver
+                        .get_class_fields(c)
+                        .is_some_and(|f| f.contains(&REPR))
+                    {
                         Some(format!("{}.{}.__repr__", c.module_name(), c.name()))
                     } else {
                         None
@@ -731,13 +735,14 @@ impl<'a> CalleesWithLocation<'a> {
     fn find_init_or_new(&self, cls: &Class) -> Vec<Callee> {
         self.callee_from_mro(cls, "__init__", |solver, c| {
             // find first class that has __init__ or __new__
-            let has_init = c.contains(&dunder::INIT)
+            let class_fields = solver.get_class_fields(c);
+            let has_init = class_fields.is_some_and(|f| f.contains(&dunder::INIT))
                 || solver
                     .get_from_class(c, &KeyClassSynthesizedFields(c.index()))
                     .is_some_and(|f| f.get(&dunder::INIT).is_some());
             if has_init {
                 Some(format!("{}.{}.__init__", c.module_name(), c.name()))
-            } else if c.contains(&dunder::NEW) {
+            } else if class_fields.is_some_and(|f| f.contains(&dunder::NEW)) {
                 Some(format!("{}.{}.__new__", c.module_name(), c.name()))
             } else {
                 None
@@ -850,8 +855,11 @@ impl<'a> CalleesWithLocation<'a> {
                 Forallable::TypeAlias(TypeAliasData::Ref(_)) => vec![],
             },
             Type::SelfType(c) | Type::ClassType(c) => {
-                self.callee_from_mro(c.class_object(), "__call__", |_solver, c| {
-                    if c.contains(&dunder::CALL) {
+                self.callee_from_mro(c.class_object(), "__call__", |solver, c| {
+                    if solver
+                        .get_class_fields(c)
+                        .is_some_and(|f| f.contains(&dunder::CALL))
+                    {
                         Some(format!("{}.{}.__call__", c.module_name(), c.name()))
                     } else {
                         None
@@ -984,8 +992,12 @@ impl Query {
         let answers = transaction.get_answers(&handle)?;
 
         if let Some(Type::ClassDef(cd)) = &class_ty {
-            let res = cd
-                .fields()
+            let class_fields = bindings
+                .get_class_fields(cd.index())
+                .cloned()
+                .unwrap_or_else(ClassFields::empty);
+            let res = class_fields
+                .names()
                 .filter_map(|n| {
                     let class_field_index = KeyClassField(cd.index(), n.clone());
                     let class_field_idx =

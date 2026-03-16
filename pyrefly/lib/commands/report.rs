@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
-use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_config::args::ConfigOverrideArgs;
 use pyrefly_config::finder::ConfigFinder;
@@ -51,6 +50,7 @@ use crate::commands::util::CommandExitStatus;
 use crate::export::exports::ExportLocation;
 use crate::state::require::Require;
 use crate::state::state::State;
+use crate::state::state::Transaction;
 
 /// Location of a code element (start of its declaration)
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -542,8 +542,10 @@ impl ReportArgs {
 
     fn parse_classes(
         module: &Module,
-        bindings: Bindings,
-        answers: Arc<Answers>,
+        bindings: &Bindings,
+        answers: &Answers,
+        transaction: &Transaction,
+        handle: &Handle,
     ) -> Vec<ReportClass> {
         let mut classes = Vec::new();
         let module_prefix = if module.name() != ModuleName::unknown() {
@@ -591,7 +593,7 @@ impl ReportArgs {
                             continue;
                         }
                         let method_name = fun.def.name.to_string();
-                        if !Self::is_function_completely_annotated(&bindings, &fun.def) {
+                        if !Self::is_function_completely_annotated(bindings, &fun.def) {
                             incomplete_attributes.push(IncompleteAttribute {
                                 name: method_name.clone(),
                                 declared_in: class_name.clone(),
@@ -630,7 +632,12 @@ impl ReportArgs {
                     if ancestor_class.module_name().as_str() == "builtins" {
                         continue;
                     }
-                    for field_name in ancestor_class.fields() {
+                    let Some(ancestor_class_fields) =
+                        transaction.get_class_fields(handle, ancestor_class)
+                    else {
+                        continue;
+                    };
+                    for field_name in ancestor_class_fields.names() {
                         let field_name_str = field_name.to_string();
                         // Skip if we already have this attribute listed (it has been overridden by the current class or another class in the MRO)
                         if incomplete_attributes
@@ -639,7 +646,7 @@ impl ReportArgs {
                         {
                             continue;
                         }
-                        if !ancestor_class.is_field_annotated(field_name) {
+                        if !ancestor_class_fields.is_field_annotated(field_name) {
                             incomplete_attributes.push(IncompleteAttribute {
                                 name: field_name_str,
                                 declared_in: ancestor_name.clone(),
@@ -773,7 +780,8 @@ impl ReportArgs {
                 let line_count = module.lined_buffer().line_index().line_count();
                 let exports = transaction.get_exports(handle);
                 let mut functions = Self::parse_functions(&module, &bindings, &answers, &exports);
-                let mut classes = Self::parse_classes(&module, bindings.dupe(), answers.dupe());
+                let mut classes =
+                    Self::parse_classes(&module, &bindings, &answers, transaction, handle);
                 let mut variables =
                     Self::parse_variables(&module, &bindings, &exports, &functions, &classes);
                 let suppressions = Self::parse_suppressions(&module);
@@ -790,8 +798,13 @@ impl ReportArgs {
                     let py_exports = transaction.get_exports(py_handle);
                     let py_functions =
                         Self::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
-                    let py_classes =
-                        Self::parse_classes(&py_module, py_bindings.dupe(), py_answers.dupe());
+                    let py_classes = Self::parse_classes(
+                        &py_module,
+                        &py_bindings,
+                        &py_answers,
+                        transaction,
+                        py_handle,
+                    );
                     let py_variables = Self::parse_variables(
                         &py_module,
                         &py_bindings,
@@ -916,7 +929,8 @@ mod tests {
 
         let line_count = module.lined_buffer().line_index().line_count();
         let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        let classes = ReportArgs::parse_classes(&module, bindings.dupe(), answers.dupe());
+        let classes =
+            ReportArgs::parse_classes(&module, &bindings, &answers, &transaction, &handle);
         let variables =
             ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
         let suppressions = ReportArgs::parse_suppressions(&module);
@@ -967,7 +981,8 @@ mod tests {
 
         let line_count = module.lined_buffer().line_index().line_count();
         let mut functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        let mut classes = ReportArgs::parse_classes(&module, bindings.dupe(), answers.dupe());
+        let mut classes =
+            ReportArgs::parse_classes(&module, &bindings, &answers, &pyi_txn, &pyi_handle);
         let mut variables =
             ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
         let suppressions = ReportArgs::parse_suppressions(&module);
@@ -988,7 +1003,7 @@ mod tests {
         let py_functions =
             ReportArgs::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
         let py_classes =
-            ReportArgs::parse_classes(&py_module, py_bindings.dupe(), py_answers.dupe());
+            ReportArgs::parse_classes(&py_module, &py_bindings, &py_answers, &py_txn, &py_handle);
         let py_variables = ReportArgs::parse_variables(
             &py_module,
             &py_bindings,

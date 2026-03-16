@@ -14,6 +14,7 @@ use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_types::class::Class;
+use pyrefly_types::class::ClassFields;
 use pyrefly_types::class::ClassType;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::Stmt;
@@ -306,10 +307,19 @@ pub fn get_class_fields<'a>(
     class: &'a Class,
     context: &'a ModuleContext<'a>,
 ) -> impl Iterator<Item = (Cow<'a, Name>, Arc<ClassField>)> {
-    let regular_fields = class.fields().filter_map(|name| {
-        get_class_field_from_current_class_only(class, name, context)
-            .map(|field| (Cow::Borrowed(name), field))
-    });
+    let class_fields = context
+        .bindings
+        .get_class_fields(class.index())
+        .cloned()
+        .unwrap_or_else(ClassFields::empty);
+    let regular_fields = class_fields
+        .names()
+        .filter_map(|name| {
+            get_class_field_from_current_class_only(class, name, context)
+                .map(|field| (Cow::Owned(name.clone()), field))
+        })
+        .collect::<Vec<_>>()
+        .into_iter();
 
     let synthesized_fields_idx = context
         .bindings
@@ -317,7 +327,7 @@ pub fn get_class_fields<'a>(
     let synthesized_fields = context.answers.get_idx(synthesized_fields_idx).unwrap();
     let synthesized_fields = synthesized_fields
         .fields()
-        .filter(|(name, _)| !class.contains(name))
+        .filter(|(name, _)| !class_fields.contains(name))
         .map(|(name, field)| (Cow::Owned(name.clone()), field.inner.dupe()))
         // Required by the borrow checker.
         // This is fine since the amount of synthesized fields should be small.
