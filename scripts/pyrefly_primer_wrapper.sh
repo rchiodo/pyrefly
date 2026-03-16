@@ -32,13 +32,11 @@ SITE_PATH_ARGS=()
 if [ -n "$PYREFLY_SCRIPTS_DIR" ]; then
     PROJECT_NAME=$(basename "$(pwd)")
     if [ ! -d ".venv" ]; then
-        echo "[wrapper] Installing deps for $PROJECT_NAME" >&2
         readarray -t SITE_PATH_ARGS < <(
             PYTHONPATH="$PYREFLY_SCRIPTS_DIR" python3 \
                 "$PYREFLY_SCRIPTS_DIR/setup_primer_deps.py" "$PROJECT_NAME" 2>/dev/null
-        ) || echo "[wrapper] Dep install failed for $PROJECT_NAME (non-fatal)" >&2
+        )
     else
-        echo "[wrapper] Reusing existing .venv for $PROJECT_NAME" >&2
         if [ -f ".venv/bin/python" ]; then
             readarray -t SITE_PATH_ARGS < <(
                 .venv/bin/python -c "
