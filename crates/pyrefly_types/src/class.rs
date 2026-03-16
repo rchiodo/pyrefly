@@ -126,6 +126,70 @@ impl ClassFieldProperties {
     }
 }
 
+/// The set of fields declared on a class, with their properties.
+#[derive(Clone, Debug, Default)]
+pub struct ClassFields(SmallMap<Name, ClassFieldProperties>);
+
+impl ClassFields {
+    pub fn new(fields: SmallMap<Name, ClassFieldProperties>) -> Self {
+        Self(fields)
+    }
+
+    pub fn empty() -> Self {
+        Self(SmallMap::new())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn contains(&self, name: &Name) -> bool {
+        self.0.contains_key(name)
+    }
+
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = &Name> {
+        self.0.keys()
+    }
+
+    /// Alias for `fields()` — iterates over field names.
+    pub fn names(&self) -> impl ExactSizeIterator<Item = &Name> {
+        self.0.keys()
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&Name, &ClassFieldProperties)> {
+        self.0.iter()
+    }
+
+    pub fn class_body_fields(&self) -> impl Iterator<Item = &Name> {
+        self.0
+            .iter()
+            .filter(|(_, prop)| prop.is_defined_in_class_body)
+            .map(|(name, _)| name)
+    }
+
+    pub fn is_field_annotated(&self, name: &Name) -> bool {
+        self.0.get(name).is_some_and(|prop| prop.is_annotated)
+    }
+
+    pub fn is_field_initialized_on_class(&self, name: &Name) -> bool {
+        self.0
+            .get(name)
+            .is_some_and(|prop| prop.is_initialized_on_class)
+    }
+
+    pub fn field_decl_range(&self, name: &Name) -> Option<TextRange> {
+        Some(self.0.get(name)?.range)
+    }
+
+    pub fn field_docstring_range(&self, name: &Name) -> Option<TextRange> {
+        self.0.get(name)?.docstring_range
+    }
+}
+
 struct ClassInner {
     def_index: ClassDefIndex,
     qname: QName,
@@ -134,7 +198,7 @@ struct ClassInner {
     /// when computing the class tparams). Whenever it is `None`, there will be a corresponding
     /// `KeyTParams` / `BindingTParams` pair to compute the class tparams.
     precomputed_tparams: Option<Arc<TParams>>,
-    fields: SmallMap<Name, ClassFieldProperties>,
+    fields: ClassFields,
 }
 
 impl Debug for ClassInner {
@@ -205,7 +269,7 @@ impl Class {
         parent: NestingContext,
         module: Module,
         precomputed_tparams: Option<Arc<TParams>>,
-        fields: SmallMap<Name, ClassFieldProperties>,
+        fields: ClassFields,
     ) -> Self {
         Self(Arc::new(ClassInner {
             def_index,
@@ -216,7 +280,7 @@ impl Class {
     }
 
     pub fn contains(&self, name: &Name) -> bool {
-        self.0.fields.contains_key(name)
+        self.0.fields.contains(name)
     }
 
     pub fn range(&self) -> TextRange {
@@ -256,37 +320,27 @@ impl Class {
     }
 
     pub fn fields(&self) -> impl ExactSizeIterator<Item = &Name> {
-        self.0.fields.keys()
+        self.0.fields.fields()
     }
 
     pub fn class_body_fields(&self) -> impl Iterator<Item = &Name> {
-        self.0
-            .fields
-            .iter()
-            .filter(|(_, prop)| prop.is_defined_in_class_body)
-            .map(|(name, _)| name)
+        self.0.fields.class_body_fields()
     }
 
     pub fn is_field_annotated(&self, name: &Name) -> bool {
-        self.0
-            .fields
-            .get(name)
-            .is_some_and(|prop| prop.is_annotated)
+        self.0.fields.is_field_annotated(name)
     }
 
     pub fn is_field_initialized_on_class(&self, name: &Name) -> bool {
-        self.0
-            .fields
-            .get(name)
-            .is_some_and(|prop| prop.is_initialized_on_class)
+        self.0.fields.is_field_initialized_on_class(name)
     }
 
     pub fn field_decl_range(&self, name: &Name) -> Option<TextRange> {
-        Some(self.0.fields.get(name)?.range)
+        self.0.fields.field_decl_range(name)
     }
 
     pub fn field_docstring_range(&self, name: &Name) -> Option<TextRange> {
-        self.0.fields.get(name)?.docstring_range
+        self.0.fields.field_docstring_range(name)
     }
 
     pub fn has_qname(&self, module: &str, parent: &NestingContext, name: &str) -> bool {

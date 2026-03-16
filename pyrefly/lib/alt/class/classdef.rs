@@ -36,6 +36,7 @@ use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
+use crate::types::class::ClassFields;
 use crate::types::class::ClassType;
 use crate::types::types::TParams;
 use crate::types::types::Type;
@@ -80,7 +81,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             parent.dupe(),
             self.module().dupe(),
             precomputed_tparams,
-            fields,
+            ClassFields::new(fields),
         )
     }
 
@@ -97,7 +98,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             parent.dupe(),
             self.module().dupe(),
             Some(Arc::new(TParams::default())),
-            fields.clone(),
+            ClassFields::new(fields.clone()),
         )
     }
 
