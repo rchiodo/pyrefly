@@ -8,6 +8,7 @@ Tests for nn.Module subclass stubs: activations, normalization, dropout,
 convolution, pooling, loss, and misc modules.
 """
 
+from collections.abc import Callable
 from typing import assert_type, TYPE_CHECKING
 
 import torch
@@ -373,3 +374,17 @@ def test_flatten_module():
     x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
     y = m(x)
     assert_type(y, Tensor)
+
+
+# ============================================================================
+# Module as Callable
+# ============================================================================
+
+
+def test_module_as_callable():
+    """nn.Module instances are subtypes of Callable matching their forward signature."""
+    relu = nn.ReLU()
+    # nn.Module subclasses: __call__ delegates to forward
+    f: Callable[[Tensor[4, 8]], Tensor[4, 8]] = relu
+    y = f(torch.randn(4, 8))
+    assert_type(y, Tensor[4, 8])
