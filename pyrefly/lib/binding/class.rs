@@ -81,6 +81,7 @@ use crate::error::context::ErrorInfo;
 use crate::export::special::SpecialExport;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassFieldProperties;
+use crate::types::class::ClassFields;
 use crate::types::types::AnyStyle;
 
 enum IllegalIdentifierHandling {
@@ -99,9 +100,7 @@ enum SynthesizedClassKind {
 
 impl<'a> BindingsBuilder<'a> {
     fn def_index(&mut self) -> ClassDefIndex {
-        let res = ClassDefIndex(self.class_count);
-        self.class_count += 1;
-        res
+        self.metadata.push_class()
     }
 
     /// Shared helper that allocates class indices and declares the class object with the given key.
@@ -463,13 +462,13 @@ impl<'a> BindingsBuilder<'a> {
         }
 
         fields.reserve(0); // Attempt to shrink to capacity
+        self.metadata.get_class_mut(class_indices.def_index).fields = ClassFields::new(fields);
         self.insert_binding_idx(
             class_indices.class_idx,
             BindingClass::ClassDef(ClassBinding {
                 def_index: class_indices.def_index,
                 def: ClassDefData::new(x),
                 parent: parent.dupe(),
-                fields,
                 tparams_require_binding,
                 docstring_range,
             }),
@@ -933,6 +932,7 @@ impl<'a> BindingsBuilder<'a> {
             force_class_initialization,
             class_kind,
         );
+        self.metadata.get_class_mut(class_indices.def_index).fields = ClassFields::new(fields);
         if bind_to_name {
             self.bind_current_as(
                 &class_name,
@@ -948,12 +948,7 @@ impl<'a> BindingsBuilder<'a> {
         }
         self.insert_binding_idx(
             class_indices.class_idx,
-            BindingClass::FunctionalClassDef(
-                class_indices.def_index,
-                class_name,
-                parent.dupe(),
-                fields,
-            ),
+            BindingClass::FunctionalClassDef(class_indices.def_index, class_name, parent.dupe()),
         );
 
         self.insert_binding_idx(

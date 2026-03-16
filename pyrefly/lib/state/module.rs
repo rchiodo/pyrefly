@@ -165,6 +165,12 @@ impl ModuleStateMut {
         self.steps.solutions.load_full()
     }
 
+    /// Borrow the solutions via a Guard, avoiding Arc refcount operations.
+    /// The Guard keeps the data alive without incrementing the Arc refcount.
+    pub fn load_solutions(&self) -> Guard<Option<Arc<Solutions>>> {
+        self.steps.solutions.load()
+    }
+
     pub fn line_count(&self) -> usize {
         self.steps.line_count()
     }

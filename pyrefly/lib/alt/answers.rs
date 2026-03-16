@@ -41,6 +41,7 @@ use crate::binding::binding::Keyed;
 use crate::binding::bindings::BindingEntry;
 use crate::binding::bindings::BindingTable;
 use crate::binding::bindings::Bindings;
+use crate::binding::metadata::BindingsMetadata;
 use crate::binding::table::TableKeyed;
 use crate::config::base::RecursionLimitConfig;
 use crate::dispatch_anyidx;
@@ -58,6 +59,8 @@ use crate::table_for_each;
 use crate::table_mut_for_each;
 use crate::table_try_for_each;
 use crate::types::callable::Callable;
+use crate::types::class::Class;
+use crate::types::class::ClassFields;
 use crate::types::equality::TypeEq;
 use crate::types::equality::TypeEqCtx;
 use crate::types::heap::TypeHeap;
@@ -218,6 +221,7 @@ table!(
 pub struct Solutions {
     module_info: ModuleInfo,
     table: SolutionsTable,
+    metadata: Arc<BindingsMetadata>,
     index: Option<Arc<Mutex<Index>>>,
 }
 
@@ -286,6 +290,10 @@ impl Display for SolutionsDifference<'_> {
 }
 
 impl Solutions {
+    pub fn metadata(&self) -> &Arc<BindingsMetadata> {
+        &self.metadata
+    }
+
     #[allow(dead_code)] // Used in tests.
     pub fn get<K: Exported>(&self, key: &K) -> &Arc<<K as Keyed>::Answer>
     where
@@ -604,6 +612,18 @@ pub trait LookupAnswer: Sized {
     ///
     /// Default implementation is a no-op.
     fn write_unlock_empty_in_module(&self, _calc_id: &CalcId) {}
+
+    /// Look up the class fields for a class, which may be defined in another
+    /// module. The fields are populated during the binding phase and can be
+    /// queried without going through the solve code path.
+    ///
+    /// Returns `None` if the `ClassDefIndex` is stale (e.g., the target module
+    /// was rebuilt with fewer classes during incremental recompilation).
+    ///
+    /// Implementations must register a class-level dependency so that
+    /// incremental rebuilds properly invalidate dependents when class
+    /// fields change.
+    fn get_class_fields(&self, cls: &Class) -> Option<&ClassFields>;
 }
 
 impl Answers {
@@ -763,6 +783,7 @@ impl Answers {
         Solutions {
             module_info: bindings.module().dupe(),
             table: res,
+            metadata: bindings.metadata().dupe(),
             index: self.index.dupe(),
         }
     }

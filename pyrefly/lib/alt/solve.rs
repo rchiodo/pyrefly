@@ -2497,12 +2497,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 x.def_index,
                 &x.def,
                 &x.parent,
-                x.fields.clone(),
                 x.tparams_require_binding,
                 errors,
             ),
-            BindingClass::FunctionalClassDef(def_index, x, parent, fields) => {
-                self.functional_class_definition(*def_index, x, parent, fields)
+            BindingClass::FunctionalClassDef(def_index, x, parent) => {
+                self.functional_class_definition(*def_index, x, parent)
             }
         };
         Arc::new(NoneIfRecursive(Some(cls)))
@@ -2541,7 +2540,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Arc<ClassField> {
         let functional_class_def = matches!(
             self.bindings().get(field.class_idx),
-            BindingClass::FunctionalClassDef(_, _, _, _)
+            BindingClass::FunctionalClassDef(_, _, _)
         );
         let field = match &self.get_idx(field.class_idx).0 {
             None => ClassField::recursive(self.heap),

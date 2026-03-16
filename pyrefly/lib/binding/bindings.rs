@@ -21,6 +21,8 @@ use pyrefly_python::nesting_context::NestingContext;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_types::callable::FuncDefIndex;
+use pyrefly_types::class::ClassDefIndex;
+use pyrefly_types::class::ClassFields;
 use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_types::type_info::JoinStyle;
 use pyrefly_util::display::DisplayWithCtx;
@@ -74,6 +76,7 @@ use crate::binding::binding::TypeAliasParams;
 use crate::binding::binding::TypeAliasRefBinding;
 use crate::binding::binding::TypeParameter;
 use crate::binding::expr::Usage;
+use crate::binding::metadata::BindingsMetadata;
 use crate::binding::narrow::NarrowOps;
 use crate::binding::scope::Exportable;
 use crate::binding::scope::FlowStyle;
@@ -177,6 +180,7 @@ table! {
 struct BindingsInner {
     module_info: ModuleInfo,
     table: BindingTable,
+    metadata: Arc<BindingsMetadata>,
     scope_trace: Option<ScopeTrace>,
     unused_parameters: Vec<UnusedParameter>,
     unused_imports: Vec<UnusedImport>,
@@ -235,7 +239,7 @@ pub struct BindingsBuilder<'a> {
     pub module_info: ModuleInfo,
     pub lookup: &'a dyn LookupExport,
     pub sys_info: SysInfo,
-    pub class_count: u32,
+    pub metadata: BindingsMetadata,
     pub func_count: u32,
     type_alias_count: u32,
     await_context: AwaitContext,
@@ -301,6 +305,7 @@ impl Bindings {
         Self(Arc::new(BindingsInner {
             module_info,
             table: Default::default(),
+            metadata: Arc::new(BindingsMetadata::new()),
             scope_trace: None,
             unused_parameters: Vec::new(),
             unused_imports: Vec::new(),
@@ -319,6 +324,17 @@ impl Bindings {
 
     pub fn module(&self) -> &ModuleInfo {
         &self.0.module_info
+    }
+
+    pub fn metadata(&self) -> &Arc<BindingsMetadata> {
+        &self.0.metadata
+    }
+
+    /// Look up pre-computed class fields by `ClassDefIndex`. O(1) Vec index.
+    /// Returns `None` if the index is out of bounds (e.g., stale cross-module
+    /// index after incremental rebuild).
+    pub fn get_class_fields(&self, idx: ClassDefIndex) -> Option<&ClassFields> {
+        Some(&self.0.metadata.get_class_checked(idx)?.fields)
     }
 
     pub fn unused_parameters(&self) -> &[UnusedParameter] {
@@ -497,7 +513,7 @@ impl Bindings {
             errors,
             solver,
             uniques,
-            class_count: 0,
+            metadata: BindingsMetadata::new(),
             func_count: 0,
             type_alias_count: 0,
             await_context: AwaitContext::General,
@@ -583,6 +599,7 @@ impl Bindings {
         Self(Arc::new(BindingsInner {
             module_info,
             table: builder.table,
+            metadata: Arc::new(builder.metadata),
             scope_trace: if enable_trace {
                 Some(scope_trace)
             } else {

@@ -46,7 +46,6 @@ use ruff_python_ast::TypeParams;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
-use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
 use crate::alt::class::class_field::ClassField;
@@ -78,7 +77,6 @@ use crate::types::annotation::Annotation;
 use crate::types::callable::FuncDefIndex;
 use crate::types::class::Class;
 use crate::types::class::ClassDefIndex;
-use crate::types::class::ClassFieldProperties;
 use crate::types::equality::TypeEq;
 use crate::types::globals::ImplicitGlobal;
 use crate::types::quantified::QuantifiedKind;
@@ -113,7 +111,7 @@ assert_words!(Binding, 6);
 assert_words!(BindingExpect, 16);
 assert_words!(BindingTypeAlias, 7);
 assert_words!(BindingAnnotation, 15);
-assert_words!(BindingClass, 15);
+assert_words!(BindingClass, 11);
 assert_words!(BindingTParams, 10);
 assert_words!(BindingClassBaseType, 3);
 assert_words!(BindingClassMetadata, 9);
@@ -1781,16 +1779,6 @@ pub struct ClassBinding {
     pub def: ClassDefData,
     pub def_index: ClassDefIndex,
     pub parent: NestingContext,
-    /// The fields are all the names declared on the class that we were able to detect
-    /// from an AST traversal, which includes:
-    /// - any name defined in the class body (e.g. by assignment or a def statement)
-    /// - attributes annotated in the class body (but not necessarily defined)
-    /// - anything assigned to something we think is a `self` or `cls` argument
-    ///
-    /// The last case may include names that are actually declared in a parent class,
-    /// because at binding time we cannot know that so we have to treat assignment
-    /// as potentially defining a field that would not otherwise exist.
-    pub fields: SmallMap<Name, ClassFieldProperties>,
     /// Were we able to determine, using only syntactic analysis at bindings time,
     /// that there can be no legacy tparams? If no, we need a `BindingTParams`, if yes
     /// we can directly compute the `TParams` from the class def.
@@ -2692,19 +2680,14 @@ impl DisplayWith<Bindings> for BindingAnnotation {
 #[derive(Clone, Debug)]
 pub enum BindingClass {
     ClassDef(ClassBinding),
-    FunctionalClassDef(
-        ClassDefIndex,
-        Identifier,
-        NestingContext,
-        SmallMap<Name, ClassFieldProperties>,
-    ),
+    FunctionalClassDef(ClassDefIndex, Identifier, NestingContext),
 }
 
 impl DisplayWith<Bindings> for BindingClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &Bindings) -> fmt::Result {
         match self {
             Self::ClassDef(c) => write!(f, "ClassDef({})", c.def.name),
-            Self::FunctionalClassDef(_, id, _, _) => write!(f, "FunctionalClassDef({id})"),
+            Self::FunctionalClassDef(_, id, _) => write!(f, "FunctionalClassDef({id})"),
         }
     }
 }

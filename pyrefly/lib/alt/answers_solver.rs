@@ -78,6 +78,7 @@ use crate::module::module_info::ModuleInfo;
 use crate::solver::solver::VarRecurser;
 use crate::solver::type_order::TypeOrder;
 use crate::types::class::Class;
+use crate::types::class::ClassFields;
 use crate::types::equality::TypeEq;
 use crate::types::equality::TypeEqCtx;
 use crate::types::stdlib::Stdlib;
@@ -2137,6 +2138,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn module(&self) -> &ModuleInfo {
         self.bindings.module()
+    }
+
+    /// Look up the fields of a class from binding metadata.
+    ///
+    /// For same-module classes, reads directly from local bindings metadata.
+    /// For cross-module classes, delegates to `LookupAnswer::get_class_fields`
+    /// which caches metadata per module and registers class-level dependencies
+    /// for proper incremental invalidation.
+    ///
+    /// Returns `None` if the `ClassDefIndex` is stale (cross-module only;
+    /// same-module indices are always valid).
+    pub fn get_class_fields(&self, cls: &Class) -> Option<&ClassFields> {
+        if cls.module_path() == self.module().path() {
+            return Some(&self.bindings.metadata().get_class(cls.index()).fields);
+        }
+        self.answers.get_class_fields(cls)
     }
 
     pub(crate) fn set_lambda_param_var(&self, id: LambdaParamId, var: Var) {

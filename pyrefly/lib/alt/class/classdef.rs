@@ -35,8 +35,6 @@ use crate::types::callable::Param;
 use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::class::ClassDefIndex;
-use crate::types::class::ClassFieldProperties;
-use crate::types::class::ClassFields;
 use crate::types::class::ClassType;
 use crate::types::types::TParams;
 use crate::types::types::Type;
@@ -65,7 +63,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         def_index: ClassDefIndex,
         x: &ClassDefData,
         parent: &NestingContext,
-        fields: SmallMap<Name, ClassFieldProperties>,
         tparams_require_binding: bool,
         errors: &ErrorCollector,
     ) -> Class {
@@ -75,13 +72,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             Some(self.calculate_class_tparams_no_legacy(name, x.type_params.as_deref(), errors))
         };
+        let fields = self
+            .bindings()
+            .metadata()
+            .get_class(def_index)
+            .fields
+            .clone();
         Class::new(
             def_index,
             x.name.clone(),
             parent.dupe(),
             self.module().dupe(),
             precomputed_tparams,
-            ClassFields::new(fields),
+            fields,
         )
     }
 
@@ -90,15 +93,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         def_index: ClassDefIndex,
         name: &Identifier,
         parent: &NestingContext,
-        fields: &SmallMap<Name, ClassFieldProperties>,
     ) -> Class {
+        let fields = self
+            .bindings()
+            .metadata()
+            .get_class(def_index)
+            .fields
+            .clone();
         Class::new(
             def_index,
             name.clone(),
             parent.dupe(),
             self.module().dupe(),
             Some(Arc::new(TParams::default())),
-            ClassFields::new(fields.clone()),
+            fields,
         )
     }
 
