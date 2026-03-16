@@ -32,6 +32,12 @@ use crate::state::lsp::DefinitionMetadata;
 use crate::state::lsp::FindPreference;
 use crate::state::state::CancellableTransaction;
 
+pub struct CallerInfo {
+    pub call_range: TextRange,
+    pub name: String,
+    pub def_range: TextRange,
+}
+
 /// Finds a function definition at a specific position in an AST.
 ///
 /// This is used by call hierarchy to identify the function being queried.
@@ -99,34 +105,35 @@ pub fn find_containing_function_for_call(
 /// Takes the output from `find_global_incoming_calls_from_function_definition`
 /// and transforms it into the LSP response format.
 pub fn transform_incoming_calls(
-    callers: Vec<(Module, Vec<(TextRange, String, TextRange)>)>,
+    callers: Vec<(Module, Vec<CallerInfo>)>,
     path_remapper: Option<&PathRemapper>,
 ) -> Vec<CallHierarchyIncomingCall> {
     let mut incoming_calls = Vec::new();
     for (caller_module, call_sites) in callers {
-        for (call_range, caller_name, caller_def_range) in call_sites {
+        for caller in call_sites {
             let Some(caller_uri) = module_info_to_uri(&caller_module, path_remapper) else {
                 continue;
             };
 
             let from = CallHierarchyItem {
-                name: caller_name
+                name: caller
+                    .name
                     .split('.')
                     .next_back()
-                    .unwrap_or(&caller_name)
+                    .unwrap_or(&caller.name)
                     .to_owned(),
                 kind: SymbolKind::FUNCTION,
                 tags: None,
-                detail: Some(caller_name),
+                detail: Some(caller.name),
                 uri: caller_uri,
-                range: caller_module.to_lsp_range(caller_def_range),
-                selection_range: caller_module.to_lsp_range(caller_def_range),
+                range: caller_module.to_lsp_range(caller.def_range),
+                selection_range: caller_module.to_lsp_range(caller.def_range),
                 data: None,
             };
 
             incoming_calls.push(CallHierarchyIncomingCall {
                 from,
-                from_ranges: vec![caller_module.to_lsp_range(call_range)],
+                from_ranges: vec![caller_module.to_lsp_range(caller.call_range)],
             });
         }
     }
@@ -212,7 +219,7 @@ impl CancellableTransaction<'_> {
         sys_info: SysInfo,
         definition_kind: DefinitionMetadata,
         target_definition: &TextRangeWithModule,
-    ) -> Result<Vec<(Module, Vec<(TextRange, String, TextRange)>)>, Cancelled> {
+    ) -> Result<Vec<(Module, Vec<CallerInfo>)>, Cancelled> {
         // Use process_rdeps_with_definition to find references and filter to call sites in a single pass
         let results = self.process_rdeps_with_definition(
             sys_info,
@@ -241,22 +248,25 @@ impl CancellableTransaction<'_> {
 
                 let mut callers_in_file = Vec::new();
 
-                /// Recursively collects Call expressions that match references to the target function.
                 fn collect_calls_from_expr(
                     expr: &Expr,
                     ref_set: &std::collections::HashSet<TextRange>,
                     handle: &Handle,
                     ast: &ModModule,
-                    callers: &mut Vec<(TextRange, String, TextRange)>,
+                    callers: &mut Vec<CallerInfo>,
                 ) {
                     if let Expr::Call(call) = expr
                         && ref_set
                             .iter()
                             .any(|ref_range| call.func.range().contains(ref_range.start()))
-                        && let Some((containing_func_name, containing_func_range)) =
+                        && let Some((name, def_range)) =
                             find_containing_function_for_call(handle, ast, call.range().start())
                     {
-                        callers.push((call.range(), containing_func_name, containing_func_range));
+                        callers.push(CallerInfo {
+                            call_range: call.range(),
+                            name,
+                            def_range,
+                        });
                     }
                     expr.recurse(&mut |child| {
                         collect_calls_from_expr(child, ref_set, handle, ast, callers)

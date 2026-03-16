@@ -57,11 +57,14 @@ fn get_callers_report(state: &State, handle: &Handle, position: TextSize) -> Str
         callers
             .into_iter()
             .flat_map(|(module_info, calls)| {
-                calls
-                    .into_iter()
-                    .map(move |(call_range, caller_name, _caller_range)| {
-                        format_call_site("Caller", &caller_name, module_info.contents(), call_range)
-                    })
+                calls.into_iter().map(move |caller| {
+                    format_call_site(
+                        "Caller",
+                        &caller.name,
+                        module_info.contents(),
+                        caller.call_range,
+                    )
+                })
             })
             .join("\n")
     } else {
