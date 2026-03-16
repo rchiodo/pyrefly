@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::path::Path;
+
 use dupe::Dupe;
 use lsp_types::CallHierarchyIncomingCall;
 use lsp_types::CallHierarchyItem;
@@ -185,6 +187,43 @@ fn find_enclosing_call_range(ast: &ModModule, position: TextSize) -> Option<Text
         }
     }
     None
+}
+
+/// Derives a Python module name from a file path by walking up parent
+/// directories looking for `__init__.py` package markers.
+fn module_name_from_path(path: &Path) -> ModuleName {
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("__unknown__");
+
+    let mut parts = if stem == "__init__" {
+        vec![]
+    } else {
+        vec![stem]
+    };
+
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        if dir.join("__init__.py").exists() {
+            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                parts.push(name);
+                current = dir.parent();
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    parts.reverse();
+
+    if parts.is_empty() {
+        ModuleName::from_str(stem)
+    } else {
+        ModuleName::from_string(parts.join("."))
+    }
 }
 
 /// Prepares a CallHierarchyItem for a function definition.
@@ -483,5 +522,48 @@ class MyClass:
         // Position on `method` in `obj.method()` — inside func range (attribute is part of func)
         let pos_method = TextSize::from(24);
         assert!(find_enclosing_call_range(&ast, pos_method).is_some());
+    }
+
+    #[test]
+    fn test_module_name_from_path() {
+        use std::fs;
+
+        use tempfile::tempdir;
+
+        use super::module_name_from_path;
+
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Standalone file: bar.py with no __init__.py → bar
+        let bar_py = root.join("bar.py");
+        fs::write(&bar_py, "").unwrap();
+        assert_eq!(module_name_from_path(&bar_py).as_str(), "bar");
+
+        // Package: pkg/__init__.py + pkg/baz.py → pkg.baz
+        let pkg = root.join("pkg");
+        fs::create_dir_all(&pkg).unwrap();
+        fs::write(pkg.join("__init__.py"), "").unwrap();
+        let baz_py = pkg.join("baz.py");
+        fs::write(&baz_py, "").unwrap();
+        assert_eq!(module_name_from_path(&baz_py).as_str(), "pkg.baz");
+
+        // __init__.py itself → package name
+        let init_py = pkg.join("__init__.py");
+        assert_eq!(module_name_from_path(&init_py).as_str(), "pkg");
+
+        // Nested: foo/__init__.py + foo/bar/__init__.py + foo/bar/qux.py → foo.bar.qux
+        let nested = root.join("foo").join("bar");
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(root.join("foo").join("__init__.py"), "").unwrap();
+        fs::write(nested.join("__init__.py"), "").unwrap();
+        let qux_py = nested.join("qux.py");
+        fs::write(&qux_py, "").unwrap();
+        assert_eq!(module_name_from_path(&qux_py).as_str(), "foo.bar.qux");
+
+        // .pyi stub → same as .py
+        let stub = root.join("stub.pyi");
+        fs::write(&stub, "").unwrap();
+        assert_eq!(module_name_from_path(&stub).as_str(), "stub");
     }
 }
