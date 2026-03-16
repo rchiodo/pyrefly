@@ -102,7 +102,10 @@ const NARROW_ENUM_LIMIT: usize = 100;
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     // Get the union of all members of an enum, minus the specified member
     fn subtract_enum_member(&self, cls: &ClassType, name: &Name) -> Type {
-        if cls.class_object().fields().len() > NARROW_ENUM_LIMIT {
+        if self
+            .get_class_fields(cls.class_object())
+            .is_some_and(|f| f.len() > NARROW_ENUM_LIMIT)
+        {
             return self.heap.mk_class_type(cls.clone());
         }
         let e = self.get_enum_from_class(cls.class_object()).unwrap();

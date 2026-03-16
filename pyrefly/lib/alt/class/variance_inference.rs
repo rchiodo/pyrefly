@@ -727,15 +727,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
 
         // Check methods shallowly
-        let fields = self.get_class_field_map(class);
-        for (name, field) in fields.iter() {
+        let class_fields = self.get_class_fields(class);
+        let field_map = self.get_class_field_map(class);
+        for (name, field) in field_map.iter() {
             if name == &dunder::INIT || name == &dunder::NEW {
                 continue;
             }
             let (ty, _, _) = field.for_variance_inference();
             if ty.is_toplevel_callable() {
-                let range = class
-                    .field_decl_range(name)
+                let range = class_fields
+                    .and_then(|f| f.field_decl_range(name))
                     .unwrap_or_else(|| class.range());
                 check_method_shallow(ty, range, &mut violations);
             }
