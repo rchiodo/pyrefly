@@ -3018,7 +3018,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return;
         }
 
-        let range = if let Some(range) = cls.field_decl_range(field_name) {
+        let Some(cls_fields) = self.get_class_fields(cls) else {
+            return;
+        };
+        let range = if let Some(range) = cls_fields.field_decl_range(field_name) {
             range
         } else {
             return;
@@ -3311,24 +3314,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             read_only: bool,
         }
 
-        let current_class_fields: SmallSet<_> = cls.fields().collect();
+        let current_class_fields = self.get_class_fields(cls);
         let current_class_metadata = self.get_metadata_for_class(cls);
         let current_class_bases = self.get_base_types_for_class(cls);
         let swallow_access_errors = self.error_swallower();
-        let mut inherited_fields: SmallMap<&Name, Vec<InheritedFieldInfo>> = SmallMap::new();
+        let mut inherited_fields: SmallMap<Name, Vec<InheritedFieldInfo>> = SmallMap::new();
 
         for parent_class in current_class_bases.iter() {
             let parent_class_object = parent_class.class_object();
-            let parent_class_fields = parent_class_object.fields();
+            let Some(parent_class_fields) = self.get_class_fields(parent_class_object) else {
+                continue;
+            };
             let parent_metadata = self.get_metadata_for_class(parent_class_object);
-            for parent_field_name in parent_class_fields {
+            for parent_field_name in parent_class_fields.names() {
                 if !self.should_check_field_for_override_consistency(
                     parent_field_name,
                     &current_class_metadata,
                 ) {
                     continue;
                 }
-                if current_class_fields.contains(parent_field_name) {
+                if current_class_fields.is_some_and(|f| f.contains(parent_field_name)) {
                     continue;
                 }
                 if let Some(parent_field_arc) =
@@ -3356,15 +3361,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if ty.is_error() {
                         continue;
                     }
-                    inherited_fields.entry(parent_field_name).or_default().push(
-                        InheritedFieldInfo {
+                    inherited_fields
+                        .entry(parent_field_name.clone())
+                        .or_default()
+                        .push(InheritedFieldInfo {
                             class: parent_class_object.dupe(),
                             metadata: parent_metadata.clone(),
                             field: parent_field,
                             ty,
                             read_only,
-                        },
-                    );
+                        });
                 }
             }
         }
@@ -3467,7 +3473,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         cls: &Class,
         name: &Name,
     ) -> Option<Arc<ClassField>> {
-        if cls.contains(name)
+        if self.get_class_fields(cls).is_some_and(|f| f.contains(name))
             && let Some(field) = self.get_from_class(cls, &KeyClassField(cls.index(), name.clone()))
         {
             Some(field)

@@ -2421,6 +2421,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return;
         }
 
+        let Some(cls_fields) = self.get_class_fields(cls) else {
+            return;
+        };
         let mro = self.get_mro_for_class(cls);
         for (field_name, _field) in self.get_class_field_map(cls).iter() {
             // Apply the same filters as check_consistent_override_for_field.
@@ -2439,10 +2442,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 continue;
             }
 
-            if let Some(child_range) = cls.field_decl_range(field_name) {
+            if let Some(child_range) = cls_fields.field_decl_range(field_name) {
                 for ancestor in mro.ancestors(self.stdlib) {
+                    let ancestor_fields = self.get_class_fields(ancestor.class_object());
                     if let Some(ancestor_range) =
-                        ancestor.class_object().field_decl_range(field_name)
+                        ancestor_fields.and_then(|f| f.field_decl_range(field_name))
                     {
                         let ancestor_module_path = ancestor.class_object().module().path();
                         if !Self::should_skip_module_for_indexing(ancestor_module_path) {
@@ -3790,7 +3794,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         // We're specifically looking for attributes that are inherited from the parent class
         if let Some(cls) = &self.get_idx(class_key).as_ref().0
-            && !cls.contains(&name.id)
+            && !self
+                .get_class_fields(cls)
+                .is_some_and(|f| f.contains(&name.id))
         {
             // If the attribute lookup fails here, we'll emit an `unknown-name` error, since this
             // is a deferred lookup that can't be calculated at the bindings step
