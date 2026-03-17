@@ -2980,9 +2980,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Helper functions for binding_to_type - extracted to reduce stack frame size
-    // =========================================================================
+    // -------------------------------------------------------------------------
 
     /// Handle `Binding::Exhaustive` - check if a match or if/elif chain is exhaustive.
     /// The `#[inline(never)]` annotation is intentional to reduce stack frame size.
@@ -3667,9 +3667,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         got
     }
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Helper functions for binding_to_type - Phase 2 (medium arms)
-    // =========================================================================
+    // -------------------------------------------------------------------------
 
     /// Handle `Binding::Expr` - process expression with optional annotation.
     /// The `#[inline(never)]` annotation is intentional to reduce stack frame size.
@@ -3962,9 +3962,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    // =========================================================================
+    // -------------------------------------------------------------------------
     // Helper functions for binding_to_type_info
-    // =========================================================================
+    // -------------------------------------------------------------------------
 
     /// Handle `Binding::Phi` in binding_to_type_info - join multiple branches.
     /// The `#[inline(never)]` annotation is intentional to reduce stack frame size.
