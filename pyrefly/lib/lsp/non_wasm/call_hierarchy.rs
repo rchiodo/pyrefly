@@ -6,12 +6,15 @@
  */
 
 use std::path::Path;
+use std::sync::Arc;
 
 use dupe::Dupe;
 use lsp_types::CallHierarchyIncomingCall;
 use lsp_types::CallHierarchyItem;
 use lsp_types::CallHierarchyOutgoingCall;
+use lsp_types::Range;
 use lsp_types::SymbolKind;
+use lsp_types::Url;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::module::Module;
@@ -24,10 +27,12 @@ use pyrefly_util::visit::Visit;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ModModule;
+use ruff_python_ast::PySourceType;
 use ruff_python_ast::StmtFunctionDef;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use tracing::debug;
 
 use crate::lsp::non_wasm::module_helpers::PathRemapper;
 use crate::lsp::non_wasm::module_helpers::module_info_to_uri;
@@ -40,6 +45,7 @@ pub struct CallerInfo {
     pub name: String,
     pub full_range: TextRange,
     pub name_range: TextRange,
+    pub kind: SymbolKind,
 }
 
 /// Finds a function definition at a specific position in an AST.
@@ -75,23 +81,33 @@ pub fn find_containing_function_for_call(
     module_name: ModuleName,
     ast: &ModModule,
     position: TextSize,
-) -> (String, TextRange, TextRange) {
+) -> (String, TextRange, TextRange, SymbolKind) {
     let covering_nodes = Ast::locate_node(ast, position);
 
     for (i, node) in covering_nodes.iter().enumerate() {
         if let AnyNodeRef::StmtFunctionDef(func_def) = node {
             if let Some(AnyNodeRef::StmtClassDef(class_def)) = covering_nodes.get(i + 1) {
                 let name = format!("{}.{}.{}", module_name, class_def.name.id, func_def.name.id);
-                return (name, func_def.range(), func_def.name.range());
+                return (
+                    name,
+                    func_def.range(),
+                    func_def.name.range(),
+                    SymbolKind::METHOD,
+                );
             } else {
                 let name = format!("{}.{}", module_name, func_def.name.id);
-                return (name, func_def.range(), func_def.name.range());
+                return (
+                    name,
+                    func_def.range(),
+                    func_def.name.range(),
+                    SymbolKind::FUNCTION,
+                );
             }
         }
     }
 
     let name = format!("{}.<module>", module_name);
-    (name, ast.range(), ast.range())
+    (name, ast.range(), ast.range(), SymbolKind::FUNCTION)
 }
 
 /// Converts raw incoming call data to LSP CallHierarchyIncomingCall items.
@@ -116,7 +132,7 @@ pub fn transform_incoming_calls(
                     .next_back()
                     .unwrap_or(&caller.name)
                     .to_owned(),
-                kind: SymbolKind::FUNCTION,
+                kind: caller.kind,
                 tags: None,
                 detail: Some(caller.name),
                 uri: caller_uri,
@@ -226,6 +242,73 @@ fn module_name_from_path(path: &Path) -> ModuleName {
     }
 }
 
+/// Converts external Glean references into LSP `CallHierarchyIncomingCall` items.
+///
+/// For each external file, reads the source, parses the AST, filters to actual
+/// call expressions (via `find_enclosing_call_range`), and finds the enclosing
+/// function (via `find_containing_function_for_call`).
+pub fn convert_external_references_to_incoming_calls(
+    external_refs: Vec<(Url, Vec<Range>)>,
+) -> Vec<CallHierarchyIncomingCall> {
+    let mut results = Vec::new();
+
+    for (url, ranges) in external_refs {
+        let Ok(path) = url.to_file_path() else {
+            debug!("Skipping external reference: cannot convert URL to file path: {url}");
+            continue;
+        };
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            debug!(
+                "Skipping external reference: cannot read file: {}",
+                path.display()
+            );
+            continue;
+        };
+
+        let module_name = module_name_from_path(&path);
+        let source_type = if path.extension().is_some_and(|ext| ext == "pyi") {
+            PySourceType::Stub
+        } else {
+            PySourceType::Python
+        };
+        let module_path = ModulePath::filesystem(path.to_path_buf());
+        let module = Module::new(module_name, module_path, Arc::new(content));
+
+        let (ast, _, _) = Ast::parse(module.contents(), source_type);
+
+        for range in ranges {
+            let position = module.from_lsp_position(range.start, None);
+
+            let Some(call_range) = find_enclosing_call_range(&ast, position) else {
+                continue;
+            };
+
+            let (caller_name, caller_full_range, caller_name_range, kind) =
+                find_containing_function_for_call(module_name, &ast, position);
+
+            results.push(CallHierarchyIncomingCall {
+                from: CallHierarchyItem {
+                    name: caller_name
+                        .split('.')
+                        .next_back()
+                        .unwrap_or(&caller_name)
+                        .to_owned(),
+                    kind,
+                    tags: None,
+                    detail: Some(caller_name),
+                    uri: url.clone(),
+                    range: module.to_lsp_range(caller_full_range),
+                    selection_range: module.to_lsp_range(caller_name_range),
+                    data: None,
+                },
+                from_ranges: vec![module.to_lsp_range(call_range)],
+            });
+        }
+    }
+
+    results
+}
+
 /// Prepares a CallHierarchyItem for a function definition.
 ///
 /// Creates the LSP CallHierarchyItem representation for a function,
@@ -308,16 +391,18 @@ impl CancellableTransaction<'_> {
                             .iter()
                             .any(|ref_range| call.func.range().contains(ref_range.start()))
                     {
-                        let (name, full_range, name_range) = find_containing_function_for_call(
-                            module_name,
-                            ast,
-                            call.range().start(),
-                        );
+                        let (name, full_range, name_range, kind) =
+                            find_containing_function_for_call(
+                                module_name,
+                                ast,
+                                call.range().start(),
+                            );
                         callers.push(CallerInfo {
                             call_range: call.range(),
                             name,
                             full_range,
                             name_range,
+                            kind,
                         });
                     }
                     expr.recurse(&mut |child| {
@@ -441,6 +526,8 @@ mod tests {
 
     #[test]
     fn test_find_containing_function_for_call() {
+        use lsp_types::SymbolKind;
+
         let source = r#"
 def my_function():
     x = call()
@@ -453,14 +540,16 @@ class MyClass:
         let module_name = ModuleName::from_str("test");
 
         let pos_in_func = TextSize::from(30);
-        let (name, _full_range, _name_range) =
+        let (name, _full_range, _name_range, kind) =
             find_containing_function_for_call(module_name, &ast, pos_in_func);
         assert_eq!(name, "test.my_function");
+        assert_eq!(kind, SymbolKind::FUNCTION);
 
         let pos_in_method = TextSize::from(85);
-        let (name, _full_range, _name_range) =
+        let (name, _full_range, _name_range, kind) =
             find_containing_function_for_call(module_name, &ast, pos_in_method);
         assert_eq!(name, "test.MyClass.method");
+        assert_eq!(kind, SymbolKind::METHOD);
     }
 
     #[test]
@@ -565,5 +654,103 @@ class MyClass:
         let stub = root.join("stub.pyi");
         fs::write(&stub, "").unwrap();
         assert_eq!(module_name_from_path(&stub).as_str(), "stub");
+    }
+
+    #[test]
+    fn test_convert_external_references_to_incoming_calls() {
+        use std::io::Write;
+
+        use lsp_types::Url;
+        use tempfile::NamedTempFile;
+
+        use super::convert_external_references_to_incoming_calls;
+
+        let source = r#"from other import target
+
+def caller_func():
+    target()
+
+x: target = None
+"#;
+        let mut file = NamedTempFile::with_suffix(".py").unwrap();
+        write!(file, "{}", source).unwrap();
+        let url = Url::from_file_path(file.path()).unwrap();
+
+        let call_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 3,
+                character: 4,
+            },
+            end: lsp_types::Position {
+                line: 3,
+                character: 10,
+            },
+        };
+        let import_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 18,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 24,
+            },
+        };
+
+        let external_refs = vec![(url.clone(), vec![call_range, import_range])];
+        let results = convert_external_references_to_incoming_calls(external_refs);
+
+        // Only the call expression should produce an incoming call, not the import
+        assert_eq!(results.len(), 1);
+        assert!(
+            results[0]
+                .from
+                .detail
+                .as_ref()
+                .unwrap()
+                .ends_with("caller_func")
+        );
+    }
+
+    #[test]
+    fn test_convert_external_references_filters_non_call() {
+        use std::io::Write;
+
+        use lsp_types::Url;
+        use tempfile::NamedTempFile;
+
+        use super::convert_external_references_to_incoming_calls;
+
+        let source = r#"from other import target
+x: target = None
+"#;
+        let mut file = NamedTempFile::with_suffix(".py").unwrap();
+        write!(file, "{}", source).unwrap();
+        let url = Url::from_file_path(file.path()).unwrap();
+
+        let import_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 0,
+                character: 18,
+            },
+            end: lsp_types::Position {
+                line: 0,
+                character: 24,
+            },
+        };
+        let annotation_range = lsp_types::Range {
+            start: lsp_types::Position {
+                line: 1,
+                character: 3,
+            },
+            end: lsp_types::Position {
+                line: 1,
+                character: 9,
+            },
+        };
+
+        let external_refs = vec![(url, vec![import_range, annotation_range])];
+        let results = convert_external_references_to_incoming_calls(external_refs);
+        assert!(results.is_empty());
     }
 }
