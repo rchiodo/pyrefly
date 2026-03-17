@@ -2237,3 +2237,190 @@ Definition Result:
         report.trim(),
     );
 }
+
+// TODO: go-to-definition on constructor calls should jump to __init__/__new__,
+// not the class definition. These tests document the current (wrong) behavior
+// and will be updated when the feature is implemented.
+
+#[test]
+fn goto_def_constructor_call_same_module() {
+    let code = r#"
+class Bar:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+Bar("hello")
+# ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+6 | Bar("hello")
+      ^
+Definition Result:
+2 | class Bar:
+          ^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_constructor_call_cross_module() {
+    let class_code = r#"
+class Foo:
+    def __init__(self, x: int) -> None:
+        self.x = x
+"#;
+    let code = r#"
+from .foo_mod import Foo
+Foo(1)
+# ^
+"#;
+    let report = get_batched_lsp_operations_report(
+        &[("main", code), ("foo_mod", class_code)],
+        get_test_report,
+    );
+    assert_eq!(
+        r#"
+# main.py
+3 | Foo(1)
+      ^
+Definition Result:
+2 | class Foo:
+          ^^^
+
+
+# foo_mod.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_constructor_inherits_init_from_base() {
+    let base_code = r#"
+class Base:
+    def __init__(self, x: int) -> None:
+        self.x = x
+"#;
+    let code = r#"
+from .base_mod import Base
+
+class Child(Base):
+    pass
+
+Child(1)
+#  ^
+"#;
+    let report = get_batched_lsp_operations_report(
+        &[("main", code), ("base_mod", base_code)],
+        get_test_report,
+    );
+    assert_eq!(
+        r#"
+# main.py
+7 | Child(1)
+       ^
+Definition Result:
+4 | class Child(Base):
+          ^^^^^
+
+
+# base_mod.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_constructor_with_new_only() {
+    let code = r#"
+class Singleton:
+    _instance = None
+    def __new__(cls) -> "Singleton":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+Singleton()
+#    ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+9 | Singleton()
+         ^
+Definition Result:
+2 | class Singleton:
+          ^^^^^^^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_constructor_with_both_init_and_new() {
+    let code = r#"
+class MyClass:
+    def __new__(cls) -> "MyClass":
+        return super().__new__(cls)
+    def __init__(self) -> None:
+        self.x = 1
+
+MyClass()
+#  ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+8 | MyClass()
+       ^
+Definition Result:
+2 | class MyClass:
+          ^^^^^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_constructor_via_module_attribute() {
+    let class_code = r#"
+class Foo:
+    def __init__(self, x: int) -> None:
+        self.x = x
+"#;
+    let code = r#"
+import foo_mod
+foo_mod.Foo(1)
+#       ^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(
+        &[("main", code), ("foo_mod", class_code)],
+        get_test_report,
+    );
+    assert_eq!(
+        r#"
+# main.py
+3 | foo_mod.Foo(1)
+            ^
+Definition Result:
+2 | class Foo:
+          ^^^
+
+
+# foo_mod.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
