@@ -3264,10 +3264,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Capping at 20 covers 99%+ of naturally-occurring unions while
                 // preventing pathological blowup.
                 const MAX_INFERRED_RETURN_UNION_WIDTH: usize = 20;
+                // Truncate excessively deep inferred return types. During iterative
+                // SCC solving, mutually-recursive functions with self-referential return
+                // types (e.g. `dict[int, dict[int, …]]`) grow one nesting level deeper
+                // per iteration. A limit of 3 lets truncation kick in by iteration 4
+                // while keeping the global fixpoint iteration budget at 5.
+                const MAX_INFERRED_RETURN_NESTING_DEPTH: usize = 3;
                 let return_ty = if return_ty.union_width() > MAX_INFERRED_RETURN_UNION_WIDTH {
                     self.heap.mk_any_implicit()
                 } else {
-                    return_ty
+                    let any = self.heap.mk_any_implicit();
+                    return_ty.truncate_class_nesting(MAX_INFERRED_RETURN_NESTING_DEPTH, &any)
                 };
                 if is_generator {
                     let yield_ty = self.unions({

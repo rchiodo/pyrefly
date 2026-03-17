@@ -902,6 +902,48 @@ impl Type {
         }
     }
 
+    /// Truncate container nesting depth, replacing over-budget nodes with `any`.
+    ///
+    /// A top-down counter tracks how many more container levels are permitted.
+    /// `ClassType` and `Tuple` each consume one depth level; other composite
+    /// types (Union, Callable, …) are transparent. A container encountered when
+    /// `remaining == 0` is replaced with `any`; otherwise it is kept and its
+    /// children are processed with `remaining - 1`.
+    pub fn truncate_class_nesting(self, max_depth: usize, any: &Type) -> Type {
+        fn truncate(ty: Type, remaining: usize, any: &Type) -> Type {
+            match ty {
+                Type::ClassType(ct) if remaining == 0 => {
+                    let _ = ct;
+                    any.clone()
+                }
+                Type::ClassType(mut ct) => {
+                    for targ in ct.targs_mut().as_mut().iter_mut() {
+                        let orig = std::mem::replace(targ, any.clone());
+                        *targ = truncate(orig, remaining - 1, any);
+                    }
+                    Type::ClassType(ct)
+                }
+                Type::Tuple(_) if remaining == 0 => any.clone(),
+                Type::Tuple(mut t) => {
+                    t.visit_mut(&mut |child| {
+                        let orig = std::mem::replace(child, any.clone());
+                        *child = truncate(orig, remaining - 1, any);
+                    });
+                    Type::Tuple(t)
+                }
+                mut other => {
+                    other.recurse_mut(&mut |child| {
+                        let orig = std::mem::replace(child, any.clone());
+                        *child = truncate(orig, remaining, any);
+                    });
+                    other
+                }
+            }
+        }
+
+        truncate(self, max_depth, any)
+    }
+
     pub fn is_never(&self) -> bool {
         matches!(self, Type::Never(_))
     }

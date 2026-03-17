@@ -65,19 +65,18 @@ assert_type(f(True), Literal['test', 1])
 );
 
 testcase!(
-    bug = "Iterative fixpoint reports non-convergent-recursion for recursive return inference",
     test_recursive_return_truncation,
     r#"
 from typing import Any, assert_type
 
-def f():  # E: Fixpoint iteration did not converge. Inferred type `() -> list[list[list[list[list[Unknown]]]]]`. Adding annotations may help.
+def f():
     return g()
 
 def g():
     return [f()]
 
-assert_type(f(), list[list[list[list[list[Any]]]]])
-assert_type(g(), list[list[list[list[list[Any]]]]])
+assert_type(f(), list[list[list[Any]]])
+assert_type(g(), list[list[list[Any]]])
 "#,
 );
 
