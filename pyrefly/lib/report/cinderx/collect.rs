@@ -23,6 +23,7 @@ use pyrefly_types::types::Type;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::AtomicNodeIndex;
 use ruff_python_ast::Expr;
+use ruff_python_ast::ExprAttribute;
 use ruff_python_ast::ExprName;
 use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::Int;
@@ -34,9 +35,11 @@ use ruff_python_ast::statement_visitor::walk_stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use starlark_map::Hashed;
 
 use crate::alt::answers::Answers;
 use crate::binding::binding::Key;
+use crate::binding::binding::KeyClassField;
 use crate::binding::bindings::Bindings;
 use crate::module::module_info::ModuleInfo;
 use crate::report::cinderx::convert::type_to_structured;
@@ -127,6 +130,25 @@ fn is_static_primitive(ty: &Type) -> bool {
     }
 }
 
+/// Look up the declared type of an attribute on a class via `KeyClassField`.
+///
+/// Given an `ExprAttribute` (e.g. `self.x`), looks up the type of the base
+/// expression from the trace, extracts the class, and resolves the attribute
+/// via `KeyClassField`. Returns `None` if any step fails (e.g. the base is
+/// not a class instance, or the attribute is not a known class field in this
+/// module's bindings).
+fn lookup_attr_type(attr: &ExprAttribute, answers: &Answers, bindings: &Bindings) -> Option<Type> {
+    let base_ty = answers.get_type_trace(attr.value.range())?;
+    let class_def_index = match &base_ty {
+        Type::ClassType(ct) | Type::SelfType(ct) => ct.class_object().index(),
+        _ => return None,
+    };
+    let key = KeyClassField(class_def_index, attr.attr.id.clone());
+    let idx = bindings.key_to_idx_hashed_opt(Hashed::new(&key))?;
+    let class_field = answers.get_idx(idx)?;
+    Some(class_field.ty())
+}
+
 /// Statement visitor that builds a map from RHS expression ranges to their
 /// contextual (annotation) types for `AnnAssign` and `Assign` statements
 /// targeting `__static__` primitive types.
@@ -140,11 +162,20 @@ impl<'a> StatementVisitor<'a> for ContextualTypeCollector<'a> {
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
         if let Stmt::AnnAssign(ann) = stmt
             && let Some(ref value) = ann.value
-            && let Expr::Name(name) = ann.target.as_ref()
         {
-            let key = Key::Definition(ShortIdentifier::expr_name(name));
-            if self.bindings.is_valid_key(&key)
-                && let Some(ty) = self.answers.get_type_at(self.bindings.key_to_idx(&key))
+            let target_type = match ann.target.as_ref() {
+                Expr::Name(name) => {
+                    let key = Key::Definition(ShortIdentifier::expr_name(name));
+                    if self.bindings.is_valid_key(&key) {
+                        self.answers.get_type_at(self.bindings.key_to_idx(&key))
+                    } else {
+                        None
+                    }
+                }
+                Expr::Attribute(attr) => lookup_attr_type(attr, self.answers, self.bindings),
+                _ => None,
+            };
+            if let Some(ty) = target_type
                 && is_static_primitive(&ty)
             {
                 self.contextual_types.insert(value.range(), ty);
@@ -152,24 +183,30 @@ impl<'a> StatementVisitor<'a> for ContextualTypeCollector<'a> {
         }
         if let Stmt::Assign(assign) = stmt {
             for target in &assign.targets {
-                if let Expr::Name(name) = target {
-                    let key = Key::BoundName(ShortIdentifier::expr_name(name));
-                    let valid_key = if self.bindings.is_valid_key(&key) {
-                        Some(key)
-                    } else {
-                        let key = Key::Definition(ShortIdentifier::expr_name(name));
-                        if self.bindings.is_valid_key(&key) {
+                let target_type = match target {
+                    Expr::Name(name) => {
+                        let key = Key::BoundName(ShortIdentifier::expr_name(name));
+                        let valid_key = if self.bindings.is_valid_key(&key) {
                             Some(key)
                         } else {
-                            None
-                        }
-                    };
-                    if let Some(key) = valid_key
-                        && let Some(ty) = self.answers.get_type_at(self.bindings.key_to_idx(&key))
-                        && is_static_primitive(&ty)
-                    {
-                        self.contextual_types.insert(assign.value.range(), ty);
+                            let key = Key::Definition(ShortIdentifier::expr_name(name));
+                            if self.bindings.is_valid_key(&key) {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        };
+                        valid_key.and_then(|key| {
+                            self.answers.get_type_at(self.bindings.key_to_idx(&key))
+                        })
                     }
+                    Expr::Attribute(attr) => lookup_attr_type(attr, self.answers, self.bindings),
+                    _ => None,
+                };
+                if let Some(ty) = target_type
+                    && is_static_primitive(&ty)
+                {
+                    self.contextual_types.insert(assign.value.range(), ty);
                 }
             }
         }

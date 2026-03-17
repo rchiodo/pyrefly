@@ -1027,6 +1027,96 @@ y: double = 3.14
     );
 }
 
+/// When a literal int is assigned to an attribute annotated with `__static__.int64`
+/// (e.g. `self.x = 42` where `x: int64`), the CinderX report should record
+/// the contextual type `__static__.int64` for the literal expression.
+#[test]
+fn test_static_attr_assign() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+class Foo:
+    x: int64
+    def __init__(self) -> None:
+        self.x = 42
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The RHS `42` of `self.x = 42` should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 42 (attr assign) with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
+/// When a class body has an annotated assignment like `x: int64 = 42`,
+/// the CinderX report should record the contextual type `__static__.int64`
+/// for the literal expression.
+#[test]
+fn test_static_attr_ann_assign() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+class Bar:
+    x: int64 = 42
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The RHS `42` of `x: int64 = 42` in the class body should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 42 (class body ann assign) with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
 #[test]
 fn test_literal_promoted_type() {
     let state = create_state("test", "x = 42");
