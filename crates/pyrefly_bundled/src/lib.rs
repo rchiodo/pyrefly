@@ -43,15 +43,6 @@ impl PathFilter {
         }
     }
 
-    #[allow(dead_code)]
-    fn should_skip_next_component(&self) -> bool {
-        match self {
-            PathFilter::Stdlib => false,
-            PathFilter::ThirdPartyTypeshedStubs => true, // Skip package directory
-            PathFilter::ThirdPartyStubs => false,        // Skip package directory
-        }
-    }
-
     fn archive_bytes(&self) -> &'static [u8] {
         match self {
             PathFilter::Stdlib | PathFilter::ThirdPartyTypeshedStubs => BUNDLED_TYPESHED_BYTES,
