@@ -2238,10 +2238,6 @@ Definition Result:
     );
 }
 
-// TODO: go-to-definition on constructor calls should jump to __init__/__new__,
-// not the class definition. These tests document the current (wrong) behavior
-// and will be updated when the feature is implemented.
-
 #[test]
 fn goto_def_constructor_call_same_module() {
     let code = r#"
@@ -2259,8 +2255,8 @@ Bar("hello")
 6 | Bar("hello")
       ^
 Definition Result:
-2 | class Bar:
-          ^^^
+3 |     def __init__(self, name: str) -> None:
+            ^^^^^^^^
 "#
         .trim(),
         report.trim(),
@@ -2289,8 +2285,8 @@ Foo(1)
 3 | Foo(1)
       ^
 Definition Result:
-2 | class Foo:
-          ^^^
+3 |     def __init__(self, x: int) -> None:
+            ^^^^^^^^
 
 
 # foo_mod.py
@@ -2326,8 +2322,8 @@ Child(1)
 7 | Child(1)
        ^
 Definition Result:
-4 | class Child(Base):
-          ^^^^^
+3 |     def __init__(self, x: int) -> None:
+            ^^^^^^^^
 
 
 # base_mod.py
@@ -2357,8 +2353,8 @@ Singleton()
 9 | Singleton()
          ^
 Definition Result:
-2 | class Singleton:
-          ^^^^^^^^^
+4 |     def __new__(cls) -> "Singleton":
+            ^^^^^^^
 "#
         .trim(),
         report.trim(),
@@ -2384,8 +2380,11 @@ MyClass()
 8 | MyClass()
        ^
 Definition Result:
-2 | class MyClass:
-          ^^^^^^^
+5 |     def __init__(self) -> None:
+            ^^^^^^^^
+Definition Result:
+3 |     def __new__(cls) -> "MyClass":
+            ^^^^^^^
 "#
         .trim(),
         report.trim(),
@@ -2414,11 +2413,86 @@ foo_mod.Foo(1)
 3 | foo_mod.Foo(1)
             ^
 Definition Result:
-2 | class Foo:
-          ^^^
+3 |     def __init__(self, x: int) -> None:
+            ^^^^^^^^
 
 
 # foo_mod.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_callable_instance() {
+    let code = r#"
+class Adder:
+    def __call__(self, x: int) -> int:
+        return x + 1
+
+adder = Adder()
+adder(5)
+# ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+7 | adder(5)
+      ^
+Definition Result:
+3 |     def __call__(self, x: int) -> int:
+            ^^^^^^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_non_constructor_call_goes_to_function() {
+    let code = r#"
+def foo(x: int) -> int:
+    return x
+
+foo(1)
+# ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+5 | foo(1)
+      ^
+Definition Result:
+2 | def foo(x: int) -> int:
+        ^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn goto_def_class_name_without_call_goes_to_class() {
+    let code = r#"
+class Baz:
+    def __init__(self) -> None:
+        pass
+
+x = Baz
+#   ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+6 | x = Baz
+        ^
+Definition Result:
+2 | class Baz:
+          ^^^
 "#
         .trim(),
         report.trim(),

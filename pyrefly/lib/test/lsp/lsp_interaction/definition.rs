@@ -489,7 +489,7 @@ fn goto_type_def_on_list_of_primitives_shows_selector() {
 
 #[test]
 fn test_go_to_def_constructor_calls() {
-    // Note: go-to-definition currently goes to the class definition, not __init__.
+    // go-to-definition on constructor calls should go to __init__
     let root = get_test_files_root();
     let constructor_root = root.path().join("constructor_references");
     test_go_to_def(
@@ -497,10 +497,10 @@ fn test_go_to_def_constructor_calls() {
         None,
         "usage.py",
         vec![
-            // Person("Alice", 30) - goes to class Person definition
-            (7, 7, "person.py", 6, 6, 6, 12),
-            // Person("Bob", 25) - goes to class Person definition
-            (8, 7, "person.py", 6, 6, 6, 12),
+            // Person("Alice", 30) - goes to Person.__init__ definition
+            (7, 7, "person.py", 7, 8, 7, 16),
+            // Person("Bob", 25) - goes to Person.__init__ definition
+            (8, 7, "person.py", 7, 8, 7, 16),
         ],
     );
 }
