@@ -778,9 +778,9 @@ def f(t: tuple[Inner, str]) -> None:
     );
 }
 
-/// BUG: When a literal int is assigned to a variable annotated with `__static__.int64`,
+/// When a literal int is assigned to a variable annotated with `__static__.int64`,
 /// the CinderX report should record the contextual type `__static__.int64` for the
-/// literal expression, but currently it records `Literal[42]` / `builtins.int` instead.
+/// literal expression via the `contextual_type` field on `LocatedType`.
 #[test]
 fn test_static_int64_literal_contextual_type() {
     let state = create_state_with_static(
@@ -810,9 +810,7 @@ x: int64 = 42
         data.entries,
     );
 
-    // BUG: The literal `42` should have contextual type `__static__.int64`, but
-    // currently it gets `Literal[42]` with promoted type `builtins.int`.
-    // Check that a Literal entry for "42" exists (the current, wrong behavior).
+    // The literal `42` should still be recorded with its inferred type `Literal[42]`.
     let has_literal_42 = data.entries.iter().any(|entry| {
         matches!(
             &entry.ty,
@@ -821,36 +819,54 @@ x: int64 = 42
     });
     assert!(
         has_literal_42,
-        "expected Literal(42) in the type table (current buggy behavior), got: {:#?}",
+        "expected Literal(42) in the type table, got: {:#?}",
         data.entries,
     );
 
-    // Verify the literal's promoted type is builtins.int, NOT __static__.int64.
-    // This confirms the bug: the contextual __static__ type is lost.
-    let literal_entry = data
+    // Find the located type for the literal `42` and verify that its
+    // `contextual_type` points to `__static__.int64`.
+    let int64_idx = data
         .entries
         .iter()
-        .find(|entry| matches!(&entry.ty, StructuredType::Literal { value, .. } if value == "42"))
-        .expect("Literal(42) should exist");
-    let promoted_idx = match &literal_entry.ty {
-        StructuredType::Literal { promoted_type, .. } => *promoted_type,
-        _ => unreachable!("already matched as Literal"),
-    };
-    let promoted_entry = &data.entries[promoted_idx];
-    // BUG: This should be __static__.int64 but is currently builtins.int.
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    let literal_42_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Literal { value, .. } if value == "42"
+            )
+        })
+        .expect("Literal(42) should exist in the type table");
+
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.type_index == literal_42_idx && loc.contextual_type.is_some());
     assert!(
-        matches!(
-            &promoted_entry.ty,
-            StructuredType::Class { qname, .. } if qname == "builtins.int"
-        ),
-        "expected promoted_type to be builtins.int (current buggy behavior), got: {:#?}",
-        promoted_entry.ty,
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 42 with contextual_type set, got locations: {:#?}",
+        data.locations,
+    );
+
+    let ctx_idx = loc_with_contextual.unwrap().contextual_type.unwrap();
+    assert_eq!(
+        ctx_idx, int64_idx,
+        "expected contextual_type to point to __static__.int64 (index {int64_idx}), got index {ctx_idx}",
     );
 }
 
-/// BUG: When a literal float is assigned to a variable annotated with `__static__.double`,
+/// When a literal float is assigned to a variable annotated with `__static__.double`,
 /// the CinderX report should record the contextual type `__static__.double` for the
-/// literal expression, but currently it records `builtins.float` instead.
+/// literal expression via the `contextual_type` field on `LocatedType`.
 #[test]
 fn test_static_double_literal_contextual_type() {
     let state = create_state_with_static(
@@ -880,25 +896,19 @@ y: double = 3.14
         data.entries,
     );
 
-    // BUG: The literal `3.14` should have contextual type `__static__.double`, but
-    // currently the located type for the literal expression resolves to `builtins.float`.
-    // Check that a builtins.float class entry exists (used for the literal's type).
-    let has_float_class = data.entries.iter().any(|entry| {
-        matches!(
-            &entry.ty,
-            StructuredType::Class { qname, args, .. } if qname == "builtins.float" && args.is_empty()
-        )
-    });
-    // BUG: This should be __static__.double but is currently builtins.float.
-    assert!(
-        has_float_class,
-        "expected `builtins.float` in the type table (current buggy behavior), got: {:#?}",
-        data.entries,
-    );
+    // The literal `3.14` should have its inferred type (builtins.float) recorded,
+    // and the contextual type should point to `__static__.double`.
+    let double_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.double"
+            )
+        })
+        .expect("__static__.double should exist in the type table");
 
-    // Find the located type entries whose type resolves to builtins.float.
-    // At least one of these should correspond to the literal `3.14`, confirming
-    // the bug that the contextual __static__.double type is lost.
     let float_class_idx = data
         .entries
         .iter()
@@ -909,15 +919,23 @@ y: double = 3.14
             )
         })
         .expect("builtins.float should exist");
-    let float_locations: Vec<_> = data
+
+    // Find a located type for the literal 3.14 (type = builtins.float) with
+    // contextual_type pointing to __static__.double.
+    let loc_with_contextual = data
         .locations
         .iter()
-        .filter(|loc| loc.type_index == float_class_idx)
-        .collect();
+        .find(|loc| loc.type_index == float_class_idx && loc.contextual_type.is_some());
     assert!(
-        !float_locations.is_empty(),
-        "expected at least one location with type builtins.float (the literal 3.14), got locations: {:#?}",
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 3.14 with contextual_type set, got locations: {:#?}",
         data.locations,
+    );
+
+    let ctx_idx = loc_with_contextual.unwrap().contextual_type.unwrap();
+    assert_eq!(
+        ctx_idx, double_idx,
+        "expected contextual_type to point to __static__.double (index {double_idx}), got index {ctx_idx}",
     );
 }
 

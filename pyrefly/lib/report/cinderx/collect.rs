@@ -10,6 +10,7 @@
 //! Walks every expression in a module's AST, looks up the inferred type,
 //! and builds a deduplicated `TypeTable` plus a list of `LocatedType` entries.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use pyrefly_build::handle::Handle;
@@ -27,6 +28,9 @@ use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::Int;
 use ruff_python_ast::ModModule;
 use ruff_python_ast::Number;
+use ruff_python_ast::Stmt;
+use ruff_python_ast::statement_visitor::StatementVisitor;
+use ruff_python_ast::statement_visitor::walk_stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
@@ -73,6 +77,8 @@ pub(crate) fn collect_module_types(
     let mut locations = Vec::new();
     let mut pending_class_traits: Vec<(usize, Class)> = Vec::new();
 
+    let contextual_types = build_contextual_types(&ast, &answers, &bindings);
+
     walk_expressions(
         &ast,
         &module_info,
@@ -83,6 +89,7 @@ pub(crate) fn collect_module_types(
         &mut table,
         &mut locations,
         &mut pending_class_traits,
+        &contextual_types,
     );
 
     // Extract unique classes from pending_class_traits for MRO collection.
@@ -96,6 +103,71 @@ pub(crate) fn collect_module_types(
         locations,
         classes,
     })
+}
+
+/// Known CinderX primitive type names from `__static__`.
+///
+/// These are simple subclasses of `int` or `float` that map to C-level
+/// primitives in the CinderX compiler. Other classes exported by the
+/// `__static__` module (e.g. `chkdict`, `StaticGeneric`, `Array`) are
+/// not primitives and should not receive contextual typing.
+const STATIC_PRIMITIVE_NAMES: &[&str] = &[
+    "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "cbool", "char",
+    "double", "single",
+];
+
+/// Check whether a type is a `__static__` primitive (CinderX C-level type).
+fn is_static_primitive(ty: &Type) -> bool {
+    match ty {
+        Type::ClassType(ct) => {
+            ct.class_object().module_name().as_str() == "__static__"
+                && STATIC_PRIMITIVE_NAMES.contains(&ct.class_object().name().as_str())
+        }
+        _ => false,
+    }
+}
+
+/// Statement visitor that builds a map from RHS expression ranges to their
+/// contextual (annotation) types for `AnnAssign` statements targeting
+/// `__static__` primitive types.
+struct ContextualTypeCollector<'a> {
+    answers: &'a Answers,
+    bindings: &'a Bindings,
+    contextual_types: HashMap<TextRange, Type>,
+}
+
+impl<'a> StatementVisitor<'a> for ContextualTypeCollector<'a> {
+    fn visit_stmt(&mut self, stmt: &'a Stmt) {
+        if let Stmt::AnnAssign(ann) = stmt
+            && let Some(ref value) = ann.value
+            && let Expr::Name(name) = ann.target.as_ref()
+        {
+            let key = Key::Definition(ShortIdentifier::expr_name(name));
+            if self.bindings.is_valid_key(&key)
+                && let Some(ty) = self.answers.get_type_at(self.bindings.key_to_idx(&key))
+                && is_static_primitive(&ty)
+            {
+                self.contextual_types.insert(value.range(), ty);
+            }
+        }
+        walk_stmt(self, stmt);
+    }
+}
+
+/// Build a map from RHS expression ranges to contextual types for qualifying
+/// `AnnAssign` statements (those targeting `__static__` primitive types).
+fn build_contextual_types(
+    ast: &Arc<ModModule>,
+    answers: &Answers,
+    bindings: &Bindings,
+) -> HashMap<TextRange, Type> {
+    let mut collector = ContextualTypeCollector {
+        answers,
+        bindings,
+        contextual_types: HashMap::new(),
+    };
+    collector.visit_body(&ast.body);
+    collector.contextual_types
 }
 
 /// Walk all expressions in the AST and collect types.
@@ -115,6 +187,7 @@ fn walk_expressions(
     table: &mut TypeTable,
     locations: &mut Vec<LocatedType>,
     pending_class_traits: &mut Vec<(usize, Class)>,
+    contextual_types: &HashMap<TextRange, Type>,
 ) {
     /// Try to find a binding key for a name expression.
     ///
@@ -230,6 +303,7 @@ fn walk_expressions(
         table: &mut TypeTable,
         locations: &mut Vec<LocatedType>,
         pending_class_traits: &mut Vec<(usize, Class)>,
+        contextual_types: &HashMap<TextRange, Type>,
     ) {
         if let Some(ty) = lookup_type(x, answers, bindings) {
             let range = x.range();
@@ -307,11 +381,18 @@ fn walk_expressions(
                 (None, false)
             };
 
+            // Check if this expression flows into a slot with a contextual type
+            // (e.g. a literal assigned to a `__static__` primitive variable).
+            let contextual_type = contextual_types
+                .get(&x.range())
+                .map(|ctx_ty| type_to_structured(ctx_ty, table, pending_class_traits));
+
             locations.push(LocatedType {
                 location,
                 type_index,
                 unnarrowed_type,
                 is_narrowed_mismatch,
+                contextual_type,
             });
         }
 
@@ -327,6 +408,7 @@ fn walk_expressions(
                 table,
                 locations,
                 pending_class_traits,
+                contextual_types,
             )
         });
     }
@@ -343,6 +425,7 @@ fn walk_expressions(
             table,
             locations,
             pending_class_traits,
+            contextual_types,
         )
     });
 }
