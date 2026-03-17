@@ -1117,6 +1117,70 @@ class Bar:
     );
 }
 
+/// Test that `int64(0)` (a constructor call) gets contextual type treatment.
+/// This mirrors a pattern the CinderX team hits in practice: using the
+/// `int64` constructor to initialize a primitive-typed local.
+///
+/// Both annotated (`x: int64 = int64(0)`) and unannotated (`y = int64(0)`)
+/// assignments should work: `x` gets contextual_type from the AnnAssign,
+/// and `y` gets it from the Assign because pyrefly infers `y`'s type as
+/// `__static__.int64` from the constructor call.
+#[test]
+fn test_static_int64_constructor_call() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+import __static__
+from __static__ import int64
+
+def main() -> None:
+    x: int64 = int64(0)
+    y = int64(0)
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Both `int64(0)` call expressions should get contextual_type pointing
+    // to __static__.int64. Count the locations with this contextual type.
+    let locs_with_contextual: Vec<_> = data
+        .locations
+        .iter()
+        .filter(|loc| loc.contextual_type == Some(int64_idx))
+        .collect();
+
+    // We expect at least 2: the RHS of `x: int64 = int64(0)` and `y = int64(0)`.
+    assert!(
+        locs_with_contextual.len() >= 2,
+        "expected at least 2 located types with contextual_type __static__.int64, got {}: {:#?}",
+        locs_with_contextual.len(),
+        data.locations,
+    );
+
+    // Each of these should have inferred type __static__.int64 as well
+    // (since `int64(0)` returns `int64`).
+    for loc in &locs_with_contextual {
+        assert_eq!(
+            loc.type_index, int64_idx,
+            "expected inferred type to also be __static__.int64 for int64(0) call",
+        );
+    }
+}
+
 #[test]
 fn test_literal_promoted_type() {
     let state = create_state("test", "x = 42");
