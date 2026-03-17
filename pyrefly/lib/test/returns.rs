@@ -81,6 +81,68 @@ assert_type(g(), list[list[list[Any]]])
 );
 
 testcase!(
+    bug = "recursive return inference still permits wide inner unions inside a stable outer container",
+    test_recursive_return_inner_union_truncation,
+    r#"
+from typing import reveal_type
+
+def condition() -> bool: ...
+
+def f():
+    if condition():
+        return [g()]
+    elif condition():
+        return [h()]
+    elif condition():
+        return [i()]
+    else:
+        return [j()]
+
+def g():
+    if condition():
+        return {"x": f()}
+    elif condition():
+        return [f()]
+    elif condition():
+        return (f(),)
+    else:
+        return (f(), f())
+
+def h():
+    if condition():
+        return {"y": f()}
+    elif condition():
+        return [f()]
+    elif condition():
+        return (f(),)
+    else:
+        return (f(), f(), f())
+
+def i():
+    if condition():
+        return {"z": f()}
+    elif condition():
+        return [f()]
+    elif condition():
+        return (f(),)
+    else:
+        return (f(), f(), f(), f())
+
+def j():
+    if condition():
+        return {"w": f()}
+    elif condition():
+        return [f()]
+    elif condition():
+        return (f(),)
+    else:
+        return (f(), f(), f(), f(), f())
+
+reveal_type(f())  # E: revealed type: list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown], list[Unknown], list[Unknown]]]
+"#,
+);
+
+testcase!(
     test_return_some_return,
     r#"
 from typing import assert_type
