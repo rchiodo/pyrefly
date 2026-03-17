@@ -294,7 +294,6 @@ impl Solutions {
         &self.metadata
     }
 
-    #[allow(dead_code)] // Used in tests.
     pub fn get<K: Exported>(&self, key: &K) -> &Arc<<K as Keyed>::Answer>
     where
         SolutionsTable: TableKeyed<K, Value = SolutionsEntry<K>>,

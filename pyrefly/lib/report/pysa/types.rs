@@ -27,7 +27,6 @@ use crate::types::display::TypeDisplayContext;
 
 /// Modifier that was stripped from a type to extract the underlying class.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[allow(dead_code)]
 pub enum TypeModifier {
     Optional,               // Optional[T]
     Coroutine,              // Coroutine[<...>]

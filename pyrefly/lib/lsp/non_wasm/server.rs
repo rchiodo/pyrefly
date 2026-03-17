@@ -450,7 +450,6 @@ pub struct Connection {
 /// without requiring interior mutability — stdin is only ever read from one
 /// thread.
 pub enum MessageReader {
-    #[cfg_attr(not(test), allow(dead_code))]
     Channel(Receiver<Message>),
     Stdio(BufReader<Stdin>),
 }

@@ -118,7 +118,6 @@ pub fn bundled_typeshed() -> anyhow::Result<SmallMap<PathBuf, String>> {
     extract_pyi_files_from_archive(PathFilter::Stdlib)
 }
 
-#[allow(dead_code)]
 pub fn bundled_third_party_stubs() -> anyhow::Result<SmallMap<PathBuf, String>> {
     extract_pyi_files_from_archive(PathFilter::ThirdPartyTypeshedStubs)
 }

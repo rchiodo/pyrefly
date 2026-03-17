@@ -657,7 +657,6 @@ impl TestClient {
     }
 
     /// Send a file deletion event notification
-    #[allow(dead_code)]
     pub fn file_deleted(&self, file: &str) {
         let path = self.get_root_or_panic().join(file);
         self.send_notification::<DidChangeWatchedFiles>(json!({
