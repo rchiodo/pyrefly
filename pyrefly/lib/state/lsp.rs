@@ -136,7 +136,6 @@ pub struct InlayHintConfig {
 }
 
 /// PEP 610 direct_url.json structure for detecting editable installs.
-#[allow(dead_code)]
 #[derive(Deserialize)]
 struct DirectUrl {
     url: String,
@@ -144,7 +143,6 @@ struct DirectUrl {
     dir_info: DirInfo,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Default)]
 struct DirInfo {
     #[serde(default)]
@@ -153,7 +151,6 @@ struct DirInfo {
 
 /// Cache for editable source paths, keyed by sorted site-packages paths.
 /// This avoids re-scanning site-packages on every check.
-#[allow(dead_code)]
 static EDITABLE_PATHS_CACHE: LazyLock<Mutex<SmallMap<Vec<PathBuf>, Vec<PathBuf>>>> =
     LazyLock::new(|| Mutex::new(SmallMap::new()));
 
@@ -341,7 +338,6 @@ pub(crate) struct IdentifierWithContext {
 
 #[derive(PartialEq, Eq)]
 pub enum AnnotationKind {
-    #[allow(dead_code)]
     Parameter,
     Return,
     Variable,
@@ -2530,7 +2526,6 @@ impl<'a> Transaction<'a> {
     }
 
     /// Detect editable packages by scanning site-packages for direct_url.json files (PEP 610).
-    #[allow(dead_code)]
     fn detect_editable_packages(site_packages: &[PathBuf]) -> Vec<PathBuf> {
         let mut editable_paths = Vec::new();
 
@@ -2594,7 +2589,6 @@ impl<'a> Transaction<'a> {
     }
 
     /// Get editable source paths for the given site-packages, using cache.
-    #[allow(dead_code)]
     fn get_editable_source_paths(site_packages: &[PathBuf]) -> Vec<PathBuf> {
         let mut key: Vec<PathBuf> = site_packages.to_vec();
         key.sort();

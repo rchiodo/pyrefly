@@ -125,7 +125,6 @@ fn qualified_name_at_position(
 /// Derive a fully-qualified name string from a resolved definition, suitable
 /// for use with external reference providers (see [`ExternalProvider`]).
 /// Returns `None` if the name cannot be determined.
-#[allow(dead_code)]
 pub(crate) fn compute_qualified_name(
     transaction: &Transaction,
     handle: &Handle,
