@@ -864,6 +864,94 @@ x: int64 = 42
     );
 }
 
+/// When a literal int is re-assigned to a variable previously annotated with
+/// `__static__.int64`, the CinderX report should record the contextual type
+/// `__static__.int64` for the RHS literal expression of the plain `Assign`.
+#[test]
+fn test_static_assign_after_annotation() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+x: int64 = 0
+x = 42
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The RHS `42` of the plain `x = 42` assign should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 42 (plain assign) with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
+/// When a variable is declared with a `__static__` annotation but no initial
+/// value, and then assigned via a plain `Assign`, the RHS should still get
+/// the contextual type from the annotation.
+#[test]
+fn test_static_assign_without_prior_value() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+x: int64
+x = 42
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The RHS `42` of `x = 42` should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for literal 42 (assign after bare annotation) with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
 /// When a literal float is assigned to a variable annotated with `__static__.double`,
 /// the CinderX report should record the contextual type `__static__.double` for the
 /// literal expression via the `contextual_type` field on `LocatedType`.

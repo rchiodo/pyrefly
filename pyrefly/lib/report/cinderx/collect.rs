@@ -128,8 +128,8 @@ fn is_static_primitive(ty: &Type) -> bool {
 }
 
 /// Statement visitor that builds a map from RHS expression ranges to their
-/// contextual (annotation) types for `AnnAssign` statements targeting
-/// `__static__` primitive types.
+/// contextual (annotation) types for `AnnAssign` and `Assign` statements
+/// targeting `__static__` primitive types.
 struct ContextualTypeCollector<'a> {
     answers: &'a Answers,
     bindings: &'a Bindings,
@@ -150,12 +150,35 @@ impl<'a> StatementVisitor<'a> for ContextualTypeCollector<'a> {
                 self.contextual_types.insert(value.range(), ty);
             }
         }
+        if let Stmt::Assign(assign) = stmt {
+            for target in &assign.targets {
+                if let Expr::Name(name) = target {
+                    let key = Key::BoundName(ShortIdentifier::expr_name(name));
+                    let valid_key = if self.bindings.is_valid_key(&key) {
+                        Some(key)
+                    } else {
+                        let key = Key::Definition(ShortIdentifier::expr_name(name));
+                        if self.bindings.is_valid_key(&key) {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(key) = valid_key
+                        && let Some(ty) = self.answers.get_type_at(self.bindings.key_to_idx(&key))
+                        && is_static_primitive(&ty)
+                    {
+                        self.contextual_types.insert(assign.value.range(), ty);
+                    }
+                }
+            }
+        }
         walk_stmt(self, stmt);
     }
 }
 
 /// Build a map from RHS expression ranges to contextual types for qualifying
-/// `AnnAssign` statements (those targeting `__static__` primitive types).
+/// `AnnAssign` and `Assign` statements (those targeting `__static__` primitive types).
 fn build_contextual_types(
     ast: &Arc<ModModule>,
     answers: &Answers,
