@@ -23,7 +23,6 @@ use crate::report::pysa::function::FunctionRef;
 use crate::report::pysa::function::get_all_functions;
 use crate::report::pysa::global_variable::GlobalVariableRef;
 use crate::report::pysa::location::PysaLocation;
-use crate::report::pysa::module::ModuleKey;
 use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::state::Transaction;
@@ -62,10 +61,7 @@ pub fn get_class(module_name: &str, class_name: &str, context: &ModuleContext) -
 
 pub fn get_class_ref(module_name: &str, class_name: &str, context: &ModuleContext) -> ClassRef {
     let class = get_class(module_name, class_name, context);
-    let module_id = context
-        .module_ids
-        .get(ModuleKey::from_module(class.module()))
-        .expect("indexed module");
+    let module_id = context.module_ids.get_from_module(class.module());
 
     ClassRef {
         class_id: ClassId::from_class(&class),

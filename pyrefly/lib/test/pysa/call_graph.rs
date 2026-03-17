@@ -45,6 +45,7 @@ use crate::report::pysa::function::collect_function_base_definitions;
 use crate::report::pysa::global_variable::GlobalVariableRef;
 use crate::report::pysa::global_variable::collect_global_variables;
 use crate::report::pysa::module::ModuleIds;
+use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::override_graph::build_reversed_override_graph;
 use crate::report::pysa::types::ScalarTypeProperties;
 use crate::test::pysa::utils::create_state;
@@ -104,16 +105,14 @@ impl FunctionRefForTest {
             }
             function_id => (function_id, false),
         };
-        let function_definition =
-            function_base_definitions.get(function_ref.module_id, &function_id);
-        let defining_class = function_definition.and_then(|definition| {
-            definition
-                .defining_class
-                .as_ref()
-                .map(|class| class.class.name().to_string())
-        });
-        let is_property_setter =
-            function_definition.is_some_and(|definition| definition.is_property_setter);
+        let function_definition = match function_id {
+            FunctionId::ModuleTopLevel | FunctionId::ClassTopLevel { .. } => None,
+            _ => Some(function_base_definitions.get(function_ref.module_id, &function_id)),
+        };
+        let defining_class = function_definition
+            .and_then(|d| d.defining_class.as_ref())
+            .map(|class| class.class.name().to_string());
+        let is_property_setter = function_definition.is_some_and(|d| d.is_property_setter);
         let is_class_toplevel = match function_id {
             FunctionId::ClassTopLevel { class_id } => Some(class_id),
             _ => None,
@@ -281,8 +280,9 @@ fn test_building_call_graph_for_module(
     let handles = transaction.handles();
     let module_ids = ModuleIds::new(&handles);
 
+    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
     let reversed_override_graph =
-        build_reversed_override_graph(&handles, &transaction, &module_ids);
+        build_reversed_override_graph(&handles, &transaction, &module_ids, &pysa_module_index);
     let function_base_definitions = collect_function_base_definitions(
         &handles,
         &transaction,
@@ -300,6 +300,7 @@ fn test_building_call_graph_for_module(
     let mut actual_call_graph = call_graph_for_test_from_actual(
         export_call_graphs(
             &context,
+            &pysa_module_index,
             &function_base_definitions,
             &global_variables,
             &captured_variables,

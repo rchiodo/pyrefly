@@ -25,6 +25,7 @@ use crate::report::pysa::function::FunctionSignature;
 use crate::report::pysa::function::collect_function_base_definitions;
 use crate::report::pysa::function::export_function_definitions;
 use crate::report::pysa::module::ModuleIds;
+use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::override_graph::build_reversed_override_graph;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::types::ClassNamesFromType;
@@ -90,10 +91,12 @@ fn test_exported_functions(
 
     let expected_function_definitions = create_expected_function_definitions(&context);
 
+    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
     let reversed_override_graph =
-        build_reversed_override_graph(&handles, &transaction, &module_ids);
+        build_reversed_override_graph(&handles, &transaction, &module_ids, &pysa_module_index);
     let captured_variables = HashMap::new();
     let actual_function_definitions = export_function_definitions(
+        &pysa_module_index,
         &collect_function_base_definitions(
             &handles,
             &transaction,

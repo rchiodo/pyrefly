@@ -14,12 +14,12 @@ use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
 use ruff_python_ast::name::Name;
 
-use crate::report::pysa::class::get_context_from_class;
+use crate::report::pysa::class::ClassId;
 use crate::report::pysa::context::ModuleContext;
-use crate::report::pysa::function::FunctionNode;
 use crate::report::pysa::function::FunctionRef;
 use crate::report::pysa::function::get_all_functions;
 use crate::report::pysa::module::ModuleIds;
+use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
 use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
 use crate::report::pysa::step_logger::StepLogger;
 use crate::state::state::Transaction;
@@ -39,9 +39,13 @@ impl WholeProgramReversedOverrideGraph {
     }
 }
 
-fn get_super_class_member(
-    class: &Class,
+/// Find the overridden base method for a class field by looking up the super
+/// class member via ad_hoc_solve, then resolving the FunctionRef through the
+/// PysaModuleIndex instead of creating a cross-module ModuleContext.
+fn find_overridden_base_method(
     field_name: &Name,
+    class: &Class,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     context: &ModuleContext,
 ) -> Option<FunctionRef> {
     assert_eq!(class.module(), &context.module_info);
@@ -53,20 +57,19 @@ fn get_super_class_member(
         })
         .flatten()?;
 
-    // Important: we need to use the module context of the class.
-    let context = get_context_from_class(&super_class_member.defining_class, context);
-
-    let function = FunctionNode::exported_function_from_class_field(
-        &super_class_member.defining_class,
-        field_name,
-        super_class_member.value,
-        &context,
-    )?;
-    Some(function.as_function_ref(&context))
+    // Look up the FunctionRef from the defining class's module index
+    // instead of creating a cross-module ModuleContext.
+    let defining_class = &super_class_member.defining_class;
+    let module_id = context.module_ids.get_from_module(defining_class.module());
+    let class_id = ClassId::from_class(defining_class);
+    pysa_module_index
+        .get_function_ref_for_class_field(module_id, class_id, field_name)
+        .cloned()
 }
 
 pub fn create_reversed_override_graph_for_module(
     context: &ModuleContext,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
 ) -> ModuleReversedOverrideGraph {
     let mut graph = ModuleReversedOverrideGraph(HashMap::new());
     for function in get_all_functions(context) {
@@ -74,9 +77,9 @@ pub fn create_reversed_override_graph_for_module(
             continue;
         }
         let name = function.name();
-        let overridden_base_method = function
-            .defining_cls()
-            .and_then(|class| get_super_class_member(class, &name, context));
+        let overridden_base_method = function.defining_cls().and_then(|class| {
+            find_overridden_base_method(&name, class, pysa_module_index, context)
+        });
         match overridden_base_method {
             Some(overridden_base_method) => {
                 let current_function = function.as_function_ref(context);
@@ -99,6 +102,7 @@ pub fn build_reversed_override_graph(
     handles: &Vec<Handle>,
     transaction: &Transaction,
     module_ids: &ModuleIds,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
 ) -> WholeProgramReversedOverrideGraph {
     let step = StepLogger::start(
         "Building reverse override graph",
@@ -114,7 +118,9 @@ pub fn build_reversed_override_graph(
                     ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
                 slow_function_monitor.monitor_function(
                     || {
-                        for (key, value) in create_reversed_override_graph_for_module(&context).0 {
+                        for (key, value) in
+                            create_reversed_override_graph_for_module(&context, pysa_module_index).0
+                        {
                             reversed_override_graph.insert(key, value);
                         }
                     },

@@ -16,6 +16,7 @@ pub mod global_variable;
 pub mod is_test_module;
 pub mod location;
 pub mod module;
+pub mod module_index;
 pub mod override_graph;
 pub mod scope;
 pub mod slow_fun_monitor;
@@ -76,7 +77,8 @@ use crate::report::pysa::global_variable::export_global_variables;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module::ModuleKey;
+use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
+use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::override_graph::build_reversed_override_graph;
 use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
 use crate::report::pysa::step_logger::StepLogger;
@@ -150,15 +152,21 @@ pub struct PysaModuleCallGraphs {
 
 pub fn export_module_definitions(
     context: &ModuleContext,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
     captured_variables: &WholeProgramCapturedVariables,
 ) -> PysaModuleDefinitions {
     let global_variables_exported = export_global_variables(global_variables, context);
-    let class_definitions = export_all_classes(function_base_definitions, context);
+    let class_definitions =
+        export_all_classes(pysa_module_index, function_base_definitions, context);
     let captured_variables = export_captured_variables_for_module(captured_variables, context);
-    let function_definitions =
-        export_function_definitions(function_base_definitions, &captured_variables, context);
+    let function_definitions = export_function_definitions(
+        pysa_module_index,
+        function_base_definitions,
+        &captured_variables,
+        context,
+    );
     PysaModuleDefinitions {
         format_version: 1,
         module_id: context.module_id,
@@ -183,12 +191,14 @@ pub fn export_module_type_of_expressions(context: &ModuleContext) -> PysaModuleT
 
 pub fn export_module_call_graphs(
     context: &ModuleContext,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
     captured_variables: &WholeProgramCapturedVariables,
 ) -> PysaModuleCallGraphs {
     let call_graphs = export_call_graphs(
         context,
+        pysa_module_index,
         function_base_definitions,
         global_variables,
         captured_variables,
@@ -218,7 +228,7 @@ fn build_module_mapping(
 
     let mut project_modules = HashMap::new();
     for handle in handles {
-        let module_id = module_ids.get(ModuleKey::from_handle(handle)).unwrap();
+        let module_id = module_ids.get_from_handle(handle);
 
         // Path where we will store the information on the module.
         let info_filename = match handle.path().details() {
@@ -300,6 +310,7 @@ fn make_module_work_list(
 
 fn write_module_definitions_files(
     module_work_list: &Vec<(Handle, ModuleId, PathBuf)>,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
     captured_variables: &WholeProgramCapturedVariables,
@@ -322,6 +333,7 @@ fn write_module_definitions_files(
                         || {
                             export_module_definitions(
                                 &context,
+                                pysa_module_index,
                                 function_base_definitions,
                                 global_variables,
                                 captured_variables,
@@ -393,6 +405,7 @@ fn write_module_call_graph_files(
     transaction: &Transaction,
     module_ids: &ModuleIds,
     call_graphs_directory: &Path,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
 ) -> anyhow::Result<()> {
     let step = StepLogger::start(
         "Exporting module call graphs",
@@ -409,6 +422,7 @@ fn write_module_call_graph_files(
                         || {
                             export_module_call_graphs(
                                 &context,
+                                pysa_module_index,
                                 function_base_definitions,
                                 global_variables,
                                 captured_variables,
@@ -539,9 +553,7 @@ fn write_errors_file(
             errors: errors
                 .iter()
                 .map(|error| PysaTypeError {
-                    module_id: module_ids
-                        .get(ModuleKey::from_module(error.module()))
-                        .unwrap(),
+                    module_id: module_ids.get_from_module(error.module()),
                     location: PysaLocation::from_text_range(error.range(), error.module()),
                     kind: error.error_kind(),
                     message: error.msg(),
@@ -578,7 +590,9 @@ pub fn write_results(
     let project_modules = build_module_mapping(&handles, project_handles, &module_ids);
     let module_work_list = make_module_work_list(&project_modules);
 
-    let reversed_override_graph = build_reversed_override_graph(&handles, transaction, &module_ids);
+    let pysa_module_index = build_pysa_module_index(&handles, transaction, &module_ids);
+    let reversed_override_graph =
+        build_reversed_override_graph(&handles, transaction, &module_ids, &pysa_module_index);
     let function_base_definitions = collect_function_base_definitions(
         &handles,
         transaction,
@@ -590,6 +604,7 @@ pub fn write_results(
 
     write_module_definitions_files(
         &module_work_list,
+        &pysa_module_index,
         &function_base_definitions,
         &global_variables,
         &captured_variables,
@@ -613,6 +628,7 @@ pub fn write_results(
         transaction,
         &module_ids,
         &call_graphs_directory,
+        &pysa_module_index,
     )?;
 
     let project_modules =
@@ -648,14 +664,10 @@ pub fn write_results(
         &PysaProjectFile {
             format_version: 1,
             modules: project_modules,
-            builtin_module_id: module_ids
-                .get(ModuleKey::from_handle(builtin_module))
-                .unwrap(),
+            builtin_module_id: module_ids.get_from_handle(builtin_module),
             object_class_id,
             dict_class_id,
-            typing_module_id: module_ids
-                .get(ModuleKey::from_handle(typing_module))
-                .unwrap(),
+            typing_module_id: module_ids.get_from_handle(typing_module),
             typing_mapping_class_id,
         },
     )?;

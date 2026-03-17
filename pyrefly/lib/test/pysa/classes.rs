@@ -21,6 +21,7 @@ use crate::report::pysa::class::export_all_classes;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::function::collect_function_base_definitions;
 use crate::report::pysa::module::ModuleIds;
+use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::override_graph::WholeProgramReversedOverrideGraph;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::types::PysaType;
@@ -64,7 +65,9 @@ fn test_exported_classes(
     let expected_class_definitions = create_expected_class_definitions(&context);
 
     let reversed_override_graph = WholeProgramReversedOverrideGraph::new();
+    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
     let actual_class_definitions = export_all_classes(
+        &pysa_module_index,
         &collect_function_base_definitions(
             &handles,
             &transaction,

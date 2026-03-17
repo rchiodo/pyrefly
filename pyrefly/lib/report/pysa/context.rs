@@ -21,7 +21,6 @@ use crate::alt::answers::Answers;
 use crate::binding::bindings::Bindings;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module::ModuleKey;
 use crate::state::state::Transaction;
 use crate::types::stdlib::Stdlib;
 
@@ -49,7 +48,7 @@ impl ModuleContext<'_> {
         let stdlib = transaction.get_stdlib(&handle);
         let ast = transaction.get_ast(&handle)?;
         let module_info = transaction.get_module_info(&handle)?;
-        let module_id = module_ids.get(ModuleKey::from_handle(&handle))?;
+        let module_id = module_ids.get_from_handle(&handle);
         Some(ModuleContext {
             transaction,
             bindings,

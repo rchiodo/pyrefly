@@ -11,7 +11,6 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use dupe::Dupe;
-use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassFields;
@@ -51,7 +50,7 @@ use crate::report::pysa::function::WholeProgramFunctionDefinitions;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module::ModuleKey;
+use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::scope::get_scope_parent;
 use crate::report::pysa::types::PysaType;
@@ -86,9 +85,7 @@ pub struct ClassRef {
 impl ClassRef {
     pub fn from_class(class: &Class, module_ids: &ModuleIds) -> ClassRef {
         ClassRef {
-            module_id: module_ids
-                .get(ModuleKey::from_module(class.module()))
-                .unwrap(),
+            module_id: module_ids.get_from_module(class.module()),
             class_id: ClassId::from_class(class),
             class: class.clone(),
         }
@@ -267,18 +264,6 @@ pub fn get_super_class_member(
             solver.get_super_class_member(class, start_lookup_cls, field_name)
         })
         .flatten()
-}
-
-pub fn get_context_from_class<'a>(
-    class: &'a Class,
-    context: &'a ModuleContext<'a>,
-) -> ModuleContext<'a> {
-    let handle = Handle::new(
-        class.module_name(),
-        class.module_path().clone(),
-        *context.handle.sys_info(),
-    );
-    ModuleContext::create(handle, context.transaction, context.module_ids).unwrap()
 }
 
 pub fn get_class_field_declaration<'a>(
@@ -472,6 +457,7 @@ fn find_definition_ast<'a>(
 
 fn get_decorator_callees(
     class: &Class,
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     context: &ModuleContext,
 ) -> HashMap<PysaLocation, Vec<Target<FunctionRef>>> {
@@ -479,6 +465,7 @@ fn get_decorator_callees(
     if let Some(class_def) = find_definition_ast(class, context) {
         resolve_decorator_callees(
             &class_def.decorator_list,
+            pysa_module_index,
             function_base_definitions,
             context,
         )
@@ -488,6 +475,7 @@ fn get_decorator_callees(
 }
 
 pub fn export_all_classes(
+    pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     context: &ModuleContext,
 ) -> HashMap<PysaLocation, ClassDefinition> {
@@ -533,7 +521,12 @@ pub fn export_all_classes(
             ClassMro::Cyclic => PysaClassMro::Cyclic,
         };
 
-        let decorator_callees = get_decorator_callees(&class, function_base_definitions, context);
+        let decorator_callees = get_decorator_callees(
+            &class,
+            pysa_module_index,
+            function_base_definitions,
+            context,
+        );
 
         let class_definition = ClassDefinition {
             class_id: ClassId::from_class(&class),
