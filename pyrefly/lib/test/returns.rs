@@ -81,7 +81,6 @@ assert_type(g(), list[list[list[Any]]])
 );
 
 testcase!(
-    bug = "recursive return inference still permits wide inner unions inside a stable outer container",
     test_recursive_return_inner_union_truncation,
     r#"
 from typing import reveal_type
@@ -138,7 +137,7 @@ def j():
     else:
         return (f(), f(), f(), f(), f())
 
-reveal_type(f())  # E: revealed type: list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown], list[Unknown]]] | list[dict[str, list[Unknown]] | list[list[Unknown]] | tuple[list[Unknown]] | tuple[list[Unknown], list[Unknown], list[Unknown], list[Unknown], list[Unknown]]]
+reveal_type(f())  # E: revealed type: list[Unknown]
 "#,
 );
 

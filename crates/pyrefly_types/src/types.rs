@@ -902,15 +902,54 @@ impl Type {
         }
     }
 
-    /// Truncate container nesting depth, replacing over-budget nodes with `any`.
+    /// Truncate container nesting depth and inner Union width, replacing
+    /// over-budget nodes with `any`.
     ///
-    /// A top-down counter tracks how many more container levels are permitted.
-    /// `ClassType` and `Tuple` each consume one depth level; other composite
-    /// types (Union, Callable, …) are transparent. A container encountered when
-    /// `remaining == 0` is replaced with `any`; otherwise it is kept and its
-    /// children are processed with `remaining - 1`.
-    pub fn truncate_class_nesting(self, max_depth: usize, any: &Type) -> Type {
-        fn truncate(ty: Type, remaining: usize, any: &Type) -> Type {
+    /// Two independent limits are enforced recursively throughout the type tree:
+    ///
+    /// **Depth** (`max_depth`): A top-down counter tracks how many more container
+    /// levels are permitted. `ClassType` and `Tuple` each consume one depth level;
+    /// other composite types (Union, Callable, …) are transparent. A container
+    /// encountered when `remaining == 0` is replaced with `any`; otherwise it is
+    /// kept and its children are processed with `remaining - 1`. Transparent
+    /// composites pass the same budget to their children unchanged.
+    ///
+    /// **Inner union width** (`max_inner_union_width`): Any `Union` encountered
+    /// *while recursing inside a container's children or a transparent composite*
+    /// is replaced with `any` if its member count exceeds `max_inner_union_width`.
+    /// The top-level type is exempted: the initial call does not apply the union
+    /// check to `self` itself, only to its descendants. This preserves wide
+    /// top-level unions (e.g. a function returning `A | B | … | T`) while
+    /// truncating runaway unions that accumulate inside type parameters.
+    ///
+    /// Both limits produce stable fixed points: two consecutive truncations of a
+    /// type that exceeds either limit yield the same result, so the fixpoint
+    /// converges after at most two truncation steps.
+    pub fn truncate_class_nesting(
+        self,
+        max_depth: usize,
+        max_inner_union_width: usize,
+        any: &Type,
+    ) -> Type {
+        /// Truncate `ty` with both limits active (inner call — union width IS checked).
+        fn truncate_inner(
+            ty: Type,
+            remaining: usize,
+            max_inner_union_width: usize,
+            any: &Type,
+        ) -> Type {
+            if let Type::Union(ref u) = ty
+                && u.members.len() > max_inner_union_width
+            {
+                return any.clone();
+            }
+            truncate(ty, remaining, max_inner_union_width, any)
+        }
+
+        /// Core truncation — does NOT apply the union-width check to `ty` itself
+        /// (that is done by the caller `truncate_inner` when needed), but does
+        /// recurse via `truncate_inner` so all descendants are checked.
+        fn truncate(ty: Type, remaining: usize, max_inner_union_width: usize, any: &Type) -> Type {
             match ty {
                 Type::ClassType(ct) if remaining == 0 => {
                     let _ = ct;
@@ -919,7 +958,7 @@ impl Type {
                 Type::ClassType(mut ct) => {
                     for targ in ct.targs_mut().as_mut().iter_mut() {
                         let orig = std::mem::replace(targ, any.clone());
-                        *targ = truncate(orig, remaining - 1, any);
+                        *targ = truncate_inner(orig, remaining - 1, max_inner_union_width, any);
                     }
                     Type::ClassType(ct)
                 }
@@ -927,21 +966,21 @@ impl Type {
                 Type::Tuple(mut t) => {
                     t.visit_mut(&mut |child| {
                         let orig = std::mem::replace(child, any.clone());
-                        *child = truncate(orig, remaining - 1, any);
+                        *child = truncate_inner(orig, remaining - 1, max_inner_union_width, any);
                     });
                     Type::Tuple(t)
                 }
                 mut other => {
                     other.recurse_mut(&mut |child| {
                         let orig = std::mem::replace(child, any.clone());
-                        *child = truncate(orig, remaining, any);
+                        *child = truncate_inner(orig, remaining, max_inner_union_width, any);
                     });
                     other
                 }
             }
         }
 
-        truncate(self, max_depth, any)
+        truncate(self, max_depth, max_inner_union_width, any)
     }
 
     pub fn is_never(&self) -> bool {
@@ -1828,5 +1867,22 @@ mod tests {
 
         assert_eq!(str_opt.as_bool(), None);
         assert_eq!(false_opt.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_truncate_class_nesting_preserves_top_level_union_width() {
+        let wide_union = Type::union(vec![
+            Type::None,
+            Type::LiteralString(LitStyle::Implicit),
+            Lit::Bool(false).to_implicit_type(),
+            Lit::Bool(true).to_implicit_type(),
+        ]);
+
+        assert_eq!(
+            wide_union
+                .clone()
+                .truncate_class_nesting(3, 3, &Type::any_implicit()),
+            wide_union,
+        );
     }
 }
