@@ -1027,6 +1027,208 @@ y: double = 3.14
     );
 }
 
+/// When a positional argument to a function call has a corresponding parameter
+/// annotated with `__static__.int64`, the CinderX report should record the
+/// contextual type `__static__.int64` for the argument expression.
+#[test]
+fn test_static_call_positional_arg() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+def foo(x: int64) -> None:
+    pass
+
+foo(42)
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The positional argument `42` in `foo(42)` should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for positional arg 42 with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
+/// When a positional argument to a bound method call has a corresponding
+/// parameter annotated with `__static__.int64`, the CinderX report should
+/// record the contextual type, correctly skipping the `self` parameter.
+#[test]
+fn test_static_call_bound_method_arg() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64
+
+class MyClass:
+    def bar(self, x: int64) -> None:
+        pass
+
+obj = MyClass()
+obj.bar(42)
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain `__static__.int64` as a class entry.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    // Find a located type with contextual_type pointing to __static__.int64.
+    // The positional argument `42` in `obj.bar(42)` should have it.
+    let loc_with_contextual = data
+        .locations
+        .iter()
+        .find(|loc| loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_with_contextual.is_some(),
+        "expected a located type for bound method arg 42 with contextual_type pointing to __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+}
+
+/// When a function has multiple parameters, only those annotated with
+/// `__static__` primitive types should get contextual types on their
+/// corresponding positional arguments.
+#[test]
+fn test_static_call_multiple_args() {
+    let state = create_state_with_static(
+        "test",
+        r#"
+from __static__ import int64, double
+
+def baz(x: int64, y: str, z: double) -> None:
+    pass
+
+baz(42, "hello", 3.14)
+"#,
+    );
+    let transaction = state.transaction();
+    let handle = get_handle("test", &transaction);
+
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+
+    // The type table should contain both `__static__.int64` and `__static__.double`.
+    let int64_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.int64"
+            )
+        })
+        .expect("__static__.int64 should exist in the type table");
+
+    let double_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, .. } if qname == "__static__.double"
+            )
+        })
+        .expect("__static__.double should exist in the type table");
+
+    // The literal `42` should have contextual_type pointing to __static__.int64.
+    let literal_42_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Literal { value, .. } if value == "42"
+            )
+        })
+        .expect("Literal(42) should exist in the type table");
+
+    let loc_42 = data
+        .locations
+        .iter()
+        .find(|loc| loc.type_index == literal_42_idx && loc.contextual_type == Some(int64_idx));
+    assert!(
+        loc_42.is_some(),
+        "expected literal 42 to have contextual_type __static__.int64, got locations: {:#?}",
+        data.locations,
+    );
+
+    // The literal `3.14` should have contextual_type pointing to __static__.double.
+    let float_class_idx = data
+        .entries
+        .iter()
+        .position(|entry| {
+            matches!(
+                &entry.ty,
+                StructuredType::Class { qname, args, .. } if qname == "builtins.float" && args.is_empty()
+            )
+        })
+        .expect("builtins.float should exist");
+
+    let loc_314 = data
+        .locations
+        .iter()
+        .find(|loc| loc.type_index == float_class_idx && loc.contextual_type == Some(double_idx));
+    assert!(
+        loc_314.is_some(),
+        "expected literal 3.14 to have contextual_type __static__.double, got locations: {:#?}",
+        data.locations,
+    );
+
+    // The string literal `"hello"` should NOT have a contextual type.
+    let str_literal_idx = data.entries.iter().position(|entry| {
+        matches!(
+            &entry.ty,
+            StructuredType::Literal { value, .. } if value == "\"hello\""
+        )
+    });
+    if let Some(str_idx) = str_literal_idx {
+        let loc_hello = data
+            .locations
+            .iter()
+            .find(|loc| loc.type_index == str_idx && loc.contextual_type.is_some());
+        assert!(
+            loc_hello.is_none(),
+            "expected string literal \"hello\" to NOT have a contextual type, got locations: {:#?}",
+            data.locations,
+        );
+    }
+}
+
 /// When a literal int is assigned to an attribute annotated with `__static__.int64`
 /// (e.g. `self.x = 42` where `x: int64`), the CinderX report should record
 /// the contextual type `__static__.int64` for the literal expression.

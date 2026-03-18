@@ -16,9 +16,13 @@ use std::sync::Arc;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::short_identifier::ShortIdentifier;
+use pyrefly_types::callable::Param;
+use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
 use pyrefly_types::facet::FacetKind;
 use pyrefly_types::type_info::TypeInfo;
+use pyrefly_types::types::BoundMethod;
+use pyrefly_types::types::BoundMethodType;
 use pyrefly_types::types::Type;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::AtomicNodeIndex;
@@ -80,7 +84,8 @@ pub(crate) fn collect_module_types(
     let mut locations = Vec::new();
     let mut pending_class_traits: Vec<(usize, Class)> = Vec::new();
 
-    let contextual_types = build_contextual_types(&ast, &answers, &bindings);
+    let mut contextual_types = build_contextual_types(&ast, &answers, &bindings);
+    collect_call_contextual_types(&ast, &answers, &bindings, &mut contextual_types);
 
     walk_expressions(
         &ast,
@@ -228,6 +233,91 @@ fn build_contextual_types(
     };
     collector.visit_body(&ast.body);
     collector.contextual_types
+}
+
+/// Walk all expressions looking for `Expr::Call` nodes and collect contextual
+/// types for positional arguments whose corresponding parameter is a `__static__`
+/// primitive type.
+///
+/// Skips calls where any argument is a starred expression (`*args`) or any
+/// keyword is a splat (`**kwargs`), since argument-to-parameter matching is
+/// unreliable in those cases.
+fn collect_call_contextual_types(
+    ast: &Arc<ModModule>,
+    answers: &Answers,
+    bindings: &Bindings,
+    contextual_types: &mut HashMap<TextRange, Type>,
+) {
+    ast.visit(&mut |x: &Expr| {
+        if let Expr::Call(call) = x {
+            // Skip if any arg is starred (*args).
+            if call
+                .arguments
+                .args
+                .iter()
+                .any(|a| matches!(a, Expr::Starred(_)))
+            {
+                return;
+            }
+            // Skip if any keyword is a splat (**kwargs).
+            if call.arguments.keywords.iter().any(|kw| kw.arg.is_none()) {
+                return;
+            }
+
+            // Look up the callee type.
+            let callee_type = if let Expr::Name(name) = call.func.as_ref() {
+                let key = Key::BoundName(ShortIdentifier::expr_name(name));
+                if bindings.is_valid_key(&key) {
+                    answers.get_type_at(bindings.key_to_idx(&key))
+                } else {
+                    let key = Key::Definition(ShortIdentifier::expr_name(name));
+                    if bindings.is_valid_key(&key) {
+                        answers.get_type_at(bindings.key_to_idx(&key))
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                answers.get_type_trace(call.func.range())
+            };
+
+            let Some(callee_type) = callee_type else {
+                return;
+            };
+
+            // Extract parameters and the number of leading params to skip
+            // (1 for bound methods to skip `self`, 0 otherwise).
+            let (params, skip_count): (&Params, usize) = match &callee_type {
+                Type::Function(f) => (&f.signature.params, 0),
+                Type::BoundMethod(box BoundMethod {
+                    func: BoundMethodType::Function(f),
+                    ..
+                }) => (&f.signature.params, 1),
+                _ => return,
+            };
+
+            let Params::List(param_list) = params else {
+                return;
+            };
+            let items = param_list.items();
+
+            for (i, arg) in call.arguments.args.iter().enumerate() {
+                let param_idx = i + skip_count;
+                if param_idx >= items.len() {
+                    break;
+                }
+                let param = &items[param_idx];
+
+                // Break if we hit a variadic argument - matching past that is complicated.
+                if matches!(param, Param::VarArg(_, _) | Param::Kwargs(_, _)) {
+                    break;
+                }
+                if is_static_primitive(param.as_type()) {
+                    contextual_types.insert(arg.range(), param.as_type().clone());
+                }
+            }
+        }
+    });
 }
 
 /// Walk all expressions in the AST and collect types.
