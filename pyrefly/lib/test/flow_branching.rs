@@ -1912,6 +1912,27 @@ def f(x: int | str, y: int | str) -> str:  # E: Function declared to return `str
 "#,
 );
 
+testcase!(
+    test_if_elif_mixed_subjects_one_exhaustive,
+    r#"
+from enum import Enum
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+    BLUE = 3
+
+def f(x: Color, y: int | str) -> str:
+    if x == Color.RED:
+        return "red"
+    elif isinstance(y, int):
+        return "y is int"
+    elif x == Color.GREEN:
+        return "green"
+    elif x == Color.BLUE:
+        return "blue"
+"#,
+);
+
 // Issue #2406: NoReturn in except block should make variable always initialized
 testcase!(
     test_noreturn_try_except_simple,
