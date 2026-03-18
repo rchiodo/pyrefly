@@ -488,38 +488,33 @@ impl<'a> BindingsBuilder<'a> {
         if exhaustive {
             self.finish_exhaustive_fork();
         } else {
-            // Compute exhaustiveness info if we can determine the narrowing subject
-            // and have accumulated narrow ops for it.
-            let exhaustiveness_info = match_narrowing_subject.and_then(|narrowing_subject| {
-                negated_prev_ops
-                    .0
-                    .get(narrowing_subject.name())
-                    .map(|(op, range)| (narrowing_subject, (Box::new(op.clone()), *range)))
-            });
-            // Create BindingExpect only if we have the info (for exhaustiveness warnings)
-            if let Some((ref narrowing_subject, ref narrow_ops_for_fall_through)) =
-                exhaustiveness_info
+            // Build narrow_entries from negated_prev_ops.
+            // For match, all entries use the same subject_idx since there's one subject.
+            let narrow_entries: Vec<_> = negated_prev_ops
+                .0
+                .iter()
+                .map(|(_name, (op, range))| (subject_idx, Box::new(op.clone()), *range))
+                .collect();
+            // Create BindingExpect only if we have a narrowing subject (for exhaustiveness warnings)
+            if let Some(narrowing_subject) = &match_narrowing_subject
+                && let Some((op, range)) = negated_prev_ops.0.get(narrowing_subject.name())
             {
                 self.insert_binding(
                     KeyExpect::MatchExhaustiveness(x.range),
                     BindingExpect::MatchExhaustiveness {
                         subject_idx,
                         narrowing_subject: narrowing_subject.clone(),
-                        narrow_ops_for_fall_through: narrow_ops_for_fall_through.clone(),
+                        narrow_ops_for_fall_through: (Box::new(op.clone()), *range),
                         subject_range: x.subject.range(),
                     },
                 );
             }
             // Always create Key::Exhaustive binding for return analysis and control-flow checks.
-            // When exhaustiveness_info is None, the solver will conservatively
-            // assume the match is not exhaustive (resolves to Type::None).
             let exhaustive_key = self.insert_binding(
                 Key::Exhaustive(ExhaustivenessKind::Match, x.range),
                 Binding::Exhaustive(Box::new(ExhaustiveBinding {
                     kind: ExhaustivenessKind::Match,
-                    subject_idx,
-                    subject_range: x.subject.range(),
-                    exhaustiveness_info,
+                    narrow_entries,
                 })),
             );
             self.finish_non_exhaustive_fork(&negated_prev_ops, Some(exhaustive_key));

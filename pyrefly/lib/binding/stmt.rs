@@ -55,9 +55,7 @@ use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::LegacyTParamCollector;
 use crate::binding::bindings::NameLookupResult;
 use crate::binding::expr::Usage;
-use crate::binding::narrow::NarrowOp;
 use crate::binding::narrow::NarrowOps;
-use crate::binding::narrow::NarrowingSubject;
 use crate::binding::scope::FlowStyle;
 use crate::binding::scope::LoopExit;
 use crate::binding::scope::Scope;
@@ -1025,40 +1023,20 @@ impl<'a> BindingsBuilder<'a> {
                 // This is done BEFORE finish_*_fork() so the binding exists in the right scope.
                 // Only do this when there's no else clause (not syntactically exhaustive).
                 if !exhaustive {
-                    let exhaustiveness_info =
-                        Self::extract_if_exhaustiveness_info(&negated_prev_ops);
-                    let (subject_idx, subject_range, info_for_binding) =
-                        if let Some((name, narrowing_subject, (op, narrow_range))) =
-                            exhaustiveness_info
+                    let mut narrow_entries = Vec::new();
+                    for (name, (op, range)) in negated_prev_ops.0.iter() {
+                        let hashed_name = Hashed::new(name);
+                        if let NameLookupResult::Found { idx, .. } =
+                            self.lookup_name(hashed_name, &mut Usage::Narrowing(None))
                         {
-                            let hashed_name = Hashed::new(&name);
-                            if let NameLookupResult::Found { idx, .. } =
-                                self.lookup_name(hashed_name, &mut Usage::Narrowing(None))
-                            {
-                                (
-                                    idx,
-                                    narrow_range,
-                                    Some((narrowing_subject, (op, narrow_range))),
-                                )
-                            } else {
-                                // Name lookup failed - create a fallback binding with None info
-                                let fallback_idx =
-                                    self.insert_binding(Key::Anon(if_range), Binding::None);
-                                (fallback_idx, if_range, None)
-                            }
-                        } else {
-                            // Couldn't extract exhaustiveness info - create a fallback binding
-                            let fallback_idx =
-                                self.insert_binding(Key::Anon(if_range), Binding::None);
-                            (fallback_idx, if_range, None)
-                        };
+                            narrow_entries.push((idx, Box::new(op.clone()), *range));
+                        }
+                    }
                     self.insert_binding(
                         Key::Exhaustive(ExhaustivenessKind::IfElif, if_range),
                         Binding::Exhaustive(Box::new(ExhaustiveBinding {
                             kind: ExhaustivenessKind::IfElif,
-                            subject_idx,
-                            subject_range,
-                            exhaustiveness_info: info_for_binding,
+                            narrow_entries,
                         })),
                     );
                 }
@@ -1480,72 +1458,6 @@ impl<'a> BindingsBuilder<'a> {
                     self.scopes.register_import(&asname);
                 }
                 self.bind_definition(&asname, val, FlowStyle::Import(m, x.name.id));
-            }
-        }
-    }
-
-    /// Extract exhaustiveness info from accumulated negated ops for if/elif chains.
-    ///
-    /// Returns Some(name, subject, narrow_op_and_range) when a single subject exists
-    /// - This is the only case we initially will support for exhaustiveness checks
-    ///
-    /// Returns None if:
-    /// - Multiple names are being narrowed (different subjects in different branches)
-    /// - No narrowing operations present
-    /// - Inconsistent facet subjects within a name
-    ///
-    /// Note: This returns the Name, not an Idx<Key>. The caller is responsible for
-    /// looking up the subject's Idx<Key> through appropriate scope mechanisms.
-    pub fn extract_if_exhaustiveness_info(
-        ops: &NarrowOps,
-    ) -> Option<(Name, NarrowingSubject, (Box<NarrowOp>, TextRange))> {
-        let entries: Vec<_> = ops.0.iter().collect();
-        if entries.len() != 1 {
-            return None;
-        }
-        let (name, (op, range)) = entries[0];
-        let narrowing_subject = Self::extract_narrowing_subject_from_op(name, op)?;
-        Some((
-            name.clone(),
-            narrowing_subject,
-            (Box::new(op.clone()), *range),
-        ))
-    }
-
-    /// Recursively walk a NarrowOp to extract a consistent NarrowingSubject.
-    /// Helper for `extract_if_exhaustiveness_info`, see its doc comment for more details.
-    fn extract_narrowing_subject_from_op(name: &Name, op: &NarrowOp) -> Option<NarrowingSubject> {
-        match op {
-            NarrowOp::Atomic(facet_opt, _) => match facet_opt {
-                Some(facet) => Some(NarrowingSubject::Facets(name.clone(), facet.clone())),
-                None => Some(NarrowingSubject::Name(name.clone())),
-            },
-            NarrowOp::And(ops) | NarrowOp::Or(ops) => {
-                // All sub-ops must have consistent narrowing subject
-                let mut result: Option<NarrowingSubject> = None;
-                for sub_op in ops {
-                    let sub_subject = Self::extract_narrowing_subject_from_op(name, sub_op)?;
-                    match &result {
-                        None => result = Some(sub_subject),
-                        Some(existing) => {
-                            // Check consistency: both must be Name or both must be Facets with same name
-                            let consistent = match (existing, &sub_subject) {
-                                (NarrowingSubject::Name(n1), NarrowingSubject::Name(n2)) => {
-                                    n1 == n2
-                                }
-                                (
-                                    NarrowingSubject::Facets(n1, _),
-                                    NarrowingSubject::Facets(n2, _),
-                                ) => n1 == n2,
-                                _ => false, // Mixing Name and Facets is inconsistent
-                            };
-                            if !consistent {
-                                return None;
-                            }
-                        }
-                    }
-                }
-                result
             }
         }
     }

@@ -115,8 +115,8 @@ use crate::binding::binding::SuperStyle;
 use crate::binding::binding::TypeAliasParams;
 use crate::binding::binding::TypeParameter;
 use crate::binding::binding::UnpackedPosition;
+use crate::binding::narrow::FacetSubject;
 use crate::binding::narrow::NarrowOp;
-use crate::binding::narrow::NarrowingSubject;
 use crate::binding::narrow::identifier_and_chain_for_expr;
 use crate::binding::narrow::identifier_and_chain_prefix_for_expr;
 use crate::config::error_kind::ErrorKind;
@@ -2985,61 +2985,60 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     // -------------------------------------------------------------------------
 
     /// Handle `Binding::Exhaustive` - check if a match or if/elif chain is exhaustive.
+    ///
+    /// Loops over all narrow entries. For each, resolves the subject type, optionally
+    /// extracts the facet chain type, narrows it, and checks if the result is `Never`.
+    /// If ANY entry narrows to `Never`, the construct is exhaustive.
     /// The `#[inline(never)]` annotation is intentional to reduce stack frame size.
     #[inline(never)]
     fn binding_to_type_exhaustive(
         &self,
-        subject_idx: Idx<Key>,
-        subject_range: TextRange,
-        exhaustiveness_info: &Option<(NarrowingSubject, (Box<NarrowOp>, TextRange))>,
+        narrow_entries: &[(Idx<Key>, Box<NarrowOp>, TextRange)],
     ) -> Type {
-        // If we couldn't determine narrowing info, conservatively assume not exhaustive
-        let Some((narrowing_subject, (op, narrow_range))) = exhaustiveness_info else {
-            return self.heap.mk_none();
-        };
-
-        let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(subject_idx));
-
-        // Check if this type should have exhaustiveness checked
-        if !self.should_check_exhaustiveness(subject_info.ty()) {
-            return self.heap.mk_none(); // Not exhaustible, assume fall-through
-        }
-
         let ignore_errors = self.error_swallower();
-        let narrowing_subject_info = match narrowing_subject {
-            NarrowingSubject::Name(_) => &subject_info,
-            NarrowingSubject::Facets(_, facets) => {
-                let Some(resolved_chain) = self.resolve_facet_chain(facets.chain.clone()) else {
-                    return self.heap.mk_none();
-                };
-                let type_info = TypeInfo::of_ty(self.heap.mk_any_implicit());
-                &type_info.with_narrow(resolved_chain.facets(), subject_info.into_ty())
+        for (subject_idx, op, narrow_range) in narrow_entries {
+            let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(*subject_idx));
+            // Check if this type should have exhaustiveness checked
+            if !self.should_check_exhaustiveness(subject_info.ty()) {
+                continue;
             }
-        };
-
-        let narrowed = self.narrow(
-            narrowing_subject_info,
-            op.as_ref(),
-            *narrow_range,
-            &ignore_errors,
-        );
-
-        let mut remaining_ty = match narrowing_subject {
-            NarrowingSubject::Name(_) => narrowed.ty().clone(),
-            NarrowingSubject::Facets(_, facets) => {
-                let Some(resolved_chain) = self.resolve_facet_chain(facets.chain.clone()) else {
-                    return self.heap.mk_none();
-                };
-                self.get_facet_chain_type(&narrowed, &resolved_chain, subject_range)
+            let facet_chain = Self::extract_facet_from_op(op)
+                .and_then(|facets| self.resolve_facet_chain(facets.chain.clone()));
+            let narrowing_subject_info = match &facet_chain {
+                Some(resolved_chain) => {
+                    let type_info = TypeInfo::of_ty(self.heap.mk_any_implicit());
+                    type_info.with_narrow(resolved_chain.facets(), subject_info.into_ty())
+                }
+                None => subject_info,
+            };
+            let narrowed = self.narrow(
+                &narrowing_subject_info,
+                op.as_ref(),
+                *narrow_range,
+                &ignore_errors,
+            );
+            let mut remaining_ty = match &facet_chain {
+                Some(resolved_chain) => {
+                    self.get_facet_chain_type(&narrowed, resolved_chain, *narrow_range)
+                }
+                None => narrowed.ty().clone(),
+            };
+            self.expand_vars_mut(&mut remaining_ty);
+            if remaining_ty.is_never() {
+                return self.heap.mk_never();
             }
-        };
-        self.expand_vars_mut(&mut remaining_ty);
+        }
+        self.heap.mk_none()
+    }
 
-        // If the result is `Never` then the cases were exhaustive
-        if remaining_ty.is_never() {
-            self.heap.mk_never()
-        } else {
-            self.heap.mk_none()
+    /// Walk a `NarrowOp` tree to find the first `FacetSubject`.
+    /// Returns `None` for plain name narrowing, `Some(FacetSubject)` for attribute narrowing.
+    fn extract_facet_from_op(op: &NarrowOp) -> Option<FacetSubject> {
+        match op {
+            NarrowOp::Atomic(facet, _) => facet.clone(),
+            NarrowOp::And(ops) | NarrowOp::Or(ops) => {
+                ops.iter().find_map(Self::extract_facet_from_op)
+            }
         }
     }
 
@@ -4675,11 +4674,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Binding::ClassBodyUnknownName(x) => {
                 self.binding_to_type_class_body_unknown_name(x.0, &x.1, &x.2, errors)
             }
-            Binding::Exhaustive(x) => self.binding_to_type_exhaustive(
-                x.subject_idx,
-                x.subject_range,
-                &x.exhaustiveness_info,
-            ),
+            Binding::Exhaustive(x) => self.binding_to_type_exhaustive(&x.narrow_entries),
             Binding::Expr(ann, e) => self.binding_to_type_expr(*ann, e, errors),
             Binding::StmtExpr(e, special_export) => {
                 self.binding_to_type_stmt_expr(e, *special_export, errors)

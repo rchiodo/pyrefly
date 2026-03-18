@@ -1989,15 +1989,14 @@ pub struct AssignToAttribute {
 }
 
 /// Data for an exhaustiveness check binding.
+///
+/// Contains multiple narrow entries `(Idx<Key>, Box<NarrowOp>, TextRange)`. At solve time,
+/// if ANY entry narrows to `Never`, the construct is exhaustive. This enables multi-subject
+/// and isinstance-based exhaustiveness without complex subject-extraction logic.
 #[derive(Clone, Debug)]
 pub struct ExhaustiveBinding {
     pub kind: ExhaustivenessKind,
-    pub subject_idx: Idx<Key>,
-    pub subject_range: TextRange,
-    /// Narrowing information needed to check exhaustiveness. None if we couldn't
-    /// determine the narrowing subject (e.g., complex expressions) or couldn't
-    /// accumulate narrow ops for it.
-    pub exhaustiveness_info: Option<(NarrowingSubject, (Box<NarrowOp>, TextRange))>,
+    pub narrow_entries: Vec<(Idx<Key>, Box<NarrowOp>, TextRange)>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -2154,9 +2153,7 @@ pub enum Binding {
     /// We'll find out which when we solve the class
     ClassBodyUnknownName(Box<(Idx<KeyClass>, Identifier, Option<Name>)>),
     /// A match statement or if/elif chain that may be type-exhaustive.
-    /// Resolves to Never if exhaustive, None otherwise.
-    /// When `exhaustiveness_info` is None, we couldn't determine narrowing info,
-    /// so we conservatively assume the statement is not exhaustive.
+    /// Resolves to Never if ANY narrow entry narrows to Never, None otherwise.
     Exhaustive(Box<ExhaustiveBinding>),
 }
 
@@ -2430,13 +2427,20 @@ impl DisplayWith<Bindings> for Binding {
                 write!(f, ")")
             }
             Self::Exhaustive(x) => {
-                write!(
-                    f,
-                    "Exhaustive({:?}, {}, {})",
-                    x.kind,
-                    ctx.display(x.subject_idx),
-                    ctx.module().display(&x.subject_range)
-                )
+                write!(f, "Exhaustive({:?}, [", x.kind)?;
+                for (i, (idx, op, range)) in x.narrow_entries.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(
+                        f,
+                        "({}, {}, {})",
+                        ctx.display(*idx),
+                        m.display(op),
+                        m.display(range)
+                    )?;
+                }
+                write!(f, "])")
             }
         }
     }
