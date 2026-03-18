@@ -1690,9 +1690,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     msg,
                 );
             }
+            let impl_ret = impl_func.signature.ret.clone();
             self.check_type(
                 &overload_func.signature.ret,
-                &impl_func.signature.ret,
+                &impl_ret.promote_implicit_literals(self.stdlib),
                 *range,
                 errors,
                 &|| TypeCheckContext::of_kind(TypeCheckKind::OverloadReturn),

@@ -766,16 +766,44 @@ def foo() -> int: # E: Function declared to return `int` but is missing an expli
 );
 
 testcase!(
-    test_return_consistency,
+    test_return_consistency_explicit_return,
     r#"
 from typing import overload
 
 @overload
-def f(x: int) -> int: ...
+def f1(x: int) -> int: ...
 @overload
-def f(x: str) -> str: ...  # E: Overload return type `str` is not assignable to implementation return type `int`
-def f(x: int | str) -> int:
+def f1(x: str) -> str: ...  # E: Overload return type `str` is not assignable to implementation return type `int`
+def f1(x: int | str) -> int:
     return int(x)
+
+@overload
+def f2(x: int) -> int: ...
+@overload
+def f2(x: str) -> str: ...
+def f2(x: int | str) -> int | str:
+    return x
+    "#,
+);
+
+testcase!(
+    test_return_consistency_inferred_return,
+    r#"
+from typing import overload
+
+@overload
+def f1(a: int) -> int: ...
+@overload
+def f1(a: str) -> str: ...  # E: Overload return type `str` is not assignable to implementation return type `int`
+def f1(a):
+    return 1
+
+@overload
+def f2(a: int) -> int: ...
+@overload
+def f2(a: str) -> str: ...
+def f2(a):
+    return 1 if a else ""
     "#,
 );
 
