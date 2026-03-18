@@ -2998,10 +2998,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let ignore_errors = self.error_swallower();
         for (subject_idx, op, narrow_range) in narrow_entries {
             let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(*subject_idx));
-            // Check if this type should have exhaustiveness checked
-            if !self.should_check_exhaustiveness(subject_info.ty()) {
-                continue;
-            }
             let facet_chain = Self::extract_facet_from_op(op)
                 .and_then(|facets| self.resolve_facet_chain(facets.chain.clone()));
             let narrowing_subject_info = match &facet_chain {
