@@ -16,6 +16,8 @@ use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::tensor::TensorType;
 use pyrefly_types::tensor::broadcast_shapes;
+use pyrefly_types::type_var::Restriction;
+use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::ExprBinOp;
 use ruff_python_ast::ExprCompare;
@@ -530,6 +532,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // This mirrors the same check in binop_infer.
                     (Type::Any(style), _) => style.propagate(),
                     (_, Type::Any(style)) => style.propagate(),
+                    (Type::Quantified(left_q), Type::Quantified(right_q))
+                        if left_q == right_q
+                            && let Restriction::Constraints(constraints) = &left_q.restriction =>
+                    {
+                        self.unions(constraints.map(|constraint| {
+                            self.compare_types(
+                                x,
+                                op,
+                                constraint,
+                                constraint,
+                                current_left_range,
+                                errors,
+                            )
+                        }))
+                    }
                     _ => {
                         let context = || {
                             ErrorContext::BinaryOp(
