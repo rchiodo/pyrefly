@@ -316,6 +316,27 @@ fn collect_call_contextual_types(
                     contextual_types.insert(arg.range(), param.as_type().clone());
                 }
             }
+
+            // Process keyword arguments by matching keyword name to parameter name.
+            //
+            // For valid code, this should not be able to overlap with the positional arguments
+            // (and Pyrefly would raise a type error) although we don't try to handle that here.
+            for kw in call.arguments.keywords.iter() {
+                // kw.arg is Option<Identifier> — None means **kwargs splat,
+                // which we already skip above.
+                if let Some(ref kw_name) = kw.arg {
+                    // Find the parameter with this name.
+                    for param in items {
+                        if let Some(param_name) = param.name()
+                            && param_name.as_str() == kw_name.as_str()
+                            && is_static_primitive(param.as_type())
+                        {
+                            contextual_types.insert(kw.value.range(), param.as_type().clone());
+                            break;
+                        }
+                    }
+                }
+            }
         }
     });
 }
