@@ -2109,6 +2109,15 @@ impl Scopes {
         }
     }
 
+    /// Check if a name is declared as `global` or `nonlocal` in the current scope.
+    fn is_mutable_capture(&self, name: &Name) -> bool {
+        self.current()
+            .stat
+            .0
+            .get(name)
+            .is_some_and(|info| matches!(info.style, StaticStyle::MutableCapture(_)))
+    }
+
     pub fn register_import(&mut self, name: &Identifier) {
         self.register_import_internal(name, false);
     }
@@ -2169,13 +2178,18 @@ impl Scopes {
     }
 
     pub fn register_variable(&mut self, name: &Identifier) {
-        // Track variables in Module, Function, and Method scopes
+        // Track variables in Module, Function, and Method scopes.
         // Module-level variables won't be reported as unused since they can be imported
-        // by other modules, but function/method-level variables will be reported
+        // by other modules, but function/method-level variables will be reported.
         if matches!(
             self.current().kind,
             ScopeKind::Module | ScopeKind::Function(_) | ScopeKind::Method(_)
         ) {
+            // Don't track variables declared as `global` or `nonlocal` — they are
+            // visible to other scopes and can't be considered locally unused.
+            if self.is_mutable_capture(&name.id) {
+                return;
+            }
             // Preserve the `used` flag if the variable was already marked as used.
             // This handles cases like `foo = foo + 1` in loops where the variable
             // is read before being reassigned

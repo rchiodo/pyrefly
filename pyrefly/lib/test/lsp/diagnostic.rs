@@ -298,9 +298,7 @@ def func(count: int) -> int:
     let (handles, state) = mk_multi_file_state(&[("main", code)], Require::Exports, true);
     let handle = handles.get("main").unwrap();
     let report = get_unused_variable_diagnostics(&state, handle);
-    // BUG: Global variables assigned inside a function should not be reported
-    // as unused — they're visible to other scopes.
-    assert_eq!(report, "Variable `COUNT` is unused");
+    assert_eq!(report, "No unused variables");
 }
 
 // Test for issue #1961: `import a as a` and `from x import a as a` are explicit re-exports
