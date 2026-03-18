@@ -76,7 +76,7 @@ pub fn get_function_ref(
     context: &ModuleContext,
 ) -> FunctionRef {
     let handle = get_handle_for_module_name(module_name, context.transaction);
-    let context = ModuleContext::create(handle, context.transaction, context.module_ids).unwrap();
+    let context = ModuleContext::create(handle, context.transaction, context.module_ids);
 
     // This is slow, but we don't care in tests.
     get_all_functions(&context)
@@ -96,7 +96,7 @@ fn get_method_ref_with_predicate(
     predicate: impl Fn(&FunctionNode) -> bool,
 ) -> FunctionRef {
     let handle = get_handle_for_module_name(module_name, context.transaction);
-    let context = ModuleContext::create(handle, context.transaction, context.module_ids).unwrap();
+    let context = ModuleContext::create(handle, context.transaction, context.module_ids);
 
     // This is slow, but we don't care in tests.
     get_all_functions(&context)
@@ -149,7 +149,7 @@ pub fn get_global_ref(
     context: &ModuleContext,
 ) -> GlobalVariableRef {
     let handle = get_handle_for_module_name(module_name, context.transaction);
-    let context = ModuleContext::create(handle, context.transaction, context.module_ids).unwrap();
+    let context = ModuleContext::create(handle, context.transaction, context.module_ids);
     GlobalVariableRef {
         module_id: context.module_id,
         module_name: context.handle.module(),

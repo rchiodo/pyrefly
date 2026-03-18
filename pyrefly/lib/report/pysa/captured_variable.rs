@@ -368,8 +368,7 @@ pub fn collect_captured_variables(
         slow_fun_monitor_scope(|slow_function_monitor| {
             handles.par_iter().for_each(|handle| {
                 let module_id = module_ids.get_from_handle(handle);
-                let context =
-                    ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let captures_for_module = slow_function_monitor.monitor_function(
                     move || collect_captured_variables_for_module(&context),
                     format!(

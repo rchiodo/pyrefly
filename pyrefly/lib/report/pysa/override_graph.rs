@@ -114,8 +114,7 @@ pub fn build_reversed_override_graph(
     ThreadPool::new().install(|| {
         slow_fun_monitor_scope(|slow_function_monitor| {
             handles.par_iter().for_each(|handle| {
-                let context =
-                    ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 slow_function_monitor.monitor_function(
                     || {
                         for (key, value) in

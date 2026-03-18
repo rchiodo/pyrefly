@@ -42,14 +42,22 @@ impl ModuleContext<'_> {
         handle: Handle,
         transaction: &'a Transaction<'a>,
         module_ids: &'a ModuleIds,
-    ) -> Option<ModuleContext<'a>> {
-        let bindings = transaction.get_bindings(&handle)?;
-        let answers = transaction.get_answers(&handle)?;
+    ) -> ModuleContext<'a> {
+        let bindings = transaction
+            .get_bindings(&handle)
+            .expect("bindings should be available for handle");
+        let answers = transaction
+            .get_answers(&handle)
+            .expect("answers should be available for handle");
         let stdlib = transaction.get_stdlib(&handle);
-        let ast = transaction.get_ast(&handle)?;
-        let module_info = transaction.get_module_info(&handle)?;
+        let ast = transaction
+            .get_ast(&handle)
+            .expect("AST should be available for handle");
+        let module_info = transaction
+            .get_module_info(&handle)
+            .expect("module info should be available for handle");
         let module_id = module_ids.get_from_handle(&handle);
-        Some(ModuleContext {
+        ModuleContext {
             transaction,
             bindings,
             answers,
@@ -59,7 +67,7 @@ impl ModuleContext<'_> {
             module_id,
             module_ids,
             handle,
-        })
+        }
     }
 }
 

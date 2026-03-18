@@ -327,8 +327,7 @@ fn write_module_definitions_files(
         slow_fun_monitor_scope(|slow_function_monitor| {
             module_work_list.par_iter().try_for_each(
                 |(handle, _, info_filename)| -> anyhow::Result<()> {
-                    let context =
-                        ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                    let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     let module_definitions = slow_function_monitor.monitor_function(
                         || {
                             export_module_definitions(
@@ -373,8 +372,7 @@ fn write_module_type_of_expressions_files(
         slow_fun_monitor_scope(|slow_function_monitor| {
             module_work_list.par_iter().try_for_each(
                 |(handle, _, info_filename)| -> anyhow::Result<()> {
-                    let context =
-                        ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                    let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     let module_type_of_expressions = slow_function_monitor.monitor_function(
                         || export_module_type_of_expressions(&context),
                         format!(
@@ -416,8 +414,7 @@ fn write_module_call_graph_files(
         slow_fun_monitor_scope(|slow_function_monitor| {
             module_work_list.par_iter().try_for_each(
                 |(handle, _, info_filename)| -> anyhow::Result<()> {
-                    let context =
-                        ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                    let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     let module_call_graphs = slow_function_monitor.monitor_function(
                         || {
                             export_module_call_graphs(
@@ -457,8 +454,7 @@ fn add_module_is_test_flags(
         slow_fun_monitor_scope(|slow_function_monitor| {
             module_work_list.par_iter().try_for_each(
                 |(handle, module_id, _)| -> anyhow::Result<()> {
-                    let context =
-                        ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                    let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     slow_function_monitor.monitor_function(
                         || {
                             if is_test_module::is_test_module(&context) {

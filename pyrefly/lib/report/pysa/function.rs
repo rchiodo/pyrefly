@@ -942,8 +942,7 @@ pub fn collect_function_base_definitions(
         slow_fun_monitor_scope(|slow_function_monitor| {
             handles.par_iter().for_each(|handle| {
                 let module_id = module_ids.get_from_handle(handle);
-                let context =
-                    ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let base_definitions_for_module = slow_function_monitor.monitor_function(
                     || export_all_functions(reversed_override_graph, &context),
                     format!(

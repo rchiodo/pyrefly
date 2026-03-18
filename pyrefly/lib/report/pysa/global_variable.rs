@@ -224,8 +224,7 @@ pub fn collect_global_variables(
         slow_fun_monitor_scope(|slow_function_monitor| {
             handles.par_iter().for_each(|handle| {
                 let module_id = module_ids.get_from_handle(handle);
-                let context =
-                    ModuleContext::create(handle.clone(), transaction, module_ids).unwrap();
+                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let globals_for_module = slow_function_monitor.monitor_function(
                     move || {
                         let mut global_variables = ModuleGlobalVariables::new();
