@@ -270,9 +270,7 @@ def main():
 }
 
 // Reassigning a parameter inside a loop using its own value should not be
-// reported as unused. Currently this is a false positive because the variable
-// tracker doesn't recognize that the RHS read of the parameter should carry
-// over to the new variable entry.
+// reported as unused.
 #[test]
 fn test_parameter_reassignment_in_loop() {
     let code = r#"
@@ -283,10 +281,7 @@ def x(lim):
     let (handles, state) = mk_multi_file_state(&[("main", code)], Require::Exports, true);
     let handle = handles.get("main").unwrap();
     let report = get_unused_variable_diagnostics(&state, handle);
-    // BUG: This should be "No unused variables" since `lim` is read on the RHS
-    // and in the loop condition. The pattern `param = param - 1` in a loop is
-    // common and shouldn't be flagged.
-    assert_eq!(report, "Variable `lim` is unused");
+    assert_eq!(report, "No unused variables");
 }
 
 // Test for issue #1961: `import a as a` and `from x import a as a` are explicit re-exports

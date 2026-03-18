@@ -2099,6 +2099,16 @@ impl Scopes {
         }
     }
 
+    fn is_parameter_used(&self, name: &Name) -> bool {
+        match &self.current().kind {
+            ScopeKind::Function(scope) => {
+                scope.parameters.get(name).is_some_and(|usage| usage.used)
+            }
+            ScopeKind::Method(scope) => scope.parameters.get(name).is_some_and(|usage| usage.used),
+            _ => false,
+        }
+    }
+
     pub fn register_import(&mut self, name: &Identifier) {
         self.register_import_internal(name, false);
     }
@@ -2166,14 +2176,15 @@ impl Scopes {
             self.current().kind,
             ScopeKind::Module | ScopeKind::Function(_) | ScopeKind::Method(_)
         ) {
-            // Preserve the `used` flag if the variable was already marked as used
+            // Preserve the `used` flag if the variable was already marked as used.
             // This handles cases like `foo = foo + 1` in loops where the variable
             // is read before being reassigned
             let was_used = self
                 .current()
                 .variables
                 .get(&name.id)
-                .is_some_and(|usage| usage.used);
+                .is_some_and(|usage| usage.used)
+                || self.is_parameter_used(&name.id);
             self.current_mut().variables.insert(
                 name.id.clone(),
                 VariableUsage {
