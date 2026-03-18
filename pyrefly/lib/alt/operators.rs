@@ -504,88 +504,100 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors,
             );
 
-            let result = self.distribute_over_union(&current_left, |left| {
-                self.distribute_over_union(&right, |right| {
-                    // If either operand is Any, the comparison result is Any.
-                    // This mirrors the same check in binop_infer.
-                    if let Type::Any(style) = &left {
-                        return style.propagate();
-                    }
-                    if let Type::Any(style) = &right {
-                        return style.propagate();
-                    }
-                    let context = || {
-                        ErrorContext::BinaryOp(
-                            op.as_str().to_owned(),
-                            self.for_display(left.clone()),
-                            self.for_display(right.clone()),
-                        )
-                    };
-                    match op {
-                        CmpOp::Is | CmpOp::IsNot => {
-                            // These comparisons never error.
-                            self.heap.mk_class_type(self.stdlib.bool().clone())
-                        }
-                        CmpOp::In | CmpOp::NotIn => {
-                            // See https://docs.python.org/3/reference/expressions.html#membership-test-operations.
-                            // `x in y` first tries `y.__contains__(x)`, then checks if `x` matches an element
-                            // obtained by iterating over `y`.
-                            if let Some(ret) = self.call_magic_dunder_method(
-                                right,
-                                &dunder::CONTAINS,
-                                x.range,
-                                &[CallArg::ty(left, current_left_range)],
-                                &[],
-                                errors,
-                                Some(&context),
-                            ) {
-                                ret
-                            } else {
-                                let iteration_errors = self.error_collector();
-                                let iterables =
-                                    self.iterate(right, x.range, &iteration_errors, Some(&context));
-                                if iteration_errors.is_empty() {
-                                    // Make sure `x` matches the produced type.
-                                    self.check_type(
-                                        left,
-                                        &self.get_produced_type(iterables),
-                                        x.range,
-                                        errors,
-                                        &|| TypeCheckContext {
-                                            kind: TypeCheckKind::Container,
-                                            context: Some(context()),
-                                        },
-                                    );
-                                } else {
-                                    // Iterating `y` failed.
-                                    errors.extend(iteration_errors);
-                                }
-                                self.heap.mk_class_type(self.stdlib.bool().clone())
-                            }
-                        }
-                        _ => {
-                            // We've handled the other cases above, so we know we have a rich comparison op.
-                            let calls_to_try = [
-                                (&dunder::rich_comparison_dunder(*op).unwrap(), left, right),
-                                (&dunder::rich_comparison_fallback(*op).unwrap(), right, left),
-                            ];
-                            let ret =
-                                self.try_binop_calls(&calls_to_try, x.range, errors, &context);
-                            if ret.is_error() {
-                                self.heap.mk_class_type(self.stdlib.bool().clone())
-                            } else {
-                                ret
-                            }
-                        }
-                    }
-                })
-            });
+            let result =
+                self.compare_types(x, *op, &current_left, &right, current_left_range, errors);
             results.push(result);
             // For next comparison, the current right becomes the new left
             current_left = right;
             current_left_range = comparator.range();
         }
         self.unions(results)
+    }
+
+    fn compare_types(
+        &self,
+        x: &ExprCompare,
+        op: CmpOp,
+        left: &Type,
+        right: &Type,
+        current_left_range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Type {
+        self.distribute_over_union(left, |left| {
+            self.distribute_over_union(right, |right| {
+                // If either operand is Any, the comparison result is Any.
+                // This mirrors the same check in binop_infer.
+                if let Type::Any(style) = left {
+                    return style.propagate();
+                }
+                if let Type::Any(style) = right {
+                    return style.propagate();
+                }
+                let context = || {
+                    ErrorContext::BinaryOp(
+                        op.as_str().to_owned(),
+                        self.for_display(left.clone()),
+                        self.for_display(right.clone()),
+                    )
+                };
+                match op {
+                    CmpOp::Is | CmpOp::IsNot => {
+                        // These comparisons never error.
+                        self.heap.mk_class_type(self.stdlib.bool().clone())
+                    }
+                    CmpOp::In | CmpOp::NotIn => {
+                        // See https://docs.python.org/3/reference/expressions.html#membership-test-operations.
+                        // `x in y` first tries `y.__contains__(x)`, then checks if `x` matches an element
+                        // obtained by iterating over `y`.
+                        if let Some(ret) = self.call_magic_dunder_method(
+                            right,
+                            &dunder::CONTAINS,
+                            x.range,
+                            &[CallArg::ty(left, current_left_range)],
+                            &[],
+                            errors,
+                            Some(&context),
+                        ) {
+                            ret
+                        } else {
+                            let iteration_errors = self.error_collector();
+                            let iterables =
+                                self.iterate(right, x.range, &iteration_errors, Some(&context));
+                            if iteration_errors.is_empty() {
+                                // Make sure `x` matches the produced type.
+                                self.check_type(
+                                    left,
+                                    &self.get_produced_type(iterables),
+                                    x.range,
+                                    errors,
+                                    &|| TypeCheckContext {
+                                        kind: TypeCheckKind::Container,
+                                        context: Some(context()),
+                                    },
+                                );
+                            } else {
+                                // Iterating `y` failed.
+                                errors.extend(iteration_errors);
+                            }
+                            self.heap.mk_class_type(self.stdlib.bool().clone())
+                        }
+                    }
+                    _ => {
+                        // We've handled the other cases above, so we know we have a rich comparison op.
+                        let calls_to_try = [
+                            (&dunder::rich_comparison_dunder(op).unwrap(), left, right),
+                            (&dunder::rich_comparison_fallback(op).unwrap(), right, left),
+                        ];
+                        let ret = self.try_binop_calls(&calls_to_try, x.range, errors, &context);
+                        if ret.is_error() {
+                            self.heap.mk_class_type(self.stdlib.bool().clone())
+                        } else {
+                            ret
+                        }
+                    }
+                }
+            })
+        })
     }
 
     pub fn unop_infer(&self, x: &ExprUnaryOp, errors: &ErrorCollector) -> Type {
