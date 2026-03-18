@@ -57,7 +57,6 @@ from __future__ import annotations
 
 import argparse
 import ast
-import concurrent.futures
 import dataclasses
 import json
 import os
@@ -809,6 +808,69 @@ def _looks_like_valid_location(loc: Location, repo_root: Path) -> bool:
     return True
 
 
+def wait_for_ready(
+    lsp: LspClient,
+    root: Path,
+    *,
+    timeout_s: float = 120.0,
+    poll_interval_s: float = 2.0,
+) -> None:
+    """Wait for an LSP server to finish indexing and become ready.
+
+    Opens a trivial Python file and sends throwaway definition requests
+    until the server responds without error, indicating it has finished
+    initial indexing.
+    """
+    # Create a small probe file
+    probe_path = root / "__lsp_bench_probe__.py"
+    probe_text = "import os\nos.path.join\n"
+    try:
+        probe_path.write_text(probe_text, encoding="utf-8")
+        probe_uri = _path_to_uri(probe_path)
+        lsp.open_document(probe_uri, probe_text)
+
+        deadline = time.perf_counter() + timeout_s
+        while time.perf_counter() < deadline:
+            res = lsp.definition(
+                probe_uri, Position(line=1, character=8), timeout_s=poll_interval_s
+            )
+            if res.ok:
+                return
+            time.sleep(poll_interval_s)
+
+        print(
+            f"    Warning: {lsp.name} did not become ready within {timeout_s}s, proceeding anyway"
+        )
+    finally:
+        probe_path.unlink(missing_ok=True)
+
+
+def start_server(
+    name: str,
+    cmd: str,
+    root: Path,
+    *,
+    trace: bool = False,
+    settings: Any = None,
+    init_timeout_s: float = 120.0,
+) -> LspClient:
+    """Start an LSP server, initialize it, and wait for it to be ready.
+
+    Returns a live LspClient that can be reused for multiple definition
+    requests.  The caller is responsible for calling ``stop()`` when done.
+    """
+    argv = _split_command(cmd)
+    lsp = LspClient(name=name, argv=argv, root=root, trace=trace)
+    lsp.start()
+    lsp.initialize()
+    if settings is not None:
+        lsp.change_configuration(settings)
+    print(f"    Waiting for {name} to finish indexing...")
+    wait_for_ready(lsp, root, timeout_s=init_timeout_s)
+    print(f"    {name} ready.")
+    return lsp
+
+
 def run_one_server(
     name: str,
     cmd: str,
@@ -820,6 +882,9 @@ def run_one_server(
     timeout_s: float = 10.0,
 ) -> DefinitionResult:
     """Run a single LSP server and measure Go to Definition latency.
+
+    This is the legacy per-request startup path.  Prefer ``start_server()``
+    + ``lsp.definition()`` for benchmarking steady-state latency.
 
     Args:
         name: Server name for logging.
@@ -1315,6 +1380,153 @@ def _run_multi_package(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_benchmark_loop(
+    servers: List[Tuple[str, LspClient]],
+    root: Path,
+    runs: int,
+    rng: random.Random,
+    *,
+    timeout_s: float = 10.0,
+) -> Tuple[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+    """Run N definition queries against pre-initialized servers.
+
+    Servers are queried sequentially for each case to avoid CPU/memory
+    contention that would inflate and destabilize latency measurements.
+
+    Returns (report_dict, agg_dict).
+    """
+    report: Dict[str, Any] = {
+        "root": str(root),
+        "runs": runs,
+        "servers": [name for name, _ in servers],
+        "cases": [],
+        "summary": {},
+    }
+
+    agg: Dict[str, Dict[str, Any]] = {
+        name: {
+            "ok": 0,
+            "found": 0,
+            "valid": 0,
+            "latencies_ms": [],
+            "errors": 0,
+            "timeouts": 0,
+        }
+        for name, _ in servers
+    }
+
+    for run_idx in range(runs):
+        case = pick_random_case(root, rng=rng)
+
+        case_payload: Dict[str, Any] = {
+            "run": run_idx,
+            "picked": {
+                "file": str(case.file_path),
+                "uri": case.uri,
+                "line": case.position.line,
+                "character": case.position.character,
+                "line_1b": case.position.line + 1,
+                "character_1b": case.position.character + 1,
+                "token": case.token,
+                "kind": case.kind,
+                "line_text": case.line_text,
+            },
+            "results": {},
+            "unresolved": {},
+        }
+
+        print(
+            f"Run {run_idx + 1}/{runs}: {case.file_path}:{case.position.line + 1}:{case.position.character + 1} token={case.token} kind={case.kind}"
+        )
+
+        # Open the file on each server
+        text = case.file_path.read_text(encoding="utf-8", errors="replace")
+        for _server_name, lsp in servers:
+            lsp.open_document(case.uri, text)
+
+        # Query each server sequentially to avoid contention
+        for server_name, lsp in servers:
+            try:
+                res = lsp.definition(case.uri, case.position, timeout_s=timeout_s)
+                locations_payload = [
+                    {
+                        "uri": loc.uri,
+                        "start": dataclasses.asdict(loc.range.start),
+                        "end": dataclasses.asdict(loc.range.end),
+                        "valid": _looks_like_valid_location(loc, root),
+                    }
+                    for loc in res.locations
+                ]
+                any_valid = any(r.get("valid") for r in locations_payload)
+
+                case_payload["results"][server_name] = {
+                    "ok": res.ok,
+                    "found": res.found,
+                    "n_locations": res.n_locations,
+                    "latency_ms": res.latency_ms,
+                    "error": res.error,
+                    "locations": locations_payload,
+                }
+
+                if res.ok:
+                    agg[server_name]["ok"] += 1
+                if res.found:
+                    agg[server_name]["found"] += 1
+                if any_valid:
+                    agg[server_name]["valid"] += 1
+                if res.ok and res.latency_ms is not None:
+                    agg[server_name]["latencies_ms"].append(res.latency_ms)
+
+                if not locations_payload:
+                    case_payload["unresolved"][server_name] = _unresolved_entry(
+                        case, reason="no_definition_locations"
+                    )
+            except Exception as e:
+                agg[server_name]["errors"] += 1
+                case_payload["results"][server_name] = {
+                    "ok": False,
+                    "found": False,
+                    "n_locations": 0,
+                    "latency_ms": None,
+                    "error": str(e),
+                    "locations": [],
+                }
+                case_payload["unresolved"][server_name] = _unresolved_entry(
+                    case, reason="server_exception", error=str(e)
+                )
+
+        report["cases"].append(case_payload)
+
+    # Compute summary
+    def _pct(n: int) -> float:
+        return (100.0 * n / runs) if runs else 0.0
+
+    for server_name, _ in servers:
+        lats = agg[server_name]["latencies_ms"]
+        lats_sorted = sorted(lats)
+        p50 = lats_sorted[len(lats_sorted) // 2] if lats_sorted else None
+        p95 = lats_sorted[int(len(lats_sorted) * 0.95)] if lats_sorted else None
+        report["summary"][server_name] = {
+            "ok": agg[server_name]["ok"],
+            "ok_pct": _pct(agg[server_name]["ok"]),
+            "found": agg[server_name]["found"],
+            "found_pct": _pct(agg[server_name]["found"]),
+            "valid": agg[server_name]["valid"],
+            "valid_pct": _pct(agg[server_name]["valid"]),
+            "errors": agg[server_name]["errors"],
+            "latency_ms": {
+                "count": len(lats),
+                "p50": p50,
+                "p95": p95,
+                "min": min(lats) if lats else None,
+                "max": max(lats) if lats else None,
+                "mean": (sum(lats) / len(lats)) if lats else None,
+            },
+        }
+
+    return report, agg
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="Benchmark Go to Definition latency across LSP servers",
@@ -1443,6 +1655,16 @@ def main(argv: Optional[List[str]] = None) -> int:
             "Requests that timeout are counted as errors and do NOT contribute to latency statistics."
         ),
     )
+    ap.add_argument(
+        "--init-timeout",
+        type=float,
+        default=120.0,
+        dest="init_timeout_s",
+        help=(
+            "Timeout in seconds to wait for each server to finish indexing "
+            "before starting benchmark runs (default: 120s)."
+        ),
+    )
     args = ap.parse_args(argv)
 
     if args.install_envs is not None:
@@ -1457,16 +1679,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     rng = random.Random(args.seed)
 
     runs = max(1, int(args.runs))
-
-    report: Dict[str, Any] = {
-        "root": str(root),
-        "seed": args.seed,
-        "runs": runs,
-        "servers": [],
-        "cases": [],
-        "summary": {},
-        "ts": time.time(),
-    }
 
     settings_payload: Any = None
     if args.settings_json is not None:
@@ -1537,24 +1749,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     if "pyright" in requested:
         servers.append(("pyright", _need("pyright", args.pyright_cmd)))
 
-    report["servers"] = [name for name, _ in servers]
-
-    agg: Dict[str, Dict[str, Any]] = {
-        name: {
-            "ok": 0,
-            "found": 0,
-            "valid": 0,
-            "latencies_ms": [],
-            "errors": 0,
-            "timeouts": 0,
-        }
-        for name, _ in servers
-    }
-
-    def run_server_task(
-        server_name: str, cmd: str, case: BenchmarkCase
-    ) -> Tuple[str, DefinitionResult]:
-        """Run a single server benchmark task (for parallel execution)."""
+    # Start all servers once and wait for indexing to complete.
+    # Servers are started sequentially to avoid startup contention.
+    live_servers: List[Tuple[str, LspClient]] = []
+    for server_name, cmd in servers:
         per_server_settings = settings_payload
         if (
             args.pyright_disable_indexing
@@ -1563,139 +1761,49 @@ def main(argv: Optional[List[str]] = None) -> int:
         ):
             per_server_settings = None
 
-        res = run_one_server(
-            server_name,
-            cmd,
-            case,
+        try:
+            lsp = start_server(
+                server_name,
+                cmd,
+                root,
+                trace=args.trace,
+                settings=per_server_settings,
+                init_timeout_s=float(args.init_timeout_s),
+            )
+            live_servers.append((server_name, lsp))
+        except Exception as e:
+            print(f"  Failed to start {server_name}: {e}")
+
+    try:
+        report, agg = run_benchmark_loop(
+            live_servers,
             root,
-            trace=args.trace,
-            settings=per_server_settings,
+            runs,
+            rng,
             timeout_s=float(args.timeout_s),
         )
-        return (server_name, res)
+    finally:
+        # Shut down all servers
+        for _, lsp in live_servers:
+            try:
+                lsp.stop()
+            except Exception:
+                pass
 
-    for run_idx in range(runs):
-        case = pick_random_case(root, rng=rng)
-
-        case_payload: Dict[str, Any] = {
-            "run": run_idx,
-            "picked": {
-                "file": str(case.file_path),
-                "uri": case.uri,
-                "line": case.position.line,
-                "character": case.position.character,
-                "line_1b": case.position.line + 1,
-                "character_1b": case.position.character + 1,
-                "token": case.token,
-                "kind": case.kind,
-                "line_text": case.line_text,
-            },
-            "results": {},
-            "unresolved": {},
-        }
-
-        print(
-            f"Run {run_idx + 1}/{runs}: {case.file_path}:{case.position.line + 1}:{case.position.character + 1} token={case.token} kind={case.kind}"
-        )
-
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=len(servers)
-        ) as executor:
-            futures = {
-                executor.submit(run_server_task, name, cmd, case): name
-                for name, cmd in servers
-            }
-
-            for future in concurrent.futures.as_completed(futures):
-                server_name = futures[future]
-                try:
-                    _, res = future.result()
-                    locations_payload = [
-                        {
-                            "uri": loc.uri,
-                            "start": dataclasses.asdict(loc.range.start),
-                            "end": dataclasses.asdict(loc.range.end),
-                            "valid": _looks_like_valid_location(loc, root),
-                        }
-                        for loc in res.locations
-                    ]
-                    any_valid = any(result.get("valid") for result in locations_payload)
-
-                    case_payload["results"][server_name] = {
-                        "ok": res.ok,
-                        "found": res.found,
-                        "n_locations": res.n_locations,
-                        "latency_ms": res.latency_ms,
-                        "error": res.error,
-                        "locations": locations_payload,
-                    }
-
-                    if res.ok:
-                        agg[server_name]["ok"] += 1
-                    if res.found:
-                        agg[server_name]["found"] += 1
-                    if any_valid:
-                        agg[server_name]["valid"] += 1
-                    if res.ok and res.latency_ms is not None:
-                        agg[server_name]["latencies_ms"].append(res.latency_ms)
-
-                    if not locations_payload:
-                        case_payload["unresolved"][server_name] = _unresolved_entry(
-                            case, reason="no_definition_locations"
-                        )
-                except Exception as e:
-                    agg[server_name]["errors"] += 1
-                    case_payload["results"][server_name] = {
-                        "ok": False,
-                        "found": False,
-                        "n_locations": 0,
-                        "latency_ms": None,
-                        "error": str(e),
-                        "locations": [],
-                    }
-                    case_payload["unresolved"][server_name] = _unresolved_entry(
-                        case, reason="server_exception", error=str(e)
-                    )
-
-        report["cases"].append(case_payload)
-
-    def _pct(n: int) -> float:
-        return (100.0 * n / runs) if runs else 0.0
-
-    for server_name, _ in servers:
-        lats = agg[server_name]["latencies_ms"]
-        lats_sorted = sorted(lats)
-        p50 = lats_sorted[len(lats_sorted) // 2] if lats_sorted else None
-        p95 = lats_sorted[int(len(lats_sorted) * 0.95)] if lats_sorted else None
-        report["summary"][server_name] = {
-            "ok": agg[server_name]["ok"],
-            "ok_pct": _pct(agg[server_name]["ok"]),
-            "found": agg[server_name]["found"],
-            "found_pct": _pct(agg[server_name]["found"]),
-            "valid": agg[server_name]["valid"],
-            "valid_pct": _pct(agg[server_name]["valid"]),
-            "errors": agg[server_name]["errors"],
-            "latency_ms": {
-                "count": len(lats),
-                "p50": p50,
-                "p95": p95,
-                "min": min(lats) if lats else None,
-                "max": max(lats) if lats else None,
-                "mean": (sum(lats) / len(lats)) if lats else None,
-            },
-        }
+    report["seed"] = args.seed
+    report["ts"] = time.time()
 
     print("Summary:")
-    for server_name, _ in servers:
-        s = report["summary"][server_name]
-        lat = s["latency_ms"]
-        if lat["count"]:
+    for server_name, _ in live_servers:
+        s = report["summary"].get(server_name, {})
+        lat = s.get("latency_ms", {})
+        if lat.get("count"):
             print(
                 f"  {server_name}: ok={s['ok']}/{runs} valid={s['valid']}/{runs} errors={s['errors']} p50={lat['p50']:.1f}ms p95={lat['p95']:.1f}ms"
             )
         else:
             print(
-                f"  {server_name}: ok={s['ok']}/{runs} valid={s['valid']}/{runs} errors={s['errors']} (no latency samples)"
+                f"  {server_name}: ok={s.get('ok', 0)}/{runs} valid={s.get('valid', 0)}/{runs} errors={s.get('errors', 0)} (no latency samples)"
             )
 
     if args.json_out:
