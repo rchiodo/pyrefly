@@ -828,7 +828,8 @@ def run_benchmark(
     output_dir: Path | None = None,
     os_name: str | None = None,
     install_envs_file: Path | None = None,
-    runs: int = 1,
+    runs: int = 5,
+    warmup: int = 1,
 ) -> Path:
     """Run the full benchmark suite.
 
@@ -841,6 +842,7 @@ def run_benchmark(
         os_name: OS name for filename (ubuntu, macos, windows).
         install_envs_file: Path to install_envs.json.
         runs: Number of runs per checker per package.
+        warmup: Number of warmup runs to discard before real runs.
 
     Returns:
         Path to the dated output JSON file.
@@ -873,10 +875,10 @@ def run_benchmark(
     print(f"Packages: {len(packages)}")
     print(f"Type checkers: {', '.join(type_checkers)}")
     print(f"Timeout: {timeout}s per checker")
-    print(f"Runs per checker: {runs}")
+    print(f"Warmup runs: {warmup}")
+    print(f"Measured runs: {runs}")
     print("=" * 70)
 
-    # Versions
     versions = get_type_checker_versions()
     print("\nType Checker Versions:")
     for name, version in versions.items():
@@ -884,8 +886,7 @@ def run_benchmark(
             print(f"  {name}: {version}")
     print()
 
-    # Run benchmarks
-    all_results = _run_all(packages, type_checkers, timeout, runs)
+    all_results = _run_all(packages, type_checkers, timeout, runs, warmup)
 
     # Aggregate
     aggregate = compute_aggregate_stats(all_results, type_checkers)
@@ -916,7 +917,8 @@ def _run_all(
     packages: list[dict[str, Any]],
     type_checkers: list[str],
     timeout: int,
-    runs: int = 1,
+    runs: int = 5,
+    warmup: int = 1,
 ) -> list[PackageResult]:
     """Run benchmarks for all packages."""
     all_results: list[PackageResult] = []
@@ -929,7 +931,9 @@ def _run_all(
 
             print(f"\n[{i}/{len(packages)}] {name}")
 
-            result = _benchmark_package(pkg, temp_path, type_checkers, timeout, runs)
+            result = _benchmark_package(
+                pkg, temp_path, type_checkers, timeout, runs, warmup
+            )
             all_results.append(result)
 
     return all_results
@@ -940,7 +944,8 @@ def _benchmark_package(
     temp_path: Path,
     type_checkers: list[str],
     timeout: int,
-    runs: int = 1,
+    runs: int = 5,
+    warmup: int = 1,
 ) -> PackageResult:
     """Benchmark a single package: clone, install deps, run checkers."""
     name = pkg["name"]
@@ -996,32 +1001,51 @@ def _benchmark_package(
             }
             continue
 
-        print(f"    Running {checker}... ({runs} run{'s' if runs > 1 else ''})")
+        total = warmup + runs
+        print(
+            f"    Running {checker}... "
+            f"({warmup} warmup + {runs} measured run{'s' if runs > 1 else ''})"
+        )
         times: list[float] = []
         memories: list[float] = []
         failed_metric: TimingMetrics | None = None
 
-        for run_idx in range(runs):
-            if runs > 1:
-                print(f"      Run {run_idx + 1}/{runs}...", end=" ")
+        for run_idx in range(total):
+            is_warmup = run_idx < warmup
+            label = (
+                f"Warmup {run_idx + 1}/{warmup}"
+                if is_warmup
+                else f"Run {run_idx - warmup + 1}/{runs}"
+            )
+            print(f"      {label}...", end=" ")
             m = run_checker(checker, package_path, resolved_paths, timeout)
             if not m.get("ok"):
-                if runs > 1:
-                    print(f"Failed: {m.get('error_message', 'Unknown')}")
+                print(f"Failed: {m.get('error_message', 'Unknown')}")
+                if not is_warmup:
+                    failed_metric = m
+                    break
+                # Warmup failure: skip this checker entirely
                 failed_metric = m
                 break
-            times.append(m["execution_time_s"])
-            memories.append(m.get("peak_memory_mb", 0.0))
-            if runs > 1:
-                peak = m.get("peak_memory_mb", 0)
-                mem_str = f", {peak:.0f}MB" if peak > 0 else ""
+            peak = m.get("peak_memory_mb", 0)
+            mem_str = f", {peak:.0f}MB" if peak > 0 else ""
+            if is_warmup:
+                print(f"{m['execution_time_s']:.1f}s{mem_str} (discarded)")
+            else:
                 print(f"{m['execution_time_s']:.1f}s{mem_str}")
+                times.append(m["execution_time_s"])
+                memories.append(m.get("peak_memory_mb", 0.0))
 
         if failed_metric is not None:
-            failed_metric["runs"] = len(times) + 1
+            failed_metric["runs"] = len(times)
             metrics[checker] = failed_metric
-            if runs == 1:
-                print(f"      Failed: {failed_metric.get('error_message', 'Unknown')}")
+        elif not times:
+            metrics[checker] = {
+                "ok": False,
+                "execution_time_s": 0.0,
+                "peak_memory_mb": 0.0,
+                "error_message": "No successful runs",
+            }
         else:
             result_metric: TimingMetrics = {
                 "ok": True,
@@ -1029,14 +1053,14 @@ def _benchmark_package(
                 "peak_memory_mb": round(statistics.mean(memories), 2),
                 "runs": runs,
             }
-            if runs > 1:
+            if len(times) > 1:
                 result_metric["execution_time_stats"] = compute_run_stats(times)
                 result_metric["peak_memory_stats"] = compute_run_stats(memories)
 
             metrics[checker] = result_metric
             peak = result_metric["peak_memory_mb"]
             mem_str = f", {peak:.0f}MB" if peak > 0 else ""
-            if runs > 1:
+            if len(times) > 1:
                 time_stats = result_metric["execution_time_stats"]
                 print(
                     f"      Mean: {result_metric['execution_time_s']:.1f}s{mem_str} "
@@ -1190,8 +1214,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--runs",
         "-r",
         type=int,
+        default=5,
+        help="Number of runs per checker per package (default: 5)",
+    )
+    parser.add_argument(
+        "--warmup",
+        "-w",
+        type=int,
         default=1,
-        help="Number of runs per checker per package (default: 1)",
+        help="Number of warmup runs to discard before real runs (default: 1)",
     )
     return parser.parse_args(argv)
 
@@ -1208,6 +1239,7 @@ def main(argv: list[str] | None = None) -> int:
         os_name=args.os_name,
         install_envs_file=args.install_envs,
         runs=args.runs,
+        warmup=args.warmup,
     )
     return 0
 

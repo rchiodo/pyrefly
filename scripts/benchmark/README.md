@@ -26,8 +26,8 @@ python3 typecheck_benchmark.py
 # Run only pyrefly and mypy on the first 5 packages
 python3 typecheck_benchmark.py -c pyrefly mypy -p 5
 
-# Run specific packages with 3 runs each for statistical stability
-python3 typecheck_benchmark.py -n requests flask django -r 3
+# Run specific packages with 10 measured runs and 2 warmup runs
+python3 typecheck_benchmark.py -n requests flask django -r 10 -w 2
 
 # Save results to a custom directory
 python3 typecheck_benchmark.py -o ./my_results --os-name macos
@@ -44,7 +44,8 @@ python3 typecheck_benchmark.py --install-envs /path/to/install_envs.json
 | `-n, --package-names NAME [NAME ...]` | Specific package names to benchmark |
 | `-c, --checkers NAME [NAME ...]` | Type checkers to run (default: all five) |
 | `-t, --timeout SECS` | Timeout per checker invocation (default: 300s) |
-| `-r, --runs N` | Runs per checker per package (default: 1) |
+| `-r, --runs N` | Measured runs per checker per package (default: 5) |
+| `-w, --warmup N` | Warmup runs to discard before measuring (default: 1) |
 | `-o, --output DIR` | Output directory for JSON results |
 | `--os-name NAME` | OS name for output filename (e.g., macos) |
 | `--install-envs PATH` | Path to install_envs.json |
