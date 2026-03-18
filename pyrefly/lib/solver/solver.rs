@@ -884,15 +884,60 @@ impl Solver {
     }
 
     /// Add a lower bound to the variable if it is a Quantified
-    pub fn add_lower_bound(&self, v: Var, bound: Type) {
+    pub fn add_lower_bound(
+        &self,
+        v: Var,
+        bound: Type,
+        is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
+    ) {
         let lock = self.variables.lock();
-        let mut e = lock.get_mut(v);
-        match &mut *e {
+        let e = lock.get(v);
+        let mut first_bound = None;
+        match &*e {
             Variable::Quantified {
                 quantified: _,
                 lower_bounds,
             } => {
-                lower_bounds.push(bound);
+                if let Some(first) = lower_bounds.first() {
+                    first_bound = Some(first.clone());
+                }
+            }
+            _ => {}
+        }
+        drop(e);
+        drop(lock);
+        // Check if the new lower bound can absorb or be absorbed into the first bound.
+        // Examples: `float` absorbs `int`, `list[Any]` absorbs `list[int]`.
+        // TODO(https://github.com/facebook/pyrefly/issues/105): there are a few fishy things:
+        // * We're only checking against the first bound.
+        // * We're keeping `Any` separate so it can be filtered out in `solve_lower_bounds`.
+        // * We're relying on `is_subset` to pin vars.
+        let new_first_bound = first_bound.and_then(|first| {
+            let can_absorb = |t: &Type| !t.is_any() && t.collect_all_vars().is_empty();
+            if !can_absorb(&first) || !can_absorb(&bound) {
+                is_subset(&bound, &first); // Ignore the result, just pin vars
+                None
+            } else if is_subset(&bound.materialize(), &first) {
+                Some(first)
+            } else if is_subset(&first.materialize(), &bound) {
+                Some(bound.clone())
+            } else {
+                None
+            }
+        });
+        let lock = self.variables.lock();
+        match &mut *lock.get_mut(v) {
+            Variable::Quantified {
+                quantified: _,
+                lower_bounds,
+            } => {
+                if let Some(new_first) = new_first_bound
+                    && let Some(old_first) = lower_bounds.first_mut()
+                {
+                    *old_first = new_first;
+                } else {
+                    lower_bounds.push(bound);
+                }
             }
             _ => {}
         }
