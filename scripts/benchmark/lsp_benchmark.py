@@ -398,7 +398,13 @@ def pick_random_identifier_case(
         # For Attribute nodes we recorded col_offset of the base; try to locate the attribute token on the line.
         col0 = o.col_0b
         if o.token and o.token != "":
-            idx = lines[line0].find(o.token)
+            # Search forward from AST col_offset first (preferred — avoids
+            # matching an earlier occurrence of the same token on the line).
+            idx = lines[line0].find(o.token, o.col_0b)
+            if idx == -1:
+                # Fallback: search from start (Attribute col_offset points to
+                # base, not attr, so the token may precede col_offset).
+                idx = lines[line0].find(o.token)
             if idx != -1:
                 col0 = idx
 
@@ -794,15 +800,31 @@ def _parse_definition_result(result: Any) -> List[Location]:
 
 
 def _looks_like_valid_location(loc: Location, repo_root: Path) -> bool:
+    """Check whether a definition location looks valid.
+
+    Verifies the resolved path exists on disk and that the start line is
+    within the file's line count.
+    """
     p = _uri_to_path(loc.uri)
     try:
-        p.resolve()
+        p = p.resolve()
     except Exception:
+        return False
+
+    if not p.exists():
         return False
 
     if loc.range.start.line < 0 or loc.range.start.character < 0:
         return False
     if loc.range.end.line < 0 or loc.range.end.character < 0:
+        return False
+
+    # Verify line is within file bounds
+    try:
+        line_count = sum(1 for _ in open(p, encoding="utf-8", errors="replace"))
+        if loc.range.start.line >= line_count:
+            return False
+    except OSError:
         return False
 
     return True
