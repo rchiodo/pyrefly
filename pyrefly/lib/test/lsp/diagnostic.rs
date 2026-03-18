@@ -284,6 +284,25 @@ def x(lim):
     assert_eq!(report, "No unused variables");
 }
 
+// Assigning a parameter to a global variable should not report the global as unused.
+#[test]
+fn test_global_assignment_from_parameter() {
+    let code = r#"
+COUNT = 0
+
+def func(count: int) -> int:
+    global COUNT
+    COUNT = count
+    return count
+"#;
+    let (handles, state) = mk_multi_file_state(&[("main", code)], Require::Exports, true);
+    let handle = handles.get("main").unwrap();
+    let report = get_unused_variable_diagnostics(&state, handle);
+    // BUG: Global variables assigned inside a function should not be reported
+    // as unused — they're visible to other scopes.
+    assert_eq!(report, "Variable `COUNT` is unused");
+}
+
 // Test for issue #1961: `import a as a` and `from x import a as a` are explicit re-exports
 // per the Python typing spec and should NOT be reported as unused imports.
 // See: https://typing.python.org/en/latest/spec/distributing.html#import-conventions
