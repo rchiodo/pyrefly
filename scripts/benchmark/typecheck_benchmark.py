@@ -465,7 +465,6 @@ def _write_dummy_pyright_config(
         "include": check_paths or ["."],
         "exclude": [],
         "typeCheckingMode": "basic",
-        "useLibraryCodeForTypes": True,
     }
     with open(package_path / "pyrightconfig.json", "w", encoding="utf-8") as f:
         json.dump(config, f)
@@ -525,7 +524,7 @@ def _write_dummy_zuban_config(
     check_paths: list[str] | None = None,
 ) -> Path:
     """Write minimal mypy-style config for zuban benchmarking."""
-    config_path = package_path / "mypy.benchmark.ini"
+    config_path = package_path / "zuban.benchmark.ini"
     with open(config_path, "w", encoding="utf-8") as f:
         f.write("[mypy]\n")
         if check_paths:
