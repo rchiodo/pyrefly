@@ -3012,6 +3012,14 @@ impl Server {
             .handles()
             .into_iter()
             .filter(|handle| {
+                // Skip Memory handles — they exist only for open-file diagnostics.
+                // After a file is closed, its Memory handle may linger in committed
+                // state with no backing content, causing false "memory path not found"
+                // errors. The corresponding FileSystem handle (if any) covers workspace
+                // diagnostics for this file.
+                if handle.path().is_memory() {
+                    return false;
+                }
                 let path = handle.path().as_path();
                 // Skip open files — they get diagnostics through the normal path
                 if open_files.contains_key(&path.to_path_buf()) {

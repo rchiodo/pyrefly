@@ -18,7 +18,7 @@ use crate::object_model::InitializeSettings;
 use crate::object_model::LspInteraction;
 use crate::util::get_test_files_root;
 
-/// Test 1: Non-open file gets diagnostics in workspace mode.
+/// Non-open file gets diagnostics in workspace mode.
 ///
 /// When `diagnosticMode` is set to `"workspace"`, opening any file from a
 /// project triggers indexing of the entire project via
@@ -61,7 +61,7 @@ fn test_workspace_diagnostics_for_non_open_file() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 2: `did_close` preserves diagnostics in workspace mode.
+/// `did_close` preserves diagnostics in workspace mode.
 ///
 /// When a file is opened and then closed in workspace diagnostic mode, its
 /// diagnostics should not be cleared — the file transitions from versioned
@@ -142,7 +142,7 @@ fn test_workspace_diagnostics_preserved_after_did_close() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 3: Default workspace guardrail.
+/// Default workspace guardrail.
 ///
 /// When `diagnosticMode` is set to `"workspace"` but there are no explicit
 /// workspace folders, workspace diagnostics should NOT be published. The
@@ -184,7 +184,7 @@ fn test_workspace_diagnostics_not_published_without_workspace_folders() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 4: Workspace diagnostics are scoped to config-covered files.
+/// Workspace diagnostics are scoped to config-covered files.
 ///
 /// When `diagnosticMode` is set to `"workspace"`, only files covered by a
 /// discovered pyrefly config should receive workspace diagnostics. Opening
@@ -234,7 +234,7 @@ fn test_workspace_diagnostics_scoped_to_config() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 5: `did_close` clears diagnostics for file outside workspace folders.
+/// `did_close` clears diagnostics for file outside workspace folders.
 ///
 /// A file that is NOT under any explicit workspace folder resolves to the
 /// catch-all default workspace, which always uses `OpenFilesOnly` mode.
@@ -286,7 +286,7 @@ fn test_did_close_clears_diagnostics_outside_workspace_folder() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 6: Multiple configs under one workspace root.
+/// Multiple configs under one workspace root.
 ///
 /// When a workspace root contains multiple pyrefly configs in different
 /// subdirectories, opening a file from each project triggers indexing of
@@ -360,7 +360,7 @@ fn test_workspace_diagnostics_multiple_configs() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 7: Config above workspace root is discovered via upward search.
+/// Config above workspace root is discovered via upward search.
 ///
 /// When the workspace root is a subdirectory but the pyrefly config lives in
 /// a parent directory, opening a file triggers `populate_project_files_if_necessary`
@@ -404,7 +404,7 @@ fn test_workspace_diagnostics_config_above_root() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 8: Switching from workspace to openFilesOnly clears diagnostics.
+/// Switching from workspace to openFilesOnly clears diagnostics.
 ///
 /// When `diagnosticMode` changes from `"workspace"` to `"openFilesOnly"`,
 /// diagnostics for non-open files should be cleared. We first open `clean.py`
@@ -460,7 +460,89 @@ fn test_workspace_diagnostics_cleared_on_mode_switch() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 9: Deleting a non-open file clears its workspace diagnostics.
+/// `did_close` does not produce stale "memory path not found" diagnostics.
+///
+/// When a file is opened (creating an in-memory handle) and then closed in
+/// workspace mode, the Memory handle's backing content is cleared. If workspace
+/// diagnostics are published for the stale Memory handle, `Load::load_from_path`
+/// fails with "memory path not found". This test verifies that closing a file
+/// does not cause such false errors to appear for it.
+#[test]
+fn test_did_close_no_stale_memory_path_errors() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("workspace_diagnostics");
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
+    interaction.set_root(root_path.clone());
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![(
+                "workspace_diagnostics".to_owned(),
+                Url::from_file_path(root_path.clone()).unwrap(),
+            )]),
+            configuration: Some(Some(
+                json!([{"pyrefly": {"diagnosticMode": "workspace", "displayTypeErrors": "force-on"}}]),
+            )),
+            ..Default::default()
+        })
+        .expect("Failed to initialize");
+
+    let errors_path = root_path.join("errors.py");
+
+    // Open errors.py — triggers project indexing and creates a Memory handle.
+    interaction.client.did_open("errors.py");
+    interaction
+        .client
+        .expect_publish_diagnostics_eventual_error_count(errors_path.clone(), 1)
+        .expect("Expected 1 diagnostic for open errors.py");
+
+    // Close errors.py — the Memory handle's content is cleared, but the handle
+    // may linger in committed state.
+    interaction.client.did_close("errors.py");
+
+    // Send shutdown to fence the message queue. The server processes all pending
+    // work (including any async recheck from did_close) before responding to
+    // shutdown. Drain all messages until the shutdown response, checking every
+    // publishDiagnostics notification for the stale error.
+    let shutdown_handle = interaction.client.send_shutdown();
+    let shutdown_id = shutdown_handle.id.clone();
+    let saw_stale_error = interaction
+        .client
+        .expect_message(
+            "drain all messages until shutdown (checking no stale memory errors)",
+            move |msg| {
+                match msg {
+                    Message::Notification(n) if n.method == PublishDiagnostics::METHOD => {
+                        let params: PublishDiagnosticsParams =
+                            serde_json::from_value(n.params).unwrap();
+                        let path = params.uri.to_file_path().unwrap();
+                        if path == errors_path
+                            && params
+                                .diagnostics
+                                .iter()
+                                .any(|d| d.message.contains("memory path not found"))
+                        {
+                            return Some(Ok(true));
+                        }
+                    }
+                    Message::Response(r) if r.id == shutdown_id => {
+                        // Shutdown response — all server work is done.
+                        return Some(Ok(false));
+                    }
+                    _ => {}
+                }
+                None
+            },
+        )
+        .expect("Expected shutdown response");
+    assert!(
+        !saw_stale_error,
+        "errors.py received 'memory path not found' diagnostic after did_close — stale Memory handle bug"
+    );
+
+    interaction.client.send_exit();
+}
+
+/// Deleting a non-open file clears its workspace diagnostics.
 ///
 /// When a non-open file with workspace diagnostics is deleted from disk and
 /// a `DidChangeWatchedFiles` notification fires with `FileChangeType::Deleted`,
