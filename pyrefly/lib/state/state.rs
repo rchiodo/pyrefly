@@ -2896,6 +2896,19 @@ impl State {
                 .loaders
                 .insert(loader_id.dupe(), additional_loader.dupe());
         }
+
+        // Garbage-collect stale loader entries. Loaders are keyed by ArcId<ConfigFile>
+        // which uses pointer-identity equality, so config reloads (via invalidate_config)
+        // create new ArcId keys and old entries accumulate without this cleanup.
+        let active_configs: HashSet<usize> =
+            state.modules.values().map(|m| m.config.id()).collect();
+        let old_loaders = std::mem::take(&mut state.loaders);
+        for (config, loader) in old_loaders {
+            if active_configs.contains(&config.id()) {
+                state.loaders.insert(config, loader);
+            }
+        }
+
         drop(committing_transaction_guard)
     }
 
