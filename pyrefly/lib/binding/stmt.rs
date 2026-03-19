@@ -1025,12 +1025,23 @@ impl<'a> BindingsBuilder<'a> {
                 let exhaustive_key = if !exhaustive {
                     let mut narrow_entries = Vec::new();
                     for (name, (op, range)) in negated_prev_ops.0.iter() {
-                        let hashed_name = Hashed::new(name);
-                        if let NameLookupResult::Found { idx, .. } =
-                            self.lookup_name(hashed_name, &mut Usage::Narrowing(None))
+                        // Use the fork's base flow (the incoming flow at the start of this
+                        // if/elif, before any branches ran) to find the subject idx. This
+                        // preserves any narrowing applied by enclosing if statements — a regular
+                        // lookup here would fall back to the un-narrowed static binding because
+                        // we are no longer in a branch flow after finish_branch(). For variables
+                        // not present in the fork base (e.g. non-locals), fall back to a regular
+                        // lookup.
+                        let idx = if let Some(idx) = self.scopes.current_fork_base_idx(name) {
+                            idx
+                        } else if let NameLookupResult::Found { idx, .. } =
+                            self.lookup_name(Hashed::new(name), &mut Usage::Narrowing(None))
                         {
-                            narrow_entries.push((idx, Box::new(op.clone()), *range));
-                        }
+                            idx
+                        } else {
+                            continue;
+                        };
+                        narrow_entries.push((idx, Box::new(op.clone()), *range));
                     }
                     Some(self.insert_binding(
                         Key::Exhaustive(ExhaustivenessKind::IfElif, if_range),

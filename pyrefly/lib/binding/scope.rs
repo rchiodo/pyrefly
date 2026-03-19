@@ -1994,6 +1994,18 @@ impl Scopes {
         Some(self.current().flow.get_info(name)?.value()?.idx)
     }
 
+    /// Get the flow idx for `name` in the current fork's **base** flow (the flow captured
+    /// at `start_fork` time, before any branches were started).
+    ///
+    /// This is used to look up names for exhaustiveness bindings, where the current flow
+    /// is empty (reset by `finish_branch`) but we need the correctly-narrowed type from
+    /// the enclosing context in which the if/elif statement appears.
+    ///
+    /// Returns `None` if there is no active fork or the name is not in the base flow.
+    pub fn current_fork_base_idx(&self, name: &Name) -> Option<Idx<Key>> {
+        Some(self.current().forks.last()?.base.get_info(name)?.idx())
+    }
+
     /// Return the current binding index and flow style for `name`, if it exists
     /// in any enclosing scope.
     pub fn binding_idx_for_name(&self, name: &Name) -> Option<(Idx<Key>, FlowStyle)> {
