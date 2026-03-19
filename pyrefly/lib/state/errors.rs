@@ -141,15 +141,29 @@ impl Errors {
             SmallMap<LineNumber, SmallSet<String>>,
         > = SmallMap::new();
 
-        // Build a map from module path to f-string ranges for lookup.
+        // Build per-module lookup maps for f-string ranges and enabled ignores.
         let fstring_ranges_by_module: SmallMap<&ModulePath, &[(LineNumber, LineNumber)]> = self
             .loads
             .iter()
             .map(|(load, _, ranges)| (load.module_info.path(), ranges.as_slice()))
             .collect();
 
+        let enabled_ignores_by_module: SmallMap<&ModulePath, SmallSet<Tool>> = self
+            .loads
+            .iter()
+            .map(|(load, config, _)| {
+                let path = load.module_info.path();
+                (path, config.enabled_ignores(path.as_path()).clone())
+            })
+            .collect();
+
         for error in &collected.suppressed {
-            if error.is_ignored(&Tool::default_enabled()) {
+            let module_path = error.path();
+            let enabled_ignores = enabled_ignores_by_module
+                .get(&module_path)
+                .cloned()
+                .unwrap_or_else(Tool::default_enabled);
+            if error.is_ignored(&enabled_ignores) {
                 let module_path = error.path();
                 let start_line = error.display_range().start.line_within_file();
                 let end_line = error.display_range().end.line_within_file();
@@ -184,29 +198,57 @@ impl Errors {
         }
 
         // Iterate over each module and check for unused ignores
-        for (load, _, _) in &self.loads {
+        for (load, config, _) in &self.loads {
             let module = &load.module_info;
             let module_path = module.path();
             let ignore = module.ignore();
+            let enabled_ignores = config.enabled_ignores(module_path.as_path());
 
             // Get the suppressed codes for this module (if any)
             let module_suppressed_codes = suppressed_codes_by_module.get(&module_path);
 
             for (applies_to_line, suppressions) in ignore.iter() {
                 for supp in suppressions {
-                    // Only check pyrefly suppressions
-                    if supp.tool() != Tool::Pyrefly {
+                    let tool = supp.tool();
+                    // Only check tools that are enabled and that we support
+                    // reporting unused ignores for (Pyrefly and Pyre).
+                    if !enabled_ignores.contains(&tool) {
                         continue;
                     }
-
-                    let declared_codes: SmallSet<String> =
-                        supp.error_codes().iter().cloned().collect();
+                    match tool {
+                        Tool::Pyrefly | Tool::Pyre => {}
+                        _ => continue,
+                    }
 
                     // Get the error codes actually suppressed on this line
                     let used_codes: SmallSet<String> = module_suppressed_codes
                         .and_then(|m| m.get(applies_to_line))
                         .cloned()
                         .unwrap_or_default();
+
+                    // For Tool::Pyre, error code filtering is not enforced
+                    // (any Pyre suppression suppresses all errors on the line),
+                    // so we only report it as unused when no errors at all were
+                    // suppressed on its line.
+                    if tool == Tool::Pyre {
+                        if !used_codes.is_empty() {
+                            continue; // Pyre suppression is used
+                        }
+                        let comment_line = supp.comment_line();
+                        let line_start = module.lined_buffer().line_start(comment_line);
+                        let range = TextRange::new(line_start, line_start + TextSize::new(1));
+                        unused_errors.push(Error::new(
+                            module.dupe(),
+                            range,
+                            vec1!["Unused pyre-fixme comment".to_owned()],
+                            ErrorKind::UnusedIgnore,
+                        ));
+                        continue;
+                    }
+
+                    // Tool::Pyrefly: check individual error codes
+                    let declared_codes: SmallSet<String> =
+                        supp.error_codes().iter().cloned().collect();
 
                     // Determine if the suppression is unused
                     let unused_codes: SmallSet<String> = if declared_codes.is_empty() {
