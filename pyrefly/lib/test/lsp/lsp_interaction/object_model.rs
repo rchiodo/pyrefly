@@ -8,6 +8,7 @@
 /// This file contains a new implementation of the lsp_interaction test suite. Soon it will replace the old one.
 use std::iter::once;
 use std::marker::PhantomData;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -80,6 +81,7 @@ use pyrefly_util::lock::FinishHandle;
 use pyrefly_util::telemetry::NoTelemetry;
 use pyrefly_util::telemetry::Telemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
+use pyrefly_util::thread_pool::ThreadCount;
 use serde_json::Value;
 use serde_json::json;
 
@@ -1341,14 +1343,18 @@ impl LspInteraction {
             build_system_blocking: false,
             enable_external_references: false,
         };
-        Self::new_with_args(args, NoTelemetry)
+        Self::new_with_args(args, NoTelemetry, None)
     }
 
     /// Create an `LspInteraction` with custom [`LspArgs`] and a custom
     /// [`Telemetry`] implementation. The telemetry value is moved into the
     /// spawned server thread.
-    pub fn new_with_args<T: Telemetry + 'static>(args: LspArgs, telemetry: T) -> Self {
-        init_test();
+    pub fn new_with_args<T: Telemetry + 'static>(
+        args: LspArgs,
+        telemetry: T,
+        thread_count: Option<ThreadCount>,
+    ) -> Self {
+        init_test(thread_count.unwrap_or(ThreadCount::NumThreads(NonZeroUsize::new(3).unwrap())));
 
         let ((conn_client, _client_reader), (conn_server, server_reader)) = Connection::memory();
 
