@@ -684,6 +684,28 @@ fn definition_relative_import_with_nested_config() {
     interaction.shutdown().unwrap();
 }
 
+/// Documents current behavior: go-to-definition on a symbol imported from a
+/// thrift-generated Python stub navigates to the .pyi stub file.
+/// Once thrift go-to-def is implemented, this should navigate to the .thrift file instead.
+#[test]
+fn thrift_go_to_def_currently_goes_to_stub() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("thrift_go_to_def");
+    test_go_to_def(
+        root_path,
+        None,
+        "main.py",
+        vec![
+            // `from my_thrift.ttypes import MyStruct` — cursor on MyStruct (col 29)
+            // Currently navigates to the .pyi stub, not the .thrift source
+            (5, 29, "my_thrift/ttypes.pyi", 5, 6, 5, 14),
+            // `x: MyStruct` — cursor on MyStruct (col 3)
+            // Currently navigates to the .pyi stub, not the .thrift source
+            (7, 3, "my_thrift/ttypes.pyi", 5, 6, 5, 14),
+        ],
+    );
+}
+
 /// Same as above but with workspace root above src/.
 #[test]
 fn definition_relative_import_with_nested_config_workspace_at_root() {
