@@ -274,6 +274,42 @@ Qualified Name: `main.a.<locals>.b.<locals>.c`
 }
 
 #[test]
+fn from_package_import_submodule() {
+    let main_code = r#"
+from pkg import sub
+#               ^
+"#;
+    let pkg_init = r#"
+"#;
+    let sub_init = r#"
+x: int = 1
+"#;
+    let report = get_batched_lsp_operations_report(
+        &[
+            ("main", main_code),
+            ("pkg", pkg_init),
+            ("pkg.sub", sub_init),
+        ],
+        get_test_report,
+    );
+    assert_eq!(
+        r#"
+# main.py
+2 | from pkg import sub
+                    ^
+Qualified Name: `pkg.sub`
+
+
+# pkg.py
+
+# pkg.sub.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn function_in_class_method() {
     let code = r#"
 class C:

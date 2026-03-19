@@ -14,6 +14,7 @@ use lsp_types::Url;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::module_name::ModuleName;
+use pyrefly_python::symbol_kind::SymbolKind;
 use pyrefly_util::telemetry::SubTaskTelemetry;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ModModule;
@@ -133,6 +134,14 @@ pub(crate) fn compute_qualified_name(
     let module_name = definition.module.name();
 
     if let DefinitionMetadata::Module = &definition.metadata {
+        return Some(module_name.to_string());
+    }
+
+    // Imported names that resolved to modules (e.g., `from torch.nn import attention`
+    // where `attention` is a submodule) use VariableOrAttribute metadata with
+    // SymbolKind::Module. The definition's module name is already the target module,
+    // so return it directly — just like the DefinitionMetadata::Module case above.
+    if definition.metadata.symbol_kind() == Some(SymbolKind::Module) {
         return Some(module_name.to_string());
     }
 
