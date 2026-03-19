@@ -857,39 +857,48 @@ impl CheckArgs {
 
         let errors = loads
             .collect_errors_with_baseline(self.output.baseline.as_deref(), relative_to.as_path());
-        let shown_errors = if let Some(only) = &self.output.only {
+        let (directives, ordinary_errors) = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
-            errors
-                .shown
-                .into_iter()
-                .filter(|e| only.contains(&e.error_kind()))
-                .collect()
+            (
+                errors
+                    .directives
+                    .into_iter()
+                    .filter(|e| only.contains(&e.error_kind()))
+                    .collect(),
+                errors
+                    .ordinary
+                    .into_iter()
+                    .filter(|e| only.contains(&e.error_kind()))
+                    .collect(),
+            )
         } else {
-            errors.shown
+            (errors.directives, errors.ordinary)
         };
 
         // Collect unused ignore errors for display (respects severity configuration)
         let unused_ignore_errors = loads.collect_unused_ignore_errors_for_display();
-        let shown_errors: Vec<_> = if let Some(only) = &self.output.only {
+        let ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
             let filtered: Vec<_> = unused_ignore_errors
-                .shown
+                .ordinary
                 .into_iter()
                 .filter(|e| only.contains(&e.error_kind()))
                 .collect();
-            shown_errors.into_iter().chain(filtered).collect()
+            ordinary_errors.into_iter().chain(filtered).collect()
         } else {
-            shown_errors
+            ordinary_errors
                 .into_iter()
-                .chain(unused_ignore_errors.shown)
+                .chain(unused_ignore_errors.ordinary)
                 .collect()
         };
 
-        // We update the baseline file if requested, after reporting any new errors using the old baseline
+        // We update the baseline file if requested, after reporting any new errors
+        // using the old baseline. Directives are structurally excluded — they live
+        // in `directives`, not `ordinary`, so they never enter the baseline.
         if self.output.update_baseline
             && let Some(baseline_path) = &self.output.baseline
         {
-            let mut new_baseline = shown_errors.clone();
+            let mut new_baseline = ordinary_errors.clone();
             new_baseline.extend(errors.baseline);
             new_baseline.sort_by_cached_key(|error| {
                 (
@@ -906,40 +915,74 @@ impl CheckArgs {
             )?;
         }
 
+        // Suppress operates on ordinary diagnostics only — directives are
+        // structurally excluded since they live in `directives`, not `ordinary_errors`.
+        if self.behavior.suppress_errors {
+            // TODO: Move this into separate command
+            let serialized_errors: Vec<SerializedError> = ordinary_errors
+                .iter()
+                .filter_map(SerializedError::from_error)
+                .filter(|e| !e.is_unused_ignore())
+                .collect();
+            suppress::suppress_errors(serialized_errors);
+        }
+        if self.behavior.remove_unused_ignores {
+            // TODO: Move this into separate command
+            let unused_errors = loads.collect_unused_ignore_errors();
+            suppress::remove_unused_ignores(unused_errors);
+        }
+
+        // Count only ordinary errors for exit code determination. Directives
+        // (e.g. reveal_type) do not contribute to the error count.
+        let mut ordinary_errors_count = config_errors_count;
+        for error in &ordinary_errors {
+            if error.severity() >= Severity::Error {
+                ordinary_errors_count += 1;
+            }
+        }
+
+        // Merge directives into the display list, re-sorting by module
+        // name, path, and source range so output preserves file/line
+        // interleaving across modules.
+        let mut output_errors = ordinary_errors;
+        output_errors.extend(directives);
+        output_errors.sort_by_cached_key(|e| {
+            (
+                e.module().name(),
+                e.path().dupe(),
+                e.range().start(),
+                e.range().end(),
+            )
+        });
+
         if let Some(path) = &self.output.output {
             self.output.output_format.write_errors_to_file(
                 path,
                 relative_to.as_path(),
-                &shown_errors,
+                &output_errors,
             )?;
         } else {
             self.output
                 .output_format
-                .write_errors_to_console(relative_to.as_path(), &shown_errors)?;
+                .write_errors_to_console(relative_to.as_path(), &output_errors)?;
         }
         memory_trace.stop();
         if let Some(limit) = self.output.count_errors {
-            print_error_counts(&shown_errors, limit);
+            print_error_counts(&output_errors, limit);
         }
         if self.output.summarize_errors.is_some() {
-            print_error_summary(&shown_errors);
-        }
-        let mut shown_errors_count = config_errors_count;
-        for error in &shown_errors {
-            if error.severity() >= Severity::Error {
-                shown_errors_count += 1;
-            }
+            print_error_summary(&output_errors);
         }
         timings.report_errors = report_errors_start.elapsed();
 
         if self.output.summary != Summary::None {
             let suppress_count = errors.suppressed.len();
             if suppress_count == 0 {
-                info!("{}", count(shown_errors_count, "error"))
+                info!("{}", count(ordinary_errors_count, "error"))
             } else {
                 info!(
                     "{} ({} suppressed)",
-                    count(shown_errors_count, "error"),
+                    count(ordinary_errors_count, "error"),
                     number_thousands(suppress_count)
                 )
             };
@@ -986,7 +1029,7 @@ impl CheckArgs {
             }
         }
         if let Some(pysa_directory) = &self.output.report_pysa {
-            report::pysa::write_results(pysa_directory, transaction, handles, &shown_errors)?;
+            report::pysa::write_results(pysa_directory, transaction, handles, &output_errors)?;
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
             report::cinderx::write_results(cinderx_directory, transaction)?;
@@ -1003,27 +1046,13 @@ impl CheckArgs {
                 report::dependency_graph::dependency_graph(transaction, handles),
             )?;
         }
-        if self.behavior.suppress_errors {
-            // TODO: Move this into separate command
-            let serialized_errors: Vec<SerializedError> = shown_errors
-                .iter()
-                .filter_map(SerializedError::from_error)
-                .filter(|e| !e.is_unused_ignore())
-                .collect();
-            suppress::suppress_errors(serialized_errors);
-        }
-        if self.behavior.remove_unused_ignores {
-            // TODO: Move this into separate command
-            let unused_errors = loads.collect_unused_ignore_errors();
-            suppress::remove_unused_ignores(unused_errors);
-        }
         if self.behavior.expectations {
             loads.check_against_expectations()?;
-            Ok((CommandExitStatus::Success, shown_errors))
-        } else if shown_errors_count > 0 {
-            Ok((CommandExitStatus::UserError, shown_errors))
+            Ok((CommandExitStatus::Success, output_errors))
+        } else if ordinary_errors_count > 0 {
+            Ok((CommandExitStatus::UserError, output_errors))
         } else {
-            Ok((CommandExitStatus::Success, shown_errors))
+            Ok((CommandExitStatus::Success, output_errors))
         }
     }
 }

@@ -23,6 +23,7 @@ use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::fs_anyhow;
+use ruff_text_size::Ranged;
 use serde::Deserialize;
 use tracing::info;
 
@@ -102,13 +103,23 @@ fn compute_errors(sys_info: SysInfo, sourcedb: impl SourceDatabase + 'static) ->
     let transaction = state.transaction();
     let errors = transaction.get_errors(&modules_to_check);
 
-    // Collect main errors
-    let mut shown = errors.collect_errors().shown;
+    // Collect main errors and directives for display, re-sorting by module
+    // name, path, and source range so output preserves file/line
+    // interleaving across modules.
+    let collected = errors.collect_errors();
+    let mut output_errors = collected.ordinary;
+    output_errors.extend(collected.directives);
+    output_errors.extend(errors.collect_unused_ignore_errors_for_display().ordinary);
+    output_errors.sort_by_cached_key(|e| {
+        (
+            e.module().name(),
+            e.path().dupe(),
+            e.range().start(),
+            e.range().end(),
+        )
+    });
 
-    // Also collect unused ignore errors (respects severity config)
-    shown.extend(errors.collect_unused_ignore_errors_for_display().shown);
-
-    shown
+    output_errors
 }
 
 fn write_output_to_file(path: &Path, legacy_errors: &LegacyErrors) -> anyhow::Result<()> {

@@ -20,6 +20,7 @@ use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ModModule;
+use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 use starlark_map::small_map::SmallMap;
@@ -111,7 +112,7 @@ impl Errors {
         if let Some(baseline_path) = baseline_path
             && let Ok(processor) = BaselineProcessor::from_file(baseline_path)
         {
-            processor.process_errors(&mut errors.shown, &mut errors.baseline, relative_to);
+            processor.process_errors(&mut errors.ordinary, &mut errors.baseline, relative_to);
         }
         errors
     }
@@ -262,7 +263,7 @@ impl Errors {
 
     /// Collects unused ignore errors for display, respecting severity configuration.
     /// Unlike `collect_unused_ignore_errors()`, this applies severity filtering so
-    /// errors with `Severity::Ignore` are not included in the shown results.
+    /// errors with `Severity::Ignore` are not included in the ordinary results.
     pub fn collect_unused_ignore_errors_for_display(&self) -> CollectedErrors {
         let unused_errors = self.collect_unused_ignore_errors();
         let mut result = CollectedErrors::default();
@@ -276,9 +277,11 @@ impl Errors {
                         .display_config
                         .severity(ErrorKind::UnusedIgnore);
                     match severity {
-                        Severity::Error => result.shown.push(error.with_severity(Severity::Error)),
-                        Severity::Warn => result.shown.push(error.with_severity(Severity::Warn)),
-                        Severity::Info => result.shown.push(error.with_severity(Severity::Info)),
+                        Severity::Error => {
+                            result.ordinary.push(error.with_severity(Severity::Error))
+                        }
+                        Severity::Warn => result.ordinary.push(error.with_severity(Severity::Warn)),
+                        Severity::Info => result.ordinary.push(error.with_severity(Severity::Info)),
                         Severity::Ignore => result.disabled.push(error),
                     }
                     break;
@@ -295,8 +298,11 @@ impl Errors {
             let mut result = CollectedErrors::default();
             load.errors
                 .collect_into(&error_config, fstring_ranges, &mut result);
+            let mut output_errors = result.ordinary;
+            output_errors.extend(result.directives);
+            output_errors.sort_by_key(|e| (e.range().start(), e.range().end()));
             Expectation::parse(load.module_info.dupe(), load.module_info.contents())
-                .check(&result.shown)?;
+                .check(&output_errors)?;
         }
         Ok(())
     }
@@ -329,7 +335,7 @@ mod tests {
             let regex = Regex::new(r"@\d+").unwrap();
             for (load, config, _) in &self.loads {
                 let error_config = config.get_error_config(load.module_info.path().as_path());
-                let errors = load.errors.collect(&error_config).shown;
+                let errors = load.errors.collect(&error_config).ordinary;
                 for error in errors {
                     let msg = error.msg();
                     if regex.is_match(&msg) {

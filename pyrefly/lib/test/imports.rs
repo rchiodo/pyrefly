@@ -557,7 +557,7 @@ fn test_import_fail_to_load() {
         .transaction()
         .get_errors([&handle("foo")])
         .collect_errors()
-        .shown;
+        .ordinary;
     assert_eq!(errs.len(), 1);
     let err = &errs[0];
     assert!(err.msg().contains("Failed to load"));
@@ -808,7 +808,7 @@ fn test_interface_disagree() {
         .transaction()
         .get_errors([&h_py])
         .collect_errors()
-        .shown;
+        .ordinary;
     assert_eq!(errs.len(), 0);
 }
 

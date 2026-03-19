@@ -418,9 +418,11 @@ impl Playground {
 
         for (filename, handle) in &self.handles {
             let errors = transaction.get_errors([handle]);
-            let mut shown = errors.collect_errors().shown;
-            shown.extend(errors.collect_unused_ignore_errors_for_display().shown);
-            let file_errors = shown.into_map(|e| {
+            let collected = errors.collect_errors();
+            let mut output_errors = collected.ordinary;
+            output_errors.extend(collected.directives);
+            output_errors.extend(errors.collect_unused_ignore_errors_for_display().ordinary);
+            let file_errors = output_errors.into_map(|e| {
                 let range = e.display_range();
                 Diagnostic {
                     start_line: range.start.line_within_file().get() as i32,

@@ -2149,7 +2149,7 @@ impl<'a> Transaction<'a> {
     ) -> Option<Vec<(String, Module, TextRange, String)>> {
         let module_info = self.get_module_info(handle)?;
         let ast = self.get_ast(handle)?;
-        let errors = self.get_errors(vec![handle]).collect_errors().shown;
+        let errors = self.get_errors(vec![handle]).collect_errors().ordinary;
         let mut import_actions = Vec::new();
         let mut generate_actions = Vec::new();
         let mut other_actions = Vec::new();
@@ -2368,7 +2368,7 @@ impl<'a> Transaction<'a> {
     ) -> Option<Vec<(Module, TextRange, String)>> {
         let module_info = self.get_module_info(handle)?;
         let ast = self.get_ast(handle)?;
-        let errors = self.get_errors(vec![handle]).collect_errors().shown;
+        let errors = self.get_errors(vec![handle]).collect_errors().ordinary;
         let mut edits = Vec::new();
         for error in errors {
             if error.error_kind() != ErrorKind::RedundantCast {

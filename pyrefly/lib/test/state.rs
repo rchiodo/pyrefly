@@ -124,9 +124,9 @@ fn test_multiple_path() {
     transaction.run(&handles, Require::Everything, None);
     let loads = transaction.get_errors(handles.iter());
     let project_root = PathBuf::new();
-    print_errors(project_root.as_path(), &loads.collect_errors().shown);
+    print_errors(project_root.as_path(), &loads.collect_errors().ordinary);
     loads.check_against_expectations().unwrap();
-    assert_eq!(loads.collect_errors().shown.len(), 3);
+    assert_eq!(loads.collect_errors().ordinary.len(), 3);
 }
 
 #[test]
@@ -149,7 +149,7 @@ fn test_change_require() {
             .transaction()
             .get_errors([&handle])
             .collect_errors()
-            .shown
+            .ordinary
             .len(),
         0
     );
@@ -169,7 +169,7 @@ fn test_change_require() {
             .transaction()
             .get_errors([&handle])
             .collect_errors()
-            .shown
+            .ordinary
             .len(),
         2
     );
@@ -189,7 +189,7 @@ fn test_change_require() {
             .transaction()
             .get_errors([&handle])
             .collect_errors()
-            .shown
+            .ordinary
             .len(),
         2
     );
@@ -327,7 +327,11 @@ x: int = 1
     // Verify the specific error is the expected type mismatch. This is specific
     // error is an indication that we are not using the typeshed bundled with Pyrefly
     // and not the typeshed provided through the config.
-    let error_messages: Vec<String> = errors.shown.iter().map(|e| e.msg().to_string()).collect();
+    let error_messages: Vec<String> = errors
+        .ordinary
+        .iter()
+        .map(|e| e.msg().to_string())
+        .collect();
     let has_literal_int_error = error_messages
         .iter()
         .any(|msg| msg.contains("Literal[1]") && msg.contains("int"));
@@ -445,7 +449,7 @@ fn test_notebook_reload_after_parse_failure() {
             .transaction()
             .get_errors([&handle])
             .collect_errors()
-            .shown
+            .ordinary
             .len()
     );
 
@@ -471,7 +475,7 @@ fn test_notebook_reload_after_parse_failure() {
             .transaction()
             .get_errors([&handle])
             .collect_errors()
-            .shown
+            .ordinary
             .len()
     );
 }

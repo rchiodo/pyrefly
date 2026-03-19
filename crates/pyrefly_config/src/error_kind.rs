@@ -359,6 +359,14 @@ impl ErrorKind {
         }
     }
 
+    /// Returns true if this error kind is a type checker directive rather than
+    /// a real diagnostic. Directives bypass suppression, baseline exclusion,
+    /// and min-severity filtering, but can still be disabled via explicit
+    /// per-kind severity overrides (e.g. `--ignore reveal-type`).
+    pub fn is_directive(self) -> bool {
+        matches!(self, ErrorKind::RevealType)
+    }
+
     /// Returns the public documentation URL for this error kind.
     /// Example: https://pyrefly.org/en/docs/error-kinds/#bad-context-manager
     pub fn docs_url(self) -> String {

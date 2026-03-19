@@ -84,6 +84,12 @@ impl SerializedError {
     pub fn is_unused_ignore(&self) -> bool {
         self.name == ErrorKind::UnusedIgnore.to_name()
     }
+
+    /// Returns true if this error is a directive (e.g. reveal_type) that
+    /// should never be suppressed.
+    pub fn is_directive(&self) -> bool {
+        self.name == ErrorKind::RevealType.to_name()
+    }
 }
 
 /// Detects the line ending style used in a string.
@@ -594,7 +600,7 @@ mod tests {
         let (errors, tdir) = get_errors(before);
         let suppressable_errors: Vec<SerializedError> = errors
             .collect_errors()
-            .shown
+            .ordinary
             .iter()
             .filter(|e| e.severity() >= Severity::Warn)
             .filter_map(SerializedError::from_error)

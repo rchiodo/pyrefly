@@ -419,7 +419,7 @@ impl TestEnv {
                 .transaction()
                 .get_errors(handles.iter())
                 .collect_errors()
-                .shown,
+                .ordinary,
         );
         (state, move |module| {
             let name = ModuleName::from_str(module);
@@ -533,7 +533,7 @@ pub fn mk_multi_file_state(
                 .transaction()
                 .get_errors(handles.values())
                 .collect_errors()
-                .shown
+                .ordinary
                 .len(),
             0
         );
@@ -679,7 +679,7 @@ pub fn testcase_for_macro(
             t.run(&[h.dupe()], Require::Everything, None);
             let errors = t.get_errors([&h]);
             let project_root = PathBuf::new();
-            print_errors(project_root.as_path(), &errors.collect_errors().shown);
+            print_errors(project_root.as_path(), &errors.collect_errors().ordinary);
             check(errors)?;
         } else {
             let (state, handle) = env.clone().to_state();
