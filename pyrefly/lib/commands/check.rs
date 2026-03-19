@@ -297,6 +297,11 @@ struct OutputArgs {
     /// When specified, emit a sorted/formatted JSON of the errors to the baseline file
     #[arg(long, requires("baseline"))]
     update_baseline: bool,
+
+    /// Minimum severity level for errors to be displayed.
+    /// Errors below this severity will not be shown.
+    #[arg(long, value_enum, default_value_t = Severity::Error)]
+    min_severity: Severity,
 }
 
 #[derive(Clone, Debug, ValueEnum, Default, PartialEq, Eq)]
@@ -877,7 +882,7 @@ impl CheckArgs {
 
         // Collect unused ignore errors for display (respects severity configuration)
         let unused_ignore_errors = loads.collect_unused_ignore_errors_for_display();
-        let ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
+        let mut ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
             let filtered: Vec<_> = unused_ignore_errors
                 .ordinary
@@ -891,29 +896,6 @@ impl CheckArgs {
                 .chain(unused_ignore_errors.ordinary)
                 .collect()
         };
-
-        // We update the baseline file if requested, after reporting any new errors
-        // using the old baseline. Directives are structurally excluded — they live
-        // in `directives`, not `ordinary`, so they never enter the baseline.
-        if self.output.update_baseline
-            && let Some(baseline_path) = &self.output.baseline
-        {
-            let mut new_baseline = ordinary_errors.clone();
-            new_baseline.extend(errors.baseline);
-            new_baseline.sort_by_cached_key(|error| {
-                (
-                    error.path().to_string(),
-                    error.range().start(),
-                    error.range().end(),
-                    error.error_kind(),
-                )
-            });
-            OutputFormat::write_error_json_to_file(
-                baseline_path,
-                relative_to.as_path(),
-                &new_baseline,
-            )?;
-        }
 
         // Suppress operates on ordinary diagnostics only — directives are
         // structurally excluded since they live in `directives`, not `ordinary_errors`.
@@ -930,6 +912,40 @@ impl CheckArgs {
             // TODO: Move this into separate command
             let unused_errors = loads.collect_unused_ignore_errors();
             suppress::remove_unused_ignores(unused_errors);
+        }
+
+        // Filter by minimum severity. Directives are not subject to this
+        // filter — they are merged separately in the output step below.
+        let min_severity = self.output.min_severity;
+        ordinary_errors.retain(|e| e.severity() >= min_severity);
+
+        // We update the baseline file if requested, after reporting any new
+        // errors using the old baseline. Directives are structurally excluded
+        // — they live in `directives`, not `ordinary_errors`. The baseline only
+        // tracks errors that meet the min-severity threshold.
+        if self.output.update_baseline
+            && let Some(baseline_path) = &self.output.baseline
+        {
+            let mut new_baseline = ordinary_errors.clone();
+            new_baseline.extend(
+                errors
+                    .baseline
+                    .into_iter()
+                    .filter(|e| e.severity() >= min_severity),
+            );
+            new_baseline.sort_by_cached_key(|error| {
+                (
+                    error.path().to_string(),
+                    error.range().start(),
+                    error.range().end(),
+                    error.error_kind(),
+                )
+            });
+            OutputFormat::write_error_json_to_file(
+                baseline_path,
+                relative_to.as_path(),
+                &new_baseline,
+            )?;
         }
 
         // Count only ordinary errors for exit code determination. Directives

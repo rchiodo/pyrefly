@@ -46,6 +46,11 @@ pub struct BuckCheckArgs {
     /// Path to output JSON file containing Pyrefly type check results.
     #[arg(long = "output", short = 'o', value_name = "FILE")]
     output_path: Option<PathBuf>,
+
+    /// Minimum severity level for errors to be displayed.
+    /// Errors below this severity will not be shown.
+    #[arg(long, value_enum, default_value_t = Severity::Error)]
+    min_severity: Severity,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -156,8 +161,12 @@ impl BuckCheckArgs {
             sys_info.dupe(),
         )?;
         let type_errors = compute_errors(sys_info, sourcedb);
-        info!("Found {} type errors", type_errors.len());
-        write_output(&type_errors, self.output_path.as_deref())?;
+        let displayed_errors: Vec<Error> = type_errors
+            .into_iter()
+            .filter(|e| e.error_kind().is_directive() || e.severity() >= self.min_severity)
+            .collect();
+        info!("Found {} type errors", displayed_errors.len());
+        write_output(&displayed_errors, self.output_path.as_deref())?;
         Ok(CommandExitStatus::Success)
     }
 }

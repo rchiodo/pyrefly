@@ -31,7 +31,8 @@ use yansi::Painted;
     Eq,
     Hash,
     Deserialize,
-    Serialize
+    Serialize,
+    ValueEnum
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
