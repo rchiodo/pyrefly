@@ -68,7 +68,7 @@ use crate::binding::scope::Scope;
 use crate::binding::scope::UnusedParameter;
 use crate::binding::scope::UnusedVariable;
 use crate::binding::scope::YieldsAndReturns;
-use crate::config::base::UntypedDefBehavior;
+use crate::config::base::InferReturnTypes;
 use crate::export::special::SpecialExport;
 use crate::types::types::AnyStyle;
 
@@ -87,7 +87,7 @@ pub struct SelfAssignments {
 }
 
 /// Determine whether a function definition is annotated.
-/// Used in the `untyped-def-behavior = "skip-and-infer-returns-any"` mode.
+/// Used when `check-unannotated-defs = false` to decide whether to skip checking.
 fn is_annotated<T>(returns: &Option<T>, params: &Parameters) -> bool {
     if returns.is_some() {
         return true;
@@ -612,8 +612,7 @@ impl<'a> BindingsBuilder<'a> {
         };
 
         let self_assignments = if decorators.has_no_type_check
-            || (self.untyped_def_behavior == UntypedDefBehavior::SkipAndInferReturnAny
-                && !is_annotated(&return_ann_with_range, parameters))
+            || (!self.check_unannotated_defs && !is_annotated(&return_ann_with_range, parameters))
         {
             self.mark_as_returns_any(func_name);
             self.unchecked_function_body_scope(
@@ -627,94 +626,40 @@ impl<'a> BindingsBuilder<'a> {
                 method_self_kind,
             )
         } else {
-            match self.untyped_def_behavior {
-                UntypedDefBehavior::SkipAndInferReturnAny => {
-                    let (yields_and_returns, self_assignments, unused_parameters, unused_variables) =
-                        self.function_body_scope(
-                            parameters,
-                            body,
-                            range,
-                            func_name,
-                            parent,
-                            undecorated_idx,
-                            class_key,
-                            is_async,
-                            method_self_kind,
-                        );
-                    if should_report_unused_parameters {
-                        self.record_unused_parameters(unused_parameters);
-                        self.record_unused_variables(unused_variables);
-                    }
-                    self.analyze_return_type(
-                        func_name,
-                        is_async,
-                        yields_and_returns,
-                        return_ann_with_range,
-                        None,
-                        false, // this disables return type inference
-                        stub_or_impl,
-                    );
-                    self_assignments
-                }
-                UntypedDefBehavior::CheckAndInferReturnAny => {
-                    let implicit_return = self.implicit_return(&body, func_name);
-                    let (yields_and_returns, self_assignments, unused_parameters, unused_variables) =
-                        self.function_body_scope(
-                            parameters,
-                            body,
-                            range,
-                            func_name,
-                            parent,
-                            undecorated_idx,
-                            class_key,
-                            is_async,
-                            method_self_kind,
-                        );
-                    if should_report_unused_parameters {
-                        self.record_unused_parameters(unused_parameters);
-                        self.record_unused_variables(unused_variables);
-                    }
-                    self.analyze_return_type(
-                        func_name,
-                        is_async,
-                        yields_and_returns,
-                        return_ann_with_range,
-                        Some(implicit_return),
-                        false, // this disables return type inference
-                        stub_or_impl,
-                    );
-                    self_assignments
-                }
-                UntypedDefBehavior::CheckAndInferReturnType => {
-                    let implicit_return = self.implicit_return(&body, func_name);
-                    let (yields_and_returns, self_assignments, unused_parameters, unused_variables) =
-                        self.function_body_scope(
-                            parameters,
-                            body,
-                            range,
-                            func_name,
-                            parent,
-                            undecorated_idx,
-                            class_key,
-                            is_async,
-                            method_self_kind,
-                        );
-                    if should_report_unused_parameters {
-                        self.record_unused_parameters(unused_parameters);
-                        self.record_unused_variables(unused_variables);
-                    }
-                    self.analyze_return_type(
-                        func_name,
-                        is_async,
-                        yields_and_returns,
-                        return_ann_with_range,
-                        Some(implicit_return),
-                        true,
-                        stub_or_impl,
-                    );
-                    self_assignments
-                }
+            // Compute implicit_return: in this branch the body is always fully analyzed,
+            // so we can always determine whether there's an implicit return.
+            let implicit_return = Some(self.implicit_return(&body, func_name));
+            let (yields_and_returns, self_assignments, unused_parameters, unused_variables) = self
+                .function_body_scope(
+                    parameters,
+                    body,
+                    range,
+                    func_name,
+                    parent,
+                    undecorated_idx,
+                    class_key,
+                    is_async,
+                    method_self_kind,
+                );
+            if should_report_unused_parameters {
+                self.record_unused_parameters(unused_parameters);
+                self.record_unused_variables(unused_variables);
             }
+            let should_infer = match self.infer_return_types {
+                InferReturnTypes::Checked => true,
+                InferReturnTypes::Annotated => is_annotated(&return_ann_with_range, parameters),
+                InferReturnTypes::Never => false,
+            };
+            self.analyze_return_type(
+                func_name,
+                is_async,
+                yields_and_returns,
+                return_ann_with_range,
+                implicit_return,
+                should_infer,
+                stub_or_impl,
+            );
+            self_assignments
         };
 
         (stub_or_impl, self_assignments)

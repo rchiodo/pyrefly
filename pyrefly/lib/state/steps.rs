@@ -24,8 +24,8 @@ use crate::alt::answers::Answers;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers::Solutions;
 use crate::binding::bindings::Bindings;
+use crate::config::base::InferReturnTypes;
 use crate::config::base::RecursionLimitConfig;
-use crate::config::base::UntypedDefBehavior;
 use crate::error::style::ErrorStyle;
 use crate::export::exports::Exports;
 use crate::export::exports::LookupExport;
@@ -45,7 +45,8 @@ pub struct Context<'a, Lookup> {
     pub uniques: &'a UniqueFactory,
     pub stdlib: &'a Stdlib,
     pub lookup: &'a Lookup,
-    pub untyped_def_behavior: UntypedDefBehavior,
+    pub check_unannotated_defs: bool,
+    pub infer_return_types: InferReturnTypes,
     pub infer_with_first_use: bool,
     pub tensor_shapes: bool,
     pub strict_callable_subtyping: bool,
@@ -417,7 +418,8 @@ impl Step {
             &load.errors,
             ctx.uniques,
             enable_trace,
-            ctx.untyped_def_behavior,
+            ctx.check_unannotated_defs,
+            ctx.infer_return_types,
         );
         let answers = Answers::new(&bindings, solver, enable_index, enable_trace);
         Arc::new((bindings, Arc::new(answers)))

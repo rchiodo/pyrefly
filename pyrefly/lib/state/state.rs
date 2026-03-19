@@ -1113,8 +1113,9 @@ impl<'a> Transaction<'a> {
                 uniques: &self.data.state.uniques,
                 stdlib: &stdlib,
                 lookup: &self.lookup(module_data),
-                untyped_def_behavior: config
-                    .untyped_def_behavior(module_data.handle.path().as_path()),
+                check_unannotated_defs: config
+                    .check_unannotated_defs(module_data.handle.path().as_path()),
+                infer_return_types: config.infer_return_types(module_data.handle.path().as_path()),
                 infer_with_first_use: config
                     .infer_with_first_use(module_data.handle.path().as_path()),
                 tensor_shapes: config.tensor_shapes(module_data.handle.path().as_path()),
@@ -2011,7 +2012,8 @@ impl<'a> Transaction<'a> {
                 uniques: &self.data.state.uniques,
                 stdlib: &stdlib,
                 lookup: &self.lookup(m),
-                untyped_def_behavior: config.untyped_def_behavior(m.handle.path().as_path()),
+                check_unannotated_defs: config.check_unannotated_defs(m.handle.path().as_path()),
+                infer_return_types: config.infer_return_types(m.handle.path().as_path()),
                 infer_with_first_use: config.infer_with_first_use(m.handle.path().as_path()),
                 tensor_shapes: config.tensor_shapes(m.handle.path().as_path()),
                 strict_callable_subtyping: config

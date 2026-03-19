@@ -87,7 +87,7 @@ use crate::binding::scope::UnusedImport;
 use crate::binding::scope::UnusedParameter;
 use crate::binding::scope::UnusedVariable;
 use crate::binding::table::TableKeyed;
-use crate::config::base::UntypedDefBehavior;
+use crate::config::base::InferReturnTypes;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorInfo;
@@ -249,7 +249,8 @@ pub struct BindingsBuilder<'a> {
     pub has_docstring: bool,
     pub scopes: Scopes,
     table: BindingTable,
-    pub untyped_def_behavior: UntypedDefBehavior,
+    pub check_unannotated_defs: bool,
+    pub infer_return_types: InferReturnTypes,
     unused_parameters: Vec<UnusedParameter>,
     unused_imports: Vec<UnusedImport>,
     unused_variables: Vec<UnusedVariable>,
@@ -504,7 +505,8 @@ impl Bindings {
         errors: &ErrorCollector,
         uniques: &UniqueFactory,
         enable_trace: bool,
-        untyped_def_behavior: UntypedDefBehavior,
+        check_unannotated_defs: bool,
+        infer_return_types: InferReturnTypes,
     ) -> Self {
         let mut builder = BindingsBuilder {
             module_info: module_info.dupe(),
@@ -520,7 +522,8 @@ impl Bindings {
             has_docstring: Ast::has_docstring(&x),
             scopes: Scopes::module(x.range, enable_trace),
             table: Default::default(),
-            untyped_def_behavior,
+            check_unannotated_defs,
+            infer_return_types,
             unused_parameters: Vec::new(),
             unused_imports: Vec::new(),
             unused_variables: Vec::new(),

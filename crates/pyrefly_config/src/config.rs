@@ -57,8 +57,8 @@ use tracing::debug;
 use tracing::error;
 
 use crate::base::ConfigBase;
+use crate::base::InferReturnTypes;
 use crate::base::RecursionLimitConfig;
-use crate::base::UntypedDefBehavior;
 use crate::environment::environment::PythonEnvironment;
 use crate::environment::interpreters::Interpreters;
 use crate::error::ErrorConfig;
@@ -788,12 +788,14 @@ impl ConfigFile {
         found_match == Some(true)
     }
 
-    pub fn untyped_def_behavior(&self, path: &Path) -> UntypedDefBehavior {
-        self.get_from_sub_configs(ConfigBase::get_untyped_def_behavior, path)
-            .unwrap_or_else(||
-                 // we can use unwrap here, because the value in the root config must
-                 // be set in `ConfigFile::configure()`.
-                 self.root.untyped_def_behavior.unwrap())
+    pub fn check_unannotated_defs(&self, path: &Path) -> bool {
+        self.get_from_sub_configs(ConfigBase::get_check_unannotated_defs, path)
+            .unwrap_or_else(|| self.root.check_unannotated_defs.unwrap())
+    }
+
+    pub fn infer_return_types(&self, path: &Path) -> InferReturnTypes {
+        self.get_from_sub_configs(ConfigBase::get_infer_return_types, path)
+            .unwrap_or_else(|| self.root.infer_return_types.unwrap())
     }
 
     pub fn disable_type_errors_in_ide(&self, path: &Path) -> bool {
@@ -1087,8 +1089,11 @@ impl ConfigFile {
             self.root.ignore_missing_imports = Some(Default::default());
         }
 
-        if self.root.untyped_def_behavior.is_none() {
-            self.root.untyped_def_behavior = Some(Default::default());
+        // Resolve the deprecated untyped_def_behavior into the two new fields
+        // for both root and sub-configs.
+        self.root.resolve_legacy_untyped_def_behavior();
+        for sub in &mut self.sub_configs {
+            sub.settings.resolve_legacy_untyped_def_behavior();
         }
 
         if self.root.ignore_errors_in_generated_code.is_none() {
@@ -1378,6 +1383,7 @@ mod tests {
 
     use super::*;
     use crate::base::ExtraConfigs;
+    use crate::base::UntypedDefBehavior;
     use crate::error_kind::ErrorKind;
     use crate::error_kind::Severity;
     use crate::module_wildcard::ModuleWildcard;
@@ -1470,6 +1476,8 @@ mod tests {
                     replace_imports_with_any: Some(vec![ModuleWildcard::new("fibonacci").unwrap()]),
                     ignore_missing_imports: Some(vec![ModuleWildcard::new("sprout").unwrap()]),
                     untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnType),
+                    check_unannotated_defs: None,
+                    infer_return_types: None,
                     permissive_ignores: None,
                     enabled_ignores: None,
                     recursion_depth_limit: None,
@@ -1492,6 +1500,8 @@ mod tests {
                         replace_imports_with_any: Some(Vec::new()),
                         ignore_missing_imports: Some(Vec::new()),
                         untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnAny),
+                        check_unannotated_defs: None,
+                        infer_return_types: None,
                         permissive_ignores: None,
                         enabled_ignores: None,
                         recursion_depth_limit: None,
@@ -1877,6 +1887,8 @@ baseline = "baseline.json"
                 replace_imports_with_any: Some(vec![ModuleWildcard::new("root").unwrap()]),
                 ignore_missing_imports: None,
                 untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnType),
+                check_unannotated_defs: None,
+                infer_return_types: None,
                 disable_type_errors_in_ide: Some(true),
                 ignore_errors_in_generated_code: Some(false),
                 infer_with_first_use: Some(true),
@@ -2188,6 +2200,8 @@ baseline = "baseline.json"
                 ]),
                 ignore_missing_imports: None,
                 untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnType),
+                check_unannotated_defs: None,
+                infer_return_types: None,
                 disable_type_errors_in_ide: Some(true),
                 ignore_errors_in_generated_code: Some(false),
                 infer_with_first_use: Some(true),
@@ -2224,6 +2238,8 @@ baseline = "baseline.json"
                 ]),
                 ignore_missing_imports: None,
                 untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnType),
+                check_unannotated_defs: None,
+                infer_return_types: None,
                 disable_type_errors_in_ide: Some(true),
                 ignore_errors_in_generated_code: Some(false),
                 infer_with_first_use: Some(true),

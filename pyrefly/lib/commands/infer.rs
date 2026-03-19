@@ -10,7 +10,7 @@ use std::path::Path;
 
 use clap::Parser;
 use pyrefly_config::args::ConfigOverrideArgs;
-use pyrefly_config::base::UntypedDefBehavior;
+use pyrefly_config::base::InferReturnTypes;
 use pyrefly_config::finder::ConfigFinder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::qname::QName;
@@ -258,10 +258,12 @@ impl InferArgs {
     ) -> anyhow::Result<CommandExitStatus> {
         self.config_override.validate()?;
         // The infer command must analyze function bodies to produce meaningful
-        // return type annotations. Override untyped_def_behavior to
-        // CheckAndInferReturnType unless the user explicitly set it via CLI.
+        // return type annotations. Ensure both settings are enabled unless
+        // the user explicitly set them via CLI.
         self.config_override
-            .set_untyped_def_behavior_if_unset(UntypedDefBehavior::CheckAndInferReturnType);
+            .set_check_unannotated_defs_if_unset(true);
+        self.config_override
+            .set_infer_return_types_if_unset(InferReturnTypes::Checked);
         let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
         Self::run_inner(files_to_check, config_finder, self.flags)
     }
