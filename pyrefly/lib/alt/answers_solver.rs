@@ -2475,8 +2475,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// state. Unlike the legacy path, this:
     /// - During cold-start iteration 1, bypasses `LoopPhi` bindings by
     ///   resolving only the prior/default index. This prevents LoopPhi from
-    ///   creating its own `LoopRecursive` placeholder, which would conflict
-    ///   with the iterative placeholder system.
+    ///   creating its own recursive placeholder, which would conflict with
+    ///   the iterative placeholder system.
     /// - Uses `error_swallower()` during cold-start (iteration 1) because
     ///   cold-start answers are based on placeholders and produce spurious
     ///   errors. From iteration 2 onward, uses `error_collector()` to capture
@@ -2500,9 +2500,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     {
         // LoopPhi cold-start bypass: during iteration 1, LoopPhi's normal
         // solve path would resolve loop-body branches, hit cycle breaks, and
-        // create its own LoopRecursive placeholder. That conflicts with the
-        // iterative placeholder system. Instead, resolve only the prior/default
-        // value (the value from before the loop body) and use it as the answer.
+        // create a recursive placeholder. That conflicts with the iterative
+        // placeholder system. Instead, resolve only the prior/default value
+        // (the value from before the loop body) and use it as the answer.
         // On warm-start iterations (>= 2), LoopPhi goes through the normal
         // path and gets the previous iteration's answer via the iterative
         // bypass, which converges correctly.
@@ -3307,15 +3307,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn create_recursive(&self, binding: &Binding) -> Var {
-        match binding {
-            Binding::LoopPhi(prior_idx, _) => self.solver().fresh_loop_recursive(
-                self.uniques,
-                self.get_idx(*prior_idx)
-                    .arc_clone_ty()
-                    .promote_implicit_literals(self.stdlib),
-            ),
-            _ => self.solver().fresh_recursive(self.uniques),
-        }
+        let _ = binding; // Used only during phase 0 discovery, whose results are discarded.
+        self.solver().fresh_recursive(self.uniques)
     }
 
     pub fn recurse(&'a self, var: Var) -> Option<Guard<'a, Var>> {
