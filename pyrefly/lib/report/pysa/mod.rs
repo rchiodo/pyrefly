@@ -54,6 +54,7 @@ use crate::module::typeshed_third_party::typeshed_third_party;
 use crate::report::pysa::call_graph::CallGraph;
 use crate::report::pysa::call_graph::ExpressionIdentifier;
 use crate::report::pysa::call_graph::export_call_graphs;
+use crate::report::pysa::captured_variable::ModuleCapturedVariables;
 use crate::report::pysa::captured_variable::WholeProgramCapturedVariables;
 use crate::report::pysa::captured_variable::collect_captured_variables;
 use crate::report::pysa::captured_variable::export_captured_variables_for_module;
@@ -194,7 +195,7 @@ pub fn export_module_call_graphs(
     pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
-    captured_variables: &WholeProgramCapturedVariables,
+    captured_variables: &ModuleCapturedVariables<FunctionRef>,
 ) -> PysaModuleCallGraphs {
     let call_graphs = export_call_graphs(
         context,
@@ -415,6 +416,9 @@ fn write_module_call_graph_files(
             module_work_list.par_iter().try_for_each(
                 |(handle, _, info_filename)| -> anyhow::Result<()> {
                     let context = ModuleContext::create(handle.clone(), transaction, module_ids);
+                    let module_captured_variables = captured_variables
+                        .get_for_module(context.module_id)
+                        .unwrap();
                     let module_call_graphs = slow_function_monitor.monitor_function(
                         || {
                             export_module_call_graphs(
@@ -422,7 +426,7 @@ fn write_module_call_graph_files(
                                 pysa_module_index,
                                 function_base_definitions,
                                 global_variables,
-                                captured_variables,
+                                module_captured_variables,
                             )
                         },
                         format!("Exporting call graphs for `{}`", handle.module().as_str()),

@@ -33,6 +33,7 @@ use crate::report::pysa::call_graph::Unresolved;
 use crate::report::pysa::call_graph::UnresolvedReason;
 use crate::report::pysa::call_graph::export_call_graphs;
 use crate::report::pysa::captured_variable::CapturedVariableRef;
+use crate::report::pysa::captured_variable::ModuleCapturedVariables;
 use crate::report::pysa::captured_variable::collect_captured_variables;
 use crate::report::pysa::class::ClassId;
 use crate::report::pysa::collect::CollectNoDuplicateKeys;
@@ -295,6 +296,10 @@ fn test_building_call_graph_for_module(
     let test_module_handle = get_handle_for_module_name(test_module_name, &transaction);
     let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
 
+    let module_captured_variables = captured_variables
+        .get_for_module(context.module_id)
+        .unwrap();
+
     let expected_call_graph = call_graph_for_test_from_expected(create_expected(&context));
 
     let mut actual_call_graph = call_graph_for_test_from_actual(
@@ -303,7 +308,7 @@ fn test_building_call_graph_for_module(
             &pysa_module_index,
             &function_base_definitions,
             &global_variables,
-            &captured_variables,
+            module_captured_variables,
         ),
         &function_base_definitions,
     );

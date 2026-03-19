@@ -77,7 +77,6 @@ use crate::report::pysa::ast_visitor::visit_module_ast;
 use crate::report::pysa::captured_variable::CaptureKind;
 use crate::report::pysa::captured_variable::CapturedVariableRef;
 use crate::report::pysa::captured_variable::ModuleCapturedVariables;
-use crate::report::pysa::captured_variable::WholeProgramCapturedVariables;
 use crate::report::pysa::class::ClassId;
 use crate::report::pysa::class::ClassRef;
 use crate::report::pysa::class::get_super_class_member;
@@ -1473,8 +1472,8 @@ struct CallGraphVisitor<'a> {
     module_name: ModuleName,
     pysa_module_index: &'a WholeProgramPysaModuleIndex,
     function_base_definitions: &'a WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
-    global_variables: &'a WholeProgramGlobalVariables,
-    captured_variables: &'a ModuleCapturedVariables<FunctionRef>,
+    global_variables: Option<&'a WholeProgramGlobalVariables>,
+    captured_variables: Option<&'a ModuleCapturedVariables<FunctionRef>>,
     current_function: Option<FunctionRef>, // The current function, if it is exported.
     debug: bool,                           // Enable logging for the current function or class body.
     debug_scopes: Vec<bool>,               // The value of the debug flag for each scope.
@@ -2375,14 +2374,14 @@ impl<'a> CallGraphVisitor<'a> {
         }
 
         // Check if this is a global variable or captured variable
-        let (global_variable, captured_variable) = if let Some(global) =
-            go_to_definition.as_ref().and_then(|definition| {
+        let (global_variable, captured_variable) = if let Some(global_variables) =
+            self.global_variables
+            && let Some(global) = go_to_definition.as_ref().and_then(|definition| {
                 let module_id = self
                     .module_context
                     .module_ids
                     .get_from_module_opt(&definition.module)?;
-
-                self.global_variables
+                global_variables
                     .get_for_module(module_id)?
                     .get(ShortIdentifier::from_text_range(
                         definition.definition_range,
@@ -2395,8 +2394,8 @@ impl<'a> CallGraphVisitor<'a> {
             }) {
             (Some(global), None)
         } else if let Some(current_function) = self.current_function.as_ref()
-            && let Some(captured_variable) = self
-                .captured_variables
+            && let Some(captured_variables) = self.captured_variables
+            && let Some(captured_variable) = captured_variables
                 .get(current_function)
                 .and_then(|captured_variables| captured_variables.get(name.id()))
         {
@@ -2409,10 +2408,10 @@ impl<'a> CallGraphVisitor<'a> {
                     }),
                 ),
                 CaptureKind::Global
-                    if let Some(global_variables) = self
-                        .global_variables
-                        .get_for_module(self.module_context.module_id)
-                        && global_variables.contains(name.id()) =>
+                    if let Some(global_variables) = self.global_variables
+                        && let Some(globals) =
+                            global_variables.get_for_module(self.module_context.module_id)
+                        && globals.contains(name.id()) =>
                 {
                     (
                         Some(GlobalVariableRef {
@@ -2612,6 +2611,9 @@ impl<'a> CallGraphVisitor<'a> {
         // Check for global variable accesses
         let (global_targets, go_to_definitions): (Vec<GlobalVariableRef>, Vec<_>) =
             go_to_definitions.into_iter().partition_map(|definition| {
+                let Some(global_variables) = self.global_variables else {
+                    return Either::Right(definition);
+                };
                 let module_id = match self
                     .module_context
                     .module_ids
@@ -2620,8 +2622,7 @@ impl<'a> CallGraphVisitor<'a> {
                     Some(id) => id,
                     None => return Either::Right(definition),
                 };
-                if let Some(global_variable_base) = self
-                    .global_variables
+                if let Some(global_variable_base) = global_variables
                     .get_for_module(module_id)
                     .and_then(|globals| {
                         globals.get(ShortIdentifier::from_text_range(
@@ -4172,8 +4173,8 @@ fn resolve_call(
         current_function: None,
         debug: false,
         debug_scopes: Vec::new(),
-        global_variables: &WholeProgramGlobalVariables::new(),
-        captured_variables: &ModuleCapturedVariables::new(),
+        global_variables: None,
+        captured_variables: None,
         error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
         matching_graphql_decorators: Vec::new(),
     };
@@ -4220,8 +4221,8 @@ fn resolve_expression(
         current_function: Some(current_function.clone()),
         debug: false,
         debug_scopes: Vec::new(),
-        global_variables: &WholeProgramGlobalVariables::new(),
-        captured_variables: &ModuleCapturedVariables::new(),
+        global_variables: None,
+        captured_variables: None,
         error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
         matching_graphql_decorators: Vec::new(),
     };
@@ -4313,11 +4314,10 @@ pub fn export_call_graphs(
     pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
-    captured_variables: &WholeProgramCapturedVariables,
+    captured_variables: &ModuleCapturedVariables<FunctionRef>,
 ) -> CallGraphs<ExpressionIdentifier, FunctionRef> {
     let mut call_graphs = CallGraphs::new();
 
-    let empty_captured_variables = ModuleCapturedVariables::new();
     let mut visitor = CallGraphVisitor {
         call_graphs: &mut call_graphs,
         module_context: context,
@@ -4328,10 +4328,8 @@ pub fn export_call_graphs(
         current_function: None,
         debug: false,
         debug_scopes: Vec::new(),
-        global_variables,
-        captured_variables: captured_variables
-            .get_for_module(context.module_id)
-            .unwrap_or(&empty_captured_variables),
+        global_variables: Some(global_variables),
+        captured_variables: Some(captured_variables),
         error_collector: ErrorCollector::new(context.module_info.dupe(), ErrorStyle::Never),
         matching_graphql_decorators: Vec::new(),
     };
