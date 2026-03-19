@@ -47,7 +47,6 @@ use crate::report::pysa::global_variable::GlobalVariableRef;
 use crate::report::pysa::global_variable::collect_global_variables;
 use crate::report::pysa::module::ModuleIds;
 use crate::report::pysa::module_index::build_pysa_module_index;
-use crate::report::pysa::override_graph::build_reversed_override_graph;
 use crate::report::pysa::types::ScalarTypeProperties;
 use crate::test::pysa::utils::create_state;
 use crate::test::pysa::utils::get_class_ref;
@@ -282,14 +281,8 @@ fn test_building_call_graph_for_module(
     let module_ids = ModuleIds::new(&handles);
 
     let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
-    let reversed_override_graph =
-        build_reversed_override_graph(&handles, &transaction, &module_ids, &pysa_module_index);
-    let function_base_definitions = collect_function_base_definitions(
-        &handles,
-        &transaction,
-        &module_ids,
-        &reversed_override_graph,
-    );
+    let function_base_definitions =
+        collect_function_base_definitions(&handles, &transaction, &module_ids);
     let global_variables = collect_global_variables(&handles, &transaction, &module_ids);
     let captured_variables = collect_captured_variables(&handles, &transaction, &module_ids);
 

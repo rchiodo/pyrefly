@@ -7,34 +7,20 @@
 
 use std::collections::HashMap;
 
-use pyrefly_build::handle::Handle;
 use pyrefly_types::class::Class;
-use pyrefly_util::thread_pool::ThreadPool;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
 use ruff_python_ast::name::Name;
 
 use crate::report::pysa::class::ClassId;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::function::FunctionRef;
 use crate::report::pysa::function::get_all_functions;
-use crate::report::pysa::module::ModuleIds;
 use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
-use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
-use crate::report::pysa::step_logger::StepLogger;
-use crate::state::state::Transaction;
 
 pub struct ModuleReversedOverrideGraph(HashMap<FunctionRef, FunctionRef>);
 
-pub struct WholeProgramReversedOverrideGraph(dashmap::ReadOnlyView<FunctionRef, FunctionRef>);
-
-impl WholeProgramReversedOverrideGraph {
-    #[cfg(test)]
-    pub fn new() -> WholeProgramReversedOverrideGraph {
-        WholeProgramReversedOverrideGraph(dashmap::DashMap::new().into_read_only())
-    }
-
-    pub fn get<'a>(&'a self, method: &FunctionRef) -> Option<&'a FunctionRef> {
+impl ModuleReversedOverrideGraph {
+    /// Look up the overridden base method for the given method.
+    pub fn get(&self, method: &FunctionRef) -> Option<&FunctionRef> {
         self.0.get(method)
     }
 }
@@ -96,43 +82,4 @@ pub fn create_reversed_override_graph_for_module(
     }
 
     graph
-}
-
-pub fn build_reversed_override_graph(
-    handles: &Vec<Handle>,
-    transaction: &Transaction,
-    module_ids: &ModuleIds,
-    pysa_module_index: &WholeProgramPysaModuleIndex,
-) -> WholeProgramReversedOverrideGraph {
-    let step = StepLogger::start(
-        "Building reverse override graph",
-        "Built reverse override graph",
-    );
-
-    let reversed_override_graph = dashmap::DashMap::new();
-
-    ThreadPool::new().install(|| {
-        slow_fun_monitor_scope(|slow_function_monitor| {
-            handles.par_iter().for_each(|handle| {
-                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
-                slow_function_monitor.monitor_function(
-                    || {
-                        for (key, value) in
-                            create_reversed_override_graph_for_module(&context, pysa_module_index).0
-                        {
-                            reversed_override_graph.insert(key, value);
-                        }
-                    },
-                    format!(
-                        "Building reverse override graph for `{}`",
-                        handle.module().as_str(),
-                    ),
-                    /* max_time_in_seconds */ 4,
-                );
-            });
-        })
-    });
-
-    step.finish();
-    WholeProgramReversedOverrideGraph(reversed_override_graph.into_read_only())
 }

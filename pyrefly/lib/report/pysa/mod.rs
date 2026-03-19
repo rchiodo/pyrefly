@@ -80,7 +80,8 @@ use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
 use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
 use crate::report::pysa::module_index::build_pysa_module_index;
-use crate::report::pysa::override_graph::build_reversed_override_graph;
+use crate::report::pysa::override_graph::ModuleReversedOverrideGraph;
+use crate::report::pysa::override_graph::create_reversed_override_graph_for_module;
 use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
 use crate::report::pysa::step_logger::StepLogger;
 use crate::report::pysa::type_of_expression::export_type_of_expressions;
@@ -157,6 +158,7 @@ pub fn export_module_definitions(
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     global_variables: &WholeProgramGlobalVariables,
     captured_variables: &WholeProgramCapturedVariables,
+    reversed_override_graph: &ModuleReversedOverrideGraph,
 ) -> PysaModuleDefinitions {
     let global_variables_exported = export_global_variables(global_variables, context);
     let class_definitions =
@@ -166,6 +168,7 @@ pub fn export_module_definitions(
         pysa_module_index,
         function_base_definitions,
         &captured_variables,
+        reversed_override_graph,
         context,
     );
     PysaModuleDefinitions {
@@ -331,12 +334,17 @@ fn write_module_definitions_files(
                     let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     let module_definitions = slow_function_monitor.monitor_function(
                         || {
+                            let reversed_override_graph = create_reversed_override_graph_for_module(
+                                &context,
+                                pysa_module_index,
+                            );
                             export_module_definitions(
                                 &context,
                                 pysa_module_index,
                                 function_base_definitions,
                                 global_variables,
                                 captured_variables,
+                                &reversed_override_graph,
                             )
                         },
                         format!(
@@ -591,14 +599,8 @@ pub fn write_results(
     let module_work_list = make_module_work_list(&project_modules);
 
     let pysa_module_index = build_pysa_module_index(&handles, transaction, &module_ids);
-    let reversed_override_graph =
-        build_reversed_override_graph(&handles, transaction, &module_ids, &pysa_module_index);
-    let function_base_definitions = collect_function_base_definitions(
-        &handles,
-        transaction,
-        &module_ids,
-        &reversed_override_graph,
-    );
+    let function_base_definitions =
+        collect_function_base_definitions(&handles, transaction, &module_ids);
     let global_variables = collect_global_variables(&handles, transaction, &module_ids);
     let captured_variables = collect_captured_variables(&handles, transaction, &module_ids);
 

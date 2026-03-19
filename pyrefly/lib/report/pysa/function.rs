@@ -53,7 +53,7 @@ use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
 use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
-use crate::report::pysa::override_graph::WholeProgramReversedOverrideGraph;
+use crate::report::pysa::override_graph::ModuleReversedOverrideGraph;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::scope::get_scope_parent;
 use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
@@ -216,10 +216,6 @@ pub struct FunctionBaseDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     /// If this is a method, record the class it is defined in.
     pub defining_class: Option<ClassRef>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    /// If the method directly overrides a method in a parent class, we record that class.
-    /// This is used for building overriding graphs.
-    pub overridden_base_method: Option<FunctionRef>,
 }
 
 impl FunctionBaseDefinition {
@@ -237,6 +233,10 @@ pub struct FunctionDefinition {
     pub captured_variables: Vec<CapturedVariableRef<FunctionRef>>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub decorator_callees: HashMap<PysaLocation, Vec<Target<FunctionRef>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    /// If the method directly overrides a method in a parent class, we record that class.
+    /// This is used for building overriding graphs.
+    pub overridden_base_method: Option<FunctionRef>,
 }
 
 impl FunctionDefinition {
@@ -293,7 +293,7 @@ impl FunctionDefinition {
 
     #[cfg(test)]
     pub fn with_overridden_base_method(mut self, overridden_base_method: FunctionRef) -> Self {
-        self.base.overridden_base_method = Some(overridden_base_method);
+        self.overridden_base_method = Some(overridden_base_method);
         self
     }
 }
@@ -833,7 +833,6 @@ pub fn get_all_functions(context: &ModuleContext) -> impl Iterator<Item = Functi
 }
 
 pub fn export_all_functions(
-    reversed_override_graph: &WholeProgramReversedOverrideGraph,
     context: &ModuleContext,
 ) -> ModuleFunctionDefinitions<FunctionBaseDefinition> {
     let mut function_base_definitions = ModuleFunctionDefinitions::new();
@@ -863,9 +862,6 @@ pub fn export_all_functions(
                         defining_class: function
                             .defining_cls()
                             .map(|class| ClassRef::from_class(class, context.module_ids)),
-                        overridden_base_method: reversed_override_graph
-                            .get(&current_function)
-                            .cloned(),
                     }
                 )
                 .is_none(),
@@ -880,6 +876,7 @@ pub fn export_function_definitions(
     pysa_module_index: &WholeProgramPysaModuleIndex,
     function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     captured_variables: &HashMap<FunctionRef, Vec<CapturedVariableRef<FunctionRef>>>,
+    reversed_override_graph: &ModuleReversedOverrideGraph,
     context: &ModuleContext,
 ) -> ModuleFunctionDefinitions<FunctionDefinition> {
     let mut function_definitions = ModuleFunctionDefinitions::new();
@@ -915,6 +912,9 @@ pub fn export_function_definitions(
                         undecorated_signatures,
                         captured_variables,
                         decorator_callees,
+                        overridden_base_method: reversed_override_graph
+                            .get(&current_function)
+                            .cloned(),
                     },
                 )
                 .is_none(),
@@ -929,7 +929,6 @@ pub fn collect_function_base_definitions(
     handles: &Vec<Handle>,
     transaction: &Transaction,
     module_ids: &ModuleIds,
-    reversed_override_graph: &WholeProgramReversedOverrideGraph,
 ) -> WholeProgramFunctionDefinitions<FunctionBaseDefinition> {
     let step = StepLogger::start(
         "Indexing function definitions",
@@ -944,7 +943,7 @@ pub fn collect_function_base_definitions(
                 let module_id = module_ids.get_from_handle(handle);
                 let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let base_definitions_for_module = slow_function_monitor.monitor_function(
-                    || export_all_functions(reversed_override_graph, &context),
+                    || export_all_functions(&context),
                     format!(
                         "Indexing function definitions for {}",
                         handle.module().as_str(),
