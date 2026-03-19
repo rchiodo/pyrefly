@@ -3000,19 +3000,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let subject_info = self.with_type_for_exhaustiveness_check(self.get_idx(*subject_idx));
             let facet_chain = Self::extract_facet_from_op(op)
                 .and_then(|facets| self.resolve_facet_chain(facets.chain.clone()));
-            let narrowing_subject_info = match &facet_chain {
-                Some(resolved_chain) => {
-                    let type_info = TypeInfo::of_ty(self.heap.mk_any_implicit());
-                    type_info.with_narrow(resolved_chain.facets(), subject_info.into_ty())
-                }
-                None => subject_info,
-            };
-            let narrowed = self.narrow(
-                &narrowing_subject_info,
-                op.as_ref(),
-                *narrow_range,
-                &ignore_errors,
-            );
+            let narrowed = self.narrow(&subject_info, op.as_ref(), *narrow_range, &ignore_errors);
             let mut remaining_ty = match &facet_chain {
                 Some(resolved_chain) => {
                     self.get_facet_chain_type(&narrowed, resolved_chain, *narrow_range)
