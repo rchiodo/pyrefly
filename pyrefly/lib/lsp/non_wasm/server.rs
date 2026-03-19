@@ -826,6 +826,10 @@ pub struct Server {
     path_remapper: Option<PathRemapper>,
     /// Accumulated file watcher events waiting to be processed as a batch.
     pending_watched_file_changes: Mutex<Vec<FileEvent>>,
+    /// Categorized events waiting to be invalidated by the next heavy task.
+    /// Multiple `DrainWatchedFileChanges` events accumulate here; the first
+    /// heavy task to run drains them all, making subsequent tasks no-ops.
+    pending_invalidation_events: Arc<Mutex<CategorizedEvents>>,
     /// An external source which may be included to assist in finding global references
     external_references: Arc<dyn ExternalProvider>,
     /// The time at which the server was started, for telemetry.
@@ -2323,6 +2327,7 @@ impl Server {
             awaiting_initial_workspace_config: AtomicBool::new(should_request_workspace_settings),
             path_remapper,
             pending_watched_file_changes: Mutex::new(Vec::new()),
+            pending_invalidation_events: Arc::new(Mutex::new(CategorizedEvents::default())),
             external_references,
             server_start_time: Instant::now(),
         };
@@ -3453,8 +3458,17 @@ impl Server {
             self.setup_file_watcher_if_necessary(Some(telemetry_event));
         }
 
+        // Accumulate events in the pending buffer. The heavy task drains this
+        // buffer at execution time, so consecutive DrainWatchedFileChanges events
+        // are coalesced: the first heavy task processes all accumulated events,
+        // and subsequent tasks find an empty buffer and become no-ops.
+        self.pending_invalidation_events.lock().extend(events);
+        let pending = Arc::clone(&self.pending_invalidation_events);
         self.invalidate(TelemetryEventKind::InvalidateFind, move |t| {
-            t.invalidate_events(&events)
+            let events = std::mem::take(&mut *pending.lock());
+            if !events.is_empty() {
+                t.invalidate_events(&events);
+            }
         });
 
         // If a non-Python, non-config file was changed, then try rebuilding build systems.
