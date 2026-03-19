@@ -203,13 +203,17 @@ pub fn tsp_loop(
 
         let mut ide_transaction_manager = TransactionManager::default();
         let mut canceled_requests = HashSet::new();
+        let mut next_task_id = 0_usize;
 
         while let Ok((subsequent_mutation, event, enqueued_at)) = server.inner.lsp_queue().recv() {
+            let task_id = next_task_id;
+            next_task_id += 1;
             let (mut event_telemetry, queue_duration) = TelemetryEvent::new_dequeued(
                 TelemetryEventKind::LspEvent(event.describe()),
                 enqueued_at,
                 server.inner.telemetry_state(),
                 QueueName::LspQueue,
+                task_id,
             );
             let event_description = event.describe();
 

@@ -85,7 +85,7 @@ pub struct TelemetryEvent {
     pub server_state: TelemetryServerState,
     pub file_stats: Option<TelemetryFileStats>,
     pub queue_name: QueueName,
-    pub task_id: Option<usize>,
+    pub task_id: usize,
     pub sourcedb_rebuild_stats: Option<TelemetrySourceDbRebuildStats>,
     pub sourcedb_rebuild_instance_stats: Option<TelemetrySourceDbRebuildInstanceStats>,
     pub file_watcher_stats: Option<TelemetryFileWatcherStats>,
@@ -215,6 +215,7 @@ impl TelemetryEvent {
         enqueued_at: Instant,
         server_state: TelemetryServerState,
         queue_name: QueueName,
+        task_id: usize,
     ) -> (Self, Duration) {
         let start = Instant::now();
         let queue = start - enqueued_at;
@@ -229,7 +230,7 @@ impl TelemetryEvent {
                 server_state,
                 file_stats: None,
                 queue_name,
-                task_id: None,
+                task_id,
                 sourcedb_rebuild_stats: None,
                 sourcedb_rebuild_instance_stats: None,
                 file_watcher_stats: None,
@@ -247,7 +248,7 @@ impl TelemetryEvent {
         kind: TelemetryEventKind,
         server_state: TelemetryServerState,
         queue_name: QueueName,
-        task_id: Option<usize>,
+        task_id: usize,
         start: Instant,
     ) -> Self {
         Self {
@@ -290,10 +291,6 @@ impl TelemetryEvent {
 
     pub fn set_file_stats(&mut self, stats: TelemetryFileStats) {
         self.file_stats = Some(stats);
-    }
-
-    pub fn set_task_id(&mut self, id: usize) {
-        self.task_id = Some(id);
     }
 
     pub fn set_sourcedb_rebuild_stats(&mut self, stats: TelemetrySourceDbRebuildStats) {
@@ -340,7 +337,7 @@ pub struct SubTaskTelemetry<'a> {
     telemetry: &'a dyn Telemetry,
     server_state: TelemetryServerState,
     queue_name: QueueName,
-    task_id: Option<usize>,
+    task_id: usize,
     activity_key: Option<ActivityKey>,
     file_stats: Option<TelemetryFileStats>,
 }

@@ -1306,12 +1306,16 @@ pub fn lsp_loop(
             .spawn_scoped(scope, || {
                 let mut ide_transaction_manager = TransactionManager::default();
                 let mut canceled_requests = HashSet::new();
+                let mut next_task_id = 0_usize;
                 while let Ok((subsequent_mutation, event, enqueue_time)) = server.lsp_queue.recv() {
+                    let task_id = next_task_id;
+                    next_task_id += 1;
                     let (mut event_telemetry, queue_duration) = TelemetryEvent::new_dequeued(
                         TelemetryEventKind::LspEvent(event.describe()),
                         enqueue_time,
                         server.telemetry_state(),
                         QueueName::LspQueue,
+                        task_id,
                     );
                     let event_description = event.describe();
                     let result = server.process_event(
@@ -1663,13 +1667,14 @@ impl Server {
                 {
                     let server_state = self.telemetry_state();
                     let activity_key = telemetry_event.activity_key.clone();
+                    let parent_task_id = telemetry_event.task_id;
                     transaction.set_ad_hoc_solve_recorder(Box::new(
                         move |label, start, duration| {
                             let mut event = TelemetryEvent::new_task(
                                 TelemetryEventKind::AdHocSolve(label.to_owned()),
                                 server_state.clone(),
                                 QueueName::LspQueue,
-                                None,
+                                parent_task_id,
                                 start,
                             );
                             // todo(kylei): add file stats
