@@ -1951,6 +1951,28 @@ def go(mdl:A|B):
     "#,
 );
 
+// Regression test for the second example bug reported in https://github.com/facebook/pyrefly/issues/1286
+testcase!(
+    bug = "We do not yet exhaust literal types in match statements",
+    test_match_exhausts_literal_type,
+    r#"
+from typing import Literal, assert_never
+
+type A = Literal['A']
+
+class C:
+    def __init__(self, a: A) -> None:
+        self.a = a
+
+    def f(self) -> None:
+        match self.a:
+            case 'A':
+                pass
+            case ever:
+                assert_never(ever)  # E: Argument `Literal['A']` is not assignable to parameter `arg` with type `Never` in function `typing.assert_never`
+    "#,
+);
+
 // Regression test for the third example bug reported in https://github.com/facebook/pyrefly/issues/1286
 testcase!(
     test_enum_exhaustive_match_and_uninitialized_local,
