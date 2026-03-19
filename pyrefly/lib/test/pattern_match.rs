@@ -774,3 +774,23 @@ def handle(o: object) -> int:
     return 1
 "#,
 );
+
+// Regression test for https://github.com/facebook/pyrefly/issues/2826
+testcase!(
+    test_match_sequence_pattern_on_attribute,
+    r#"
+from __future__ import annotations
+from typing import assert_type
+
+class C:
+    items: list[C]
+    def __init__(self, items: list[C]) -> None:
+        self.items = items
+
+def handle(c: C) -> None:
+    match c.items:
+        case [_]:
+            assert_type(c, C)
+    assert_type(c, C)
+"#,
+);

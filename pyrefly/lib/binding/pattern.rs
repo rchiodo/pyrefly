@@ -149,11 +149,17 @@ impl<'a> BindingsBuilder<'a> {
                     // Add the combined narrow op to the returned narrow_ops.
                     // We insert directly instead of using and_all twice to avoid
                     // Placeholder issues when starting from an empty NarrowOps.
-                    let name = match subject {
-                        NarrowingSubject::Name(name) => name.clone(),
-                        NarrowingSubject::Facets(name, _) => name.clone(),
+                    let (name, facet) = match subject {
+                        NarrowingSubject::Name(name) => (name.clone(), None),
+                        NarrowingSubject::Facets(name, facets) => {
+                            (name.clone(), Some(facets.clone()))
+                        }
                     };
-                    narrow_ops.0.insert(name, (combined_narrow_op, x.range));
+                    let scope_narrow_op = NarrowOp::And(vec![
+                        NarrowOp::Atomic(facet.clone(), AtomicNarrowOp::IsSequence),
+                        NarrowOp::Atomic(facet, len_narrow_op.clone()),
+                    ]);
+                    narrow_ops.0.insert(name, (scope_narrow_op, x.range));
                 }
                 let mut seen_star = false;
                 for (i, x) in x.patterns.into_iter().enumerate() {
