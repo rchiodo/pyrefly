@@ -189,6 +189,7 @@ use lsp_types::request::WorkspaceSymbolRequest;
 use pyrefly_build::SourceDatabase;
 use pyrefly_build::handle::Handle;
 use pyrefly_config::config::ConfigSource;
+use pyrefly_config::error_kind::Severity;
 use pyrefly_python::PYTHON_EXTENSIONS;
 use pyrefly_python::module::TextRangeWithModule;
 use pyrefly_python::module_name::ModuleName;
@@ -2477,7 +2478,10 @@ impl Server {
 
             // Workspace diagnostic mode: allow non-open files that are under a
             // workspace root with DiagnosticMode::Workspace and within project scope.
+            // Only show error-severity diagnostics for non-open files; lower-severity
+            // diagnostics (warnings, info) are restricted to open files.
             if open_files.get(&path).is_none()
+                && e.severity() >= Severity::Error
                 && self.workspaces.diagnostic_mode(&path) == DiagnosticMode::Workspace
                 && config.project_includes.covers(&path)
                 && !config.project_excludes.covers(&path)
