@@ -300,23 +300,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        let binop_call = |op: Operator, lhs: &Type, rhs: &Type, range: TextRange| -> Type {
-            let context = || {
-                ErrorContext::BinaryOp(
-                    op.as_str().to_owned(),
-                    self.for_display(lhs.clone()),
-                    self.for_display(rhs.clone()),
-                )
-            };
-            // Reflected operator implementation: This deviates from the runtime semantics by calling the reflected dunder if the regular dunder call errors.
-            // At runtime, the reflected dunder is called only if the regular dunder method doesn't exist or if it returns NotImplemented.
-            // This deviation is necessary, given that the typeshed stubs don't record when NotImplemented is returned
-            let calls_to_try = [
-                (&Name::new_static(op.dunder()), lhs, rhs),
-                (&Name::new_static(op.reflected_dunder()), rhs, lhs),
-            ];
-            self.try_binop_calls(&calls_to_try, range, errors, &context)
-        };
         let lhs;
         let rhs;
         if Ast::is_list_literal_or_comprehension(&x.left) && x.op == Operator::Mult {
@@ -351,8 +334,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return self.heap.mk_type_form(self.union(l, r));
         }
 
-        self.distribute_over_union(&lhs, |lhs| {
-            self.distribute_over_union(&rhs, |rhs| {
+        self.binop_types(x, &lhs, &rhs, errors)
+    }
+
+    fn binop_types(&self, x: &ExprBinOp, lhs: &Type, rhs: &Type, errors: &ErrorCollector) -> Type {
+        let binop_call = |op: Operator, lhs: &Type, rhs: &Type, range: TextRange| -> Type {
+            let context = || {
+                ErrorContext::BinaryOp(
+                    op.as_str().to_owned(),
+                    self.for_display(lhs.clone()),
+                    self.for_display(rhs.clone()),
+                )
+            };
+            // Reflected operator implementation: This deviates from the runtime semantics by calling the reflected dunder if the regular dunder call errors.
+            // At runtime, the reflected dunder is called only if the regular dunder method doesn't exist or if it returns NotImplemented.
+            // This deviation is necessary, given that the typeshed stubs don't record when NotImplemented is returned
+            let calls_to_try = [
+                (&Name::new_static(op.dunder()), lhs, rhs),
+                (&Name::new_static(op.reflected_dunder()), rhs, lhs),
+            ];
+            self.try_binop_calls(&calls_to_try, range, errors, &context)
+        };
+        self.distribute_over_union(lhs, |lhs| {
+            self.distribute_over_union(rhs, |rhs| {
                 // If an Any appears on the RHS, do not refine the return type based on the LHS.
                 // Without loss of generality, consider e1 + e2 where e1 has type int and e2 has type Any.
                 // Then e1 + e2 should have a return type of Any since e2's __radd__  signature could be
