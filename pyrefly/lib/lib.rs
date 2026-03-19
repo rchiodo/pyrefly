@@ -75,6 +75,7 @@ pub mod library {
                 pub use crate::lsp::non_wasm::external_provider::ExternalProvider;
                 pub use crate::lsp::non_wasm::external_provider::NoExternalProvider;
                 pub use crate::lsp::non_wasm::module_helpers::PathRemapper;
+                pub use crate::lsp::non_wasm::module_helpers::ThriftRemapper;
             }
         }
     }
