@@ -40,6 +40,7 @@ use vec1::vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::call::CallStyle;
+use crate::alt::call::CallTarget;
 use crate::alt::callable::CallArg;
 use crate::alt::types::decorated_function::DecoratedFunction;
 use crate::alt::types::decorated_function::Decorator;
@@ -93,6 +94,13 @@ fn is_class_property_decorator_type(ty: &Type) -> bool {
         Type::ClassType(cls) => is_class_property_decorator_class_object(cls.class_object()),
         _ => false,
     }
+}
+
+struct PreparedDecoratorApplication {
+    original_decoratee: Type,
+    decoratee_arg: Type,
+    decoratee_tparams: Option<Arc<TParams>>,
+    call_target: CallTarget,
 }
 
 /// Result of resolving a function parameter's type and requiredness.
@@ -1255,6 +1263,129 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
+    fn prepare_decorator_application(
+        &self,
+        decorator: Type,
+        decoratee: Type,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> PreparedDecoratorApplication {
+        // If the decoratee is generic, unwrap the `Forall` so that `call_infer` can treat the
+        // type parameters as concrete in the raw inferred result; this avoids us replacing the
+        // type vars with partial types.
+        let (decoratee_tparams, decoratee_arg) = match &decoratee {
+            Type::Forall(forall) => (Some(forall.tparams.clone()), forall.body.clone().as_type()),
+            _ => (None, decoratee.clone()),
+        };
+        let call_target =
+            self.as_call_target_or_error(decorator, CallStyle::FreeForm, range, errors, None);
+        PreparedDecoratorApplication {
+            original_decoratee: decoratee,
+            decoratee_arg,
+            decoratee_tparams,
+            call_target,
+        }
+    }
+
+    fn decorate_returned_callable(
+        &self,
+        returned_ty: Type,
+        metadata: &FuncMetadata,
+        original_decoratee: &Type,
+    ) -> Type {
+        match returned_ty {
+            Type::Callable(c) => self.heap.mk_function(Function {
+                signature: *c,
+                metadata: metadata.clone(),
+            }),
+            Type::Forall(box Forall {
+                tparams,
+                body: Forallable::Callable(c),
+            }) => Forallable::Function(Function {
+                signature: c,
+                metadata: metadata.clone(),
+            })
+            .forall(tparams),
+            // Callback protocol. We convert it to a function so we can add function metadata.
+            Type::ClassType(cls)
+                if self
+                    .get_metadata_for_class(cls.class_object())
+                    .is_protocol() =>
+            {
+                let call_attr = self.instance_as_dunder_call(&cls).and_then(|call_attr| {
+                    if let Type::BoundMethod(m) = call_attr {
+                        Some(
+                            self.bind_boundmethod(&m, &mut |a, b| self.is_subset_eq(a, b))
+                                .unwrap_or(m.func.as_type()),
+                        )
+                    } else {
+                        None
+                    }
+                });
+                if let Some(mut call_attr) = call_attr {
+                    call_attr.transform_toplevel_func_metadata(|m| {
+                        *m = FuncMetadata {
+                            kind: FunctionKind::CallbackProtocol(Box::new(cls.clone())),
+                            flags: metadata.flags.clone(),
+                        };
+                    });
+                    call_attr
+                } else {
+                    self.heap.mk_class_type(cls)
+                }
+            }
+            Type::ClassType(cls) if cls.has_qname("functools", "_Wrapped") => {
+                original_decoratee.clone()
+            }
+            returned_ty => returned_ty,
+        }
+    }
+
+    fn restore_decoratee_generics(
+        &self,
+        inferred_ty: Type,
+        decoratee_tparams: Option<Arc<TParams>>,
+    ) -> Type {
+        let Some(tparams) = decoratee_tparams else {
+            return inferred_ty;
+        };
+        // Identify which original tparams are actually used in the result.
+        let relevant_tparams_vec: Vec<Quantified> = {
+            let mut used_quantifieds = SmallSet::new();
+            inferred_ty.collect_quantifieds(&mut used_quantifieds);
+            tparams
+                .iter()
+                .filter(|p| used_quantifieds.contains(p))
+                .cloned()
+                .collect()
+        };
+        if relevant_tparams_vec.is_empty() {
+            return inferred_ty;
+        }
+
+        let new_tparams = Arc::new(TParams::new(relevant_tparams_vec));
+        match inferred_ty {
+            // Merge tparams from decoratee and inferred_ty.
+            Type::Forall(box forall) => {
+                let mut merged_tparams = (*new_tparams).clone();
+                merged_tparams.extend(&forall.tparams);
+                forall.body.forall(Arc::new(merged_tparams))
+            }
+            // Wrap callable inferred_ty in a Forall with the decoratee tparams that appear in it.
+            Type::Function(f) => Forallable::Function(*f).forall(new_tparams),
+            Type::Callable(c) => Forallable::Callable(*c).forall(new_tparams),
+            // Convert any `Type::Quantified` from the original Forall to gradual types if
+            // the type isn't callable.
+            ty => {
+                let substitution_map: SmallMap<_, _> = new_tparams
+                    .iter()
+                    .map(|p| (p, p.as_gradual_type()))
+                    .collect();
+                ty.subst(&substitution_map.iter().map(|(k, v)| (*k, v)).collect())
+            }
+        }
+    }
+
     fn apply_function_decorator(
         &self,
         decorator: Type,
@@ -1269,111 +1400,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             return decoratee;
         }
-        // Preserve function metadata, so things like method binding still work.
-        let call_target =
-            self.as_call_target_or_error(decorator, CallStyle::FreeForm, range, errors, None);
-        // If the decoratee is generic, unwrap the `Forall` so that `call_infer` can treat the
-        // type parameters as concrete in the raw inferred result; this avoids us replacing the
-        // type vars with partial types.
-        let (tparams_opt, decoratee_arg) = match &decoratee {
-            Type::Forall(forall) => (Some(forall.tparams.clone()), forall.body.clone().as_type()),
-            _ => (None, decoratee.clone()),
-        };
-        let arg = CallArg::ty(&decoratee_arg, range);
-        // Compute the raw return type - this may need tweaks to handle Forall well.
-        let inferred_ty =
-            match self.call_infer(call_target, &[arg], &[], range, errors, None, None, None) {
-                Type::Callable(c) => self.heap.mk_function(Function {
-                    signature: *c,
-                    metadata: metadata.clone(),
-                }),
-                Type::Forall(box Forall {
-                    tparams,
-                    body: Forallable::Callable(c),
-                }) => Forallable::Function(Function {
-                    signature: c,
-                    metadata: metadata.clone(),
-                })
-                .forall(tparams),
-                // Callback protocol. We convert it to a function so we can add function metadata.
-                Type::ClassType(cls)
-                    if self
-                        .get_metadata_for_class(cls.class_object())
-                        .is_protocol() =>
-                {
-                    let call_attr = self.instance_as_dunder_call(&cls).and_then(|call_attr| {
-                        if let Type::BoundMethod(m) = call_attr {
-                            Some(
-                                self.bind_boundmethod(&m, &mut |a, b| self.is_subset_eq(a, b))
-                                    .unwrap_or(m.func.as_type()),
-                            )
-                        } else {
-                            None
-                        }
-                    });
-                    if let Some(mut call_attr) = call_attr {
-                        call_attr.transform_toplevel_func_metadata(|m| {
-                            *m = FuncMetadata {
-                                kind: FunctionKind::CallbackProtocol(Box::new(cls.clone())),
-                                flags: metadata.flags.clone(),
-                            };
-                        });
-                        call_attr
-                    } else {
-                        self.heap.mk_class_type(cls)
-                    }
-                }
-                Type::ClassType(cls) if cls.has_qname("functools", "_Wrapped") => decoratee.clone(),
-                returned_ty => returned_ty,
-            };
-
-        // Given the raw `inferred_ty`, which may include `Type::Quantified` type variables coming from a
-        // `Forall` in the original decoratee, we need to create the proper output type:
+        let application = self.prepare_decorator_application(decorator, decoratee, range, errors);
+        let raw_return = self.call_infer(
+            application.call_target.clone(),
+            &[CallArg::ty(&application.decoratee_arg, range)],
+            &[],
+            range,
+            errors,
+            None,
+            None,
+            None,
+        );
+        let decorated_value =
+            self.decorate_returned_callable(raw_return, metadata, &application.original_decoratee);
+        // Given the raw `decorated_value`, which may include `Type::Quantified` type variables
+        // coming from a `Forall` in the original decoratee, we need to create the proper output
+        // type:
         // - If the return type is not a callable, we simply replace it with gradual types
         // - If the return type is a callable (possibly wrapped in a Forall with additional
         //   tparams introduced by the decorator), we merge the original tparams with the
         //   new ones (if any) and produce a Forall
         //
         // An invariant is that in no case should a `Type::Quantified` originating in a `Forall`
-        // from either the decoratee *or* the raw `inferred_ty` make it into the final result
+        // from either the decoratee *or* the raw `decorated_value` make it into the final result
         // without either being wrapped in a `Forall` or converted to a gradual type.
-        if let Some(tparams) = tparams_opt {
-            // Identify which original tparams are actually used in the result
-            // We scope this in a block to drop the borrow on inferred_ty immediately after scanning
-            let relevant_tparams_vec: Vec<Quantified> = {
-                let mut used_quantifieds = SmallSet::new();
-                inferred_ty.collect_quantifieds(&mut used_quantifieds);
-                tparams
-                    .iter()
-                    .filter(|p| used_quantifieds.contains(p))
-                    .cloned()
-                    .collect()
-            };
-            if !relevant_tparams_vec.is_empty() {
-                let new_tparams = Arc::new(TParams::new(relevant_tparams_vec));
-                return match inferred_ty {
-                    // Merge tparams from decoratee and inferred_ty
-                    Type::Forall(box forall) => {
-                        let mut merged_tparams = (*new_tparams).clone();
-                        merged_tparams.extend(&forall.tparams);
-                        forall.body.forall(Arc::new(merged_tparams))
-                    }
-                    // Wrap callable inferred_ty in a Forall with the decoratee tparams that appear in it
-                    Type::Function(f) => Forallable::Function(*f).forall(new_tparams),
-                    Type::Callable(c) => Forallable::Callable(*c).forall(new_tparams),
-                    // Convert any `Type::Qauntified` from the original Forall to gradual types if the type isn't callable
-                    ty => {
-                        let substitution_map: SmallMap<_, _> = new_tparams
-                            .iter()
-                            .map(|p| (p, p.as_gradual_type()))
-                            .collect();
-                        ty.subst(&substitution_map.iter().map(|(k, v)| (*k, v)).collect())
-                    }
-                };
-            }
-        }
-
-        inferred_ty
+        self.restore_decoratee_generics(decorated_value, application.decoratee_tparams)
     }
 
     /// For a type guard function, validate whether it has at least one
