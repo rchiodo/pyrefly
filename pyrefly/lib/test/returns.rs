@@ -712,6 +712,71 @@ def confuses(which: Foo) -> str:
 "#,
 );
 
+// Regression test for https://github.com/facebook/pyrefly/issues/1518
+testcase!(
+    bug = "We do not handle nested if/elif exhaustiveness correctly",
+    test_nested_branches_if_elif_return_type,
+    r#"
+def f(value: int | str | float) -> str:  # E: Function declared to return `str`, but one or more paths are missing an explicit `return`
+    if isinstance(value, (int, float)):
+        if isinstance(value, int):
+            return f"integer: {value}"
+        elif isinstance(value, float):
+            return f"float: {value}"
+    else:
+        return f"string: {value}"
+"#,
+);
+
+testcase!(
+    bug = "We do not handle nested if/elif exhaustiveness correctly",
+    test_nested_branches_if_elif_uninitialized_local,
+    r#"
+def uninitialized_local_logic(value: int | str | float) -> str:
+    if isinstance(value, (int, float)):
+        if isinstance(value, int):
+            result = f"integer: {value}"
+        elif isinstance(value, float):
+            result = f"float: {value}"
+    else:
+        result = f"string: {value}"
+    return result  # E: `result` may be uninitialized 
+"#,
+);
+
+testcase!(
+    test_nested_branches_pattern_return_type,
+    r#"
+def f(value: int | str | float) -> str:
+    match value:
+        case int() | float():
+            match value:
+                case int():
+                    return f"integer: {value}"
+                case float():
+                    return f"float: {value}"
+        case str():
+            return f"string: {value}"
+"#,
+);
+
+testcase!(
+    test_nested_branches_pattern_uninitialized_local,
+    r#"
+def f(value: int | str | float) -> str:
+    match value:
+        case int() | float():
+            match value:
+                case int():
+                    result = f"integer: {value}"
+                case float():
+                    result = f"float: {value}"
+        case str():
+            result = f"string: {value}"
+    return result
+"#,
+);
+
 testcase!(
     test_pruned_if_last_statement_no_bad_override,
     r#"
