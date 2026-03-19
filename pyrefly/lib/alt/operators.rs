@@ -13,6 +13,7 @@ use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::lit_int::LitInt;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::literal::Literal;
+use pyrefly_types::quantified::Quantified;
 use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::tensor::TensorType;
 use pyrefly_types::tensor::broadcast_shapes;
@@ -516,6 +517,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.unions(results)
     }
 
+    /// Returns the restriction on the given Quantified if the restriction is a union
+    fn as_union_restriction(&self, q: &Quantified) -> Option<Type> {
+        let restriction = q.restriction.as_type(self.stdlib, self.heap);
+        if matches!(restriction, Type::Union(_)) {
+            Some(restriction)
+        } else {
+            None
+        }
+    }
+
     fn compare_types(
         &self,
         x: &ExprCompare,
@@ -546,6 +557,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 errors,
                             )
                         }))
+                    }
+                    // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
+                    (Type::Quantified(left_q), _)
+                        if let Some(left_restriction) = self.as_union_restriction(left_q) =>
+                    {
+                        self.compare_types(
+                            x,
+                            op,
+                            &left_restriction,
+                            right,
+                            current_left_range,
+                            errors,
+                        )
+                    }
+                    (_, Type::Quantified(right_q))
+                        if let Some(right_restriction) = self.as_union_restriction(right_q) =>
+                    {
+                        self.compare_types(
+                            x,
+                            op,
+                            left,
+                            &right_restriction,
+                            current_left_range,
+                            errors,
+                        )
                     }
                     _ => {
                         let context = || {
