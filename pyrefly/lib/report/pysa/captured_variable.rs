@@ -76,10 +76,6 @@ pub struct ModuleCapturedVariables<Function: FunctionTrait>(
 );
 
 impl<Function: FunctionTrait> ModuleCapturedVariables<Function> {
-    pub fn new() -> Self {
-        Self(HashMap::new())
-    }
-
     #[cfg(test)]
     pub fn into_iter(
         self,

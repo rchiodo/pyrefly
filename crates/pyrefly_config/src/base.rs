@@ -112,8 +112,8 @@ pub struct ConfigBase {
     /// - `never`: unannotated returns are always treated as `Any`.
     /// - `annotated`: infer return types only for functions with at least one annotation.
     /// - `checked`: infer return types for all checked functions (default).
-    /// Only applies to functions whose bodies are checked; unannotated functions
-    /// are only eligible when `check-unannotated-defs` is true.
+    ///   Only applies to functions whose bodies are checked; unannotated functions
+    ///   are only eligible when `check-unannotated-defs` is true.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub infer_return_types: Option<InferReturnTypes>,
 

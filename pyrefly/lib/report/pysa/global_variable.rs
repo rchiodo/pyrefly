@@ -78,10 +78,6 @@ impl ModuleGlobalVariables {
 }
 
 impl WholeProgramGlobalVariables {
-    pub fn new() -> Self {
-        WholeProgramGlobalVariables(dashmap::DashMap::new().into_read_only())
-    }
-
     pub fn get_for_module(&self, module_id: ModuleId) -> Option<&ModuleGlobalVariables> {
         self.0.get(&module_id)
     }
