@@ -48,9 +48,9 @@ pub struct BuckCheckArgs {
     output_path: Option<PathBuf>,
 
     /// Minimum severity level for errors to be displayed.
-    /// Errors below this severity will not be shown.
-    #[arg(long, value_enum, default_value_t = Severity::Error)]
-    min_severity: Severity,
+    /// Errors below this severity will not be shown. Defaults to "error".
+    #[arg(long, value_enum)]
+    min_severity: Option<Severity>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -161,9 +161,10 @@ impl BuckCheckArgs {
             sys_info.dupe(),
         )?;
         let type_errors = compute_errors(sys_info, sourcedb);
+        let min_severity = self.min_severity.unwrap_or(Severity::Error);
         let displayed_errors: Vec<Error> = type_errors
             .into_iter()
-            .filter(|e| e.error_kind().is_directive() || e.severity() >= self.min_severity)
+            .filter(|e| e.error_kind().is_directive() || e.severity() >= min_severity)
             .collect();
         info!("Found {} type errors", displayed_errors.len());
         write_output(&displayed_errors, self.output_path.as_deref())?;

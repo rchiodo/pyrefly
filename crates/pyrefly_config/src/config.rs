@@ -63,6 +63,7 @@ use crate::environment::environment::PythonEnvironment;
 use crate::environment::interpreters::Interpreters;
 use crate::error::ErrorConfig;
 use crate::error::ErrorDisplayConfig;
+use crate::error_kind::Severity;
 use crate::finder::ConfigError;
 use crate::module_wildcard::Match;
 use crate::pyproject::PyProject;
@@ -523,6 +524,11 @@ pub struct ConfigFile {
     #[derivative(PartialEq = "ignore")]
     pub source_db: Option<ArcId<Box<dyn SourceDatabase>>>,
 
+    /// Minimum severity level for errors to be displayed.
+    /// Errors below this severity will not be shown. Defaults to "error".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_severity: Option<Severity>,
+
     /// Should we let Pyrefly try to index the project's files? Disabling this
     /// may speed up LSP operations on large projects.
     #[serde(default, skip_serializing_if = "crate::util::skip_default_false")]
@@ -556,6 +562,7 @@ impl Default for ConfigFile {
             use_ignore_files: true,
             typeshed_path: None,
             baseline: None,
+            min_severity: None,
             skip_lsp_config_indexing: false,
         }
     }
@@ -1510,6 +1517,7 @@ mod tests {
                 }],
                 typeshed_path: None,
                 baseline: None,
+                min_severity: None,
                 skip_lsp_config_indexing: false,
             }
         );
@@ -1748,6 +1756,7 @@ mod tests {
             }],
             typeshed_path: Some(PathBuf::from(typeshed)),
             baseline: Some(PathBuf::from("baseline.json")),
+            min_severity: None,
             skip_lsp_config_indexing: false,
         };
 
@@ -1807,6 +1816,7 @@ mod tests {
             }],
             typeshed_path: Some(expected_typeshed),
             baseline: Some(test_path.join("baseline.json")),
+            min_severity: None,
             skip_lsp_config_indexing: false,
         };
         assert_eq!(config, expected_config);

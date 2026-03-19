@@ -299,9 +299,9 @@ struct OutputArgs {
     update_baseline: bool,
 
     /// Minimum severity level for errors to be displayed.
-    /// Errors below this severity will not be shown.
-    #[arg(long, value_enum, default_value_t = Severity::Error)]
-    min_severity: Severity,
+    /// Errors below this severity will not be shown. Defaults to "error".
+    #[arg(long, value_enum)]
+    min_severity: Option<Severity>,
 }
 
 #[derive(Clone, Debug, ValueEnum, Default, PartialEq, Eq)]
@@ -665,15 +665,20 @@ impl CheckArgs {
         );
         let (loaded_handles, _, sourcedb_errors) = handles.all(holder.as_ref().config_finder());
 
-        // If CLI doesn't provide baseline, get from config
-        if self.output.baseline.is_none()
+        // If CLI doesn't provide baseline or min-severity, get from config
+        if (self.output.baseline.is_none() || self.output.min_severity.is_none())
             && let Some(handle) = loaded_handles.first()
         {
             let config = holder.as_ref().config_finder().python_file(
                 ModuleNameWithKind::guaranteed(handle.module()),
                 handle.path(),
             );
-            self.output.baseline = config.baseline.clone();
+            if self.output.baseline.is_none() {
+                self.output.baseline = config.baseline.clone();
+            }
+            if self.output.min_severity.is_none() {
+                self.output.min_severity = config.min_severity;
+            }
         }
 
         self.run_inner(
@@ -705,9 +710,12 @@ impl CheckArgs {
         let sys_info = config.get_sys_info();
         let handle = Handle::new(module_name, module_path.clone(), sys_info);
 
-        // If CLI doesn't provide baseline, get from config
+        // If CLI doesn't provide baseline or min-severity, get from config
         if self.output.baseline.is_none() {
             self.output.baseline = config.baseline.clone();
+        }
+        if self.output.min_severity.is_none() {
+            self.output.min_severity = config.min_severity;
         }
 
         let require_levels = self.get_required_levels();
@@ -746,8 +754,9 @@ impl CheckArgs {
         let mut handles = Handles::new(expanded_file_list);
         let state = State::new(config_finder);
 
-        // Track if CLI provided baseline - if so, never override it with config values
+        // Track if CLI provided values - if so, never override them with config values
         let cli_provided_baseline = self.output.baseline.is_some();
+        let cli_provided_min_severity = self.output.min_severity.is_some();
 
         let mut transaction = state.new_committable_transaction(require_levels.default, None);
         loop {
@@ -755,14 +764,21 @@ impl CheckArgs {
             let (loaded_handles, reloaded_configs, sourcedb_errors) =
                 handles.all(state.config_finder());
 
-            // If CLI didn't provide baseline, get from config on every iteration
+            // If CLI didn't provide these values, get from config on every iteration
             // to pick up config file changes
-            if !cli_provided_baseline && let Some(handle) = loaded_handles.first() {
+            if (!cli_provided_baseline || !cli_provided_min_severity)
+                && let Some(handle) = loaded_handles.first()
+            {
                 let config = state.config_finder().python_file(
                     ModuleNameWithKind::guaranteed(handle.module()),
                     handle.path(),
                 );
-                self.output.baseline = config.baseline.clone();
+                if !cli_provided_baseline {
+                    self.output.baseline = config.baseline.clone();
+                }
+                if !cli_provided_min_severity {
+                    self.output.min_severity = config.min_severity;
+                }
             }
             let mut_transaction = transaction.as_mut();
             mut_transaction.invalidate_find_for_configs(reloaded_configs);
@@ -916,7 +932,7 @@ impl CheckArgs {
 
         // Filter by minimum severity. Directives are not subject to this
         // filter — they are merged separately in the output step below.
-        let min_severity = self.output.min_severity;
+        let min_severity = self.output.min_severity.unwrap_or(Severity::Error);
         ordinary_errors.retain(|e| e.severity() >= min_severity);
 
         // We update the baseline file if requested, after reporting any new
