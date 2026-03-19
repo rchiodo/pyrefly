@@ -1007,7 +1007,6 @@ impl CheckArgs {
             // TODO: Move this into separate command
             let serialized_errors: Vec<SerializedError> = shown_errors
                 .iter()
-                .filter(|e| e.severity() >= Severity::Warn)
                 .filter_map(SerializedError::from_error)
                 .filter(|e| !e.is_unused_ignore())
                 .collect();

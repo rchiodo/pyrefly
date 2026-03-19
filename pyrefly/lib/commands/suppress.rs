@@ -9,7 +9,6 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use pyrefly_config::args::ConfigOverrideArgs;
-use pyrefly_config::error_kind::Severity;
 
 use crate::commands::check::CheckArgs;
 use crate::commands::config_finder::ConfigConfigurerWrapper;
@@ -96,10 +95,9 @@ impl SuppressArgs {
                 let check_args = CheckArgs::parse_from(["check", "--output-format", "omit-errors"]);
                 let (_, errors) = check_args.run_once(files_to_check, config_finder)?;
 
-                // Convert to SerializedErrors, filtering by severity and excluding UnusedIgnore
+                // Convert to SerializedErrors for all user-visible errors, excluding UnusedIgnore
                 errors
                     .into_iter()
-                    .filter(|e| e.severity() >= Severity::Warn)
                     .filter_map(|e| SerializedError::from_error(&e))
                     .filter(|e| !e.is_unused_ignore())
                     .collect()
