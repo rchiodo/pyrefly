@@ -430,7 +430,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     }
                 } else {
-                    binop_call(x.op, lhs, rhs, x.range)
+                    match (lhs, rhs) {
+                        (Type::Quantified(left_q), Type::Quantified(right_q))
+                            if left_q == right_q
+                                && let Restriction::Constraints(constraints) =
+                                    &left_q.restriction =>
+                        {
+                            self.unions(constraints.map(|constraint| {
+                                self.binop_types(x, constraint, constraint, errors)
+                            }))
+                        }
+                        // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
+                        (Type::Quantified(left_q), _)
+                            if let Some(left_restriction) = self.as_union_restriction(left_q) =>
+                        {
+                            self.binop_types(x, &left_restriction, rhs, errors)
+                        }
+                        (_, Type::Quantified(right_q))
+                            if let Some(right_restriction) = self.as_union_restriction(right_q) =>
+                        {
+                            self.binop_types(x, lhs, &right_restriction, errors)
+                        }
+                        _ => binop_call(x.op, lhs, rhs, x.range),
+                    }
                 }
             })
         })

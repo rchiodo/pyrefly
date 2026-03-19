@@ -328,7 +328,6 @@ class F(Generic[_b]):
 );
 
 testcase!(
-    bug = "Operator dispatch does not expand per constraint",
     test_constrained_typevar_subtype_resolves_to_constraint,
     r#"
 from typing import TypeVar, assert_type
@@ -336,7 +335,7 @@ from typing import TypeVar, assert_type
 AnyStr = TypeVar("AnyStr", str, bytes)
 
 def concat(x: AnyStr, y: AnyStr) -> AnyStr:
-    return x + y  # E: `+` is not supported  # E: `+` is not supported
+    return x + y
 
 class MyStr(str): ...
 

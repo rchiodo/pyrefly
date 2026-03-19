@@ -597,16 +597,14 @@ f(X())  # E: `X` is not assignable to upper bound `int | str` of type variable `
 );
 
 testcase!(
-    bug = "This should succeed with no errors",
     test_add_with_constraints,
     r#"
 def add[T: (int, str)](x: T, y: T) -> T:
-    return x + y # E: `+` is not supported between `T` and `T` # E: `+` is not supported between `T` and `T`
+    return x + y
     "#,
 );
 
 testcase!(
-    bug = "Unexpected error in add3",
     test_add_with_upper_bound,
     r#"
 # This is not allowed because it's legal to pass something like `add1(0, "1")` to this function.
@@ -619,19 +617,18 @@ def add2[T: int](x: T, y: T) -> int:
 
 # This is also ok.
 def add3[T: int | float](x: T, y: T) -> int | float:
-    return x + y # E: `+` is not supported
+    return x + y
     "#,
 );
 
 testcase!(
-    bug = "Spurious '`+` is not supported' error",
     test_add_with_upper_bound_and_bad_return_type,
     r#"
 # mypy and pyright both reject both of these, so we do, too.
 def add1[T: int](x: T, y: T) -> T:
     return x + y # E: Returned type `int` is not assignable to declared return type `T`
 def add2[T: int | float](x: T, y: T) -> T:
-    return x + y # E: `+` is not supported # E: Returned type `float | int` is not assignable to declared return type `T`
+    return x + y # E: Returned type `float | int` is not assignable to declared return type `T`
     "#,
 );
 

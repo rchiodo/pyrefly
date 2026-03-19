@@ -64,12 +64,13 @@ def f2[T](x: T) -> bool:
 );
 
 testcase!(
-    test_preserve_typevar_through_comparison,
+    test_preserve_typevar_through_comparison_and_binop,
     r#"
 from typing import Any, Protocol, Self, TypeVar
 
 class NativeExpr:
     def __ge__(self, value: Any, /) -> Self: ...
+    def __add__(self, value: Any, /) -> Self: ...
 
 NativeExprT = TypeVar("NativeExprT", bound=NativeExpr)
 
@@ -80,7 +81,9 @@ class SQLExpr(Protocol[NativeExprT]):
     def do_stuff(self) -> None:
         x = self._window()
         y_ge = x >= 1
+        z_add = x + 1
         self._when(y_ge)
+        self._when(z_add)
     "#,
 );
 
@@ -99,6 +102,24 @@ class CandidateWeight(Generic[Weight]):
     weight: Weight
     def __lt__(self, other: CandidateWeight[Weight]) -> bool:
         return self.weight < other.weight
+    "#,
+);
+
+testcase!(
+    test_add_typevars,
+    r#"
+from typing import Generic, Protocol, TypeVar
+
+Weight = TypeVar("Weight", bound="ImplementationWeight")
+SelfWeight = TypeVar("SelfWeight", bound="ImplementationWeight")
+
+class ImplementationWeight(Protocol):
+    def __add__(self: SelfWeight, other: SelfWeight) -> SelfWeight: ...
+
+class CandidateWeight(Generic[Weight]):
+    weight: Weight
+    def __add__(self, other: CandidateWeight[Weight]) -> Weight:
+        return self.weight + other.weight
     "#,
 );
 

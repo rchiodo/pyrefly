@@ -5426,28 +5426,6 @@
   "generics_basic.py": [
     {
       "code": -2,
-      "column": 12,
-      "concise_description": "`+` is not supported between `AnyStr` and `AnyStr`",
-      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  Argument `AnyStr` is not assignable to parameter `value` with type `Buffer` in function `bytes.__add__`\n  Protocol `Buffer` requires attribute `__buffer__`",
-      "line": 34,
-      "name": "unsupported-operation",
-      "severity": "error",
-      "stop_column": 17,
-      "stop_line": 34
-    },
-    {
-      "code": -2,
-      "column": 12,
-      "concise_description": "`+` is not supported between `AnyStr` and `AnyStr`",
-      "description": "`+` is not supported between `AnyStr` and `AnyStr`\n  No matching overload found for function `str.__add__` called with arguments: (AnyStr)\n  Possible overloads:\n  (value: LiteralString, /) -> LiteralString\n  (value: str, /) -> str [closest match]",
-      "line": 34,
-      "name": "unsupported-operation",
-      "severity": "error",
-      "stop_column": 17,
-      "stop_line": 34
-    },
-    {
-      "code": -2,
       "column": 15,
       "concise_description": "Argument `bytes` is not assignable to parameter `y` with type `str` in function `concat`",
       "description": "Argument `bytes` is not assignable to parameter `y` with type `str` in function `concat`",
