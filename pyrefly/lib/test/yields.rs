@@ -600,3 +600,14 @@ def f(start, iterable: Iterable[_T], step) ->  Iterator[_T]:
 
     "#,
 );
+
+testcase!(
+    test_yield_union_of_iterators,
+    r#"
+from collections.abc import Iterator
+def f() -> Iterator[str] | Iterator[int]: ...
+
+def g():
+  yield from f()
+"#,
+);
