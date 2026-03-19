@@ -513,12 +513,12 @@ impl<'a> TransactionData<'a> {
     /// Convert saved transaction data back into a full transaction. We can only restore if the
     /// underlying state is unchanged, otherwise the transaction data might make inconsistent
     /// assumptions, in particular about deps/rdeps.
-    pub(crate) fn restore(self) -> Option<Transaction<'a>> {
+    pub(crate) fn restore(self) -> Result<Transaction<'a>, Duration> {
         let start = Instant::now();
         let readable = self.state.state.read();
         let state_lock_blocked = start.elapsed();
         if self.base == readable.now {
-            Some(Transaction {
+            Ok(Transaction {
                 data: self,
                 stats: Mutex::new(TelemetryTransactionStats {
                     state_lock_blocked,
@@ -528,7 +528,7 @@ impl<'a> TransactionData<'a> {
                 readable,
             })
         } else {
-            None
+            Err(state_lock_blocked)
         }
     }
 }
@@ -582,6 +582,10 @@ impl<'a> Transaction<'a> {
     /// Returns `Duration::ZERO` when the stdlib was cached (no pre-warming needed).
     pub fn compute_stdlib_prewarm_time(&self) -> Duration {
         self.stats.lock().compute_stdlib_prewarm_time
+    }
+
+    pub fn add_locked_blocking_duration(&self, duration: Duration) {
+        self.stats.lock().state_lock_blocked += duration;
     }
 
     /// Returns a handle that can be used to cancel ongoing work in this transaction.
