@@ -416,6 +416,7 @@ impl<'a> BindingsBuilder<'a> {
     pub fn stmt_match(&mut self, mut x: StmtMatch, parent: &NestingContext) {
         let mut subject = self.declare_current_idx(Key::Anon(x.subject.range()));
         self.ensure_expr(&mut x.subject, subject.usage());
+        let subject_expr = x.subject.clone();
         let subject_idx =
             self.insert_binding_current(subject, Binding::Expr(None, Box::new(*x.subject.clone())));
         let match_narrowing_subject = expr_to_subjects(&x.subject).first().cloned();
@@ -448,20 +449,27 @@ impl<'a> BindingsBuilder<'a> {
                 NarrowUseLocation::Start(case_range),
                 &Usage::Narrowing(None),
             );
-            // Create a narrowed subject_idx for this case by applying negated_prev_ops.
-            // This ensures that patterns like MatchMapping use the narrowed type
-            // (e.g., after matching `None`, the type excludes `None`).
+            // First try to project previous narrows directly onto the already-evaluated
+            // match subject. This is required for cases like `match self.a`, where the
+            // carried narrow is stored as a facet on `self` but the branch-local subject
+            // is already the projected `self.a` expression.
             let case_subject_idx = if let Some(ref narrowing_subject) = match_narrowing_subject
                 && let Some((narrow_op, op_range)) =
                     negated_prev_ops.0.get(narrowing_subject.name())
+                && let Some(projected_narrow_op) = narrow_op.rebase_onto_subject(narrowing_subject)
             {
                 self.insert_binding(
                     Key::PatternNarrow(case_range),
                     Binding::Narrow(
                         subject_idx,
-                        Box::new(narrow_op.clone()),
+                        Box::new(projected_narrow_op),
                         NarrowUseLocation::Start(*op_range),
                     ),
+                )
+            } else if match_narrowing_subject.is_some() && !negated_prev_ops.0.is_empty() {
+                self.insert_binding(
+                    Key::PatternNarrow(case_range),
+                    Binding::Expr(None, Box::new(*subject_expr.clone())),
                 )
             } else {
                 subject_idx
