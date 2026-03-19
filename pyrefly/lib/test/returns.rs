@@ -687,7 +687,6 @@ assert_type(foo(), None)
 
 // Regression test for https://github.com/facebook/pyrefly/issues/1518
 testcase!(
-    bug = "The if/elif is exhaustive, but uninitialized local doesn't see it as such",
     test_exhaustive_enum_logic,
     r#"
 from enum import Enum
@@ -709,7 +708,7 @@ def confuses(which: Foo) -> str:
         answer = 'good'
     elif which == Foo.B:
         answer = 'bad'
-    return answer.upper()  # E: may be uninitialized
+    return answer.upper()
 "#,
 );
 

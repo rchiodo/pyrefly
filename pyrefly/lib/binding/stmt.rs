@@ -1022,7 +1022,7 @@ impl<'a> BindingsBuilder<'a> {
                 // Create Exhaustive binding for type-based exhaustiveness checking.
                 // This is done BEFORE finish_*_fork() so the binding exists in the right scope.
                 // Only do this when there's no else clause (not syntactically exhaustive).
-                if !exhaustive {
+                let exhaustive_key = if !exhaustive {
                     let mut narrow_entries = Vec::new();
                     for (name, (op, range)) in negated_prev_ops.0.iter() {
                         let hashed_name = Hashed::new(name);
@@ -1032,18 +1032,20 @@ impl<'a> BindingsBuilder<'a> {
                             narrow_entries.push((idx, Box::new(op.clone()), *range));
                         }
                     }
-                    self.insert_binding(
+                    Some(self.insert_binding(
                         Key::Exhaustive(ExhaustivenessKind::IfElif, if_range),
                         Binding::Exhaustive(Box::new(ExhaustiveBinding {
                             kind: ExhaustivenessKind::IfElif,
                             narrow_entries,
                         })),
-                    );
-                }
+                    ))
+                } else {
+                    None
+                };
                 if exhaustive {
                     self.finish_exhaustive_fork();
                 } else {
-                    self.finish_non_exhaustive_fork(&negated_prev_ops, None);
+                    self.finish_non_exhaustive_fork(&negated_prev_ops, exhaustive_key);
                 }
                 // If we have a statically evaluated test like `sys.version_info`, we should set `is_definitely_unreachable` to false
                 // to reduce false positive unreachable errors, since some code paths can still be hit at runtime

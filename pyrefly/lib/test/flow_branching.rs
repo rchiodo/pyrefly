@@ -1337,6 +1337,7 @@ def f() -> int:
 
 // elif condition only executes if the first `if` was False — walrus may not run.
 testcase!(
+    bug = "In order to fix false positives, we handled narrows differently in if/elif and introduced a false negative here",
     test_walrus_in_elif,
     r#"
 def condition() -> bool: ...
@@ -1345,7 +1346,7 @@ def f() -> bool:
         pass
     elif (x := condition()):
         pass
-    return x  # E: `x` may be uninitialized
+    return x  # False negative: x winds up getting applied as if it were in the base flow due to the negative narrow
     "#,
 );
 

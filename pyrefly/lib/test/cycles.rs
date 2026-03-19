@@ -569,7 +569,7 @@ fn env_deep_phi_chain_term_expr() -> TestEnv {
         writeln!(code, "          value = repr(self.f{i})").unwrap();
         writeln!(code, "          L.append('    f{i}=%s' % (value,))").unwrap();
     }
-    code.push_str("    return value\n");
+    code.push_str("    return value  # E: may be uninitialized\n");
 
     TestEnv::one("gen", &code)
 }
