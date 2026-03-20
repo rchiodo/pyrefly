@@ -19,6 +19,7 @@ use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::quantified::Quantified;
+use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::types::BoundMethod;
 use pyrefly_types::types::TParams;
 use pyrefly_types::types::TParamsSource;
@@ -1612,10 +1613,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         metadata
     }
 
+    /// Substitute each type parameter with its upper bound, for overload consistency checking.
+    /// For TypeVar this is `object`; for ParamSpec it's `...` (any params); for TypeVarTuple
+    /// it's an unbounded tuple. These represent the widest possible instantiation of each kind.
     fn subst_function(&self, tparams: &TParams, func: Function) -> Function {
-        let mp = tparams
-            .as_vec()
-            .map(|p| (p, p.restriction().as_type(self.stdlib, self.heap)));
+        let mp = tparams.as_vec().map(|p| {
+            let bound = if p.restriction().is_restricted() {
+                p.restriction().as_type(self.stdlib, self.heap)
+            } else {
+                match p.kind {
+                    QuantifiedKind::TypeVar => self.stdlib.object().clone().to_type(),
+                    QuantifiedKind::ParamSpec => Type::Ellipsis,
+                    QuantifiedKind::TypeVarTuple => Type::any_tuple(),
+                }
+            };
+            (p, bound)
+        });
         match self
             .heap
             .mk_function(func)

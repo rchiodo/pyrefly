@@ -1632,7 +1632,6 @@ def test(x: A[None], y: A[Any]) -> None:
 
 // Regression test for https://github.com/facebook/pyrefly/issues/2043
 testcase!(
-    bug = "Overload resolution fails to unify ParamSpec with Callable[...]",
     test_overload_paramspec_unify_with_ellipsis_callable,
     r#"
 from collections.abc import Callable
@@ -1642,7 +1641,7 @@ P = ParamSpec("P")
 R = TypeVar("R")
 
 @overload
-def foo(func: Callable[P, R]) -> Callable[P, R]: ...  # E: Implementation signature `(func: ((...) -> R) | None = None) -> ((...) -> R) | None` does not accept all arguments that overload signature `(func: (ParamSpec(P)) -> R) -> (ParamSpec(P)) -> R` accepts # E: Overload return type `(ParamSpec(object)) -> object` is not assignable to implementation return type `((...) -> Unknown) | None`
+def foo(func: Callable[P, R]) -> Callable[P, R]: ...
 @overload
 def foo() -> None: ...
 
