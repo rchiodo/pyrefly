@@ -1675,3 +1675,25 @@ def g(x):
     assert_type(f2(x), str)
     "#,
 );
+
+testcase!(
+    bug = "https://github.com/facebook/pyrefly/issues/2833",
+    test_eliminate_overload_using_argument_count_even_with_error,
+    r#"
+from typing import assert_type, overload
+
+@overload
+def f(x: int) -> int: ...
+@overload
+def f(x: int, y: str) -> str: ...
+def f(x, y="") -> int | str: ...
+
+def g(x: int | None):
+    # We should report the mismatch between `int` and `int | None` rather than "No matching overload",
+    # since we know only the first overload can match based on argument count.
+    e = f(x)  # E: No matching overload
+    # Even though the call failed, we know that the second overload cannot match based on argument
+    # count, so we should use the return type from the first overload.
+    assert_type(e, int)  # E: assert_type(Unknown, int)
+    "#,
+);
