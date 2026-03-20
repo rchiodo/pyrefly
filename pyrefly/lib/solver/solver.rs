@@ -1850,8 +1850,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         let is_partial = matches!(&*v1_ref, Variable::PartialQuantified(_));
                         let name = q.name.clone();
                         let restriction = q.restriction().clone();
-                        let bound =
-                            restriction.as_type(self.type_order.stdlib(), &self.solver.heap);
+                        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
                         drop(v1_ref);
 
                         // For constrained TypeVars, promote to the matching constraint type
@@ -1959,8 +1958,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         let name = q.name.clone();
                         let kind = q.kind();
                         let restriction = q.restriction().clone();
-                        let bound =
-                            restriction.as_type(self.type_order.stdlib(), &self.solver.heap);
+                        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
                         drop(v2_ref);
                         drop(variables);
 

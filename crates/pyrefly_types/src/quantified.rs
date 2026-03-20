@@ -226,6 +226,20 @@ impl Quantified {
         &self.restriction
     }
 
+    /// The upper bound of this type parameter as a type, accounting for the parameter's kind.
+    /// For TypeVar the bound is `object`, for ParamSpec it's `...` (any params), and for
+    /// TypeVarTuple it's an unbounded tuple. Explicit bounds and constraints are used as-is.
+    pub fn bound_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+        match &self.restriction {
+            Restriction::Unrestricted => match self.kind {
+                QuantifiedKind::TypeVar => stdlib.object().clone().to_type(),
+                QuantifiedKind::ParamSpec => Type::Ellipsis,
+                QuantifiedKind::TypeVarTuple => Type::any_tuple(),
+            },
+            r => r.as_type(stdlib, heap),
+        }
+    }
+
     /// Display this type parameter with its bounds/constraints and default,
     /// in the format used for type parameter lists (e.g. `T: int = str`).
     pub fn display_with_bounds(&self) -> impl Display + '_ {

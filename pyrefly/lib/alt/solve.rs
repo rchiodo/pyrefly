@@ -2853,9 +2853,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Restriction::Bound(bound_ty) => {
                 let default_for_check = match default {
                     Type::TypeVar(tv) => tv.restriction().as_type(self.stdlib, self.heap),
-                    Type::Quantified(q) if q.is_type_var() => {
-                        q.restriction().as_type(self.stdlib, self.heap)
-                    }
+                    Type::Quantified(q) if q.is_type_var() => q.bound_type(self.stdlib, self.heap),
                     _ => default.clone(),
                 };
                 if !self.is_subset_eq(&default_for_check, bound_ty) {

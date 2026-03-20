@@ -545,7 +545,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Returns the restriction on the given Quantified if the restriction is a union
     fn as_union_restriction(&self, q: &Quantified) -> Option<Type> {
-        let restriction = q.restriction.as_type(self.stdlib, self.heap);
+        let restriction = q.bound_type(self.stdlib, self.heap);
         if matches!(restriction, Type::Union(_)) {
             Some(restriction)
         } else {
