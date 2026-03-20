@@ -92,6 +92,7 @@ impl ArgCount {
 pub struct ArgCounts {
     pub positional: ArgCount,
     pub keyword: ArgCount,
+    pub overall: ArgCount,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -245,24 +246,30 @@ impl Params {
                 let mut counts = ArgCounts {
                     positional: ArgCount::none_allowed(),
                     keyword: ArgCount::none_allowed(),
+                    overall: ArgCount::none_allowed(),
                 };
                 for param in params.items() {
                     match param {
                         Param::PosOnly(_, _, req) => {
                             counts.positional.add_arg(req);
+                            counts.overall.add_arg(req);
                         }
-                        Param::Pos(..) => {
+                        Param::Pos(_, _, req) => {
                             counts.positional.add_arg(&Required::Optional(None));
                             counts.keyword.add_arg(&Required::Optional(None));
+                            counts.overall.add_arg(req);
                         }
                         Param::KwOnly(_, _, req) => {
                             counts.keyword.add_arg(req);
+                            counts.overall.add_arg(req);
                         }
                         Param::VarArg(..) => {
                             counts.positional.max = None;
+                            counts.overall.max = None;
                         }
                         Param::Kwargs(..) => {
                             counts.keyword.max = None;
+                            counts.overall.max = None;
                         }
                     }
                 }
@@ -271,6 +278,7 @@ impl Params {
             Self::Ellipsis | Self::Materialization => ArgCounts {
                 positional: ArgCount::any_allowed(),
                 keyword: ArgCount::any_allowed(),
+                overall: ArgCount::any_allowed(),
             },
             Self::ParamSpec(prefix, _) => ArgCounts {
                 positional: ArgCount {
@@ -278,6 +286,10 @@ impl Params {
                     max: None,
                 },
                 keyword: ArgCount::any_allowed(),
+                overall: ArgCount {
+                    min: prefix.len(),
+                    max: None,
+                },
             },
         }
     }

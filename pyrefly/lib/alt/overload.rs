@@ -456,8 +456,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let max_mismatch = n.saturating_sub(count.max.unwrap_or(n));
             max(min_mismatch, max_mismatch)
         };
-        mismatch_size(&expected_arg_counts.positional, n_posargs, has_varargs)
-            + mismatch_size(&expected_arg_counts.keyword, n_keywords, has_kwargs)
+        let pos_mismatch = mismatch_size(&expected_arg_counts.positional, n_posargs, has_varargs);
+        let kw_mismatch = mismatch_size(&expected_arg_counts.keyword, n_keywords, has_kwargs);
+        let overall_mismatch = mismatch_size(
+            &expected_arg_counts.overall,
+            n_posargs + n_keywords,
+            has_varargs || has_kwargs,
+        );
+        // overall_mismatch will double-count, but this is ok because all we care about is whether
+        // the mismatch is 0 (correct arity) and relative mismatch sizes between overloads
+        pos_mismatch + kw_mismatch + overall_mismatch
     }
 
     /// Returns the overload that matches the given arguments, or the one that produces the fewest
