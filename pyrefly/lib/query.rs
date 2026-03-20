@@ -289,7 +289,10 @@ impl<'a> CalleesWithLocation<'a> {
                         .end()
                         .checked_sub(TextSize::from(1))
                         .unwrap(),
-                    FindPreference::default(),
+                    FindPreference {
+                        resolve_call_dunders: false,
+                        ..FindPreference::default()
+                    },
                 )
                 .into_iter()
                 .collect_vec()
@@ -686,7 +689,10 @@ impl<'a> CalleesWithLocation<'a> {
                 &self.handle,
                 // take location of last included character in range (which should work for identifiers and attributes)
                 callee_range.end().checked_sub(TextSize::from(1)).unwrap(),
-                FindPreference::default(),
+                FindPreference {
+                    resolve_call_dunders: false,
+                    ..FindPreference::default()
+                },
             )
             .into_iter()
             // filter out attributes since we don't know how to handle them

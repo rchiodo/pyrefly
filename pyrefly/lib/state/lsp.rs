@@ -204,6 +204,12 @@ pub struct FindPreference {
     /// controls whether to prioritize finding pyi or py files. if false, we will search all search paths until a .py file is found before
     /// falling back to a .pyi.
     pub prefer_pyi: bool,
+    /// When true (the default), if the cursor is on a name/attribute in call
+    /// position, resolve through `__init__`/`__new__`/`__call__` dunders
+    /// instead of returning the class or variable definition. Set to false
+    /// when callers need the raw definition (e.g., call-graph queries that
+    /// unwrap decorators like `@lru_cache`).
+    pub resolve_call_dunders: bool,
 }
 
 impl Default for FindPreference {
@@ -211,6 +217,7 @@ impl Default for FindPreference {
         Self {
             import_behavior: ImportBehavior::JumpThroughEverything,
             prefer_pyi: true,
+            resolve_call_dunders: true,
         }
     }
 }
@@ -1776,7 +1783,8 @@ impl<'a> Transaction<'a> {
                     ExprContext::Load | ExprContext::Del | ExprContext::Invalid => {
                         // If this name is the callee of a call expression, jump
                         // to constructor or __call__ definitions when applicable.
-                        if let Some(AnyNodeRef::ExprCall(call)) = covering_nodes.get(1)
+                        if preference.resolve_call_dunders
+                            && let Some(AnyNodeRef::ExprCall(call)) = covering_nodes.get(1)
                             && call.func.range() == id.range
                             && let Some(bindings) = self.get_bindings(handle)
                         {
@@ -1953,7 +1961,8 @@ impl<'a> Transaction<'a> {
             }) => {
                 // If this attribute is the callee of a call expression, jump
                 // to constructor or __call__ definitions when applicable.
-                if let Some(AnyNodeRef::ExprAttribute(attr)) = covering_nodes.get(1)
+                if preference.resolve_call_dunders
+                    && let Some(AnyNodeRef::ExprAttribute(attr)) = covering_nodes.get(1)
                     && let Some(AnyNodeRef::ExprCall(call)) = covering_nodes.get(2)
                     && call.func.range() == attr.range()
                     && let Some(ty) = self.get_type_trace(handle, attr.range())
@@ -2068,6 +2077,7 @@ impl<'a> Transaction<'a> {
             FindPreference {
                 import_behavior: ImportBehavior::StopAtEverything,
                 prefer_pyi: true,
+                ..Default::default()
             },
         );
 
@@ -3016,6 +3026,7 @@ impl<'a> Transaction<'a> {
                         FindPreference {
                             import_behavior: ImportBehavior::StopAtRenamedImports,
                             prefer_pyi: false,
+                            ..Default::default()
                         },
                     )
                     && def_handle.path() == handle.path()
