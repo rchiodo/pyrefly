@@ -20,7 +20,7 @@ fn test_is_test_module(python_code: &str, expected: bool) {
     let test_module_handle = get_handle_for_module_name("test", &transaction);
     let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
 
-    let result = is_test_module(&context);
+    let result = is_test_module(&context.answers_context);
     assert_eq!(result, expected);
 }
 

@@ -24,6 +24,7 @@ use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::report::pysa::class::ClassId;
 use crate::report::pysa::class::get_all_classes;
 use crate::report::pysa::class::get_class_fields;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::function::FunctionNode;
 use crate::report::pysa::function::FunctionRef;
@@ -142,7 +143,7 @@ impl PysaModuleIndex {
     /// Build the index for a single module from its full context.
     ///
     /// Must be called while AST + bindings + answers are available (before eviction).
-    pub fn build(context: &ModuleContext) -> PysaModuleIndex {
+    pub fn build(context: &ModuleAnswersContext) -> PysaModuleIndex {
         // Step 1: Build short_identifier_to_function_ref and short_identifier_to_setter_ref
         // by iterating all KeyDecoratedFunction entries.
         let mut short_identifier_to_function_ref = HashMap::new();
@@ -373,7 +374,7 @@ pub fn build_pysa_module_index(
                 let module_id = module_ids.get_from_handle(handle);
                 let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let module_index = slow_function_monitor.monitor_function(
-                    || PysaModuleIndex::build(&context),
+                    || PysaModuleIndex::build(&context.answers_context),
                     format!(
                         "Building pysa module index for {}",
                         handle.module().as_str(),

@@ -24,6 +24,7 @@ use serde::Serialize;
 use starlark_map::Hashed;
 
 use crate::binding::binding::Key;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
@@ -94,7 +95,10 @@ impl GlobalVariable {
                 .type_
                 .as_ref()
                 .map(|type_| PysaType::from_type(type_, context)),
-            location: PysaLocation::from_text_range(identifier.range(), &context.module_info),
+            location: PysaLocation::from_text_range(
+                identifier.range(),
+                &context.answers_context.module_info,
+            ),
         }
     }
 }
@@ -102,7 +106,7 @@ impl GlobalVariable {
 fn visit_assign_target(
     target: &Expr,
     global_variables: &mut ModuleGlobalVariables,
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) {
     Ast::expr_lvalue(target, &mut |global: &ExprName| {
         let short_identifier = ShortIdentifier::expr_name(global);
@@ -131,7 +135,7 @@ fn visit_assign_target(
 fn visit_statement(
     stmt: &Stmt,
     global_variables: &mut ModuleGlobalVariables,
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) {
     match stmt {
         Stmt::Assign(assign) => {
@@ -200,11 +204,20 @@ fn visit_statement(
 fn visit_statements<'a>(
     statements: impl Iterator<Item = &'a Stmt>,
     global_variables: &mut ModuleGlobalVariables,
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) {
     for stmt in statements {
         visit_statement(stmt, global_variables, context);
     }
+}
+
+/// Collect global variables for a single module.
+pub fn collect_global_variables_for_module(
+    context: &ModuleAnswersContext,
+) -> ModuleGlobalVariables {
+    let mut global_variables = ModuleGlobalVariables::new();
+    visit_statements(context.ast.body.iter(), &mut global_variables, context);
+    global_variables
 }
 
 pub fn collect_global_variables(
@@ -222,11 +235,7 @@ pub fn collect_global_variables(
                 let module_id = module_ids.get_from_handle(handle);
                 let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let globals_for_module = slow_function_monitor.monitor_function(
-                    move || {
-                        let mut global_variables = ModuleGlobalVariables::new();
-                        visit_statements(context.ast.body.iter(), &mut global_variables, &context);
-                        global_variables
-                    },
+                    move || collect_global_variables_for_module(&context.answers_context),
                     format!("Indexing global variables for {}", handle.module().as_str(),),
                     /* max_time_in_seconds */ 4,
                 );
@@ -243,7 +252,10 @@ pub fn export_global_variables(
     global_variables: &WholeProgramGlobalVariables,
     context: &ModuleContext,
 ) -> HashMap<Name, GlobalVariable> {
-    let globals_for_module = global_variables.0.get(&context.module_id).unwrap();
+    let globals_for_module = global_variables
+        .0
+        .get(&context.answers_context.module_id)
+        .unwrap();
 
     let mut global_variables = HashMap::new();
     for (short_identifier, global) in &globals_for_module.0 {

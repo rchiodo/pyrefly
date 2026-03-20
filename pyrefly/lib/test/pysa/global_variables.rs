@@ -70,7 +70,10 @@ x: int = 42
         HashMap::from([(
             "x".into(),
             create_global_variable(
-                Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                Some(PysaType::from_class_type(
+                    context.answers_context.stdlib.int(),
+                    context,
+                )),
                 create_location(2, 1, 2, 2),
             ),
         )])
@@ -86,7 +89,10 @@ y = "hello"
         HashMap::from([(
             "y".into(),
             create_global_variable(
-                Some(PysaType::from_class_type(context.stdlib.str(), context)),
+                Some(PysaType::from_class_type(
+                    context.answers_context.stdlib.str(),
+                    context,
+                )),
                 create_location(2, 1, 2, 2),
             ),
         )])
@@ -118,21 +124,30 @@ c = 3.14
             (
                 "a".into(),
                 create_global_variable(
-                    Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                    Some(PysaType::from_class_type(
+                        context.answers_context.stdlib.int(),
+                        context,
+                    )),
                     create_location(2, 1, 2, 2),
                 ),
             ),
             (
                 "b".into(),
                 create_global_variable(
-                    Some(PysaType::from_class_type(context.stdlib.str(), context)),
+                    Some(PysaType::from_class_type(
+                        context.answers_context.stdlib.str(),
+                        context,
+                    )),
                     create_location(3, 1, 3, 2),
                 ),
             ),
             (
                 "c".into(),
                 create_global_variable(
-                    Some(PysaType::from_class_type(context.stdlib.float(), context)),
+                    Some(PysaType::from_class_type(
+                        context.answers_context.stdlib.float(),
+                        context,
+                    )),
                     create_location(4, 1, 4, 2),
                 ),
             ),
@@ -150,14 +165,20 @@ x, y = 1, "hello"
             (
                 "x".into(),
                 create_global_variable(
-                    Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                    Some(PysaType::from_class_type(
+                        context.answers_context.stdlib.int(),
+                        context,
+                    )),
                     create_location(2, 1, 2, 2),
                 ),
             ),
             (
                 "y".into(),
                 create_global_variable(
-                    Some(PysaType::from_class_type(context.stdlib.str(), context)),
+                    Some(PysaType::from_class_type(
+                        context.answers_context.stdlib.str(),
+                        context,
+                    )),
                     create_location(2, 4, 2, 5),
                 ),
             ),
@@ -178,7 +199,10 @@ def my_function():
         HashMap::from([(
             "global_var".into(),
             create_global_variable(
-                Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                Some(PysaType::from_class_type(
+                    context.answers_context.stdlib.int(),
+                    context,
+                )),
                 create_location(2, 1, 2, 11),
             ),
         )])
@@ -197,7 +221,10 @@ class MyClass:
         HashMap::from([(
             "global_var".into(),
             create_global_variable(
-                Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                Some(PysaType::from_class_type(
+                    context.answers_context.stdlib.int(),
+                    context,
+                )),
                 create_location(2, 1, 2, 11),
             ),
         )])
@@ -214,7 +241,10 @@ counter += 1
         HashMap::from([(
             "counter".into(),
             create_global_variable(
-                Some(PysaType::from_class_type(context.stdlib.int(), context)),
+                Some(PysaType::from_class_type(
+                    context.answers_context.stdlib.int(),
+                    context,
+                )),
                 create_location(2, 1, 2, 8),
             ),
         )])

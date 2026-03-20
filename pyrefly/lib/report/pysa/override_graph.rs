@@ -34,13 +34,15 @@ fn find_overridden_base_method(
     pysa_module_index: &WholeProgramPysaModuleIndex,
     context: &ModuleContext,
 ) -> Option<FunctionRef> {
-    assert_eq!(class.module(), &context.module_info);
+    assert_eq!(class.module(), &context.answers_context.module_info);
 
     let super_class_member = context
         .transaction
-        .ad_hoc_solve(&context.handle, "override_super_class_member", |solver| {
-            solver.get_super_class_member(class, None, field_name)
-        })
+        .ad_hoc_solve(
+            &context.answers_context.handle,
+            "override_super_class_member",
+            |solver| solver.get_super_class_member(class, None, field_name),
+        )
         .flatten()?;
 
     // Look up the FunctionRef from the defining class's module index
@@ -58,8 +60,8 @@ pub fn create_reversed_override_graph_for_module(
     pysa_module_index: &WholeProgramPysaModuleIndex,
 ) -> ModuleReversedOverrideGraph {
     let mut graph = ModuleReversedOverrideGraph(HashMap::new());
-    for function in get_all_functions(context) {
-        if !function.should_export(context) {
+    for function in get_all_functions(&context.answers_context) {
+        if !function.should_export(&context.answers_context) {
             continue;
         }
         let name = function.name();
@@ -68,7 +70,7 @@ pub fn create_reversed_override_graph_for_module(
         });
         match overridden_base_method {
             Some(overridden_base_method) => {
-                let current_function = function.as_function_ref(context);
+                let current_function = function.as_function_ref(&context.answers_context);
                 assert!(
                     graph
                         .0

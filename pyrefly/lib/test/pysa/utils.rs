@@ -79,13 +79,13 @@ pub fn get_function_ref(
     let context = ModuleContext::create(handle, context.transaction, context.module_ids);
 
     // This is slow, but we don't care in tests.
-    get_all_functions(&context)
-        .filter(|function| function.should_export(&context))
+    get_all_functions(&context.answers_context)
+        .filter(|function| function.should_export(&context.answers_context))
         .find(|function| function.name().as_str() == function_name)
         .unwrap_or_else(|| {
             panic!("expected valid function name, got `{module_name}.{function_name}`")
         })
-        .as_function_ref(&context)
+        .as_function_ref(&context.answers_context)
 }
 
 fn get_method_ref_with_predicate(
@@ -99,8 +99,8 @@ fn get_method_ref_with_predicate(
     let context = ModuleContext::create(handle, context.transaction, context.module_ids);
 
     // This is slow, but we don't care in tests.
-    get_all_functions(&context)
-        .filter(|function| function.should_export(&context))
+    get_all_functions(&context.answers_context)
+        .filter(|function| function.should_export(&context.answers_context))
         .filter(|function| predicate(function))
         .find(|function| match function {
             FunctionNode::DecoratedFunction(decorated_function) => {
@@ -116,7 +116,7 @@ fn get_method_ref_with_predicate(
         .unwrap_or_else(|| {
             panic!("expected valid method name, got `{module_name}.{class_name}.{function_name}`")
         })
-        .as_function_ref(&context)
+        .as_function_ref(&context.answers_context)
 }
 
 pub fn get_method_ref(
@@ -151,8 +151,8 @@ pub fn get_global_ref(
     let handle = get_handle_for_module_name(module_name, context.transaction);
     let context = ModuleContext::create(handle, context.transaction, context.module_ids);
     GlobalVariableRef {
-        module_id: context.module_id,
-        module_name: context.handle.module(),
+        module_id: context.answers_context.module_id,
+        module_name: context.answers_context.handle.module(),
         name: Name::new(global_name),
     }
 }

@@ -121,11 +121,12 @@ impl<'a> DefinitionToFunctionMapVisitor<'a> {
     fn bind_name(&mut self, key: Key, scopes: &Scopes) {
         if let Some(idx) = self
             .module_context
+            .answers_context
             .bindings
             .key_to_idx_hashed_opt(Hashed::new(&key))
             && let Some(current_function) = scopes.current_exported_function(
-                self.module_context.module_id,
-                self.module_context.module_info.name(),
+                self.module_context.answers_context.module_id,
+                self.module_context.answers_context.module_info.name(),
                 &SCOPE_EXPORTED_FUNCTION_FLAGS,
             )
         {
@@ -220,9 +221,10 @@ impl<'a> CapturedVariableVisitor<'a> {
     fn get_definition_from_usage(&self, key: Key) -> Option<FunctionRef> {
         let idx = self
             .module_context
+            .answers_context
             .bindings
             .key_to_idx_hashed_opt(Hashed::new(&key))?;
-        let binding = self.module_context.bindings.get(idx);
+        let binding = self.module_context.answers_context.bindings.get(idx);
         match binding {
             Binding::Forward(definition_idx) | Binding::ForwardToFirstUse(definition_idx) => {
                 self.get_definition_from_idx(
@@ -257,7 +259,7 @@ impl<'a> CapturedVariableVisitor<'a> {
         }
         depth += 1;
 
-        let binding = self.module_context.bindings.get(idx);
+        let binding = self.module_context.answers_context.bindings.get(idx);
         match binding {
             Binding::Forward(idx)
             | Binding::ForwardToFirstUse(idx)
@@ -280,8 +282,8 @@ impl<'a> CapturedVariableVisitor<'a> {
 impl<'a> AstScopedVisitor for CapturedVariableVisitor<'a> {
     fn on_scope_update(&mut self, scopes: &Scopes) {
         self.current_exported_function = scopes.current_exported_function(
-            self.module_context.module_id,
-            self.module_context.module_info.name(),
+            self.module_context.answers_context.module_id,
+            self.module_context.answers_context.module_info.name(),
             &SCOPE_EXPORTED_FUNCTION_FLAGS,
         );
     }
@@ -387,7 +389,7 @@ pub fn export_captured_variables_for_module(
     context: &ModuleContext,
 ) -> HashMap<FunctionRef, Vec<CapturedVariableRef<FunctionRef>>> {
     captured_variables
-        .get_for_module(context.module_id)
+        .get_for_module(context.answers_context.module_id)
         .unwrap()
         .clone()
         .0

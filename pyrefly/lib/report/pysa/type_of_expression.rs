@@ -25,14 +25,19 @@ struct VisitorContext<'a> {
 /// Export the type of a single expression, if it has one.
 fn maybe_export_type(e: &Expr, context: &mut VisitorContext) {
     let range = e.range();
-    if let Some(type_) = context.module_context.answers.get_type_trace(range) {
+    if let Some(type_) = context
+        .module_context
+        .answers_context
+        .answers
+        .get_type_trace(range)
+    {
         // An expression may match multiple patterns (e.g., a Name node that is
         // also a call argument). The type is the same, so skip duplicates.
         context
             .type_of_expression
             .entry(PysaLocation::from_text_range(
                 range,
-                &context.module_context.module_info,
+                &context.module_context.answers_context.module_info,
             ))
             .or_insert_with(|| PysaType::from_type(&type_, context.module_context));
     }
@@ -69,7 +74,7 @@ pub fn export_type_of_expressions(context: &ModuleContext) -> HashMap<PysaLocati
         type_of_expression: &mut type_of_expression,
     };
 
-    for stmt in &context.ast.body {
+    for stmt in &context.answers_context.ast.body {
         stmt.recurse(&mut |e| visit_expression(e, &mut visitor_context));
     }
 

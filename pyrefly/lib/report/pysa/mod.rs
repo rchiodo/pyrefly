@@ -173,9 +173,9 @@ pub fn export_module_definitions(
     );
     PysaModuleDefinitions {
         format_version: 1,
-        module_id: context.module_id,
-        module_name: context.module_info.name(),
-        source_path: context.module_info.path().details().clone(),
+        module_id: context.answers_context.module_id,
+        module_name: context.answers_context.module_info.name(),
+        source_path: context.answers_context.module_info.path().details().clone(),
         function_definitions,
         class_definitions,
         global_variables: global_variables_exported,
@@ -186,9 +186,9 @@ pub fn export_module_type_of_expressions(context: &ModuleContext) -> PysaModuleT
     let type_of_expression = export_type_of_expressions(context);
     PysaModuleTypeOfExpressions {
         format_version: 1,
-        module_id: context.module_id,
-        module_name: context.module_info.name(),
-        source_path: context.module_info.path().details().clone(),
+        module_id: context.answers_context.module_id,
+        module_name: context.answers_context.module_info.name(),
+        source_path: context.answers_context.module_info.path().details().clone(),
         type_of_expression,
     }
 }
@@ -213,9 +213,9 @@ pub fn export_module_call_graphs(
     .expect("Found multiple call graphs for the same function");
     PysaModuleCallGraphs {
         format_version: 1,
-        module_id: context.module_id,
-        module_name: context.module_info.name(),
-        source_path: context.module_info.path().details().clone(),
+        module_id: context.answers_context.module_id,
+        module_name: context.answers_context.module_info.name(),
+        source_path: context.answers_context.module_info.path().details().clone(),
         call_graphs,
     }
 }
@@ -425,7 +425,7 @@ fn write_module_call_graph_files(
                 |(handle, _, info_filename)| -> anyhow::Result<()> {
                     let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     let module_captured_variables = captured_variables
-                        .get_for_module(context.module_id)
+                        .get_for_module(context.answers_context.module_id)
                         .unwrap();
                     let module_call_graphs = slow_function_monitor.monitor_function(
                         || {
@@ -469,7 +469,7 @@ fn add_module_is_test_flags(
                     let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                     slow_function_monitor.monitor_function(
                         || {
-                            if is_test_module::is_test_module(&context) {
+                            if is_test_module::is_test_module(&context.answers_context) {
                                 project_modules
                                     .lock()
                                     .unwrap()

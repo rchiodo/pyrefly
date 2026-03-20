@@ -8,6 +8,7 @@
 use std::fmt;
 use std::sync::Arc;
 
+use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
 use pyrefly_util::display::DisplayWith;
@@ -24,17 +25,25 @@ use crate::report::pysa::module::ModuleIds;
 use crate::state::state::Transaction;
 use crate::types::stdlib::Stdlib;
 
-/// Pyrefly information about a module.
-pub struct ModuleContext<'a> {
+/// Pyrefly information about a single module.
+#[derive(Clone, Dupe)]
+pub struct ModuleAnswersContext {
     pub handle: Handle,
-    pub transaction: &'a Transaction<'a>,
-    pub bindings: Bindings,
-    pub answers: Arc<Answers>,
+    pub module_id: ModuleId,
+    pub module_info: Module,
     pub stdlib: Arc<Stdlib>,
     pub ast: Arc<ModModule>,
-    pub module_info: Module,
-    pub module_id: ModuleId,
+    pub bindings: Bindings,
+    pub answers: Arc<Answers>,
+}
+
+/// Pyrefly information about a module.
+///
+/// This includes the `transaction` which allows to access cross-module information.
+pub struct ModuleContext<'a> {
+    pub answers_context: ModuleAnswersContext,
     pub module_ids: &'a ModuleIds,
+    pub transaction: &'a Transaction<'a>,
 }
 
 impl ModuleContext<'_> {
@@ -58,15 +67,17 @@ impl ModuleContext<'_> {
             .expect("module info should be available for handle");
         let module_id = module_ids.get_from_handle(&handle);
         ModuleContext {
-            transaction,
-            bindings,
-            answers,
-            stdlib,
-            ast,
-            module_info,
-            module_id,
+            answers_context: ModuleAnswersContext {
+                handle,
+                module_id,
+                module_info,
+                stdlib,
+                ast,
+                bindings,
+                answers,
+            },
             module_ids,
-            handle,
+            transaction,
         }
     }
 }
@@ -82,24 +93,24 @@ impl<'a, T: DisplayWith<ModuleContext<'a>>> DisplayWith<ModuleContext<'a>> for O
 
 impl DisplayWith<ModuleContext<'_>> for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, context: &ModuleContext) -> fmt::Result {
-        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.module_info)
+        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.answers_context.module_info)
     }
 }
 
 impl DisplayWith<ModuleContext<'_>> for AnyNodeRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, context: &ModuleContext) -> fmt::Result {
-        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.module_info)
+        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.answers_context.module_info)
     }
 }
 
 impl DisplayWith<ModuleContext<'_>> for Arguments {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, context: &ModuleContext) -> fmt::Result {
-        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.module_info)
+        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.answers_context.module_info)
     }
 }
 
 impl DisplayWith<ModuleContext<'_>> for Decorator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, context: &ModuleContext) -> fmt::Result {
-        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.module_info)
+        pyrefly_util::display::DisplayWith::fmt(&self, f, &context.answers_context.module_info)
     }
 }

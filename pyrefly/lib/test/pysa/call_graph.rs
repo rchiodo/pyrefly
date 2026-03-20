@@ -289,7 +289,7 @@ fn test_building_call_graph_for_module(
     let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
 
     let module_captured_variables = captured_variables
-        .get_for_module(context.module_id)
+        .get_for_module(context.answers_context.module_id)
         .unwrap();
 
     let expected_call_graph = call_graph_for_test_from_expected(create_expected(&context));

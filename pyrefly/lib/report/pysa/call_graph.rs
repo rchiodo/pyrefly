@@ -81,6 +81,7 @@ use crate::report::pysa::class::ClassId;
 use crate::report::pysa::class::ClassRef;
 use crate::report::pysa::class::get_super_class_member;
 use crate::report::pysa::collect::CollectNoDuplicateKeys;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::function::FunctionBaseDefinition;
 use crate::report::pysa::function::FunctionId;
@@ -1468,6 +1469,7 @@ impl DirectCall {
 struct CallGraphVisitor<'a> {
     call_graphs: &'a mut CallGraphs<ExpressionIdentifier, FunctionRef>,
     module_context: &'a ModuleContext<'a>,
+    module_answers_context: ModuleAnswersContext,
     module_id: ModuleId,
     module_name: ModuleName,
     pysa_module_index: &'a WholeProgramPysaModuleIndex,
@@ -1514,7 +1516,7 @@ impl ResolveCallResult {
 
 impl<'a> CallGraphVisitor<'a> {
     fn pysa_location(&self, location: TextRange) -> PysaLocation {
-        PysaLocation::from_text_range(location, &self.module_context.module_info)
+        PysaLocation::from_text_range(location, &self.module_answers_context.module_info)
     }
 
     fn add_callees(
@@ -1573,7 +1575,7 @@ impl<'a> CallGraphVisitor<'a> {
             }
             Type::TypedDict(TypedDict::Anonymous(_)) => ReceiverClassResult {
                 class: Some(ClassRef::from_class(
-                    self.module_context.stdlib.dict_object(),
+                    self.module_answers_context.stdlib.dict_object(),
                     self.module_context.module_ids,
                 )),
                 is_class_def: false,
@@ -1634,7 +1636,7 @@ impl<'a> CallGraphVisitor<'a> {
             self.module_context,
         ) {
             let parent_class = with_defining_class.defining_class;
-            let object = self.module_context.stdlib.object().class_object();
+            let object = self.module_answers_context.stdlib.object().class_object();
             if exclude_object_methods && parent_class == *object {
                 return Result::Err(UnresolvedReason::ClassFieldOnlyExistInObject);
             }
@@ -1924,7 +1926,7 @@ impl<'a> CallGraphVisitor<'a> {
                 MaybeResolved::Unresolved(UnresolvedReason::UnsupportedFunctionTarget)
             }
             Some(Type::LiteralString(..)) => {
-                let str_class = self.module_context.stdlib.str().class_object();
+                let str_class = self.module_answers_context.stdlib.str().class_object();
                 call_targets_from_method_name_with_class(str_class)
             }
             Some(Type::TypedDict(typed_dict)) | Some(Type::PartialTypedDict(typed_dict)) => {
@@ -1933,7 +1935,7 @@ impl<'a> CallGraphVisitor<'a> {
                         call_targets_from_method_name_with_class(inner.class_object())
                     }
                     TypedDict::Anonymous(..) => call_targets_from_method_name_with_class(
-                        self.module_context.stdlib.dict_object(),
+                        self.module_answers_context.stdlib.dict_object(),
                     ),
                 }
             }
@@ -1990,7 +1992,7 @@ impl<'a> CallGraphVisitor<'a> {
         callee_expr_suffix: Option<&str>,
         exclude_object_methods: bool,
     ) -> CallCallees<FunctionRef> {
-        let object_class = self.module_context.stdlib.object();
+        let object_class = self.module_answers_context.stdlib.object();
         let object_init_method = || {
             self.call_targets_from_method_name(
                 &dunder::INIT,
@@ -2204,7 +2206,7 @@ impl<'a> CallGraphVisitor<'a> {
                     .module_context
                     .transaction
                     .ad_hoc_solve(
-                        &self.module_context.handle,
+                        &self.module_answers_context.handle,
                         "call_graph_constructor",
                         |solver| {
                             let new_method = solver.get_dunder_new(&class_type);
@@ -2229,7 +2231,7 @@ impl<'a> CallGraphVisitor<'a> {
             }
             Some(CallTargetLookup::Ok(box CallTarget::TypedDict(typed_dict_inner))) => {
                 let init_method = self.module_context.transaction.ad_hoc_solve(
-                    &self.module_context.handle,
+                    &self.module_answers_context.handle,
                     "call_graph_typed_dict_init",
                     |solver| solver.get_typed_dict_dunder_init(&typed_dict_inner),
                 );
@@ -2308,7 +2310,7 @@ impl<'a> CallGraphVisitor<'a> {
             .module_context
             .transaction
             .find_definition_for_name_use(
-                &self.module_context.handle,
+                &self.module_answers_context.handle,
                 &identifier,
                 FindPreference::default(),
             );
@@ -2349,7 +2351,10 @@ impl<'a> CallGraphVisitor<'a> {
             && function_ref.function_name != dunder::INIT
                 && function_ref.function_name != dunder::NEW
         {
-            let callee_type = self.module_context.answers.get_type_trace(name.range());
+            let callee_type = self
+                .module_answers_context
+                .answers
+                .get_type_trace(name.range());
             let callee_expr = Some(AnyNodeRef::from(name));
             let callee_expr_suffix = Some(name.id.as_str());
 
@@ -2409,14 +2414,14 @@ impl<'a> CallGraphVisitor<'a> {
                 ),
                 CaptureKind::Global
                     if let Some(global_variables) = self.global_variables
-                        && let Some(globals) =
-                            global_variables.get_for_module(self.module_context.module_id)
+                        && let Some(globals) = global_variables
+                            .get_for_module(self.module_answers_context.module_id)
                         && globals.contains(name.id()) =>
                 {
                     (
                         Some(GlobalVariableRef {
-                            module_id: self.module_context.module_id,
-                            module_name: self.module_context.module_info.name(),
+                            module_id: self.module_answers_context.module_id,
+                            module_name: self.module_answers_context.module_info.name(),
                             name: name.id().clone(),
                         }),
                         None,
@@ -2432,7 +2437,7 @@ impl<'a> CallGraphVisitor<'a> {
         let callees = self.resolve_callees_from_expression_type(
             /* expression */ Some(AnyNodeRef::from(name)),
             /* expression_type */
-            self.module_context
+            self.module_answers_context
                 .answers
                 .get_type_trace(name.range())
                 .as_ref(),
@@ -2457,7 +2462,7 @@ impl<'a> CallGraphVisitor<'a> {
             .module_context
             .transaction
             .ad_hoc_solve(
-                &self.module_context.handle,
+                &self.module_answers_context.handle,
                 "call_graph_call_target",
                 |solver| expression_type.map(|type_| solver.as_call_target(type_.clone())),
             )
@@ -2493,7 +2498,7 @@ impl<'a> CallGraphVisitor<'a> {
             self.module_context
                 .transaction
                 .ad_hoc_solve(
-                    &self.module_context.handle,
+                    &self.module_answers_context.handle,
                     "call_graph_dunder_attr",
                     |solver| {
                         solver
@@ -2519,8 +2524,8 @@ impl<'a> CallGraphVisitor<'a> {
                          attr_type: callee_type,
                      }| {
                         // TODO(T252263933): Need more precise return types for `__getitem__` in `typed_dict.py`
-                        let return_type = if let Some(return_type) =
-                            callee_type.callable_return_type(self.module_context.answers.heap())
+                        let return_type = if let Some(return_type) = callee_type
+                            .callable_return_type(self.module_answers_context.answers.heap())
                         {
                             ScalarTypeProperties::from_type(&return_type, self.module_context)
                         } else {
@@ -2579,14 +2584,17 @@ impl<'a> CallGraphVisitor<'a> {
             .module_context
             .transaction
             .find_definition_for_attribute(
-                &self.module_context.handle,
+                &self.module_answers_context.handle,
                 base.range(),
                 attribute,
                 FindPreference::default(),
             );
 
         let callee_expr_suffix = Some(attribute.as_str());
-        let receiver_type = self.module_context.answers.get_type_trace(base.range());
+        let receiver_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(base.range());
 
         for go_to_definition in go_to_definitions.iter() {
             debug_println!(
@@ -2823,7 +2831,7 @@ impl<'a> CallGraphVisitor<'a> {
                                 /* callee */ argument,
                                 /* return_type */
                                 self.get_return_type_for_callee(
-                                    self.module_context
+                                    self.module_answers_context
                                         .answers
                                         .get_type_trace(argument.range())
                                         .as_ref(),
@@ -2882,7 +2890,7 @@ impl<'a> CallGraphVisitor<'a> {
             Expr::Attribute(attribute) => {
                 let callee_expr = Some(AnyNodeRef::from(attribute));
                 let callee_type = self
-                    .module_context
+                    .module_answers_context
                     .answers
                     .get_type_trace(attribute.range());
                 let callees = self.resolve_attribute_access(
@@ -2914,7 +2922,7 @@ impl<'a> CallGraphVisitor<'a> {
     // for a call expression, we could simply query its type (e.g., query the type of `c(1)`).
     fn get_return_type_for_callee(&self, callee_type: Option<&Type>) -> ScalarTypeProperties {
         callee_type
-            .and_then(|ty| ty.callable_return_type(self.module_context.answers.heap()))
+            .and_then(|ty| ty.callable_return_type(self.module_answers_context.answers.heap()))
             .map(|return_type| ScalarTypeProperties::from_type(&return_type, self.module_context))
             .unwrap_or(ScalarTypeProperties::none())
     }
@@ -2952,7 +2960,10 @@ impl<'a> CallGraphVisitor<'a> {
         return_type: ScalarTypeProperties,
         origin_kind: OriginKind,
     ) {
-        let argument_type = self.module_context.answers.get_type_trace(argument.range());
+        let argument_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(argument.range());
         let callees = self.call_targets_from_method_name(
             method_name,
             argument_type.as_ref(),
@@ -2977,8 +2988,16 @@ impl<'a> CallGraphVisitor<'a> {
     }
 
     fn resolve_and_register_str(&mut self, call: &ExprCall, argument: &Expr) {
-        let argument_type = self.module_context.answers.get_type_trace(argument.range());
-        let object_type = self.module_context.stdlib.object().clone().to_type();
+        let argument_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(argument.range());
+        let object_type = self
+            .module_answers_context
+            .stdlib
+            .object()
+            .clone()
+            .to_type();
         let callees = if let Some(argument_type) = argument_type {
             self.resolve_stringify_call(argument_type, dunder::STR, argument.range(), &object_type)
         } else {
@@ -3012,7 +3031,7 @@ impl<'a> CallGraphVisitor<'a> {
                 if callees.has_globals_or_captures() =>
             {
                 self.add_callees(
-                    ExpressionIdentifier::expr_name(name, &self.module_context.module_info),
+                    ExpressionIdentifier::expr_name(name, &self.module_answers_context.module_info),
                     ExpressionCallees::Identifier(callees.clone()),
                 )
             }
@@ -3022,7 +3041,7 @@ impl<'a> CallGraphVisitor<'a> {
                 self.add_callees(
                     ExpressionIdentifier::regular(
                         attribute.range(),
-                        &self.module_context.module_info,
+                        &self.module_answers_context.module_info,
                     ),
                     ExpressionCallees::AttributeAccess(callees.clone()),
                 )
@@ -3031,7 +3050,7 @@ impl<'a> CallGraphVisitor<'a> {
         }
 
         self.add_callees(
-            ExpressionIdentifier::regular(call.range(), &self.module_context.module_info),
+            ExpressionIdentifier::regular(call.range(), &self.module_answers_context.module_info),
             ExpressionCallees::Call(resolved.into_call_callees()),
         );
 
@@ -3135,7 +3154,7 @@ impl<'a> CallGraphVisitor<'a> {
 
     fn resolve_and_register_compare(&mut self, compare: &ExprCompare) {
         let left_comparator_type = self
-            .module_context
+            .module_answers_context
             .answers
             .get_type_trace(compare.comparators.first().unwrap().range());
 
@@ -3181,7 +3200,7 @@ impl<'a> CallGraphVisitor<'a> {
             attr_type: iter_callee_type,
         } = self.call_targets_from_magic_dunder_attr(
             /* base */
-            self.module_context
+            self.module_answers_context
                 .answers
                 .get_type_trace(iter_range)
                 .as_ref(),
@@ -3201,7 +3220,8 @@ impl<'a> CallGraphVisitor<'a> {
             /* base */
             iter_callee_type
                 .and_then(|iter_callee_type| {
-                    iter_callee_type.callable_return_type(self.module_context.answers.heap())
+                    iter_callee_type
+                        .callable_return_type(self.module_answers_context.answers.heap())
                 })
                 .as_ref(),
             /* attribute */ Some(&next_callee_name),
@@ -3305,7 +3325,10 @@ impl<'a> CallGraphVisitor<'a> {
             ),
         };
         let value_range = subscript.value.range();
-        let value_type = self.module_context.answers.get_type_trace(value_range);
+        let value_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(value_range);
         let DunderAttrCallees { callees, .. } = self.call_targets_from_magic_dunder_attr(
             /* base */ value_type.as_ref(),
             /* attribute */ Some(&callee_name),
@@ -3439,14 +3462,22 @@ impl<'a> CallGraphVisitor<'a> {
             }),
         );
 
-        let object_type = self.module_context.stdlib.object().clone().to_type();
+        let object_type = self
+            .module_answers_context
+            .stdlib
+            .object()
+            .clone()
+            .to_type();
         for interpolation in fstring
             .value
             .elements()
             .filter_map(|element| element.as_interpolation())
         {
             let expression_range = interpolation.expression.range();
-            let callee_class = self.module_context.answers.get_type_trace(expression_range);
+            let callee_class = self
+                .module_answers_context
+                .answers
+                .get_type_trace(expression_range);
             let callees = if let Some(callee_class) = callee_class {
                 self.resolve_interpolation(
                     interpolation,
@@ -3474,7 +3505,7 @@ impl<'a> CallGraphVisitor<'a> {
         let lhs_range = bin_op.left.range();
         let DunderAttrCallees { callees, .. } = self.call_targets_from_magic_dunder_attr(
             /* base */
-            self.module_context
+            self.module_answers_context
                 .answers
                 .get_type_trace(lhs_range)
                 .as_ref(),
@@ -3494,9 +3525,15 @@ impl<'a> CallGraphVisitor<'a> {
 
     fn resolve_and_register_augmented_assign(&mut self, aug_assign: &StmtAugAssign) {
         let lhs_range = aug_assign.target.range();
-        let lhs_type = self.module_context.answers.get_type_trace(lhs_range);
+        let lhs_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(lhs_range);
         let rhs_range = aug_assign.value.range();
-        let rhs_type = self.module_context.answers.get_type_trace(rhs_range);
+        let rhs_type = self
+            .module_answers_context
+            .answers
+            .get_type_trace(rhs_range);
 
         let callees = self.distribute_over_optional_union(lhs_type.as_ref(), |lhs_type| {
             self.distribute_over_optional_union(rhs_type.as_ref(), |rhs_type| {
@@ -3544,9 +3581,9 @@ impl<'a> CallGraphVisitor<'a> {
                 let class_object = class_type.class_object();
                 let mut targs = class_type.targs().iter_paired().map(|(_, targ)| targ);
                 if let Some(targ) = targs.next()
-                    && (class_object == self.module_context.stdlib.list_object()
-                        || class_object == self.module_context.stdlib.set_object()
-                        || class_type == self.module_context.stdlib.sequence(targ.clone()))
+                    && (class_object == self.module_answers_context.stdlib.list_object()
+                        || class_object == self.module_answers_context.stdlib.set_object()
+                        || class_type == self.module_answers_context.stdlib.sequence(targ.clone()))
                 {
                     match targ {
                         Type::ClassType(class_type) => Some((
@@ -3570,7 +3607,7 @@ impl<'a> CallGraphVisitor<'a> {
         if let Some(Some(graphql_decorator)) = self.matching_graphql_decorators.last()
             && let Some(return_expression_type) =
                 return_stmt.value.as_ref().and_then(|return_expression| {
-                    self.module_context
+                    self.module_answers_context
                         .answers
                         .get_type_trace(return_expression.range())
                 })
@@ -3616,7 +3653,7 @@ impl<'a> CallGraphVisitor<'a> {
                 self.add_callees(
                     ExpressionIdentifier::regular(
                         return_stmt.range(),
-                        &self.module_context.module_info,
+                        &self.module_answers_context.module_info,
                     ),
                     ExpressionCallees::Return(ReturnShimCallees {
                         targets: callees,
@@ -3628,14 +3665,14 @@ impl<'a> CallGraphVisitor<'a> {
     }
 
     fn resolve_and_register_slice(&mut self, slice: &ExprSlice) {
-        let slice_class = self.module_context.stdlib.slice_class_object();
+        let slice_class = self.module_answers_context.stdlib.slice_class_object();
         let slice_class_type =
             pyrefly_types::class::ClassType::new(slice_class.dupe(), Default::default());
         let (init_method, new_method) = self
             .module_context
             .transaction
             .ad_hoc_solve(
-                &self.module_context.handle,
+                &self.module_answers_context.handle,
                 "call_graph_slice_constructor",
                 |solver| {
                     let new_method = solver.get_dunder_new(&slice_class_type);
@@ -3676,7 +3713,11 @@ impl<'a> CallGraphVisitor<'a> {
                 Expr::Call(callee) if expr.range() == callee.func.range() => true,
                 _ => false,
             });
-        let expr_type = || self.module_context.answers.get_type_trace(expr.range());
+        let expr_type = || {
+            self.module_answers_context
+                .answers
+                .get_type_trace(expr.range())
+        };
         match expr {
             Expr::Call(call) => {
                 debug_println!(
@@ -3715,7 +3756,10 @@ impl<'a> CallGraphVisitor<'a> {
                 );
                 if !callees.is_empty() {
                     self.add_callees(
-                        ExpressionIdentifier::expr_name(name, &self.module_context.module_info),
+                        ExpressionIdentifier::expr_name(
+                            name,
+                            &self.module_answers_context.module_info,
+                        ),
                         ExpressionCallees::Identifier(callees),
                     );
                 }
@@ -3748,7 +3792,7 @@ impl<'a> CallGraphVisitor<'a> {
                     self.add_callees(
                         ExpressionIdentifier::regular(
                             expr.range(),
-                            &self.module_context.module_info,
+                            &self.module_answers_context.module_info,
                         ),
                         ExpressionCallees::AttributeAccess(callees),
                     );
@@ -3863,26 +3907,29 @@ impl<'a> CallGraphVisitor<'a> {
         }
         let key = KeyDecoratedFunction(ShortIdentifier::new(&function_def.name));
         let callees = self
-            .module_context
+            .module_answers_context
             .bindings
             .key_to_idx_hashed_opt(Hashed::new(&key))
             .and_then(|idx| {
                 let decorated_function = DecoratedFunction::from_bindings_answers(
                     idx,
-                    &self.module_context.bindings,
-                    &self.module_context.answers,
+                    &self.module_answers_context.bindings,
+                    &self.module_answers_context.answers,
                 );
-                if should_export_decorated_function(&decorated_function, self.module_context) {
+                if should_export_decorated_function(
+                    &decorated_function,
+                    &self.module_answers_context,
+                ) {
                     let return_type = decorated_function
                         .ty
-                        .callable_return_type(self.module_context.answers.heap())
+                        .callable_return_type(self.module_answers_context.answers.heap())
                         .map_or(ScalarTypeProperties::none(), |type_| {
                             ScalarTypeProperties::from_type(&type_, self.module_context)
                         });
                     let target = self.call_target_from_function_target(
                         Target::Function(FunctionRef::from_decorated_function(
                             &decorated_function,
-                            self.module_context,
+                            &self.module_answers_context,
                         )),
                         return_type,
                         /* receiver_type */ None,
@@ -3900,7 +3947,7 @@ impl<'a> CallGraphVisitor<'a> {
             self.add_callees(
                 ExpressionIdentifier::regular(
                     function_def.range(),
-                    &self.module_context.module_info,
+                    &self.module_answers_context.module_info,
                 ),
                 callees,
             );
@@ -3917,7 +3964,7 @@ impl<'a> CallGraphVisitor<'a> {
             };
             let DunderAttrCallees { callees, .. } = self.call_targets_from_magic_dunder_attr(
                 /* base */
-                self.module_context
+                self.module_answers_context
                     .answers
                     .get_type_trace(context_expr_range)
                     .as_ref(),
@@ -3966,7 +4013,7 @@ impl<'a> CallGraphVisitor<'a> {
                 decorator.display_with(self.module_context)
             );
             let callee_type = self
-                .module_context
+                .module_answers_context
                 .answers
                 .get_type_trace(decorator.expression.range());
             let return_type = self.get_return_type_for_callee(callee_type.as_ref());
@@ -3992,7 +4039,10 @@ impl<'a> CallGraphVisitor<'a> {
                 Expr::Name(name) => {
                     self.call_graphs.remove_callees(
                         decorated_target.clone(),
-                        ExpressionIdentifier::expr_name(name, &self.module_context.module_info),
+                        ExpressionIdentifier::expr_name(
+                            name,
+                            &self.module_answers_context.module_info,
+                        ),
                     );
                 }
                 Expr::Attribute(_) => {
@@ -4000,7 +4050,7 @@ impl<'a> CallGraphVisitor<'a> {
                         decorated_target.clone(),
                         ExpressionIdentifier::regular(
                             decorator.expression.range(),
-                            &self.module_context.module_info,
+                            &self.module_answers_context.module_info,
                         ),
                     );
                 }
@@ -4055,7 +4105,7 @@ impl<'a> AstScopedVisitor for CallGraphVisitor<'a> {
                 .map(|decorator| match &decorator.expression {
                     Expr::Name(_) | Expr::Attribute(_) => {
                         self.module_context.transaction.find_definition(
-                            &self.module_context.handle,
+                            &self.module_answers_context.handle,
                             decorator.expression.end(),
                             FindPreference::default(),
                         )
@@ -4166,8 +4216,9 @@ fn resolve_call(
     let visitor = CallGraphVisitor {
         call_graphs: &mut call_graphs,
         module_context,
-        module_id: module_context.module_id,
-        module_name: module_context.module_info.name(),
+        module_answers_context: module_context.answers_context.dupe(),
+        module_id: module_context.answers_context.module_id,
+        module_name: module_context.answers_context.module_info.name(),
         pysa_module_index,
         function_base_definitions: function_definitions,
         current_function: None,
@@ -4175,7 +4226,10 @@ fn resolve_call(
         debug_scopes: Vec::new(),
         global_variables: None,
         captured_variables: None,
-        error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
+        error_collector: ErrorCollector::new(
+            module_context.answers_context.module_info.dupe(),
+            ErrorStyle::Never,
+        ),
         matching_graphql_decorators: Vec::new(),
     };
     let callees = visitor
@@ -4183,6 +4237,7 @@ fn resolve_call(
             /* callee */ &call.func,
             /* return_type */
             module_context
+                .answers_context
                 .answers
                 .get_type_trace(call.range())
                 .map_or(ScalarTypeProperties::none(), |type_| {
@@ -4205,8 +4260,8 @@ fn resolve_expression(
 ) -> Vec<PysaCallTarget<FunctionRef>> {
     // This needs to be provided. Otherwise the callees won't be registered into `call_graphs`.
     let current_function = FunctionRef {
-        module_id: module_context.module_id,
-        module_name: module_context.module_info.name(),
+        module_id: module_context.answers_context.module_id,
+        module_name: module_context.answers_context.module_info.name(),
         function_id: FunctionId::ModuleTopLevel,
         function_name: Name::new("artificial_function"),
     };
@@ -4214,8 +4269,9 @@ fn resolve_expression(
     let mut visitor = CallGraphVisitor {
         call_graphs: &mut call_graphs,
         module_context,
-        module_id: module_context.module_id,
-        module_name: module_context.module_info.name(),
+        module_answers_context: module_context.answers_context.dupe(),
+        module_id: module_context.answers_context.module_id,
+        module_name: module_context.answers_context.module_info.name(),
         pysa_module_index,
         function_base_definitions: function_definitions,
         current_function: Some(current_function.clone()),
@@ -4223,7 +4279,10 @@ fn resolve_expression(
         debug_scopes: Vec::new(),
         global_variables: None,
         captured_variables: None,
-        error_collector: ErrorCollector::new(module_context.module_info.dupe(), ErrorStyle::Never),
+        error_collector: ErrorCollector::new(
+            module_context.answers_context.module_info.dupe(),
+            ErrorStyle::Never,
+        ),
         matching_graphql_decorators: Vec::new(),
     };
     visitor.resolve_and_register_expression(
@@ -4232,8 +4291,13 @@ fn resolve_expression(
         /* current_statement */ None,
     );
     let expression_identifier = match expression {
-        Expr::Name(name) => ExpressionIdentifier::expr_name(name, &module_context.module_info),
-        _ => ExpressionIdentifier::regular(expression.range(), &module_context.module_info),
+        Expr::Name(name) => {
+            ExpressionIdentifier::expr_name(name, &module_context.answers_context.module_info)
+        }
+        _ => ExpressionIdentifier::regular(
+            expression.range(),
+            &module_context.answers_context.module_info,
+        ),
     };
     call_graphs
         .0
@@ -4298,7 +4362,8 @@ pub fn resolve_decorator_callees(
         };
 
         if !callees.is_empty() {
-            let location = PysaLocation::from_text_range(range, &context.module_info);
+            let location =
+                PysaLocation::from_text_range(range, &context.answers_context.module_info);
             assert!(
                 decorator_callees.insert(location, callees).is_none(),
                 "Found multiple decorators at the same location"
@@ -4321,8 +4386,9 @@ pub fn export_call_graphs(
     let mut visitor = CallGraphVisitor {
         call_graphs: &mut call_graphs,
         module_context: context,
-        module_id: context.module_id,
-        module_name: context.module_info.name(),
+        module_answers_context: context.answers_context.dupe(),
+        module_id: context.answers_context.module_id,
+        module_name: context.answers_context.module_info.name(),
         pysa_module_index,
         function_base_definitions,
         current_function: None,
@@ -4330,7 +4396,10 @@ pub fn export_call_graphs(
         debug_scopes: Vec::new(),
         global_variables: Some(global_variables),
         captured_variables: Some(captured_variables),
-        error_collector: ErrorCollector::new(context.module_info.dupe(), ErrorStyle::Never),
+        error_collector: ErrorCollector::new(
+            context.answers_context.module_info.dupe(),
+            ErrorStyle::Never,
+        ),
         matching_graphql_decorators: Vec::new(),
     };
 

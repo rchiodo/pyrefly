@@ -17,7 +17,9 @@ use serde::Serialize;
 use crate::report::pysa::step_logger::StepLogger;
 
 /// Represents a unique identifier for a module
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(
+    Debug, Clone, Copy, Dupe, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize
+)]
 pub struct ModuleId(u32);
 
 impl ModuleId {

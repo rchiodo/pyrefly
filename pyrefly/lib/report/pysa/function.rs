@@ -49,6 +49,7 @@ use crate::report::pysa::class::ClassRef;
 use crate::report::pysa::class::get_all_classes;
 use crate::report::pysa::class::get_class_field_declaration;
 use crate::report::pysa::class::get_class_fields;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
@@ -113,7 +114,10 @@ pub struct FunctionRef {
 }
 
 impl FunctionRef {
-    pub fn from_decorated_function(function: &DecoratedFunction, context: &ModuleContext) -> Self {
+    pub fn from_decorated_function(
+        function: &DecoratedFunction,
+        context: &ModuleAnswersContext,
+    ) -> Self {
         assert_decorated_function_in_context(function, context);
         assert!(should_export_decorated_function(function, context));
         let name = function.metadata().kind.function_name().into_owned();
@@ -390,7 +394,10 @@ fn export_function_parameters(params: &Params, context: &ModuleContext) -> Funct
 }
 
 // For many function implementations, we need to pass the module context where the function is defined.
-fn assert_decorated_function_in_context(function: &DecoratedFunction, context: &ModuleContext) {
+fn assert_decorated_function_in_context(
+    function: &DecoratedFunction,
+    context: &ModuleAnswersContext,
+) {
     match &function.undecorated.metadata.kind {
         FunctionKind::Def(func_id) => {
             assert_eq!(func_id.module, context.module_info);
@@ -401,7 +408,7 @@ fn assert_decorated_function_in_context(function: &DecoratedFunction, context: &
 
 pub fn should_export_decorated_function(
     function: &DecoratedFunction,
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) -> bool {
     assert_decorated_function_in_context(function, context);
     // We only want to export one function when we have an @overload chain.
@@ -416,7 +423,7 @@ pub fn should_export_decorated_function(
 pub fn get_exported_decorated_function(
     key_decorated_function: Idx<KeyDecoratedFunction>,
     skip_property_getter: bool,
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) -> DecoratedFunction {
     // Follow the successor chain to find either the last function, or a function that is not an overload,
     // or a property setter when `skip_property_getter` is true.
@@ -521,7 +528,7 @@ pub enum FunctionNode {
 
 impl FunctionNode {
     // For many function implementations, we need to pass the module context where the function is defined.
-    fn assert_in_context(&self, context: &ModuleContext) {
+    fn assert_in_context(&self, context: &ModuleAnswersContext) {
         match self {
             FunctionNode::DecoratedFunction(function) => {
                 assert_decorated_function_in_context(function, context)
@@ -532,7 +539,7 @@ impl FunctionNode {
         }
     }
 
-    pub fn should_export(&self, context: &ModuleContext) -> bool {
+    pub fn should_export(&self, context: &ModuleAnswersContext) -> bool {
         match self {
             FunctionNode::DecoratedFunction(function) => {
                 should_export_decorated_function(function, context)
@@ -559,7 +566,7 @@ impl FunctionNode {
     }
 
     // Return the function type, considering decorators and overloads.
-    fn get_decorated_type(&self, context: &ModuleContext) -> Type {
+    fn get_decorated_type(&self, context: &ModuleAnswersContext) -> Type {
         self.assert_in_context(context);
         match self {
             FunctionNode::DecoratedFunction(function) => {
@@ -577,14 +584,18 @@ impl FunctionNode {
                 // We need the list of raw parameters, ignoring decorators.
                 // For overloads, we need the list of all overloads, not just the current one.
                 // To get it, we check if `get_function_type` returns `Type::Overload`.
-                let decorated_type = self.get_decorated_type(context);
+                let decorated_type = self.get_decorated_type(&context.answers_context);
                 match decorated_type {
                     Type::Overload(overload) => export_overload_signatures(&overload, context),
                     _ => {
                         let return_binding = Key::ReturnType(function.undecorated.identifier);
-                        let idx = context.bindings.key_to_idx(&return_binding);
-                        let undecorated_return_type =
-                            context.answers.get_idx(idx).unwrap().arc_clone_ty();
+                        let idx = context.answers_context.bindings.key_to_idx(&return_binding);
+                        let undecorated_return_type = context
+                            .answers_context
+                            .answers
+                            .get_idx(idx)
+                            .unwrap()
+                            .arc_clone_ty();
                         vec![FunctionSignature {
                             parameters: FunctionParameters::List(
                                 function
@@ -612,7 +623,7 @@ impl FunctionNode {
         class: &Class,
         field_name: &Name,
         class_field: Arc<ClassField>,
-        context: &ModuleContext,
+        context: &ModuleAnswersContext,
     ) -> Option<Self> {
         let function_node = match get_class_field_declaration(class, field_name, context) {
             // Class field is a `def` statement.
@@ -647,7 +658,7 @@ impl FunctionNode {
         }
     }
 
-    pub fn as_function_ref(&self, context: &ModuleContext) -> FunctionRef {
+    pub fn as_function_ref(&self, context: &ModuleAnswersContext) -> FunctionRef {
         self.assert_in_context(context);
         assert!(self.should_export(context));
 
@@ -667,7 +678,7 @@ impl FunctionNode {
         }
     }
 
-    fn get_scope_parent(&self, context: &ModuleContext) -> ScopeParent {
+    fn get_scope_parent(&self, context: &ModuleAnswersContext) -> ScopeParent {
         self.assert_in_context(context);
         match self {
             FunctionNode::DecoratedFunction(function) => match &function.undecorated.defining_cls {
@@ -750,7 +761,10 @@ impl FunctionNode {
         }
     }
 
-    fn get_define_stmt<'a>(&self, context: &'a ModuleContext) -> Option<&'a StmtFunctionDef> {
+    fn get_define_stmt<'a>(
+        &self,
+        context: &'a ModuleAnswersContext,
+    ) -> Option<&'a StmtFunctionDef> {
         self.assert_in_context(context);
         match self {
             FunctionNode::DecoratedFunction(function) => {
@@ -774,7 +788,7 @@ impl FunctionNode {
         function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
         context: &ModuleContext,
     ) -> HashMap<PysaLocation, Vec<Target<FunctionRef>>> {
-        if let Some(function_def) = self.get_define_stmt(context) {
+        if let Some(function_def) = self.get_define_stmt(&context.answers_context) {
             resolve_decorator_callees(
                 &function_def.decorator_list,
                 pysa_module_index,
@@ -789,7 +803,7 @@ impl FunctionNode {
 
 /// Return all functions defined with a `def` statement.
 pub fn get_all_decorated_functions(
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) -> impl Iterator<Item = DecoratedFunction> {
     context.bindings.keys::<KeyDecoratedFunction>().map(|idx| {
         DecoratedFunction::from_bindings_answers(idx, &context.bindings, &context.answers)
@@ -797,7 +811,7 @@ pub fn get_all_decorated_functions(
 }
 
 /// Return all function defined in the module.
-pub fn get_all_functions(context: &ModuleContext) -> impl Iterator<Item = FunctionNode> {
+pub fn get_all_functions(context: &ModuleAnswersContext) -> impl Iterator<Item = FunctionNode> {
     let decorated_functions = context.bindings.keys::<KeyDecoratedFunction>().map(|idx| {
         FunctionNode::DecoratedFunction(DecoratedFunction::from_bindings_answers(
             idx,
@@ -833,7 +847,7 @@ pub fn get_all_functions(context: &ModuleContext) -> impl Iterator<Item = Functi
 }
 
 pub fn export_all_functions(
-    context: &ModuleContext,
+    context: &ModuleAnswersContext,
 ) -> ModuleFunctionDefinitions<FunctionBaseDefinition> {
     let mut function_base_definitions = ModuleFunctionDefinitions::new();
 
@@ -859,9 +873,11 @@ pub fn export_all_functions(
                         is_property_setter: function.is_property_setter(),
                         is_stub: function.is_stub(),
                         is_def_statement: function.is_def_statement(),
-                        defining_class: function
-                            .defining_cls()
-                            .map(|class| ClassRef::from_class(class, context.module_ids)),
+                        defining_class: function.defining_cls().map(|class| ClassRef {
+                            module_id: context.module_id,
+                            class_id: ClassId::from_class(class),
+                            class: class.clone(),
+                        }),
                     }
                 )
                 .is_none(),
@@ -880,18 +896,16 @@ pub fn export_function_definitions(
     context: &ModuleContext,
 ) -> ModuleFunctionDefinitions<FunctionDefinition> {
     let mut function_definitions = ModuleFunctionDefinitions::new();
-    let function_base_definitions_for_module =
-        function_base_definitions.get_for_module(context.module_id);
 
-    for function in get_all_functions(context) {
-        if !function.should_export(context) {
+    for function in get_all_functions(&context.answers_context) {
+        if !function.should_export(&context.answers_context) {
             continue;
         }
-        let current_function = function.as_function_ref(context);
-        let function_base_definition = function_base_definitions_for_module
-            .0
-            .get(&current_function.function_id)
-            .unwrap();
+        let current_function = function.as_function_ref(&context.answers_context);
+        let function_base_definition = function_base_definitions.get(
+            context.answers_context.module_id,
+            &current_function.function_id,
+        );
         let undecorated_signatures = function.get_undecorated_signatures(context);
 
         let captured_variables = captured_variables
@@ -908,7 +922,7 @@ pub fn export_function_definitions(
                 .insert(
                     current_function.function_id.clone(),
                     FunctionDefinition {
-                        base: function_base_definition.to_owned(),
+                        base: function_base_definition.clone(),
                         undecorated_signatures,
                         captured_variables,
                         decorator_callees,
@@ -943,7 +957,7 @@ pub fn collect_function_base_definitions(
                 let module_id = module_ids.get_from_handle(handle);
                 let context = ModuleContext::create(handle.clone(), transaction, module_ids);
                 let base_definitions_for_module = slow_function_monitor.monitor_function(
-                    || export_all_functions(&context),
+                    || export_all_functions(&context.answers_context),
                     format!(
                         "Indexing function definitions for {}",
                         handle.module().as_str(),
