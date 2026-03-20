@@ -201,6 +201,7 @@ pub struct TelemetryExternalReferencesStats {
     pub find_repo_ms: Option<Duration>,
     pub angle_query_ms: Option<Duration>,
     pub cas_init_error: Option<String>,
+    pub resolve_locations_ms: Option<Duration>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
