@@ -654,10 +654,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             Callable::list(ParamList::new(def.params.clone()), ret)
         };
-        if let Some(cls) = &def.defining_cls
-            && stmt.name.id == dunder::INIT
-        {
-            self.validate_init_self_annotation(cls.name(), &callable, def.id_range(), errors);
+        if let Some(cls) = &def.defining_cls {
+            if stmt.name.id == dunder::INIT {
+                self.validate_init_self_annotation(cls.name(), &callable, def.id_range(), errors);
+            } else if is_dunder_new {
+                self.validate_new_cls_annotation(cls, &callable, def.id_range(), errors);
+            }
         }
         // Extend tparams with any implicit jaxtyping dimension TypeVars found
         // in the signature, and detect mixing of native and jaxtyping syntax.
@@ -2084,6 +2086,53 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         pluralize(class_scoped_tvars.len(), "type parameter")
                     )],
                 );
+            }
+        }
+    }
+
+    /// Validate the cls annotation on `__new__`.
+    /// The cls type must be `type[X]` where `X` is the defining class or a superclass of it.
+    fn validate_new_cls_annotation(
+        &self,
+        cls: &Class,
+        callable: &Callable,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) {
+        if let Params::List(param_list) = &callable.params
+            && let Some(Param::Pos(_, cls_ty, _)) = param_list.items().first()
+        {
+            let cls_name = cls.name();
+            match cls_ty {
+                Type::Type(box Type::ClassType(inner_cls)) => {
+                    if inner_cls.name() != cls_name
+                        && !self
+                            .type_order()
+                            .has_superclass(cls, inner_cls.class_object())
+                    {
+                        errors.add(
+                            range,
+                            ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                            vec1![format!(
+                                "`__new__` method cls type `{}` is not a superclass of class `{cls_name}`",
+                                self.for_display(cls_ty.clone()),
+                            )],
+                        );
+                    }
+                }
+                // allow Any, type[Any], type[Self] and type[TypeVar]
+                Type::Type(box Type::SelfType(_) | box Type::Quantified(_) | box Type::Any(_))
+                | Type::Any(_) => {}
+                _ => {
+                    errors.add(
+                        range,
+                        ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                        vec1![format!(
+                            "`__new__` method cls type `{}` is not a valid `type[...]` annotation",
+                            self.for_display(cls_ty.clone()),
+                        )],
+                    );
+                }
             }
         }
     }
