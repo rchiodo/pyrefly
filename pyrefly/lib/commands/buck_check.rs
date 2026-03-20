@@ -83,12 +83,11 @@ fn compute_errors(sys_info: SysInfo, sourcedb: impl SourceDatabase + 'static) ->
     // Modifications to make it more like Pyre.
     // Should probably figure out how to move these into PACKAGE files, or put them in Pyrefly.toml.
     config.root.permissive_ignores = Some(true);
-    // CheckAndInferReturnAny equivalent: check bodies but don't infer return types.
-    config.root.check_unannotated_defs = Some(true);
-    config.root.infer_return_types = Some(InferReturnTypes::Never);
+    config.root.check_unannotated_defs = Some(false);
+    config.root.infer_return_types = Some(InferReturnTypes::Annotated);
     let mut error_config = ErrorDisplayConfig::default();
     error_config.set_error_severity(ErrorKind::Deprecated, Severity::Ignore);
-    error_config.set_error_severity(ErrorKind::UnusedIgnore, Severity::Error);
+    error_config.set_error_severity(ErrorKind::UnusedIgnore, Severity::Info);
     config.root.errors = Some(error_config);
 
     config.configure();
