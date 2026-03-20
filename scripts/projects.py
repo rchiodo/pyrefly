@@ -561,7 +561,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} parso",
             expected_mypy_success=True,
             cost={"pyright": 75},
-            skip_determinism_check=True,
         ),
         Project(
             location="https://github.com/konradhalas/dacite",
