@@ -358,7 +358,7 @@ def f():
 
 def g():
     x: dict[int, int] = {}
-    x.update(a=1) # E: No matching overload
+    x.update(a=1) # E: `dict[int, int]` is not assignable to parameter `self` with type `SupportsGetItem[str, int]`
 "#,
 );
 

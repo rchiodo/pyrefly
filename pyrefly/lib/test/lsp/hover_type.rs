@@ -443,10 +443,7 @@ Hover Result: `(a: int, b: bool) -> str`
 
 15 | overloaded_func(False)
        ^
-Hover Result: `Overload[
-  (a: str) -> bool
-  (a: int, b: bool) -> str
-]`
+Hover Result: `(a: str) -> bool`
 "#
         .trim(),
         report.trim(),
@@ -488,10 +485,7 @@ Hover Result: `(self: Foo, a: int, b: bool) -> str`
 
 17 | foo.overloaded_meth(False)
              ^
-Hover Result: `Overload[
-  (self: Foo, a: str) -> bool
-  (self: Foo, a: int, b: bool) -> str
-]`
+Hover Result: `(self: Foo, a: str) -> bool`
 "#
         .trim(),
         report.trim(),

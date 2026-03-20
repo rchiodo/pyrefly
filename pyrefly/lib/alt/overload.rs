@@ -319,7 +319,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         break;
                     }
                 }
-                (closest_overload, matched)
+                (
+                    closest_overload,
+                    // If there was only one overload with the right arity, it definitely matched.
+                    matched || arity_compatible_overloads.len() == 1,
+                )
             }
         };
 
@@ -364,6 +368,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     msg,
                 );
             }
+            errors.extend(closest_overload.call_errors);
             (closest_overload.res, closest_overload.func.1.signature)
         } else {
             // Build a string showing the argument types for error messages
