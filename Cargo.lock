@@ -3559,6 +3559,7 @@ dependencies = [
  "lsp-server",
  "serde",
  "serde_json",
+ "serde_repr",
 ]
 
 [[package]]
