@@ -517,8 +517,14 @@ impl Solver {
                 let ty = match &mut *e {
                     Variable::Quantified {
                         quantified: q,
-                        lower_bounds: _,
-                    } => q.as_gradual_type(),
+                        lower_bounds,
+                    } => {
+                        if lower_bounds.is_empty() {
+                            q.as_gradual_type()
+                        } else {
+                            self.solve_lower_bounds(mem::take(lower_bounds))
+                        }
+                    }
                     Variable::PartialQuantified(q) => q.as_gradual_type(),
                     Variable::Unwrap(lower_bounds) if !lower_bounds.is_empty() => {
                         self.solve_lower_bounds(mem::take(lower_bounds))
