@@ -887,7 +887,7 @@ impl Solver {
         }
     }
 
-    /// Add a lower bound to the variable if it is a Quantified
+    /// Add a lower bound to the variable if it is a Quantified or Unwrap
     pub fn add_lower_bound(
         &self,
         v: Var,
@@ -901,7 +901,8 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 lower_bounds,
-            } => {
+            }
+            | Variable::Unwrap(lower_bounds) => {
                 if let Some(first) = lower_bounds.first() {
                     first_bound = Some(first.clone());
                 }
@@ -934,7 +935,8 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 lower_bounds,
-            } => {
+            }
+            | Variable::Unwrap(lower_bounds) => {
                 if let Some(new_first) = new_first_bound
                     && let Some(old_first) = lower_bounds.first_mut()
                 {
@@ -2060,12 +2062,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Unwrap(_) => {
                         drop(v2_ref);
-                        match &mut *variables.get_mut(*v2) {
-                            Variable::Unwrap(lower_bounds) => {
-                                lower_bounds.push(t1.clone());
-                            }
-                            _ => {}
-                        }
+                        drop(variables);
+                        self.solver
+                            .add_lower_bound(*v2, t1.clone(), &mut |got, want| {
+                                self.is_subset_eq(got, want).is_ok()
+                            });
                         Ok(())
                     }
                     Variable::Recursive => {
