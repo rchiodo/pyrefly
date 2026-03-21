@@ -5530,12 +5530,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .collect();
                 Type::ParamSpecValue(ParamList::new(elts))
             }
-            // Special case: integer literals in type argument context with native tensor shapes
-            // These can be used for Dim-bounded parameters (e.g., LinearLayer[6, 9])
-            // We convert them directly to Type::Size to distinguish from Literal[6]
+            // Special case: integer literals in type argument or TypeVar default context with
+            // native tensor shapes. These can be used for Dim-bounded parameters
+            // (e.g., LinearLayer[6, 9]) or TypeVar defaults (e.g., class Conv2d[..., S = 1]).
+            // We convert them directly to Type::Size to distinguish from Literal[6].
             Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. })
-                if matches!(type_form_context, TypeFormContext::TypeArgument)
-                    && self.solver().tensor_shapes =>
+                if matches!(
+                    type_form_context,
+                    TypeFormContext::TypeArgument | TypeFormContext::TypeVarDefault
+                ) && self.solver().tensor_shapes =>
             {
                 match value {
                     ruff_python_ast::Number::Int(i) => {

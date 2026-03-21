@@ -18,6 +18,7 @@ use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
+use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::types::BoundMethod;
 use pyrefly_types::types::TParams;
@@ -847,18 +848,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let self_type = std::mem::take(self_type);
         let (ty, mut required, is_unannotated) = match self.bindings().get_function_param(name) {
             FunctionParameter::Annotated(idx) => {
-                // If the parameter is annotated, we check the default value against the annotation
                 let param_ty = self.get_idx(*idx).annotation.get_type().clone();
-                let required = self.get_requiredness(
-                    default,
-                    Some((&param_ty, &|| {
-                        TypeCheckContext::of_kind(TypeCheckKind::FunctionParameterDefault(
-                            name.id.clone(),
-                        ))
-                    })),
-                    stub_or_impl,
-                    errors,
+                let make_context = || {
+                    TypeCheckContext::of_kind(TypeCheckKind::FunctionParameterDefault(
+                        name.id.clone(),
+                    ))
+                };
+                // When the parameter type is Dim[S] where S is a TypeVar with a
+                // Size(Literal(n)) default, and the default expression is the same
+                // integer literal n, skip the type check. At definition time S is
+                // unresolved so `int <: Dim[S]` would fail spuriously. At call time
+                // S will be bound from the explicit argument or the PEP 696 default.
+                let skip_check = matches!(
+                    (&param_ty, default),
+                    (
+                        Type::Dim(inner),
+                        Some(Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral {
+                            value: ruff_python_ast::Number::Int(i),
+                            ..
+                        }))
+                    ) if matches!(
+                        inner.as_ref(),
+                        Type::Quantified(q) if matches!(
+                            &q.default,
+                            Some(Type::Size(SizeExpr::Literal(n))) if i.as_i64() == Some(*n)
+                        )
+                    )
                 );
+                let check: Option<(&Type, &dyn Fn() -> TypeCheckContext)> = if skip_check {
+                    None
+                } else {
+                    Some((&param_ty, &make_context))
+                };
+                let required = self.get_requiredness(default, check, stub_or_impl, errors);
                 (param_ty, required, false)
             }
             FunctionParameter::Unannotated(_, _, _) => {

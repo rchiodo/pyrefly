@@ -413,13 +413,17 @@ impl Solver {
         )
     }
 
-    /// Finish the type returned from a function call. This entails expanding solved variables and
-    /// erasing unsolved variables without defaults from unions.
+    /// Finish the type returned from a function call. This entails expanding solved variables,
+    /// erasing unsolved variables without defaults from unions, and canonicalizing dimension
+    /// expressions so that all-literal SizeExpr trees fold to single literals.
     pub fn finish_function_return(&self, mut t: Type) -> Type {
         self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false);
         self.erase_unsolved_variables(&mut t);
         self.simplify_mut(&mut t);
-        t
+        // After variable expansion, dimension expressions may have all-literal operands
+        // (e.g., (64 + 2 - 3 - 1) // 2 + 1) that should fold to a single literal (32).
+        // Without this, Sequential chaining compounds symbolic expressions across layers.
+        self.simplify_forced_type(t)
     }
 
     /// Expand a type. All variables that have been bound will be replaced with non-Var types,
