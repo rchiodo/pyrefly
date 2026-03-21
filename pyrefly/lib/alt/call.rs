@@ -12,8 +12,10 @@ use dupe::Dupe;
 use pyrefly_python::dunder;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
+use pyrefly_types::tensor_ops_registry::TensorOpsRegistry;
 use pyrefly_types::typed_dict::TypedDictInner;
 use pyrefly_types::types::CalleeKind;
+use pyrefly_types::types::NNModuleType;
 use pyrefly_types::types::TArgs;
 use pyrefly_types::types::TParams;
 use pyrefly_types::types::Union;
@@ -26,6 +28,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
+use starlark_map::small_map::SmallMap;
 use vec1::Vec1;
 
 use crate::alt::answers::LookupAnswer;
@@ -34,6 +37,7 @@ use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::alt::callable::CallWithTypes;
 use crate::alt::class::class_field::DescriptorBase;
+use crate::alt::expr::TypeOrExpr;
 use crate::alt::nn_module_specials::is_nn_sequential;
 use crate::alt::unwrap::HintRef;
 use crate::binding::binding::Key;
@@ -367,6 +371,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     {
                         CallTargetLookup::Ok(Box::new(CallTarget::Any(AnyStyle::Implicit)))
                     }
+                    None => CallTargetLookup::Error(vec![]),
+                }
+            }
+            // NNModule instances delegate call dispatch to their underlying class.
+            // instance_as_dunder_call will find `forward` for nn.Module subclasses.
+            // We patch the BoundMethod's self object to be the NNModule type so
+            // that inject_module_attrs can detect NNModule and inject its fields.
+            Type::NNModule(module) => {
+                let nn_module_ty = Type::NNModule(module.clone());
+                let cls = module.class.clone();
+                let maybe_dunder_call = self.instance_as_dunder_call(&cls);
+                match maybe_dunder_call {
+                    Some(Type::BoundMethod(bm)) => {
+                        let patched = Type::BoundMethod(Box::new(BoundMethod {
+                            obj: nn_module_ty,
+                            ..*bm
+                        }));
+                        self.as_call_target_impl(patched, quantified)
+                    }
+                    Some(ty) => self.as_call_target_impl(ty, quantified),
                     None => CallTargetLookup::Error(vec![]),
                 }
             }
@@ -837,9 +861,68 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             let targ = ct.targs().as_slice()[0].clone();
             self.heap.mk_unbounded_tuple(targ)
+        } else if let Type::ClassType(ct) = result {
+            // Check for init capture: if the class has a registered init capture,
+            // extract constructor arg values and wrap in Type::NNModule.
+            self.maybe_wrap_nn_module(&ct.clone(), args, keywords, errors, Type::ClassType(ct))
         } else {
             result
         }
+    }
+
+    /// If the class has a registered init capture, extract constructor arg values
+    /// and wrap the result in `Type::NNModule`. Otherwise return the result as-is.
+    ///
+    /// This enables shape-aware module instance tracking: the NNModule carries
+    /// captured constructor args (e.g., kernel_size, stride) so DSL forward
+    /// functions can access them without requiring type params on the class.
+    fn maybe_wrap_nn_module(
+        &self,
+        ct: &ClassType,
+        args: &[CallArg],
+        keywords: &[CallKeyword],
+        errors: &ErrorCollector,
+        result: Type,
+    ) -> Type {
+        use std::sync::OnceLock;
+        static TENSOR_OPS_REGISTRY: OnceLock<TensorOpsRegistry> = OnceLock::new();
+
+        let class_name = format!("{}.{}", ct.class_object().module_name(), ct.name());
+        let registry = TENSOR_OPS_REGISTRY.get_or_init(TensorOpsRegistry::new);
+        let capture_names = match registry.get_init_capture(&class_name) {
+            Some(names) => names,
+            None => return result,
+        };
+
+        let infer_type_or_expr = |toe: TypeOrExpr, errors: &ErrorCollector| -> Type {
+            match toe {
+                TypeOrExpr::Type(ty, _) => ty.clone(),
+                TypeOrExpr::Expr(e) => self.expr_infer(e, errors),
+            }
+        };
+
+        let mut fields = SmallMap::new();
+        for (i, param_name) in capture_names.iter().enumerate() {
+            let name = Name::new(param_name);
+            // First check keyword args.
+            if let Some(kw) = keywords.iter().find(|k| {
+                k.arg
+                    .is_some_and(|id| id.id.as_str() == param_name.as_str())
+            }) {
+                fields.insert(name, infer_type_or_expr(kw.value, errors));
+            } else if i < args.len() {
+                // Map positional arg by index to the capture param name.
+                if let CallArg::Arg(toe) = &args[i] {
+                    fields.insert(name, infer_type_or_expr(*toe, errors));
+                }
+            }
+            // If neither keyword nor positional, the param uses its default.
+            // We leave it absent from the fields map; the forward DSL function
+            // will use its own default for that parameter.
+        }
+
+        self.heap
+            .mk_nn_module(NNModuleType::new(ct.clone(), fields))
     }
 
     fn construct_typed_dict(

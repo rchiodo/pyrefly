@@ -46,6 +46,7 @@ use crate::types::AnyStyle;
 use crate::types::BoundMethod;
 use crate::types::Forall;
 use crate::types::Forallable;
+use crate::types::NNModuleType;
 use crate::types::NeverStyle;
 use crate::types::Overload;
 use crate::types::SuperObj;
@@ -439,6 +440,11 @@ impl TypeHeap {
     /// Create a `Type::Tensor` from a TensorType.
     pub fn mk_tensor(&self, tensor: TensorType) -> Type {
         Type::Tensor(Box::new(tensor))
+    }
+
+    /// Create a `Type::NNModule` from an NNModuleType.
+    pub fn mk_nn_module(&self, module: NNModuleType) -> Type {
+        Type::NNModule(Box::new(module))
     }
 }
 

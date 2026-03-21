@@ -2137,6 +2137,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Use TensorInstance to preserve shape information through attribute lookup
                 acc.push(AttributeBase1::TensorInstance((*tensor).clone()))
             }
+            Type::NNModule(module) => {
+                // NNModule delegates attribute access to its underlying class
+                acc.push(AttributeBase1::ClassInstance(module.class.clone()))
+            }
             Type::Size(_) => {
                 // Dimension values behave like int for attribute access
                 acc.push(AttributeBase1::ClassInstance(self.stdlib.int().clone()))

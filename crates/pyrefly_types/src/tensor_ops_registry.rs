@@ -50,6 +50,13 @@ fn dsl_fn(
 /// are shared via `Arc` across all shape function instances.
 pub struct TensorOpsRegistry {
     functions: HashMap<String, Box<dyn MetaShapeFunction>>,
+    /// Maps qualified class names (e.g., "torch.nn.MaxPool2d") to the list of
+    /// __init__ parameter names to capture. When a class has an init capture
+    /// registered, `construct_class` builds a `Type::NNModule` instead of a
+    /// `Type::ClassType`, storing the captured arg values in the NNModule's
+    /// field map. This allows forward DSL functions to access constructor
+    /// parameters directly from the type.
+    init_captures: HashMap<String, Vec<String>>,
 }
 
 impl TensorOpsRegistry {
@@ -70,6 +77,7 @@ impl TensorOpsRegistry {
         );
         let mut registry = Self {
             functions: HashMap::new(),
+            init_captures: HashMap::new(),
         };
 
         // Shape manipulation
@@ -419,6 +427,35 @@ impl TensorOpsRegistry {
     /// Get a meta-shape function by name.
     pub fn get(&self, name: &str) -> Option<&dyn MetaShapeFunction> {
         self.functions.get(name).map(|b| b.as_ref())
+    }
+
+    /// Register an nn.Module: both the forward DSL function and the list of
+    /// __init__ parameter names to capture in the NNModule type.
+    ///
+    /// `class_name` is the qualified class name (e.g., `"torch.nn.MaxPool2d"`).
+    /// This registers the forward function under `"{class_name}.forward"` and
+    /// the init captures under `"{class_name}"`.
+    pub(crate) fn register_init_forward(
+        &mut self,
+        fn_lookup: &Arc<HashMap<String, Arc<DslFnDef>>>,
+        class_name: &str,
+        dsl_fn_name: &str,
+        capture_params: &[&str],
+    ) {
+        self.functions.insert(
+            format!("{class_name}.forward"),
+            dsl_fn(fn_lookup, dsl_fn_name),
+        );
+        self.init_captures.insert(
+            class_name.to_owned(),
+            capture_params.iter().map(|s| (*s).to_owned()).collect(),
+        );
+    }
+
+    /// Look up init capture config for a qualified class name.
+    /// Returns the list of __init__ parameter names to capture.
+    pub fn get_init_capture(&self, class_name: &str) -> Option<&[String]> {
+        self.init_captures.get(class_name).map(|v| v.as_slice())
     }
 }
 

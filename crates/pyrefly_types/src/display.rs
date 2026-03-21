@@ -419,6 +419,10 @@ impl<'a> TypeDisplayContext<'a> {
                 }
             },
             Type::Tensor(tensor) => output.write_str(&format!("{}", tensor)),
+            Type::NNModule(module) => {
+                // Display as the class name (e.g., MaxPool2d)
+                self.fmt_helper_generic(&Type::ClassType(module.class.clone()), false, output)
+            }
             Type::Size(dim) => {
                 // Display dimension value directly without Literal wrapper
                 output.write_str(&format!("{}", dim))

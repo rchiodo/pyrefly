@@ -5176,6 +5176,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ty @ Type::Dim(_) => Some(ty),
             ty @ Type::Size(_) => Some(ty),
             ty @ Type::Tensor(_) => Some(ty),
+            ty @ Type::NNModule(_) => Some(ty),
             // Handle bare class definitions (e.g., Dim, Module) by canonicalizing them to type forms
             Type::ClassDef(cls) => {
                 let canonicalized =

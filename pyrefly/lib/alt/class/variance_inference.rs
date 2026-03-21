@@ -241,6 +241,12 @@ fn on_type(
                 }
             }
         }
+        Type::NNModule(module) => {
+            // NNModule fields are invariant
+            for (_, ty) in module.fields.iter() {
+                on_type(Variance::Invariant, inj, ty, on_edge, on_var);
+            }
+        }
         Type::Callable(t) => {
             // Walk return type covariantly
             on_type(variance, inj, &t.ret, on_edge, on_var);

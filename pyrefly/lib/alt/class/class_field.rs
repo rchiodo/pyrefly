@@ -1733,22 +1733,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.determine_read_only_reason(name, annotation.as_ref(), &metadata, field_definition);
 
         // Determine the final type, promoting literals when appropriate.
-        let mut has_implicit_literal = value_ty.is_implicit_literal();
-        if !has_implicit_literal && matches!(initialization, ClassFieldInitialization::Method) {
-            value_ty.universe(&mut |current_type_node| {
-                has_implicit_literal |= current_type_node.is_implicit_literal();
-            });
-        }
-        let ty = if annotation
-            .as_ref()
-            .and_then(|ann| ann.ty.as_ref())
-            .is_none()
-            && matches!(read_only_reason, None | Some(ReadOnlyReason::NamedTuple))
-            && has_implicit_literal
-        {
-            value_ty.promote_implicit_literals(self.stdlib)
-        } else {
+        // Skip literal promotion for NNModule types: their fields are captured
+        // constructor args that must preserve literal types for shape inference.
+        let ty = if matches!(value_ty, Type::NNModule(_)) {
             value_ty
+        } else {
+            let mut has_implicit_literal = value_ty.is_implicit_literal();
+            if !has_implicit_literal && matches!(initialization, ClassFieldInitialization::Method) {
+                value_ty.universe(&mut |current_type_node| {
+                    has_implicit_literal |= current_type_node.is_implicit_literal();
+                });
+            }
+            if annotation
+                .as_ref()
+                .and_then(|ann| ann.ty.as_ref())
+                .is_none()
+                && matches!(read_only_reason, None | Some(ReadOnlyReason::NamedTuple))
+                && has_implicit_literal
+            {
+                value_ty.promote_implicit_literals(self.stdlib)
+            } else {
+                value_ty
+            }
         };
 
         // Identify whether this is a descriptor

@@ -1546,6 +1546,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 &tensor.base_class.clone().to_type(),
                 &Type::ClassType(cls.clone()),
             ),
+            // NNModule is subtype of its class
+            (Type::NNModule(module), Type::ClassType(cls)) => self.is_subset_eq(
+                &Type::ClassType(module.class.clone()),
+                &Type::ClassType(cls.clone()),
+            ),
+            // NNModule-to-NNModule: delegate to class subtyping
+            (Type::NNModule(got), Type::NNModule(want)) => self.is_subset_eq(
+                &Type::ClassType(got.class.clone()),
+                &Type::ClassType(want.class.clone()),
+            ),
             // Type::Dim is a subtype of int and float (numeric tower: Dim <: int <: float)
             // This allows Dim[N] values to be passed where int or float parameters are expected
             (Type::Dim(_), Type::ClassType(cls))

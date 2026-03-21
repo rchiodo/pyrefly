@@ -691,7 +691,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 || ErrorContext::UnaryOp(x.op.as_str().to_owned(), self.for_display(t.clone()));
             match t {
                 Type::Literal(lit) if let Some(ret) = f(&lit.value) => ret,
-                Type::ClassType(_) | Type::SelfType(_) | Type::Quantified(_) | Type::Tensor(_) => {
+                Type::ClassType(_)
+                | Type::SelfType(_)
+                | Type::Quantified(_)
+                | Type::Tensor(_)
+                | Type::NNModule(_) => {
                     self.call_method_or_error(t, method, x.range, &[], &[], errors, Some(&context))
                 }
                 Type::Literal(lit) if let Lit::Enum(lit_enum) = &lit.value => self
