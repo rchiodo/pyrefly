@@ -22,6 +22,14 @@ from typing import Any, overload, Self
 __all__ = ["Tensor"]
 
 # ============================================================================
+# Device Type
+# ============================================================================
+
+class device:
+    """Represents the device on which a Tensor is or will be allocated."""
+    def __init__(self, type: str, index: int = 0) -> None: ...
+
+# ============================================================================
 # Tensor Class
 # ============================================================================
 
@@ -93,6 +101,10 @@ class Tensor[*Shape]:
 
     # Power operations
     def __pow__(self, other: Tensor | float | int) -> Self: ...
+
+    # Unary operations
+    def __neg__(self) -> Self: ...
+    def __abs__(self) -> Self: ...
 
     # ==== Comparison Operations ====
     # Return boolean tensors with the same shape
@@ -169,6 +181,10 @@ class Tensor[*Shape]:
 
     def expand(self: Tensor, *sizes: int) -> Tensor:
         """Expand tensor. Shape inference via meta-shape: torch.Tensor.expand"""
+        ...
+
+    def expand_as[*S](self: Tensor, other: Tensor[*S]) -> Tensor[*S]:
+        """Expand tensor to match the shape of `other`."""
         ...
 
     def contiguous(self) -> Self:
@@ -1225,7 +1241,9 @@ def arange(
     """Create 1D tensor with range [start, end) with step. Shape inference via meta-shape: torch.arange"""
     ...
 
-def linspace(start: float, end: float, steps: int) -> Tensor:
+def linspace(
+    start: float, end: float, steps: int, *, dtype: Any = None, device: Any = None
+) -> Tensor:
     """Create 1D tensor with linearly spaced values. Shape inference via meta-shape: torch.linspace"""
     ...
 
@@ -1564,6 +1582,10 @@ def sqrt[*Shape](input: Tensor[*Shape]) -> Tensor[*Shape]:
 
 def tanh[*Shape](input: Tensor[*Shape]) -> Tensor[*Shape]:
     """Element-wise hyperbolic tangent. Shape inference via generic fixture signature."""
+    ...
+
+def sigmoid[*Shape](input: Tensor[*Shape]) -> Tensor[*Shape]:
+    """Element-wise sigmoid. Shape inference via generic fixture signature."""
     ...
 
 # Comparison operations
@@ -2050,3 +2072,11 @@ class no_grad:
     def __enter__(self) -> None: ...
     def __exit__(self, exc_type, exc_value, traceback) -> None: ...
     def __call__(self, func) -> Any: ...  # For decorator usage
+
+def meshgrid(*tensors: Tensor, indexing: str = "ij") -> tuple[Tensor, ...]:
+    """Create coordinate grids from 1D input tensors.
+
+    For N input tensors, returns N tensors each with N dimensions.
+    Shape inference depends on input tensor shapes; returns shapeless tuple.
+    """
+    ...

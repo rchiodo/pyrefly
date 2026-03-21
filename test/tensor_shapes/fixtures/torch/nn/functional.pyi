@@ -828,3 +828,13 @@ def scaled_dot_product_attention[
 ) -> Tensor[B, H, Tq, Dv]:
     """Scaled dot product attention. Shape inference via meta-shape: torch.nn.functional.scaled_dot_product_attention"""
     ...
+
+def grid_sample[B, C, Hout, Wout](
+    input: Tensor[B, C, ...],
+    grid: Tensor[B, Hout, Wout, 2],
+    mode: str = "bilinear",
+    padding_mode: str = "zeros",
+    align_corners: bool | None = None,
+) -> Tensor[B, C, Hout, Wout]:
+    """Sample input using grid of coordinates. Output spatial dims match grid."""
+    ...
