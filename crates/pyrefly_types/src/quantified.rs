@@ -282,7 +282,7 @@ impl Quantified {
         matches!(self.kind, QuantifiedKind::TypeVarTuple)
     }
 
-    fn as_gradual_type_helper(kind: QuantifiedKind, default: Option<&Type>) -> Type {
+    pub fn as_gradual_type_helper(kind: QuantifiedKind, default: Option<&Type>) -> Type {
         default.map_or_else(
             || kind.empty_value(),
             |default| {

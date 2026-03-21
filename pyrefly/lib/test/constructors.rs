@@ -178,15 +178,66 @@ assert_type(x, int)
 );
 
 testcase!(
-    bug = "Generic metaclasses are not allowed, should error on `C` classdef.",
     test_metaclass_invalid_generic,
     r#"
 from typing import Any, assert_type
 class Meta[T](type):
     def __call__(cls, x: T): ...
-class C[T](metaclass=Meta[T]): # TODO: error here (or possibly on Meta classdef)
+class C[T](metaclass=Meta[T]): # E: Metaclass may not be an unbound generic
     pass
 assert_type(C(), C[Any]) # Correct, because invalid metaclass.
+    "#,
+);
+
+testcase!(
+    test_metaclass_invalid_generic_legacy_typevar,
+    r#"
+from typing import Any, Generic, TypeVar, assert_type
+T = TypeVar("T")
+class Meta(type, Generic[T]):
+    foo: T
+class C(metaclass=Meta[T]): # E: Metaclass may not be an unbound generic
+    pass
+    "#,
+);
+
+testcase!(
+    test_metaclass_invalid_generic_legacy_typevar_with_default,
+    r#"
+from typing import Any, Generic, TypeVar, assert_type
+T = TypeVar("T", default=int)
+class Meta(type, Generic[T]):
+    foo: T
+class C(metaclass=Meta[T]): # E: Metaclass may not be an unbound generic
+    pass
+# After gradualization, T (default=int) becomes int.
+assert_type(C.foo, int)
+    "#,
+);
+
+testcase!(
+    test_metaclass_invalid_generic_nested_targ,
+    r#"
+from typing import Any, assert_type
+class Meta[T](type):
+    foo: list[T]
+class C[T](metaclass=Meta[list[T]]): # E: Metaclass may not be an unbound generic
+    pass
+# After gradualization, Meta[list[T]] becomes Meta[list[Any]], so foo: list[list[Any]].
+assert_type(C.foo, list[list[Any]])
+    "#,
+);
+
+testcase!(
+    test_metaclass_invalid_generic_inherited,
+    r#"
+from typing import Any, assert_type
+class Meta[T](type):
+    foo: T
+class Base[T](metaclass=Meta[T]): # E: Metaclass may not be an unbound generic
+    pass
+class Child(Base[int]):
+    pass
     "#,
 );
 

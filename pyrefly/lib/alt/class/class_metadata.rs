@@ -14,6 +14,7 @@ use pyrefly_graph::index::Idx;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::annotation::Annotation;
+use pyrefly_types::quantified::Quantified;
 use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::type_var::Restriction;
 use pyrefly_types::typed_dict::ExtraItem;
@@ -163,20 +164,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .iter()
             .filter_map(|(b, metadata)| metadata.custom_metaclass().map(|m| (b.name(), m)))
             .collect::<Vec<_>>();
-        let calculated_metaclass = self.calculate_metaclass(
+        let mut calculated_metaclass = self.calculate_metaclass(
             cls,
             metaclasses.into_iter().next(),
             &base_metaclasses,
             errors,
         );
-        let metaclass = calculated_metaclass.get();
-        if let Some(metaclass) = &metaclass {
+        if let Some(metaclass) = calculated_metaclass.get() {
             self.check_base_class_metaclasses(cls, metaclass, &base_metaclasses, errors);
             if metaclass
                 .targs()
                 .as_slice()
                 .iter()
-                .any(|targ| targ.any(|ty| ty.is_raw_legacy_type_variable()))
+                .any(|targ| targ.contains_type_variable())
             {
                 self.error(
                     errors,
@@ -186,6 +186,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
             }
         }
+        // If the metaclass has unresolved type variables, replace them with their
+        // gradual types (e.g. Any) to avoid cascading errors from bare TypeVars.
+        // We do a targeted substitution inside each targ so that e.g. Meta[list[T]]
+        // becomes Meta[list[Any]] rather than Meta[Any].
+        if let Some(metaclass) = calculated_metaclass.get_mut() {
+            for targ in metaclass.targs_mut().as_mut().iter_mut() {
+                if targ.contains_type_variable() {
+                    targ.transform_mut(&mut |ty| match ty {
+                        Type::Quantified(q) => *ty = q.as_gradual_type(),
+                        Type::TypeVar(t) => {
+                            *ty = Quantified::as_gradual_type_helper(
+                                QuantifiedKind::TypeVar,
+                                t.default(),
+                            )
+                        }
+                        Type::TypeVarTuple(t) => {
+                            *ty = Quantified::as_gradual_type_helper(
+                                QuantifiedKind::TypeVarTuple,
+                                t.default(),
+                            )
+                        }
+                        Type::ParamSpec(p) => {
+                            *ty = Quantified::as_gradual_type_helper(
+                                QuantifiedKind::ParamSpec,
+                                p.default(),
+                            )
+                        }
+                        _ => {}
+                    });
+                }
+            }
+        }
+        let metaclass = calculated_metaclass.get();
 
         let mut directly_inherits_model = false;
         let mut inherited_django_metadata: Option<&DjangoModelMetadata> = None;
