@@ -59,6 +59,7 @@ use crate::config::error_kind::Severity;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::Error;
 use crate::error::error::print_error_counts;
+use crate::error::legacy::LegacyError;
 use crate::error::legacy::LegacyErrors;
 use crate::error::legacy::severity_to_str;
 use crate::error::summarize::print_error_summary;
@@ -72,6 +73,27 @@ use crate::state::require::RequireLevels;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 use crate::state::subscriber::ProgressBarSubscriber;
+
+/// Result data from a non-watch check run, used for telemetry logging.
+pub struct CheckResult {
+    /// CLI-visible diagnostics in the legacy JSON format, suitable for serialization.
+    pub legacy_errors: Vec<LegacyError>,
+    /// Number of files (modules) that were checked.
+    pub checked_file_count: usize,
+}
+
+impl CheckResult {
+    /// Build a `CheckResult` from the raw error list.
+    fn from_errors(errors: &[Error], relative_to: &Path, checked_file_count: usize) -> Self {
+        Self {
+            legacy_errors: errors
+                .iter()
+                .map(|e| LegacyError::from_error(relative_to, e))
+                .collect(),
+            checked_file_count,
+        }
+    }
+}
 
 /// Check the given files.
 #[deny(clippy::missing_docs_in_private_items)]
@@ -99,11 +121,19 @@ impl FullCheckArgs {
     pub async fn run(
         self,
         wrapper: Option<ConfigConfigurerWrapper>,
-    ) -> anyhow::Result<CommandExitStatus> {
+    ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
         self.config_override.validate()?;
         let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
         run_check(self.args, self.watch, files_to_check, config_finder).await
     }
+}
+
+/// Resolve the `--relative-to` argument to a concrete path for error reporting.
+fn resolve_relative_to(relative_to: Option<&String>) -> PathBuf {
+    relative_to.map_or_else(
+        || std::env::current_dir().ok().unwrap_or_default(),
+        |x| PathBuf::from_str(x.as_str()).unwrap(),
+    )
 }
 
 async fn run_check(
@@ -111,7 +141,7 @@ async fn run_check(
     watch: bool,
     files_to_check: Box<dyn Includes>,
     config_finder: ConfigFinder,
-) -> anyhow::Result<CommandExitStatus> {
+) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
     if watch {
         let roots = files_to_check.roots();
         info!(
@@ -121,12 +151,10 @@ async fn run_check(
         let watcher = Watcher::notify(&roots)?;
         args.run_watch(watcher, files_to_check, config_finder)
             .await?;
-        Ok(CommandExitStatus::Success)
+        Ok((CommandExitStatus::Success, None))
     } else {
-        match args.run_once(files_to_check, config_finder) {
-            Ok((status, _)) => Ok(status),
-            Err(e) => Err(e),
-        }
+        let (status, _, check_result) = args.run_once(files_to_check, config_finder)?;
+        Ok((status, Some(check_result)))
     }
 }
 
@@ -183,7 +211,7 @@ impl SnippetCheckArgs {
     pub async fn run(
         self,
         wrapper: Option<ConfigConfigurerWrapper>,
-    ) -> anyhow::Result<CommandExitStatus> {
+    ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
         let (_, config_finder) =
             FilesArgs::get(vec![], self.config, self.config_override, wrapper)?;
         let check_args = CheckArgs {
@@ -195,10 +223,8 @@ impl SnippetCheckArgs {
                 remove_unused_ignores: false,
             },
         };
-        match check_args.run_once_with_snippet(self.code, config_finder) {
-            Ok((status, _)) => Ok(status),
-            Err(e) => Err(e),
-        }
+        let (status, check_result) = check_args.run_once_with_snippet(self.code, config_finder)?;
+        Ok((status, Some(check_result)))
     }
 }
 
@@ -636,11 +662,13 @@ impl Timings {
 }
 
 impl CheckArgs {
+    /// Run a one-shot type check. Returns the exit status, the CLI-visible errors,
+    /// and a `CheckResult` suitable for telemetry logging.
     pub fn run_once(
         mut self,
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
-    ) -> anyhow::Result<(CommandExitStatus, Vec<Error>)> {
+    ) -> anyhow::Result<(CommandExitStatus, Vec<Error>, CheckResult)> {
         let mut timings = Timings::new();
         let list_files_start = Instant::now();
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
@@ -651,7 +679,14 @@ impl CheckArgs {
             Timings::show(timings.list_files),
         );
         if expanded_file_list.is_empty() {
-            return Ok((CommandExitStatus::Success, Vec::new()));
+            return Ok((
+                CommandExitStatus::Success,
+                Vec::new(),
+                CheckResult {
+                    legacy_errors: Vec::new(),
+                    checked_file_count: 0,
+                },
+            ));
         }
 
         let holder = Forgetter::new(State::new(config_finder), true);
@@ -681,20 +716,24 @@ impl CheckArgs {
             }
         }
 
-        self.run_inner(
+        let checked_file_count = loaded_handles.len();
+        let relative_to = resolve_relative_to(self.output.relative_to.as_ref());
+        let (status, errors) = self.run_inner(
             timings,
             transaction.as_mut(),
             &loaded_handles,
             sourcedb_errors,
             require_levels.specified,
-        )
+        )?;
+        let check_result = CheckResult::from_errors(&errors, &relative_to, checked_file_count);
+        Ok((status, errors, check_result))
     }
 
     pub fn run_once_with_snippet(
         mut self,
         code: String,
         config_finder: ConfigFinder,
-    ) -> anyhow::Result<(CommandExitStatus, Vec<Error>)> {
+    ) -> anyhow::Result<(CommandExitStatus, CheckResult)> {
         // Create a virtual module path for the snippet
         let path = PathBuf::from_str("snippet")?;
         let module_path = ModulePath::memory(path);
@@ -732,13 +771,15 @@ impl CheckArgs {
             Some(Arc::new(FileContents::from_source(code))),
         )]);
 
-        self.run_inner(
+        let relative_to = resolve_relative_to(self.output.relative_to.as_ref());
+        let (status, errors) = self.run_inner(
             Timings::new(),
             transaction.as_mut(),
             &[handle],
             vec![],
             require_levels.specified,
-        )
+        )?;
+        Ok((status, CheckResult::from_errors(&errors, &relative_to, 1)))
     }
 
     pub async fn run_watch(

@@ -62,7 +62,8 @@ impl SuppressArgs {
                     .resolve(self.config_override.clone(), wrapper.clone())?;
 
                 let check_args = CheckArgs::parse_from(["check", "--output-format", "omit-errors"]);
-                let (_, errors) = check_args.run_once(files_to_check, config_finder)?;
+                let (_, errors, _check_result) =
+                    check_args.run_once(files_to_check, config_finder)?;
 
                 // Convert to SerializedErrors, filtering for UnusedIgnore only
                 errors
@@ -93,7 +94,8 @@ impl SuppressArgs {
                     .resolve(self.config_override.clone(), wrapper)?;
 
                 let check_args = CheckArgs::parse_from(["check", "--output-format", "omit-errors"]);
-                let (_, errors) = check_args.run_once(files_to_check, config_finder)?;
+                let (_, errors, _check_result) =
+                    check_args.run_once(files_to_check, config_finder)?;
 
                 // Convert to SerializedErrors for all user-visible errors,
                 // excluding directives (e.g. reveal_type) and UnusedIgnore

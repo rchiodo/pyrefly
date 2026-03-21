@@ -139,7 +139,7 @@ impl InitArgs {
         if let Err(e) = &res {
             error!("Failed to run pyrefly check: {}", e);
         }
-        res
+        res.map(|(status, errors, _check_result)| (status, errors))
     }
 
     fn prompt_error_suppression(

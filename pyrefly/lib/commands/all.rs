@@ -11,6 +11,7 @@ use clap::Subcommand;
 use pyrefly_util::telemetry::Telemetry;
 
 use crate::commands::buck_check::BuckCheckArgs;
+use crate::commands::check::CheckResult;
 use crate::commands::check::FullCheckArgs;
 use crate::commands::check::SnippetCheckArgs;
 use crate::commands::config_finder::ConfigConfigurerWrapper;
@@ -66,25 +67,28 @@ impl Command {
         version: &str,
         telemetry: &impl Telemetry,
         config_configurer_wrapper: Option<ConfigConfigurerWrapper>,
-    ) -> anyhow::Result<CommandExitStatus> {
+    ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
         match self {
             Command::Check(args) => args.run(config_configurer_wrapper).await,
             Command::Snippet(args) => args.run(config_configurer_wrapper).await,
-            Command::BuckCheck(args) => args.run(),
-            Command::Lsp(args) => args.run(
-                version,
+            Command::BuckCheck(args) => Ok((args.run()?, None)),
+            Command::Lsp(args) => Ok((
+                args.run(
+                    version,
+                    None,
+                    telemetry,
+                    Arc::new(NoExternalProvider),
+                    config_configurer_wrapper,
+                )?,
                 None,
-                telemetry,
-                Arc::new(NoExternalProvider),
-                config_configurer_wrapper,
-            ),
-            Command::Tsp(args) => args.run(telemetry, config_configurer_wrapper),
-            Command::Init(args) => args.run(config_configurer_wrapper.clone()),
-            Command::Infer(args) => args.run(config_configurer_wrapper),
-            Command::DumpConfig(args) => args.run(config_configurer_wrapper),
-            Command::Report(args) => args.run(config_configurer_wrapper),
-            Command::Suppress(args) => args.run(config_configurer_wrapper),
-            Command::Stubgen(args) => args.run(config_configurer_wrapper),
+            )),
+            Command::Tsp(args) => Ok((args.run(telemetry, config_configurer_wrapper)?, None)),
+            Command::Init(args) => Ok((args.run(config_configurer_wrapper.clone())?, None)),
+            Command::Infer(args) => Ok((args.run(config_configurer_wrapper)?, None)),
+            Command::DumpConfig(args) => Ok((args.run(config_configurer_wrapper)?, None)),
+            Command::Report(args) => Ok((args.run(config_configurer_wrapper)?, None)),
+            Command::Suppress(args) => Ok((args.run(config_configurer_wrapper)?, None)),
+            Command::Stubgen(args) => Ok((args.run(config_configurer_wrapper)?, None)),
         }
     }
 }
