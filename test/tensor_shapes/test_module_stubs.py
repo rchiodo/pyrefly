@@ -219,31 +219,47 @@ def test_identity():
 
 
 def test_conv1d():
+    # S, P, D bound from constructor args via _Dim[T]
     conv = nn.Conv1d(16, 32, kernel_size=3, padding=1)
     x: Tensor[4, 16, 100] = torch.randn(4, 16, 100)
     y = conv(x)
+    # (100 + 2*1 - 1*(3-1) - 1) // 1 + 1 = 100
     assert_type(y, Tensor[4, 32, 100])
 
 
+def test_conv2d_default_stride():
+    # S, P, D bound from defaults (S=1, P=0, D=1)
+    conv = nn.Conv2d(3, 64, kernel_size=3)
+    x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
+    y = conv(x)
+    # (32 + 0 - 1*(3-1) - 1) // 1 + 1 = 30
+    assert_type(y, Tensor[4, 64, 30, 30])
+
+
 def test_conv2d_padding():
+    # S, P, D bound from constructor args via _Dim[T]
     conv = nn.Conv2d(3, 64, kernel_size=3, padding=1)
     x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
     y = conv(x)
+    # (32 + 2*1 - 1*(3-1) - 1) // 1 + 1 = 32
     assert_type(y, Tensor[4, 64, 32, 32])
 
 
-def test_conv2d_default_stride():
-    """Conv2d with default stride=1 (PEP 696 default)."""
-    conv = nn.Conv2d(3, 16, kernel_size=5)
-    x: Tensor[4, 3, 28, 28] = torch.randn(4, 3, 28, 28)
+def test_conv2d_stride():
+    # S, P, D bound from constructor args via _Dim[T]
+    conv = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1)
+    x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
     y = conv(x)
-    assert_type(y, Tensor[4, 16, 24, 24])
+    # (32 + 2*1 - 1*(3-1) - 1) // 2 + 1 = 16
+    assert_type(y, Tensor[4, 128, 16, 16])
 
 
 def test_conv_transpose2d():
+    # S, P, D bound from constructor args via _Dim[T]
     conv = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
     x: Tensor[4, 128, 16, 16] = torch.randn(4, 128, 16, 16)
     y = conv(x)
+    # (16-1)*2 - 2*1 + 1*(4-1) + 0 + 1 = 32
     assert_type(y, Tensor[4, 64, 32, 32])
 
 
@@ -373,6 +389,29 @@ def test_cross():
 
 
 # ============================================================================
+# Sequential Module (shape-aware chaining)
+# ============================================================================
+
+
+def test_sequential_chain():
+    seq = nn.Sequential(
+        nn.Conv2d(3, 64, kernel_size=3, padding=1),
+        nn.BatchNorm2d(64),
+        nn.ReLU(),
+    )
+    x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
+    y = seq(x)
+    assert_type(y, Tensor[4, 64, 32, 32])
+
+
+def test_sequential_single_module():
+    seq = nn.Sequential(nn.Linear(256, 512))
+    x: Tensor[4, 256] = torch.randn(4, 256)
+    y = seq(x)
+    assert_type(y, Tensor[4, 512])
+
+
+# ============================================================================
 # Flatten / Unflatten
 # ============================================================================
 
@@ -385,7 +424,6 @@ def test_flatten_module():
 
 
 def test_flatten_module_custom_dims():
-    """Flatten with custom start_dim and end_dim."""
     m = nn.Flatten(0, 1)
     x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
     y = m(x)
@@ -393,47 +431,23 @@ def test_flatten_module_custom_dims():
 
 
 def test_flatten_in_sequential():
-    """Flatten module works in Sequential chain."""
-    seq = nn.Sequential(nn.Flatten(), nn.Linear(3072, 10))
-    x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
+    seq = nn.Sequential(
+        nn.AdaptiveAvgPool2d((1, 1)),
+        nn.Flatten(),
+    )
+    x: Tensor[4, 64, 8, 8] = torch.randn(4, 64, 8, 8)
     y = seq(x)
-    assert_type(y, Tensor[4, 10])
+    assert_type(y, Tensor[4, 64])
 
 
 # ============================================================================
-# Module as Callable
+# nn.Module as Callable
 # ============================================================================
 
 
 def test_module_as_callable():
-    """nn.Module instances are subtypes of Callable matching their forward signature."""
-    relu = nn.ReLU()
-    # nn.Module subclasses: __call__ delegates to forward
-    f: Callable[[Tensor[4, 8]], Tensor[4, 8]] = relu
-    y = f(torch.randn(4, 8))
-    assert_type(y, Tensor[4, 8])
-
-
-# ============================================================================
-# Sequential chain
-# ============================================================================
-
-
-def test_sequential_chain():
-    """nn.Sequential chains input through each module, preserving shapes."""
-    linear1 = nn.Linear(784, 256)
-    relu = nn.ReLU()
-    linear2 = nn.Linear(256, 10)
-
-    seq = nn.Sequential(linear1, relu, linear2)
-    x: Tensor[32, 784] = torch.randn(32, 784)
-    y = seq(x)
-    assert_type(y, Tensor[32, 10])
-
-
-def test_sequential_single_module():
-    """nn.Sequential with a single module."""
-    seq = nn.Sequential(nn.Linear(10, 5))
-    x: Tensor[4, 10] = torch.randn(4, 10)
-    y = seq(x)
-    assert_type(y, Tensor[4, 5])
+    """nn.Module instance is a subtype of Callable matching its forward."""
+    m: Callable[[Tensor[4, 256]], Tensor[4, 512]] = nn.Linear(256, 512)
+    x: Tensor[4, 256] = torch.randn(4, 256)
+    y = m(x)
+    assert_type(y, Tensor[4, 512])
