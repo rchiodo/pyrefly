@@ -855,7 +855,6 @@ impl CheckArgs {
             || self.output.debug_info.is_some()
             || self.output.report_trace.is_some()
             || self.output.report_glean.is_some()
-            || self.output.report_pysa.is_some()
             || self.output.report_cinderx.is_some();
         RequireLevels {
             specified: if retain {
@@ -865,7 +864,10 @@ impl CheckArgs {
             },
             default: if retain {
                 Require::Everything
-            } else if self.behavior.check_all || stdlib_search_path().is_some() {
+            } else if self.behavior.check_all
+                || stdlib_search_path().is_some()
+                || self.output.report_pysa.is_some()
+            {
                 Require::Errors
             } else {
                 Require::Exports
@@ -882,6 +884,11 @@ impl CheckArgs {
         require: Require,
     ) -> anyhow::Result<(CommandExitStatus, Vec<Error>)> {
         let mut memory_trace = MemoryUsageTrace::start(Duration::from_secs_f32(0.1));
+
+        if let Some(pysa_directory) = &self.output.report_pysa {
+            let reporter = report::pysa::PysaReporter::new(pysa_directory, handles)?;
+            transaction.set_pysa_reporter(Some(reporter));
+        }
 
         let type_check_start = Instant::now();
         let show_progress_bar =
@@ -1101,8 +1108,8 @@ impl CheckArgs {
                 )?;
             }
         }
-        if let Some(pysa_directory) = &self.output.report_pysa {
-            report::pysa::write_results(pysa_directory, transaction, handles, &output_errors)?;
+        if let Some(pysa_reporter) = transaction.take_pysa_reporter() {
+            report::pysa::write_project_file(&pysa_reporter, transaction, handles, &output_errors)?;
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
             report::cinderx::write_results(cinderx_directory, transaction)?;

@@ -5,8 +5,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-use std::collections::HashMap;
+use std::sync::atomic::AtomicU32;
+use std::sync::atomic::Ordering;
 
+use dashmap::DashMap;
 use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
@@ -51,13 +53,24 @@ impl ModuleKey {
     }
 }
 
-pub struct ModuleIds(HashMap<ModuleKey, ModuleId>);
+/// Thread-safe map from `ModuleKey` to `ModuleId`.
+///
+/// Project handles are pre-assigned deterministic IDs in sorted order.
+/// Dependency modules discovered during type checking get IDs assigned
+/// lazily on first access via `get_or_insert`.
+pub struct ModuleIds {
+    map: DashMap<ModuleKey, ModuleId>,
+    next_id: AtomicU32,
+}
 
 impl ModuleIds {
-    /// Multiple python files can map to the same module name (e.g, `foo.bar`).
-    /// This creates a unique and deterministic identifier for each handle.
+    /// Pre-assign deterministic IDs for project handles in sorted order.
+    /// Dependency modules discovered later get IDs via `get_or_insert`.
     pub fn new(handles: &[Handle]) -> ModuleIds {
-        let step = StepLogger::start("Building unique module ids", "Built unique module ids");
+        let step = StepLogger::start(
+            "Building unique module ids",
+            format!("Built unique module ids for {} modules", handles.len()).as_str(),
+        );
 
         let mut modules = handles
             .iter()
@@ -65,57 +78,40 @@ impl ModuleIds {
             .collect::<Vec<_>>();
         modules.sort();
 
-        let mut result = HashMap::new();
-        let mut current_id = 1;
+        let map = DashMap::new();
+        let mut current_id = 1u32;
         for module in modules {
             assert!(
-                result.insert(module, ModuleId(current_id)).is_none(),
+                map.insert(module, ModuleId(current_id)).is_none(),
                 "Found multiple handles with the same module name and path"
             );
             current_id += 1;
         }
 
         step.finish();
-        ModuleIds(result)
+        ModuleIds {
+            map,
+            next_id: AtomicU32::new(current_id),
+        }
     }
 
-    pub fn get_opt(&self, key: &ModuleKey) -> Option<ModuleId> {
-        self.0.get(key).copied()
+    /// Get or lazily assign a `ModuleId` for the given key.
+    fn get_or_insert(&self, key: ModuleKey) -> ModuleId {
+        *self
+            .map
+            .entry(key)
+            .or_insert_with(|| {
+                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                ModuleId(id)
+            })
+            .value()
     }
 
     pub fn get_from_handle(&self, handle: &Handle) -> ModuleId {
-        let key = ModuleKey::from_handle(handle);
-        self.get_opt(&key).unwrap_or_else(|| {
-            panic!(
-                "ModuleIds missing entry for handle module={}, path={:?} — was the module indexed?",
-                handle.module(),
-                handle.path().details(),
-            )
-        })
+        self.get_or_insert(ModuleKey::from_handle(handle))
     }
 
     pub fn get_from_module(&self, module: &Module) -> ModuleId {
-        let key = ModuleKey::from_module(module);
-        self.get_opt(&key).unwrap_or_else(|| {
-            panic!(
-                "ModuleIds missing entry for module={}, path={:?} — was the module indexed?",
-                module.name(),
-                module.path().details(),
-            )
-        })
-    }
-
-    /// Returns the ModuleId for the given handle, or None if the handle is not indexed.
-    /// Use this for handles from LSP functions that may lazy-load modules not present
-    /// when ModuleIds was built.
-    pub fn get_from_handle_opt(&self, handle: &Handle) -> Option<ModuleId> {
-        self.get_opt(&ModuleKey::from_handle(handle))
-    }
-
-    /// Returns the ModuleId for the given module, or None if the module is not indexed.
-    /// Use this for modules from LSP functions that may lazy-load modules not present
-    /// when ModuleIds was built.
-    pub fn get_from_module_opt(&self, module: &Module) -> Option<ModuleId> {
-        self.get_opt(&ModuleKey::from_module(module))
+        self.get_or_insert(ModuleKey::from_module(module))
     }
 }

@@ -126,6 +126,7 @@ use crate::state::module::ModuleStateReader;
 use crate::state::require::Require;
 use crate::state::require::RequireLevels;
 use crate::state::steps::Context;
+use crate::state::steps::PysaContext;
 use crate::state::steps::Step;
 use crate::state::steps::StepsMut;
 use crate::state::subscriber::Subscriber;
@@ -507,6 +508,8 @@ pub(crate) struct TransactionData<'a> {
     dirty: Mutex<SmallSet<ArcId<ModuleDataMut>>>,
     /// Thing to tell about each action.
     subscriber: Option<Box<dyn Subscriber + 'a>>,
+    /// When set, pysa reporting is done during answer solving and before memory eviction.
+    pysa_reporter: Option<Box<crate::report::pysa::PysaReporter>>,
 }
 
 impl<'a> TransactionData<'a> {
@@ -566,6 +569,16 @@ impl<'a> Transaction<'a> {
 
     pub fn set_subscriber(&mut self, subscriber: Option<Box<dyn Subscriber>>) {
         self.data.subscriber = subscriber;
+    }
+
+    /// Set the pysa reporter for inline extraction during type checking.
+    pub fn set_pysa_reporter(&mut self, reporter: Option<Box<crate::report::pysa::PysaReporter>>) {
+        self.data.pysa_reporter = reporter;
+    }
+
+    /// Take the pysa reporter out of the transaction, consuming ownership.
+    pub fn take_pysa_reporter(&mut self) -> Option<Box<crate::report::pysa::PysaReporter>> {
+        self.data.pysa_reporter.take()
     }
 
     /// Mark this transaction as freshly created (not restored from saved state).
@@ -1108,6 +1121,15 @@ impl<'a> Transaction<'a> {
             let require = guard.require();
             let stdlib = self.get_stdlib(&module_data.handle);
             let config = module_data.config.read();
+            let pysa_context = self
+                .data
+                .pysa_reporter
+                .as_ref()
+                .map(|reporter| PysaContext {
+                    handle: &module_data.handle,
+                    module_ids: &reporter.module_ids,
+                    stdlib: stdlib.dupe(),
+                });
             let ctx = Context {
                 require,
                 module: module_data.handle.module(),
@@ -1126,6 +1148,7 @@ impl<'a> Transaction<'a> {
                 strict_callable_subtyping: config
                     .strict_callable_subtyping(module_data.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
+                pysa_context,
             };
 
             // Compute the step. This stores the result and advances current_step,
@@ -1133,6 +1156,7 @@ impl<'a> Transaction<'a> {
             // Post-compute work (diffing, invalidation, eviction) runs without
             // the flag held.
             let post = guard.compute(&ctx);
+
             let mut load_result = None;
             // Compute which exports changed for fine-grained invalidation.
             // All diffing is done at the Solutions step, using old data
@@ -1174,11 +1198,17 @@ impl<'a> Transaction<'a> {
                     changed
                 );
             }
-            if todo == Step::Answers && !require.keep_ast() {
+            if todo == Step::Answers && !require.keep_ast() && self.data.pysa_reporter.is_none() {
                 // We have captured the Ast, and must have already built Exports (we do it serially),
                 // so won't need the Ast again.
                 post.evict_ast();
             } else if todo == Step::Solutions {
+                if let Some(pysa_reporter) = self.data.pysa_reporter.as_ref() {
+                    pysa_reporter.report_module(&module_data.handle, self);
+                    // With pysa, we delayed AST eviction past Answers (needed for
+                    // report_module). Evict it now that report_module has completed.
+                    post.evict_ast();
+                }
                 if !require.keep_bindings() && !require.keep_answers() {
                     // From now on we can use the answers directly, so evict the bindings/answers.
                     post.evict_answers();
@@ -2023,6 +2053,7 @@ impl<'a> Transaction<'a> {
                 strict_callable_subtyping: config
                     .strict_callable_subtyping(m.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
+                pysa_context: None,
             };
             while let Some(step) = alt.next_step() {
                 let start = Instant::now();
@@ -2108,6 +2139,22 @@ impl<'a> Transaction<'a> {
     pub fn get_module_docstring_range(&self, handle: &Handle) -> Option<TextRange> {
         let module_data = self.get_module(handle);
         self.lookup_export(module_data).docstring_range()
+    }
+
+    /// Demand that a module reaches Solutions and return its PysaSolutions.
+    pub fn resolve_pysa_solutions(
+        &self,
+        handle: &Handle,
+    ) -> Arc<crate::report::pysa::PysaSolutions> {
+        let module_data = self.get_module(&handle);
+        self.demand(module_data, Step::last());
+        module_data
+            .state
+            .get_solutions()
+            .expect("solutions must exist after demand")
+            .pysa_solutions()
+            .expect("pysa_solutions must exist when pysa reporting is enabled")
+            .clone()
     }
 }
 
@@ -2790,6 +2837,7 @@ impl State {
                 changed: Default::default(),
                 dirty: Default::default(),
                 subscriber,
+                pysa_reporter: None,
             },
         }
     }
@@ -2859,6 +2907,7 @@ impl State {
                             changed: _,
                             dirty,
                             subscriber: _,
+                            pysa_reporter: _,
                         },
                 },
             committing_transaction_guard,

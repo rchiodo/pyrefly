@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use dupe::Dupe;
 use pretty_assertions::assert_eq;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::types::Type;
@@ -18,10 +19,10 @@ use crate::report::pysa::class::PysaClassField;
 use crate::report::pysa::class::PysaClassFieldDeclaration;
 use crate::report::pysa::class::PysaClassMro;
 use crate::report::pysa::class::export_all_classes;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
-use crate::report::pysa::function::collect_function_base_definitions;
+use crate::report::pysa::context::PysaResolver;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::types::PysaType;
 use crate::test::pysa::utils::create_location;
@@ -58,17 +59,24 @@ fn test_exported_classes(
     let module_ids = ModuleIds::new(&handles);
 
     let test_module_handle = get_handle_for_module_name(module_name, &transaction);
-
-    let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
+    let resolver = PysaResolver::new_for_test(
+        &transaction,
+        &module_ids,
+        test_module_handle.dupe(),
+        &handles,
+    );
+    let context = ModuleContext {
+        answers_context: ModuleAnswersContext::create(
+            test_module_handle.dupe(),
+            &transaction,
+            &module_ids,
+        ),
+        resolver: &resolver,
+    };
 
     let expected_class_definitions = create_expected_class_definitions(&context);
 
-    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
-    let actual_class_definitions = export_all_classes(
-        &pysa_module_index,
-        &collect_function_base_definitions(&handles, &transaction, &module_ids),
-        &context,
-    );
+    let actual_class_definitions = export_all_classes(&context);
 
     // Sort definitions by location.
     let mut actual_class_definitions = actual_class_definitions.into_iter().collect::<Vec<_>>();

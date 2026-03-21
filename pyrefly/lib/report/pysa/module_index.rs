@@ -7,16 +7,12 @@
 
 use std::collections::HashMap;
 
-use pyrefly_build::handle::Handle;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::callable::FuncDefIndex;
 use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::callable::PropertyRole;
 use pyrefly_types::types::Type;
-use pyrefly_util::thread_pool::ThreadPool;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
 use ruff_python_ast::name::Name;
 
 use crate::binding::binding::KeyDecoratedFunction;
@@ -25,18 +21,12 @@ use crate::report::pysa::class::ClassId;
 use crate::report::pysa::class::get_all_classes;
 use crate::report::pysa::class::get_class_fields;
 use crate::report::pysa::context::ModuleAnswersContext;
-use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::function::FunctionNode;
 use crate::report::pysa::function::FunctionRef;
 use crate::report::pysa::function::get_exported_decorated_function;
 use crate::report::pysa::function::should_export_decorated_function;
-use crate::report::pysa::module::ModuleId;
-use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
-use crate::report::pysa::step_logger::StepLogger;
 use crate::report::pysa::types::is_callable_like;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
-use crate::state::state::Transaction;
 
 // Intentionally refer to decorators by names instead of uniquely identifying them. Some special handling
 // (i.e., see the usage of `GRAPHQL_DECORATORS`) are triggered when decorators are matched by names.
@@ -141,8 +131,6 @@ pub struct PysaModuleIndex {
 
 impl PysaModuleIndex {
     /// Build the index for a single module from its full context.
-    ///
-    /// Must be called while AST + bindings + answers are available (before eviction).
     pub fn build(context: &ModuleAnswersContext) -> PysaModuleIndex {
         // Step 1: Build short_identifier_to_function_ref and short_identifier_to_setter_ref
         // by iterating all KeyDecoratedFunction entries.
@@ -259,133 +247,64 @@ impl PysaModuleIndex {
             class_field_graphql_decorator_ids,
         }
     }
-}
 
-/// Whole-program index mapping ModuleId → PysaModuleIndex.
-///
-/// Thread-safe for concurrent reads after construction.
-pub struct WholeProgramPysaModuleIndex(dashmap::ReadOnlyView<ModuleId, PysaModuleIndex>);
-
-impl WholeProgramPysaModuleIndex {
-    /// Returns the PysaModuleIndex for the given module. Panics if the module
-    /// is not in the index, which would indicate a bug in index construction.
-    fn get_module_index(&self, module_id: ModuleId) -> &PysaModuleIndex {
-        self.0
-            .get(&module_id)
-            .expect("PysaModuleIndex missing for module")
-    }
-
-    /// Look up a FunctionRef by FuncDefIndex in a given module.
-    /// Used to replace `call_targets_from_callable_metadata` cross-module lookup.
-    ///
-    /// Panics if the func_def_index is not in the module's index, which would
-    /// indicate a bug in index construction (all functions should be indexed).
-    pub fn get_function_ref_by_func_def_index(
-        &self,
-        module_id: ModuleId,
-        func_def_index: FuncDefIndex,
-    ) -> &FunctionRef {
-        self.get_module_index(module_id)
-            .func_def_to_function_ref
+    /// Look up a FunctionRef by FuncDefIndex.
+    pub fn get_function_ref_by_func_def_index(&self, func_def_index: FuncDefIndex) -> FunctionRef {
+        self.func_def_to_function_ref
             .get(&func_def_index)
             .expect("FuncDefIndex missing from PysaModuleIndex")
+            .clone()
     }
 
-    /// Look up a FunctionRef by ShortIdentifier in a given module.
-    /// Used to replace `exported_function_from_definition_item_with_docstring` cross-module lookup.
+    /// Look up a FunctionRef by ShortIdentifier.
     ///
     /// When `skip_property_getter` is true, returns the property setter's FunctionRef
     /// if one exists; otherwise falls back to the normal (getter) FunctionRef.
     pub fn get_function_ref_by_short_identifier(
         &self,
-        module_id: ModuleId,
         short_identifier: ShortIdentifier,
         skip_property_getter: bool,
-    ) -> Option<&FunctionRef> {
-        let index = self.get_module_index(module_id);
+    ) -> Option<FunctionRef> {
         if skip_property_getter {
-            index
-                .short_identifier_to_setter_ref
+            self.short_identifier_to_setter_ref
                 .get(&short_identifier)
-                .or_else(|| {
-                    index
-                        .short_identifier_to_function_ref
-                        .get(&short_identifier)
-                })
+                .or_else(|| self.short_identifier_to_function_ref.get(&short_identifier))
+                .cloned()
         } else {
-            index
-                .short_identifier_to_function_ref
+            self.short_identifier_to_function_ref
                 .get(&short_identifier)
+                .cloned()
         }
     }
 
     /// Look up a FunctionRef for a class's own callable field.
-    /// Used to replace `get_context_from_class` + `exported_function_from_class_field`
-    /// cross-module lookups.
     pub fn get_function_ref_for_class_field(
         &self,
-        module_id: ModuleId,
         class_id: ClassId,
         field_name: &Name,
-    ) -> Option<&FunctionRef> {
-        self.get_module_index(module_id)
-            .class_field_to_function_ref
+    ) -> Option<FunctionRef> {
+        self.class_field_to_function_ref
             .get(&(class_id, field_name.clone()))
+            .cloned()
     }
 
     /// Return all FunctionRefs for class fields that have a matching graphql decorator.
     pub fn get_graphql_decorated_class_fields(
         &self,
-        module_id: ModuleId,
         class_id: ClassId,
         predicate: impl Fn(&GraphQLDecoratorRef) -> bool,
-    ) -> Vec<&FunctionRef> {
-        let index = self.get_module_index(module_id);
-        let Some(fields) = index.class_field_graphql_decorator_ids.get(&class_id) else {
+    ) -> Vec<FunctionRef> {
+        let Some(fields) = self.class_field_graphql_decorator_ids.get(&class_id) else {
             return Vec::new();
         };
         fields
             .iter()
             .filter(|(_, refs)| refs.iter().any(|r| predicate(r)))
             .filter_map(|(name, _)| {
-                index
-                    .class_field_to_function_ref
+                self.class_field_to_function_ref
                     .get(&(class_id, name.clone()))
+                    .cloned()
             })
             .collect()
     }
-}
-
-/// Build the whole-program PysaModuleIndex for all handles.
-///
-/// Must be called while AST + bindings + answers are available for all modules.
-pub fn build_pysa_module_index(
-    handles: &[Handle],
-    transaction: &Transaction,
-    module_ids: &ModuleIds,
-) -> WholeProgramPysaModuleIndex {
-    let step = StepLogger::start("Building pysa module index", "Built pysa module index");
-
-    let index = dashmap::DashMap::new();
-
-    ThreadPool::new().install(|| {
-        slow_fun_monitor_scope(|slow_function_monitor| {
-            handles.par_iter().for_each(|handle| {
-                let module_id = module_ids.get_from_handle(handle);
-                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
-                let module_index = slow_function_monitor.monitor_function(
-                    || PysaModuleIndex::build(&context.answers_context),
-                    format!(
-                        "Building pysa module index for {}",
-                        handle.module().as_str(),
-                    ),
-                    /* max_time_in_seconds */ 4,
-                );
-                index.insert(module_id, module_index);
-            });
-        })
-    });
-
-    step.finish();
-    WholeProgramPysaModuleIndex(index.into_read_only())
 }

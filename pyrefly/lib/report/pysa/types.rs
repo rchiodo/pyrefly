@@ -82,7 +82,7 @@ impl ClassNamesFromType {
         ClassNamesFromType {
             classes: vec![ClassWithModifiers::new(ClassRef::from_class(
                 class,
-                context.module_ids,
+                context.module_ids(),
             ))],
             is_exhaustive: true,
         }
@@ -223,12 +223,10 @@ fn strip_typevar(type_: &Type) -> Option<TypeVariableRestriction> {
 
 pub fn has_superclass(class: &Class, want: &Class, context: &ModuleContext) -> bool {
     context
-        .transaction
-        .ad_hoc_solve(
-            &context.answers_context.handle,
-            "pysa_has_superclass",
-            |solver| solver.type_order().has_superclass(class, want),
-        )
+        .resolver
+        .with_solver("pysa_has_superclass", |solver| {
+            solver.type_order().has_superclass(class, want)
+        })
         .unwrap()
 }
 

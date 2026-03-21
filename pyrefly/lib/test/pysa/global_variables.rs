@@ -7,12 +7,14 @@
 
 use std::collections::HashMap;
 
+use dupe::Dupe;
 use pretty_assertions::assert_eq;
 use ruff_python_ast::name::Name;
 
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
+use crate::report::pysa::context::PysaResolver;
 use crate::report::pysa::global_variable::GlobalVariable;
-use crate::report::pysa::global_variable::collect_global_variables;
 use crate::report::pysa::global_variable::export_global_variables;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleIds;
@@ -38,13 +40,27 @@ fn test_exported_global_variables(
 
     let test_module_handle = get_handle_for_module_name(module_name, &transaction);
 
-    let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
+    let resolver = PysaResolver::new_for_test(
+        &transaction,
+        &module_ids,
+        test_module_handle.dupe(),
+        &handles,
+    );
+    let context = ModuleContext {
+        answers_context: ModuleAnswersContext::create(
+            test_module_handle.dupe(),
+            &transaction,
+            &module_ids,
+        ),
+        resolver: &resolver,
+    };
 
     let expected_globals = create_expected_globals(&context);
 
-    let whole_program_global_variables =
-        collect_global_variables(&handles, &transaction, &module_ids);
-    let actual_globals = export_global_variables(&whole_program_global_variables, &context);
+    let actual_globals = export_global_variables(
+        &resolver.current_module_solutions().global_variables,
+        &context,
+    );
 
     assert_eq!(expected_globals, actual_globals);
 }

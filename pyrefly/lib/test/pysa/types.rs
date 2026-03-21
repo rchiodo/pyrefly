@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use dupe::Dupe;
 use pretty_assertions::assert_eq;
 use pyrefly_types::callable::Callable;
 use pyrefly_types::callable::ParamList;
@@ -22,7 +23,9 @@ use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::name::Name;
 
 use crate::report::pysa::class::ClassRef;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
+use crate::report::pysa::context::PysaResolver;
 use crate::report::pysa::module::ModuleIds;
 use crate::report::pysa::types::ClassNamesFromType;
 use crate::report::pysa::types::PysaType;
@@ -63,7 +66,20 @@ class MyTypedDict(TypedDict):
     let module_ids = ModuleIds::new(&handles);
 
     let test_module_handle = get_handle_for_module_name("test", &transaction);
-    let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
+    let resolver = PysaResolver::new_for_test(
+        &transaction,
+        &module_ids,
+        test_module_handle.dupe(),
+        &handles,
+    );
+    let context = ModuleContext {
+        answers_context: ModuleAnswersContext::create(
+            test_module_handle.dupe(),
+            &transaction,
+            &module_ids,
+        ),
+        resolver: &resolver,
+    };
 
     // Builtin types
 
@@ -354,11 +370,11 @@ class MyTypedDict(TypedDict):
                 vec![
                     ClassRef::from_class(
                         context.answers_context.stdlib.int().class_object(),
-                        context.module_ids
+                        context.module_ids()
                     ),
                     ClassRef::from_class(
                         context.answers_context.stdlib.float().class_object(),
-                        context.module_ids
+                        context.module_ids()
                     ),
                 ],
                 /* is_exhaustive */ true

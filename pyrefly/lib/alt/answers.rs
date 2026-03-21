@@ -49,6 +49,7 @@ use crate::error::collector::ErrorCollector;
 use crate::error::style::ErrorStyle;
 use crate::export::exports::LookupExport;
 use crate::module::module_info::ModuleInfo;
+use crate::report::pysa::PysaSolutions;
 use crate::solver::solver::Solver;
 use crate::solver::solver::VarRecurser;
 use crate::state::ide::IntermediateDefinition;
@@ -223,6 +224,8 @@ pub struct Solutions {
     table: SolutionsTable,
     metadata: Arc<BindingsMetadata>,
     index: Option<Arc<Mutex<Index>>>,
+    /// Per-module pysa data, populated when pysa reporting is enabled.
+    pysa_solutions: Option<Arc<PysaSolutions>>,
 }
 
 impl Display for Solutions {
@@ -292,6 +295,11 @@ impl Display for SolutionsDifference<'_> {
 impl Solutions {
     pub fn metadata(&self) -> &Arc<BindingsMetadata> {
         &self.metadata
+    }
+
+    /// Access per-module pysa data, if pysa reporting was enabled.
+    pub fn pysa_solutions(&self) -> Option<&Arc<PysaSolutions>> {
+        self.pysa_solutions.as_ref()
     }
 
     pub fn get<K: Exported>(&self, key: &K) -> &Arc<<K as Keyed>::Answer>
@@ -688,6 +696,7 @@ impl Answers {
         uniques: &UniqueFactory,
         compute_everything: bool,
         recursion_limit_config: Option<RecursionLimitConfig>,
+        pysa_context: Option<&crate::report::pysa::context::ModuleAnswersContext>,
     ) -> Solutions {
         let mut res = SolutionsTable::default();
 
@@ -777,6 +786,9 @@ impl Answers {
                 }
             }
         }
+
+        let pysa_solutions = pysa_context.map(PysaSolutions::build);
+
         answers_solver.validate_final_thread_state();
 
         Solutions {
@@ -784,6 +796,7 @@ impl Answers {
             table: res,
             metadata: bindings.metadata().dupe(),
             index: self.index.dupe(),
+            pysa_solutions,
         }
     }
 

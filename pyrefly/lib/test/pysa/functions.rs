@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use dupe::Dupe;
 use pretty_assertions::assert_eq;
 use pyrefly_types::callable::Callable;
 use pyrefly_types::callable::Param;
@@ -16,16 +17,16 @@ use pyrefly_types::class::ClassType;
 use ruff_python_ast::name::Name;
 
 use crate::report::pysa::call_graph::Target;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
+use crate::report::pysa::context::PysaResolver;
 use crate::report::pysa::function::FunctionBaseDefinition;
 use crate::report::pysa::function::FunctionDefinition;
 use crate::report::pysa::function::FunctionParameter;
 use crate::report::pysa::function::FunctionParameters;
 use crate::report::pysa::function::FunctionSignature;
-use crate::report::pysa::function::collect_function_base_definitions;
 use crate::report::pysa::function::export_function_definitions;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::override_graph::create_reversed_override_graph_for_module;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::types::ClassNamesFromType;
@@ -87,17 +88,26 @@ fn test_exported_functions(
 
     let test_module_handle = get_handle_for_module_name(module_name, &transaction);
 
-    let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
+    let resolver = PysaResolver::new_for_test(
+        &transaction,
+        &module_ids,
+        test_module_handle.dupe(),
+        &handles,
+    );
+    let context = ModuleContext {
+        answers_context: ModuleAnswersContext::create(
+            test_module_handle.dupe(),
+            &transaction,
+            &module_ids,
+        ),
+        resolver: &resolver,
+    };
 
     let expected_function_definitions = create_expected_function_definitions(&context);
 
-    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
     let captured_variables = HashMap::new();
-    let module_reversed_override_graph =
-        create_reversed_override_graph_for_module(&context, &pysa_module_index);
+    let module_reversed_override_graph = create_reversed_override_graph_for_module(&context);
     let actual_function_definitions = export_function_definitions(
-        &pysa_module_index,
-        &collect_function_base_definitions(&handles, &transaction, &module_ids),
         &captured_variables,
         &module_reversed_override_graph,
         &context,

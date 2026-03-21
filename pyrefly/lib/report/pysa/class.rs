@@ -45,13 +45,10 @@ use crate::report::pysa::call_graph::Target;
 use crate::report::pysa::call_graph::resolve_decorator_callees;
 use crate::report::pysa::collect::CollectNoDuplicateKeys;
 use crate::report::pysa::context::ModuleAnswersContext;
-use crate::report::pysa::function::FunctionBaseDefinition;
 use crate::report::pysa::function::FunctionRef;
-use crate::report::pysa::function::WholeProgramFunctionDefinitions;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::scope::get_scope_parent;
 use crate::report::pysa::types::PysaType;
@@ -275,12 +272,10 @@ pub fn get_super_class_member(
     context: &ModuleContext,
 ) -> Option<WithDefiningClass<Arc<ClassField>>> {
     context
-        .transaction
-        .ad_hoc_solve(
-            &context.answers_context.handle,
-            "pysa_super_class_member",
-            |solver| solver.get_super_class_member(class, start_lookup_cls, field_name),
-        )
+        .resolver
+        .with_solver("pysa_super_class_member", |solver| {
+            solver.get_super_class_member(class, start_lookup_cls, field_name)
+        })
         .flatten()
 }
 
@@ -486,28 +481,17 @@ fn find_definition_ast<'a>(
 
 fn get_decorator_callees(
     class: &Class,
-    pysa_module_index: &WholeProgramPysaModuleIndex,
-    function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     context: &ModuleContext,
 ) -> HashMap<PysaLocation, Vec<Target<FunctionRef>>> {
     assert_eq!(class.module(), &context.answers_context.module_info);
     if let Some(class_def) = find_definition_ast(class, context) {
-        resolve_decorator_callees(
-            &class_def.decorator_list,
-            pysa_module_index,
-            function_base_definitions,
-            context,
-        )
+        resolve_decorator_callees(&class_def.decorator_list, context)
     } else {
         HashMap::new()
     }
 }
 
-pub fn export_all_classes(
-    pysa_module_index: &WholeProgramPysaModuleIndex,
-    function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
-    context: &ModuleContext,
-) -> HashMap<PysaLocation, ClassDefinition> {
+pub fn export_all_classes(context: &ModuleContext) -> HashMap<PysaLocation, ClassDefinition> {
     let mut class_definitions = HashMap::new();
     let ann_assign_map = AnnAssignMap::build(&context.answers_context.ast);
 
@@ -547,26 +531,21 @@ pub fn export_all_classes(
         let bases = metadata
             .base_class_objects()
             .iter()
-            .map(|base_class| ClassRef::from_class(base_class, context.module_ids))
+            .map(|base_class| ClassRef::from_class(base_class, context.module_ids()))
             .collect::<Vec<_>>();
 
         let mro = match &*get_class_mro(&class, &context.answers_context) {
             ClassMro::Resolved(mro) => PysaClassMro::Resolved(
                 mro.iter()
                     .map(|class_type| {
-                        ClassRef::from_class(class_type.class_object(), context.module_ids)
+                        ClassRef::from_class(class_type.class_object(), context.module_ids())
                     })
                     .collect::<Vec<_>>(),
             ),
             ClassMro::Cyclic => PysaClassMro::Cyclic,
         };
 
-        let decorator_callees = get_decorator_callees(
-            &class,
-            pysa_module_index,
-            function_base_definitions,
-            context,
-        );
+        let decorator_callees = get_decorator_callees(&class, context);
 
         let class_definition = ClassDefinition {
             class_id: ClassId::from_class(&class),

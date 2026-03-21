@@ -7,14 +7,10 @@
 
 use std::collections::HashMap;
 
-use pyrefly_build::handle::Handle;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::types::Type;
-use pyrefly_util::thread_pool::ThreadPool;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprName;
 use ruff_python_ast::Stmt;
@@ -28,13 +24,9 @@ use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
-use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
-use crate::report::pysa::step_logger::StepLogger;
 use crate::report::pysa::types::PysaType;
 use crate::report::pysa::types::is_bound_method_like;
 use crate::report::pysa::types::preprocess_type;
-use crate::state::state::Transaction;
 
 /// Represents information about a global variable, collected in a pre-analysis step.
 /// See `GlobalVariable` for the type exported to Pysa. This only store memory-efficient information.
@@ -62,8 +54,6 @@ pub struct GlobalVariableRef {
 #[derive(Debug, Clone)]
 pub struct ModuleGlobalVariables(HashMap<ShortIdentifier, GlobalVariableBase>);
 
-pub struct WholeProgramGlobalVariables(dashmap::ReadOnlyView<ModuleId, ModuleGlobalVariables>);
-
 impl ModuleGlobalVariables {
     fn new() -> Self {
         Self(HashMap::new())
@@ -75,12 +65,6 @@ impl ModuleGlobalVariables {
 
     pub fn contains(&self, name: &Name) -> bool {
         self.0.values().any(|global| global.name == *name)
-    }
-}
-
-impl WholeProgramGlobalVariables {
-    pub fn get_for_module(&self, module_id: ModuleId) -> Option<&ModuleGlobalVariables> {
-        self.0.get(&module_id)
     }
 }
 
@@ -220,45 +204,12 @@ pub fn collect_global_variables_for_module(
     global_variables
 }
 
-pub fn collect_global_variables(
-    handles: &Vec<Handle>,
-    transaction: &Transaction,
-    module_ids: &ModuleIds,
-) -> WholeProgramGlobalVariables {
-    let step = StepLogger::start("Indexing global variables", "Indexed global variables");
-
-    let global_variables = dashmap::DashMap::new();
-
-    ThreadPool::new().install(|| {
-        slow_fun_monitor_scope(|slow_function_monitor| {
-            handles.par_iter().for_each(|handle| {
-                let module_id = module_ids.get_from_handle(handle);
-                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
-                let globals_for_module = slow_function_monitor.monitor_function(
-                    move || collect_global_variables_for_module(&context.answers_context),
-                    format!("Indexing global variables for {}", handle.module().as_str(),),
-                    /* max_time_in_seconds */ 4,
-                );
-                global_variables.insert(module_id, globals_for_module);
-            });
-        })
-    });
-
-    step.finish();
-    WholeProgramGlobalVariables(global_variables.into_read_only())
-}
-
 pub fn export_global_variables(
-    global_variables: &WholeProgramGlobalVariables,
+    module_global_variables: &ModuleGlobalVariables,
     context: &ModuleContext,
 ) -> HashMap<Name, GlobalVariable> {
-    let globals_for_module = global_variables
-        .0
-        .get(&context.answers_context.module_id)
-        .unwrap();
-
     let mut global_variables = HashMap::new();
-    for (short_identifier, global) in &globals_for_module.0 {
+    for (short_identifier, global) in &module_global_variables.0 {
         let new_global = GlobalVariable::from_base(*short_identifier, global, context);
         global_variables
             .entry(global.name.clone())

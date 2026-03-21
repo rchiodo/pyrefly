@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
+use dupe::Dupe;
 use pretty_assertions::assert_eq;
 use ruff_python_ast::name::Name;
 use serde::Serialize;
@@ -33,19 +34,16 @@ use crate::report::pysa::call_graph::Unresolved;
 use crate::report::pysa::call_graph::UnresolvedReason;
 use crate::report::pysa::call_graph::export_call_graphs;
 use crate::report::pysa::captured_variable::CapturedVariableRef;
-use crate::report::pysa::captured_variable::collect_captured_variables;
+use crate::report::pysa::captured_variable::collect_captured_variables_for_module;
 use crate::report::pysa::class::ClassId;
 use crate::report::pysa::collect::CollectNoDuplicateKeys;
+use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::context::ModuleContext;
-use crate::report::pysa::function::FunctionBaseDefinition;
+use crate::report::pysa::context::PysaResolver;
 use crate::report::pysa::function::FunctionId;
 use crate::report::pysa::function::FunctionRef;
-use crate::report::pysa::function::WholeProgramFunctionDefinitions;
-use crate::report::pysa::function::collect_function_base_definitions;
 use crate::report::pysa::global_variable::GlobalVariableRef;
-use crate::report::pysa::global_variable::collect_global_variables;
 use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module_index::build_pysa_module_index;
 use crate::report::pysa::types::ScalarTypeProperties;
 use crate::test::pysa::utils::create_state;
 use crate::test::pysa::utils::get_class_ref;
@@ -94,19 +92,22 @@ pub fn split_module_class_and_identifier(string: &str) -> (String, Option<String
 }
 
 impl FunctionRefForTest {
-    fn from_definition_ref(
-        function_ref: FunctionRef,
-        function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
-    ) -> Self {
+    fn from_definition_ref(function_ref: FunctionRef, resolver: &PysaResolver) -> Self {
         let (function_id, is_decorated_target) = match function_ref.function_id {
             FunctionId::FunctionDecoratedTarget { location } => {
                 (FunctionId::Function { location }, true)
             }
             function_id => (function_id, false),
         };
+        let solutions = resolver.get_cached_solutions(function_ref.module_id);
         let function_definition = match function_id {
             FunctionId::ModuleTopLevel | FunctionId::ClassTopLevel { .. } => None,
-            _ => Some(function_base_definitions.get(function_ref.module_id, &function_id)),
+            _ => Some(
+                solutions
+                    .function_base_definitions
+                    .get(&function_id)
+                    .expect("FunctionId missing from function_base_definitions"),
+            ),
         };
         let defining_class = function_definition
             .and_then(|d| d.defining_class.as_ref())
@@ -196,11 +197,10 @@ fn create_call_target(target: &str, target_type: TargetType) -> PysaCallTarget<F
 
 fn call_graph_for_test_from_actual(
     call_graphs: CallGraphs<ExpressionIdentifier, FunctionRef>,
-    function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
+    resolver: &PysaResolver,
 ) -> CallGraphs<String, FunctionRefForTest> {
-    let create_function_ref_for_test = |function_ref| {
-        FunctionRefForTest::from_definition_ref(function_ref, function_base_definitions)
-    };
+    let create_function_ref_for_test =
+        |function_ref| FunctionRefForTest::from_definition_ref(function_ref, resolver);
     CallGraphs::from_map(
         call_graphs
             .into_iter()
@@ -279,30 +279,29 @@ fn test_building_call_graph_for_module(
     let handles = transaction.handles();
     let module_ids = ModuleIds::new(&handles);
 
-    let pysa_module_index = build_pysa_module_index(&handles, &transaction, &module_ids);
-    let function_base_definitions =
-        collect_function_base_definitions(&handles, &transaction, &module_ids);
-    let global_variables = collect_global_variables(&handles, &transaction, &module_ids);
-    let captured_variables = collect_captured_variables(&handles, &transaction, &module_ids);
-
     let test_module_handle = get_handle_for_module_name(test_module_name, &transaction);
-    let context = ModuleContext::create(test_module_handle, &transaction, &module_ids);
+    let resolver = PysaResolver::new_for_test(
+        &transaction,
+        &module_ids,
+        test_module_handle.dupe(),
+        &handles,
+    );
+    let context = ModuleContext {
+        answers_context: ModuleAnswersContext::create(
+            test_module_handle.dupe(),
+            &transaction,
+            &module_ids,
+        ),
+        resolver: &resolver,
+    };
 
-    let module_captured_variables = captured_variables
-        .get_for_module(context.answers_context.module_id)
-        .unwrap();
+    let module_captured_variables = collect_captured_variables_for_module(&context);
 
     let expected_call_graph = call_graph_for_test_from_expected(create_expected(&context));
 
     let mut actual_call_graph = call_graph_for_test_from_actual(
-        export_call_graphs(
-            &context,
-            &pysa_module_index,
-            &function_base_definitions,
-            &global_variables,
-            module_captured_variables,
-        ),
-        &function_base_definitions,
+        export_call_graphs(&context, &module_captured_variables),
+        &resolver,
     );
     // We don't care about callables that are not specified in the expected call graphs
     actual_call_graph.intersect(&expected_call_graph);

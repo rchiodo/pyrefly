@@ -11,7 +11,6 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use dupe::Dupe;
-use pyrefly_build::handle::Handle;
 use pyrefly_graph::index::Idx;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::module_name::ModuleName;
@@ -25,9 +24,6 @@ use pyrefly_types::types::BoundMethodType;
 use pyrefly_types::types::Overload;
 use pyrefly_types::types::Type;
 use pyrefly_types::types::Union;
-use pyrefly_util::thread_pool::ThreadPool;
-use rayon::iter::IntoParallelRefIterator;
-use rayon::iter::ParallelIterator;
 use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::StmtFunctionDef;
 use ruff_python_ast::name::Name;
@@ -52,16 +48,11 @@ use crate::report::pysa::class::get_class_fields;
 use crate::report::pysa::context::ModuleAnswersContext;
 use crate::report::pysa::location::PysaLocation;
 use crate::report::pysa::module::ModuleId;
-use crate::report::pysa::module::ModuleIds;
-use crate::report::pysa::module_index::WholeProgramPysaModuleIndex;
 use crate::report::pysa::override_graph::ModuleReversedOverrideGraph;
 use crate::report::pysa::scope::ScopeParent;
 use crate::report::pysa::scope::get_scope_parent;
-use crate::report::pysa::slow_fun_monitor::slow_fun_monitor_scope;
-use crate::report::pysa::step_logger::StepLogger;
 use crate::report::pysa::types::PysaType;
 use crate::report::pysa::types::is_callable_like;
-use crate::state::state::Transaction;
 
 /// Represents a unique identifier for a function **within a module**.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -312,42 +303,13 @@ impl<GenericFunctionDefinition> ModuleFunctionDefinitions<GenericFunctionDefinit
         ModuleFunctionDefinitions(HashMap::new())
     }
 
+    pub fn get(&self, function_id: &FunctionId) -> Option<&GenericFunctionDefinition> {
+        self.0.get(function_id)
+    }
+
     #[cfg(test)]
     pub fn iter(&self) -> impl Iterator<Item = (&FunctionId, &GenericFunctionDefinition)> {
         self.0.iter()
-    }
-}
-
-pub struct WholeProgramFunctionDefinitions<FunctionDefinition>(
-    dashmap::ReadOnlyView<ModuleId, ModuleFunctionDefinitions<FunctionDefinition>>,
-);
-
-impl<GenericFunctionDefinition> WholeProgramFunctionDefinitions<GenericFunctionDefinition> {
-    /// Returns the function definition for a given module and function ID.
-    pub fn get<'a>(
-        &'a self,
-        module_id: ModuleId,
-        function_id: &FunctionId,
-    ) -> &'a GenericFunctionDefinition {
-        self.get_for_module(module_id)
-            .0
-            .get(function_id)
-            .unwrap_or_else(|| {
-                panic!(
-                    "FunctionId missing from WholeProgramFunctionDefinitions: {:?}",
-                    function_id
-                )
-            })
-    }
-
-    /// Returns the module's function definitions.
-    pub fn get_for_module(
-        &self,
-        module_id: ModuleId,
-    ) -> &ModuleFunctionDefinitions<GenericFunctionDefinition> {
-        self.0
-            .get(&module_id)
-            .expect("WholeProgramFunctionDefinitions missing for module")
     }
 }
 
@@ -784,17 +746,10 @@ impl FunctionNode {
 
     fn get_decorator_callees(
         &self,
-        pysa_module_index: &WholeProgramPysaModuleIndex,
-        function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
         context: &ModuleContext,
     ) -> HashMap<PysaLocation, Vec<Target<FunctionRef>>> {
         if let Some(function_def) = self.get_define_stmt(&context.answers_context) {
-            resolve_decorator_callees(
-                &function_def.decorator_list,
-                pysa_module_index,
-                function_base_definitions,
-                context,
-            )
+            resolve_decorator_callees(&function_def.decorator_list, context)
         } else {
             HashMap::new()
         }
@@ -889,8 +844,6 @@ pub fn export_all_functions(
 }
 
 pub fn export_function_definitions(
-    pysa_module_index: &WholeProgramPysaModuleIndex,
-    function_base_definitions: &WholeProgramFunctionDefinitions<FunctionBaseDefinition>,
     captured_variables: &HashMap<FunctionRef, Vec<CapturedVariableRef<FunctionRef>>>,
     reversed_override_graph: &ModuleReversedOverrideGraph,
     context: &ModuleContext,
@@ -902,10 +855,12 @@ pub fn export_function_definitions(
             continue;
         }
         let current_function = function.as_function_ref(&context.answers_context);
-        let function_base_definition = function_base_definitions.get(
-            context.answers_context.module_id,
-            &current_function.function_id,
-        );
+        let current_module_solutions = context.resolver.current_module_solutions();
+        let function_base_definition = current_module_solutions
+            .function_base_definitions
+            .0
+            .get(&current_function.function_id)
+            .expect("FunctionId missing from function_base_definitions");
         let undecorated_signatures = function.get_undecorated_signatures(context);
 
         let captured_variables = captured_variables
@@ -913,8 +868,7 @@ pub fn export_function_definitions(
             .cloned()
             .unwrap_or_default();
 
-        let decorator_callees =
-            function.get_decorator_callees(pysa_module_index, function_base_definitions, context);
+        let decorator_callees = function.get_decorator_callees(context);
 
         assert!(
             function_definitions
@@ -937,38 +891,4 @@ pub fn export_function_definitions(
     }
 
     function_definitions
-}
-
-pub fn collect_function_base_definitions(
-    handles: &Vec<Handle>,
-    transaction: &Transaction,
-    module_ids: &ModuleIds,
-) -> WholeProgramFunctionDefinitions<FunctionBaseDefinition> {
-    let step = StepLogger::start(
-        "Indexing function definitions",
-        "Indexed function definitions",
-    );
-
-    let base_definitions = dashmap::DashMap::new();
-
-    ThreadPool::new().install(|| {
-        slow_fun_monitor_scope(|slow_function_monitor| {
-            handles.par_iter().for_each(|handle| {
-                let module_id = module_ids.get_from_handle(handle);
-                let context = ModuleContext::create(handle.clone(), transaction, module_ids);
-                let base_definitions_for_module = slow_function_monitor.monitor_function(
-                    || export_all_functions(&context.answers_context),
-                    format!(
-                        "Indexing function definitions for {}",
-                        handle.module().as_str(),
-                    ),
-                    /* max_time_in_seconds */ 4,
-                );
-                base_definitions.insert(module_id, base_definitions_for_module);
-            });
-        })
-    });
-
-    step.finish();
-    WholeProgramFunctionDefinitions(base_definitions.into_read_only())
 }
