@@ -652,7 +652,7 @@ class ConvTranspose3d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
 # ==============================================================================
 
 class MaxPool1d(Module):
-    """1D max pooling"""
+    """1D max pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -665,7 +665,7 @@ class MaxPool1d(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 class MaxPool2d(Module):
-    """2D max pooling"""
+    """2D max pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -678,7 +678,7 @@ class MaxPool2d(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 class MaxPool3d(Module):
-    """3D max pooling"""
+    """3D max pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -691,7 +691,7 @@ class MaxPool3d(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 class AvgPool1d(Module):
-    """1D average pooling"""
+    """1D average pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -703,7 +703,7 @@ class AvgPool1d(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 class AvgPool2d(Module):
-    """2D average pooling"""
+    """2D average pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -716,7 +716,7 @@ class AvgPool2d(Module):
     def forward(self, input: Tensor) -> Tensor: ...
 
 class AvgPool3d(Module):
-    """3D average pooling"""
+    """3D average pooling. Shape inference via DSL + NNModule init capture."""
     def __init__(
         self,
         kernel_size: int,
@@ -767,6 +767,75 @@ class AdaptiveMaxPool3d[OD, OH, OW](Module):
     def forward[B, C](
         self, input: Tensor[B, C, Any, Any, Any]
     ) -> Tensor[B, C, OD, OH, OW]: ...
+
+# ==============================================================================
+# Upsampling / Rearrangement Modules
+# ==============================================================================
+
+class PixelShuffle(Module):
+    """Rearranges channels into spatial dimensions.
+
+    [B, C * r * r, H, W] → [B, C, H * r, W * r]
+
+    Shape inference via DSL + NNModule init capture.
+    """
+
+    def __init__(self, upscale_factor: int) -> None: ...
+    def forward(self, input: Tensor) -> Tensor: ...
+
+class GLU(Module):
+    """Gated Linear Unit: splits input along dim, applies sigmoid gating.
+
+    GLU(x) = x1 * sigmoid(x2) where x1, x2 = x.split(x.size(dim) // 2, dim)
+    Output is same as input except dimension `dim` is halved.
+
+    Shape inference via DSL + NNModule init capture.
+    """
+
+    def __init__(self, dim: int = 1) -> None: ...
+    def forward(self, input: Tensor) -> Tensor: ...
+
+class LSTM(Module):
+    """Long Short-Term Memory RNN.
+
+    Input:  Tensor[B, T, InputSize]  (batch_first=True assumed)
+    Output: (Tensor[B, T, HiddenSize * ND],
+             Tensor[NL * ND, B, HiddenSize],
+             Tensor[NL * ND, B, HiddenSize])
+
+    ND (num_directions) = 1 for unidirectional, 2 for bidirectional.
+
+    Shape inference via DSL + NNModule init capture.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+        num_directions: int = 1,
+    ) -> None: ...
+    def forward(self, input: Tensor) -> tuple[Tensor, Tensor, Tensor]: ...
+
+class Upsample(Module):
+    """Upsamples input. Shape inference via DSL + NNModule init capture.
+
+    Supports size (target spatial dims) or scale_factor (int multiplier).
+    Float scale_factor not yet supported in DSL.
+    """
+
+    def __init__(
+        self,
+        size: int | None = None,
+        scale_factor: int | None = None,
+        mode: str = "nearest",
+        align_corners: bool | None = None,
+    ) -> None: ...
+    def forward(self, input: Tensor) -> Tensor: ...
 
 # ==============================================================================
 # Loss Modules
@@ -887,17 +956,13 @@ class CTCLoss(Module):
 # Misc Modules
 # ==============================================================================
 
-class Flatten[S = 1, E = -1](Module):
+class Flatten(Module):
     """Flattens a contiguous range of dims.
 
-    Type parameters S and E capture start_dim and end_dim from the constructor
-    so the shape handler can compute the output shape at call time.
+    Shape inference via DSL + NNModule init capture.
     """
 
-    start_dim: _Dim[S]
-    end_dim: _Dim[E]
-
-    def __init__(self, start_dim: _Dim[S] = 1, end_dim: _Dim[E] = -1) -> None: ...
+    def __init__(self, start_dim: int = 1, end_dim: int = -1) -> None: ...
     def forward(self, input: Tensor) -> Tensor: ...
 
 class Unflatten(Module):

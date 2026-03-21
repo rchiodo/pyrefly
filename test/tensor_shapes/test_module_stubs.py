@@ -269,18 +269,43 @@ def test_conv_transpose2d():
 
 
 def test_maxpool2d():
+    """MaxPool2d(2, 2): 32x32 → 16x16"""
     pool = nn.MaxPool2d(2, 2)
     x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
     y = pool(x)
-    # Pool module forward returns unrefined Tensor (spatial dims not tracked at module level)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 64, 16, 16])
+
+
+def test_maxpool2d_stride_default():
+    """MaxPool2d(2) without stride: stride defaults to kernel_size=2"""
+    pool = nn.MaxPool2d(2)
+    x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
+    y = pool(x)
+    assert_type(y, Tensor[4, 64, 16, 16])
+
+
+def test_maxpool2d_with_padding():
+    """MaxPool2d(3, 1, padding=1): preserves spatial dims"""
+    pool = nn.MaxPool2d(3, 1, padding=1)
+    x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
+    y = pool(x)
+    assert_type(y, Tensor[4, 64, 32, 32])
 
 
 def test_avgpool2d():
+    """AvgPool2d(2, 2): 32x32 → 16x16"""
     pool = nn.AvgPool2d(2, 2)
     x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
     y = pool(x)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 64, 16, 16])
+
+
+def test_avgpool2d_stride_default():
+    """AvgPool2d(2) without stride: stride defaults to kernel_size=2"""
+    pool = nn.AvgPool2d(2)
+    x: Tensor[4, 64, 32, 32] = torch.randn(4, 64, 32, 32)
+    y = pool(x)
+    assert_type(y, Tensor[4, 64, 16, 16])
 
 
 def test_adaptive_avg_pool2d():
@@ -295,6 +320,66 @@ def test_adaptive_avg_pool1d():
     x: Tensor[4, 64, 100] = torch.randn(4, 64, 100)
     y = pool(x)
     assert_type(y, Tensor[4, 64, 5])
+
+
+def test_upsample_scale_factor():
+    """Upsample(scale_factor=2): 16x16 → 32x32"""
+    up = nn.Upsample(scale_factor=2)
+    x: Tensor[4, 64, 16, 16] = torch.randn(4, 64, 16, 16)
+    y = up(x)
+    assert_type(y, Tensor[4, 64, 32, 32])
+
+
+def test_upsample_size():
+    """Upsample(size=64): any spatial → 64x64"""
+    up = nn.Upsample(size=64)
+    x: Tensor[4, 64, 16, 16] = torch.randn(4, 64, 16, 16)
+    y = up(x)
+    assert_type(y, Tensor[4, 64, 64, 64])
+
+
+def test_pixel_shuffle():
+    """PixelShuffle(2): [B, C*4, H, W] → [B, C, H*2, W*2]"""
+    ps = nn.PixelShuffle(2)
+    x: Tensor[4, 32, 16, 16] = torch.randn(4, 32, 16, 16)
+    y = ps(x)
+    assert_type(y, Tensor[4, 8, 32, 32])
+
+
+def test_glu():
+    """GLU(dim=1): halves the channel dimension."""
+    glu = nn.GLU(dim=1)
+    x: Tensor[4, 64, 16] = torch.randn(4, 64, 16)
+    y = glu(x)
+    assert_type(y, Tensor[4, 32, 16])
+
+
+def test_glu_default_dim():
+    """GLU(): default dim=1, halves dim 1."""
+    glu = nn.GLU()
+    x: Tensor[4, 128] = torch.randn(4, 128)
+    y = glu(x)
+    assert_type(y, Tensor[4, 64])
+
+
+def test_lstm_unidirectional():
+    """LSTM: [B, T, 256] → [B, T, 512]."""
+    lstm = nn.LSTM(256, 512, batch_first=True)
+    x: Tensor[4, 10, 256] = torch.randn(4, 10, 256)
+    output, h_n, c_n = lstm(x)
+    assert_type(output, Tensor[4, 10, 512])
+    assert_type(h_n, Tensor[1, 4, 512])
+    assert_type(c_n, Tensor[1, 4, 512])
+
+
+def test_lstm_bidirectional():
+    """Bidirectional LSTM: [B, T, 256] → [B, T, 1024]."""
+    lstm = nn.LSTM(256, 512, num_directions=2, batch_first=True)
+    x: Tensor[4, 10, 256] = torch.randn(4, 10, 256)
+    output, h_n, c_n = lstm(x)
+    assert_type(output, Tensor[4, 10, 1024])
+    assert_type(h_n, Tensor[2, 4, 512])
+    assert_type(c_n, Tensor[2, 4, 512])
 
 
 # ============================================================================

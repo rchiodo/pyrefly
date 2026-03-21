@@ -390,10 +390,73 @@ impl TensorOpsRegistry {
         registry.register("torch.Tensor.tolist", dsl_fn(&fn_lookup, "tolist_ir"));
         registry.register("torch.numel", dsl_fn(&fn_lookup, "numel_ir"));
 
-        // nn.Module forward methods
-        registry.register(
-            "torch.nn.Flatten.forward",
-            dsl_fn(&fn_lookup, "nn_flatten_forward_ir"),
+        // nn.Module forward methods with init capture.
+        // register_init_forward registers both the forward DSL function and the
+        // list of __init__ params to capture in the NNModule type.
+        let maxpool_captures = &["kernel_size", "stride", "padding", "dilation"];
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.MaxPool1d",
+            "nn_maxpool_forward_ir",
+            maxpool_captures,
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.MaxPool2d",
+            "nn_maxpool_forward_ir",
+            maxpool_captures,
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.MaxPool3d",
+            "nn_maxpool_forward_ir",
+            maxpool_captures,
+        );
+
+        let avgpool_captures = &["kernel_size", "stride", "padding"];
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.AvgPool1d",
+            "nn_avgpool_forward_ir",
+            avgpool_captures,
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.AvgPool2d",
+            "nn_avgpool_forward_ir",
+            avgpool_captures,
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.AvgPool3d",
+            "nn_avgpool_forward_ir",
+            avgpool_captures,
+        );
+
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.Flatten",
+            "nn_flatten_forward_ir",
+            &["start_dim", "end_dim"],
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.PixelShuffle",
+            "nn_pixel_shuffle_forward_ir",
+            &["upscale_factor"],
+        );
+        registry.register_init_forward(&fn_lookup, "torch.nn.GLU", "nn_glu_forward_ir", &["dim"]);
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.LSTM",
+            "nn_lstm_forward_ir",
+            &["input_size", "hidden_size", "num_layers", "num_directions"],
+        );
+        registry.register_init_forward(
+            &fn_lookup,
+            "torch.nn.Upsample",
+            "nn_upsample_forward_ir",
+            &["size", "scale_factor"],
         );
 
         // Random sampling
@@ -882,4 +945,28 @@ def take_along_dim_ir(self: Tensor, indices: Tensor) -> Tensor:
 
 def nn_flatten_forward_ir(input: Tensor, start_dim: symint = 1, end_dim: symint = -1) -> Tensor:
     return flatten_ir(input, start_dim, end_dim)
+
+def nn_maxpool_forward_ir(input: Tensor, kernel_size: symint = 1, stride: symint | None = None, padding: symint = 0, dilation: symint = 1) -> Tensor:
+    return pool_ir(input, kernel_size, stride, padding, dilation)
+
+def nn_avgpool_forward_ir(input: Tensor, kernel_size: symint = 1, stride: symint | None = None, padding: symint = 0) -> Tensor:
+    return pool_ir(input, kernel_size, stride, padding, 1)
+
+def nn_upsample_forward_ir(input: Tensor, size: symint | None = None, scale_factor: symint | None = None) -> Tensor:
+    return interpolate_ir(input, size, scale_factor)
+
+def nn_pixel_shuffle_forward_ir(input: Tensor, upscale_factor: symint) -> Tensor:
+    r = upscale_factor
+    return Tensor(shape=[input.shape[0], input.shape[1] // (r * r)] + [d * r for d in input.shape[2:]])
+
+def nn_glu_forward_ir(input: Tensor, dim: symint = 1) -> Tensor:
+    rank = len(input.shape)
+    d = normalize_dim(rank, dim)
+    return Tensor(shape=replace_dim(input.shape, d, input.shape[d] // 2))
+
+def nn_lstm_forward_ir(input: Tensor, input_size: symint, hidden_size: symint, num_layers: symint = 1, num_directions: symint = 1) -> [Tensor, Tensor, Tensor]:
+    output = Tensor(shape=[input.shape[0], input.shape[1], hidden_size * num_directions])
+    h_n = Tensor(shape=[num_layers * num_directions, input.shape[0], hidden_size])
+    c_n = Tensor(shape=[num_layers * num_directions, input.shape[0], hidden_size])
+    return [output, h_n, c_n]
 "#;
