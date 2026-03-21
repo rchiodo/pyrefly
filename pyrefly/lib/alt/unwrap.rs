@@ -281,19 +281,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Warning: this returns `Some` if the type is `Any` or a class that extends `Any`
-    pub fn unwrap_async_iterator(&self, ty: &Type) -> Option<Type> {
-        let var = self.fresh_var();
-        let iterator_ty = self
-            .heap
-            .mk_class_type(self.stdlib.async_iterator(var.to_type(self.heap)));
-        if self.is_subset_eq(ty, &iterator_ty) {
-            Some(self.resolve_var(ty, var))
-        } else {
-            None
-        }
-    }
-
     pub fn decompose_dict<'b>(
         &self,
         hint: HintRef<'b, '_>,

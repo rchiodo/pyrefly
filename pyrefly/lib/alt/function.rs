@@ -542,27 +542,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         stmt: &FunctionDefData,
         errors: &ErrorCollector,
     ) -> Arc<Type> {
-        let mut ret = self
+        let ret = self
             .get(&Key::ReturnType(ShortIdentifier::new(&stmt.name)))
             .arc_clone_ty();
         // `stmt.returns` is always set to None because the binding step calls `mem::take` on it
         let has_return_annotation = self.bindings().function_has_return_annotation(&stmt.name);
-        if stmt.is_async
-            && def.metadata.flags.is_abstract_method
-            && !self.behaves_like_any(&ret)
-            && let Some((_, _, coroutine_ret)) = self.unwrap_coroutine(&ret)
-            && !self.behaves_like_any(&coroutine_ret)
-            && self.unwrap_async_iterator(&coroutine_ret).is_some()
-        {
-            self.error(
-                errors,
-                stmt.name.range(),
-                ErrorInfo::Kind(ErrorKind::BadFunctionDefinition),
-                "Abstract methods for async generators should use `def`, not `async def`"
-                    .to_owned(),
-            );
-            ret = coroutine_ret;
-        }
         if !has_return_annotation {
             self.error(
                 errors,
