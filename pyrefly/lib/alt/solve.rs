@@ -3239,29 +3239,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             .collect(),
                     )
                 };
-                // Cap excessively wide inferred return types to Any. During iterative
-                // SCC solving, mutual recursion can cause union widths to grow
-                // exponentially across iterations (e.g. 74 → 1247 → 1M in sympy).
-                // Capping at 20 covers 99%+ of naturally-occurring unions while
-                // preventing pathological blowup.
-                const MAX_INFERRED_RETURN_UNION_WIDTH: usize = 20;
+                // Cap inferred return unions aggressively. A small shared width
+                // budget keeps both top-level and nested inferred unions from
+                // accumulating many alternatives across recursive inference.
+                // For inferred return types, wide unions are often noisy and
+                // prone to downstream false positives even when they converge.
+                const MAX_INFERRED_RETURN_UNION_WIDTH: usize = 3;
                 // Truncate excessively deep inferred return types. During iterative
                 // SCC solving, mutually-recursive functions with self-referential return
                 // types (e.g. `dict[int, dict[int, …]]`) grow one nesting level deeper
                 // per iteration. A limit of 3 lets truncation kick in by iteration 4
                 // while keeping the global fixpoint iteration budget at 5.
                 const MAX_INFERRED_RETURN_NESTING_DEPTH: usize = 3;
-                // Also cap union width *inside* type arguments. A limit of 3 ensures
-                // the widening takes effect no later than iteration 4 in the common
-                // “add one more union member per iteration” pattern.
-                const MAX_INFERRED_INNER_UNION_WIDTH: usize = 3;
                 let return_ty = if return_ty.union_width() > MAX_INFERRED_RETURN_UNION_WIDTH {
                     self.heap.mk_any_implicit()
                 } else {
                     let any = self.heap.mk_any_implicit();
                     return_ty.truncate_class_nesting(
                         MAX_INFERRED_RETURN_NESTING_DEPTH,
-                        MAX_INFERRED_INNER_UNION_WIDTH,
+                        MAX_INFERRED_RETURN_UNION_WIDTH,
                         &any,
                     )
                 };
