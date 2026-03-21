@@ -887,9 +887,17 @@ class CTCLoss(Module):
 # Misc Modules
 # ==============================================================================
 
-class Flatten(Module):
-    """Flattens a contiguous range of dims."""
-    def __init__(self, start_dim: int = 1, end_dim: int = -1) -> None: ...
+class Flatten[S = 1, E = -1](Module):
+    """Flattens a contiguous range of dims.
+
+    Type parameters S and E capture start_dim and end_dim from the constructor
+    so the shape handler can compute the output shape at call time.
+    """
+
+    start_dim: _Dim[S]
+    end_dim: _Dim[E]
+
+    def __init__(self, start_dim: _Dim[S] = 1, end_dim: _Dim[E] = -1) -> None: ...
     def forward(self, input: Tensor) -> Tensor: ...
 
 class Unflatten(Module):

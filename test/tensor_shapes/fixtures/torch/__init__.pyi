@@ -2024,6 +2024,14 @@ def cross[*B](
     """Cross product of two tensors along a dimension of size 3."""
     ...
 
+def flatten(
+    self: Tensor,
+    start_dim: int = 0,
+    end_dim: int = -1,
+) -> Tensor:
+    """Flatten a contiguous range of dims. Shape computed by meta-shape DSL."""
+    ...
+
 # Context managers
 class no_grad:
     """Context manager and decorator that disables gradient tracking.

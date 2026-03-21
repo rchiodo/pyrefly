@@ -382,6 +382,12 @@ impl TensorOpsRegistry {
         registry.register("torch.Tensor.tolist", dsl_fn(&fn_lookup, "tolist_ir"));
         registry.register("torch.numel", dsl_fn(&fn_lookup, "numel_ir"));
 
+        // nn.Module forward methods
+        registry.register(
+            "torch.nn.Flatten.forward",
+            dsl_fn(&fn_lookup, "nn_flatten_forward_ir"),
+        );
+
         // Random sampling
         registry.register("torch.multinomial", dsl_fn(&fn_lookup, "multinomial_ir"));
         registry.register(
@@ -608,7 +614,22 @@ def index_select_ir(self: Tensor, dim: int, index: Tensor) -> Tensor:
     return Tensor(shape=replace_dim(self.shape, normalize_dim(len(self.shape), dim), index.shape[0]))
 
 def reduce_ir(self: Tensor, dim: int | list[int] | None = None, keepdim: bool = False) -> Tensor:
-    return Tensor(shape=reduce_shape(self.shape, dim, keepdim))
+    if dim == None:
+        return Tensor(shape=reduce_shape(self.shape, dim, keepdim))
+    if isinstance(dim, list):
+        return Tensor(shape=reduce_shape(self.shape, dim, keepdim))
+    return Tensor(shape=reduce_single(self.shape, dim, keepdim))
+
+def reduce_single(dims: list[int | symint], dim: int, keepdim: bool) -> list[int | symint]:
+    before = dims[:dim]
+    if dim == -1:
+        if keepdim:
+            return before + [1]
+        return before
+    after = dims[dim + 1:]
+    if keepdim:
+        return before + [1] + after
+    return before + after
 
 def min_max_median_ir(self: Tensor, dim: int | None = None, keepdim: bool = False) -> Tensor:
     if dim == None:
@@ -821,4 +842,7 @@ def where_ir(condition: Tensor, x: Tensor, y: Tensor) -> Tensor:
 
 def take_along_dim_ir(self: Tensor, indices: Tensor) -> Tensor:
     return Tensor(shape=indices.shape)
+
+def nn_flatten_forward_ir(input: Tensor, start_dim: symint = 1, end_dim: symint = -1) -> Tensor:
+    return flatten_ir(input, start_dim, end_dim)
 "#;

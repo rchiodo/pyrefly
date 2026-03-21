@@ -1305,8 +1305,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Apply meta-shape inference if bound args were collected
         let ret = if let Some(meta_shape_func) = meta_shape_func
-            && let Some(bound) = bound_args
+            && let Some(mut bound) = bound_args
         {
+            // For bound method calls, ensure `self` is in bound_args so that
+            // inject_module_attrs can resolve module fields (e.g., start_dim, end_dim).
+            // The self param may not be recorded by callable_infer_params if it's
+            // positional-only without a name.
+            if let Some(ref obj) = self_obj {
+                bound
+                    .entry("self".to_owned())
+                    .or_insert_with(|| obj.clone());
+            }
+            // Auto-inject module field values for DSL params not in bound_args.
+            // When a DSL function expects params like `start_dim` that aren't method
+            // parameters but are fields on `self`, resolve them from the module instance.
+            self.inject_module_attrs(&mut bound, meta_shape_func, arguments_range);
+
             self.apply_meta_shape(
                 callable.ret.clone(),
                 meta_shape_func,
@@ -1339,6 +1353,53 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         let registry = TENSOR_OPS_REGISTRY.get_or_init(TensorOpsRegistry::new);
         registry.get(&qualified_name)
+    }
+
+    /// Auto-inject module field values into `bound_args` for DSL parameters
+    /// that aren't method parameters but match fields on `self`.
+    ///
+    /// This enables DSL functions for module methods (e.g., `nn.Flatten.forward`)
+    /// to access constructor-captured values (e.g., `start_dim`, `end_dim`) without
+    /// extending the DSL grammar. The DSL function declares them as regular parameters
+    /// with defaults, and this method resolves them from `self`'s class fields.
+    ///
+    /// For fields typed as `Dim[T]`, unwraps to `T` so the DSL's `extract_dsl_val`
+    /// can handle them as plain literal ints.
+    fn inject_module_attrs(
+        &self,
+        bound_args: &mut HashMap<String, Type>,
+        meta_shape_func: &dyn MetaShapeFunction,
+        _range: TextRange,
+    ) {
+        let cls = match bound_args.get("self") {
+            Some(Type::ClassType(cls)) => cls.clone(),
+            _ => return,
+        };
+
+        for param_name in meta_shape_func.param_names() {
+            if param_name == "self" || bound_args.contains_key(param_name) {
+                continue;
+            }
+
+            // Look up the field directly on the class, avoiding error reporting.
+            let attr_name = Name::new(param_name);
+            let field = match self.get_field_from_current_class_only(cls.class_object(), &attr_name)
+            {
+                Some(f) => f,
+                None => continue,
+            };
+
+            // Substitute type parameters (e.g., _Dim[S] with S=1 → Dim[1]).
+            let field_ty = cls.targs().substitution().substitute_into(field.ty());
+
+            // Unwrap Dim[T] → T so the DSL can extract literal ints.
+            // After type param substitution, Dim[S] with S=0 becomes Type::Dim(Size(Literal(0))).
+            let unwrapped = match field_ty {
+                Type::Dim(inner) => *inner,
+                other => other,
+            };
+            bound_args.insert(param_name.to_owned(), unwrapped);
+        }
     }
 
     /// Apply a meta-shape function using pre-bound arguments.

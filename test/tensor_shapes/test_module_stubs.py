@@ -381,7 +381,23 @@ def test_flatten_module():
     m = nn.Flatten()
     x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
     y = m(x)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 3072])
+
+
+def test_flatten_module_custom_dims():
+    """Flatten with custom start_dim and end_dim."""
+    m = nn.Flatten(0, 1)
+    x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
+    y = m(x)
+    assert_type(y, Tensor[12, 32, 32])
+
+
+def test_flatten_in_sequential():
+    """Flatten module works in Sequential chain."""
+    seq = nn.Sequential(nn.Flatten(), nn.Linear(3072, 10))
+    x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
+    y = seq(x)
+    assert_type(y, Tensor[4, 10])
 
 
 # ============================================================================

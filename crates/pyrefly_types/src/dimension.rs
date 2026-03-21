@@ -628,6 +628,10 @@ pub enum ShapeError {
 
     /// Too many indices for tensor rank
     TooManyIndices { got: usize, max: usize },
+
+    /// Operation not supported on variadic shapes.
+    /// Triggers fixture fallback instead of a user-visible error.
+    Unsupported { message: String },
 }
 
 impl Display for ShapeError {
@@ -670,6 +674,9 @@ impl Display for ShapeError {
                     "Too many indices for tensor: got {}, expected at most {}",
                     got, max
                 )
+            }
+            Self::Unsupported { message } => {
+                write!(f, "Unsupported: {}", message)
             }
         }
     }
