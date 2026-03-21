@@ -689,6 +689,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     );
                     match right {
                         Type::None
+                        | Type::Ellipsis
                         | Type::Literal(box Literal {
                             value: Lit::Bool(_) | Lit::Enum(_),
                             ..
@@ -715,11 +716,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     match (&facet_ty, &right) {
                         (
                             Type::None
+                            | Type::Ellipsis
                             | Type::Literal(box Literal {
                                 value: Lit::Bool(_) | Lit::Enum(_),
                                 ..
                             }),
                             Type::None
+                            | Type::Ellipsis
                             | Type::Literal(box Literal {
                                 value: Lit::Bool(_) | Lit::Enum(_),
                                 ..
@@ -739,7 +742,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                     );
                     match right {
-                        Type::None | Type::Literal(_) => {
+                        Type::None | Type::Ellipsis | Type::Literal(_) => {
                             if self.is_subset_eq(&right, &facet_ty) {
                                 t.clone()
                             } else {
@@ -760,11 +763,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                     );
                     match (&facet_ty, &right) {
-                        (Type::None | Type::Literal(_), Type::None | Type::Literal(_))
-                            if self.literal_equal(&right, &facet_ty) =>
-                        {
-                            self.heap.mk_never()
-                        }
+                        (
+                            Type::None | Type::Ellipsis | Type::Literal(_),
+                            Type::None | Type::Ellipsis | Type::Literal(_),
+                        ) if self.literal_equal(&right, &facet_ty) => self.heap.mk_never(),
                         _ => t.clone(),
                     }
                 }))
@@ -1136,6 +1138,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         (
                             _,
                             Type::None
+                            | Type::Ellipsis
                             | Type::Literal(box Literal {
                                 value: Lit::Bool(_) | Lit::Enum(_),
                                 ..
@@ -1323,7 +1326,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             AtomicNarrowOp::Eq(v) => {
                 let right = self.expr_infer(v, errors);
-                if matches!(right, Type::Literal(_) | Type::None) {
+                if matches!(right, Type::Literal(_) | Type::None | Type::Ellipsis) {
                     self.intersect(ty, &right)
                 } else {
                     ty.clone()
@@ -1331,7 +1334,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             AtomicNarrowOp::NotEq(v) => {
                 let right = self.expr_infer(v, errors);
-                if matches!(right, Type::Literal(_) | Type::None) {
+                if matches!(right, Type::Literal(_) | Type::None | Type::Ellipsis) {
                     self.distribute_over_union(ty, |t| match (t, &right) {
                         (_, _) if self.literal_equal(t, &right) => self.heap.mk_never(),
                         (Type::ClassType(cls), Type::Literal(lit))
@@ -1928,6 +1931,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn literal_equal(&self, left: &Type, right: &Type) -> bool {
         match (left, right) {
             (Type::None, Type::None) => true,
+            (Type::Ellipsis, Type::Ellipsis) => true,
             (Type::Literal(left), Type::Literal(right)) => left.value == right.value,
             _ => false,
         }
