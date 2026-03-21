@@ -34,6 +34,7 @@ use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::alt::callable::CallWithTypes;
 use crate::alt::class::class_field::DescriptorBase;
+use crate::alt::nn_module_specials::is_nn_sequential;
 use crate::alt::unwrap::HintRef;
 use crate::binding::binding::Key;
 use crate::config::error_kind::ErrorKind;
@@ -1476,11 +1477,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        // nn.Module call forwarding: when calling an nn.Module instance (or Self in a Module subclass),
-        // redirect to the `forward` method. This models PyTorch's `nn.Module.__call__` behavior.
-        // TODO: Consider modeling this via a stub for `nn.Module.__call__` that delegates to `forward`.
-        if let Some(forward_ty) = self.try_nn_module_forward_dispatch(&callee_ty, x.range, errors) {
-            return self.expr_call_infer(x, forward_ty, hint, errors);
+        // nn.Sequential chain: thread input through each module's forward method.
+        // Must be checked before generic Module forward dispatch, which would erase shapes.
+        if let Type::ClassType(cls) = &callee_ty
+            && is_nn_sequential(cls)
+            && x.arguments.args.len() == 1
+            && x.arguments.keywords.is_empty()
+        {
+            let input_ty = self.expr_infer(&x.arguments.args[0], errors);
+            if let Some(result) =
+                self.try_nn_sequential_chain_forward(cls, input_ty, x.range, errors)
+            {
+                return result;
+            }
         }
 
         if matches!(&callee_ty, Type::ClassDef(cls) if cls.is_builtin("super")) {

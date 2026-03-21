@@ -388,3 +388,28 @@ def test_module_as_callable():
     f: Callable[[Tensor[4, 8]], Tensor[4, 8]] = relu
     y = f(torch.randn(4, 8))
     assert_type(y, Tensor[4, 8])
+
+
+# ============================================================================
+# Sequential chain
+# ============================================================================
+
+
+def test_sequential_chain():
+    """nn.Sequential chains input through each module, preserving shapes."""
+    linear1 = nn.Linear(784, 256)
+    relu = nn.ReLU()
+    linear2 = nn.Linear(256, 10)
+
+    seq = nn.Sequential(linear1, relu, linear2)
+    x: Tensor[32, 784] = torch.randn(32, 784)
+    y = seq(x)
+    assert_type(y, Tensor[32, 10])
+
+
+def test_sequential_single_module():
+    """nn.Sequential with a single module."""
+    seq = nn.Sequential(nn.Linear(10, 5))
+    x: Tensor[4, 10] = torch.randn(4, 10)
+    y = seq(x)
+    assert_type(y, Tensor[4, 5])

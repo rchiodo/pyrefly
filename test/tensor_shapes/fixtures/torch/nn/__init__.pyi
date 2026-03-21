@@ -163,13 +163,14 @@ class ModuleDict[T](Module):
     def values(self) -> Iterator[Module]: ...
 
 # Sequential container
-class Sequential(Module):
+class Sequential[*Ms](Module):
     """
     A sequential container. Modules will be added to it in the order they are passed.
+    When type arguments are known, calling the Sequential chains input through each
+    module's forward method, preserving shape information.
     """
-    def __init__(self, *args: Module) -> None: ...
+    def __init__(self, *args: *Ms) -> None: ...
     def forward(self, input: Tensor) -> Tensor: ...
-    def __call__(self, input: Tensor) -> Tensor: ...
 
 # ModuleList container
 class ModuleList[T](Module):
