@@ -592,7 +592,7 @@ fn test_workspace_diagnostics_cleared_on_file_delete() {
     interaction.shutdown().unwrap();
 }
 
-/// Test 10: Warning-severity diagnostics are only shown for open files.
+/// Warning-severity diagnostics follow open/close transitions.
 ///
 /// In workspace diagnostic mode, non-open files should only receive
 /// error-severity diagnostics. Warning-severity diagnostics should be
@@ -601,10 +601,11 @@ fn test_workspace_diagnostics_cleared_on_file_delete() {
 /// `warning.py` has both a `bad-assignment` (error) and a `bad-return`
 /// (configured as warn in pyrefly.toml). When non-open, only the error
 /// should be published. When opened, both the error and the warning
-/// should appear. This guards against regressions where either all
-/// diagnostics leak through or all diagnostics are suppressed.
+/// should appear. When closed again, the file should transition back to
+/// non-open diagnostics and drop the warning. This guards against stale
+/// open-file warnings lingering after `did_close`.
 #[test]
-fn test_workspace_diagnostics_only_errors_for_non_open_files() {
+fn test_workspace_diagnostics_severity_tracks_open_close_transitions() {
     let root = get_test_files_root();
     let root_path = root.path().join("workspace_diagnostics_severity");
     let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
@@ -693,6 +694,40 @@ fn test_workspace_diagnostics_only_errors_for_non_open_files() {
             },
         )
         .expect("Opened warning.py should have both error and warning diagnostics");
+
+    // Close warning.py again. The warning should disappear immediately,
+    // proving the file transitioned back to non-open workspace diagnostics.
+    let warning_path = root_path.join("warning.py");
+    interaction.client.did_close("warning.py");
+    interaction
+        .client
+        .expect_message(
+            "publishDiagnostics for closed warning.py with only error-severity diagnostics",
+            move |msg| {
+                if let Message::Notification(n) = msg
+                    && n.method == PublishDiagnostics::METHOD
+                {
+                    let params: PublishDiagnosticsParams =
+                        serde_json::from_value(n.params).unwrap();
+                    let path = params.uri.to_file_path().unwrap();
+                    if path == warning_path && !params.diagnostics.is_empty() {
+                        let all_errors = params
+                            .diagnostics
+                            .iter()
+                            .all(|d| d.severity == Some(DiagnosticSeverity::ERROR));
+                        let has_warning = params
+                            .diagnostics
+                            .iter()
+                            .any(|d| d.severity == Some(DiagnosticSeverity::WARNING));
+                        if all_errors && !has_warning {
+                            return Some(Ok(()));
+                        }
+                    }
+                }
+                None
+            },
+        )
+        .expect("Closed warning.py should return to only error-severity diagnostics");
 
     interaction.shutdown().unwrap();
 }

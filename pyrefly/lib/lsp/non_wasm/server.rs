@@ -3562,7 +3562,7 @@ impl Server {
                 let mut transaction = server
                     .state
                     .new_committable_transaction(Require::Exports, None);
-                transaction.as_mut().set_memory(vec![(path, None)]);
+                transaction.as_mut().set_memory(vec![(path.clone(), None)]);
                 let _ = server.validate_in_memory_for_transaction(
                     transaction.as_mut(),
                     telemetry_event,
@@ -3571,6 +3571,24 @@ impl Server {
                 server
                     .state
                     .commit_transaction(transaction, Some(telemetry_event));
+                if server.workspaces.diagnostic_mode(&path) == DiagnosticMode::Workspace
+                    && path.exists()
+                    && path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                {
+                    let transaction = server.state.transaction();
+                    let handle = handle_from_module_path(
+                        &server.state,
+                        ModulePath::filesystem(path.clone()),
+                    );
+                    server.publish_for_handles(
+                        &transaction,
+                        std::slice::from_ref(&handle),
+                        DiagnosticSource::CommittingTransaction,
+                    );
+                }
             }),
         );
     }
