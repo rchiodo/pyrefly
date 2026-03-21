@@ -56,6 +56,7 @@ use ruff_python_ast::Keyword;
 use ruff_python_ast::Number;
 use ruff_python_ast::Operator;
 use ruff_python_ast::StringLiteralValue;
+use ruff_python_ast::UnaryOp;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -2352,7 +2353,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         // Convert a slice bound expression to a dimension type.
+        // For unary negation (-expr), we preserve the Mul(-1, ...) wrapper
+        // without canonicalizing, so adjust_negative can detect negative bounds
+        // even after the distributive law would otherwise distribute -1 across sums.
         let to_dim = |expr: &Expr| -> Type {
+            // Detect syntactic unary minus: -(inner)
+            if let Expr::UnaryOp(x) = expr
+                && x.op == UnaryOp::USub
+            {
+                let inner_ty = self.expr_infer(&x.operand, errors);
+                let inner_dim = match inner_ty {
+                    Type::Literal(ref lit) if let Some(val) = lit.value.as_index_i64() => {
+                        // Literal negation: just negate the value directly
+                        return self.heap.mk_size(SizeExpr::Literal(-val));
+                    }
+                    Type::Dim(ref inner) => (**inner).clone(),
+                    Type::Quantified(_) | Type::Size(_) => inner_ty.clone(),
+                    _ => return Type::any_implicit(),
+                };
+                // Wrap in Mul(-1, ...) WITHOUT canonicalizing.
+                // This preserves the structural signal for adjust_negative.
+                // The final canonicalization happens in TensorShape::from_types.
+                return Type::Size(SizeExpr::Mul(
+                    Box::new(Type::Size(SizeExpr::Literal(-1))),
+                    Box::new(inner_dim),
+                ));
+            }
             let ty = self.expr_infer(expr, errors);
             match ty {
                 Type::Literal(ref lit) if let Some(val) = lit.value.as_index_i64() => {
@@ -2364,10 +2390,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
 
+        // Extract a step value from a slice step expression.
+        // Supports literal integers, Dim[S], and Size types.
+        let to_step = |expr: &Expr| -> Option<Type> {
+            let ty = self.expr_infer(expr, errors);
+            match &ty {
+                Type::Literal(lit) if let Some(val) = lit.value.as_index_i64() => {
+                    Some(self.heap.mk_size(SizeExpr::Literal(val)))
+                }
+                Type::Dim(_) => Some(ty.clone()),
+                Type::Quantified(_) | Type::Size(_) => Some(ty.clone()),
+                _ => Option::None,
+            }
+        };
+
         // Classify a non-slice, non-ellipsis index expression into an IndexOp.
         // Returns None to bail to shapeless for unclassifiable indices.
         let classify_index_expr = |expr: &Expr| -> Option<IndexOp> {
+            // None literal → NewAxis (inserts dim of size 1)
+            if matches!(expr, Expr::NoneLiteral(_)) {
+                return Some(IndexOp::NewAxis);
+            }
             let idx_ty = self.expr_infer(expr, errors);
+            // None type (e.g. from a variable typed as None)
+            if matches!(&idx_ty, Type::None) {
+                return Some(IndexOp::NewAxis);
+            }
             if let Type::Tuple(ref tuple) = idx_ty {
                 return match tuple {
                     Tuple::Concrete(elems) => Some(IndexOp::Fancy(Some(elems.len() as i64))),
@@ -2388,21 +2436,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Classify any index expression (including slices) into an IndexOp.
         let classify = |expr: &Expr| -> Option<IndexOp> {
             match expr {
-                Expr::Slice(ExprSlice { lower, upper, .. }) => {
+                Expr::Slice(ExprSlice {
+                    lower, upper, step, ..
+                }) => {
                     let start = lower.as_ref().map(|e| to_dim(e));
                     let stop = upper.as_ref().map(|e| to_dim(e));
-                    Some(IndexOp::Slice { start, stop })
+                    let step_val = step.as_ref().and_then(|e| to_step(e));
+                    Some(IndexOp::Slice {
+                        start,
+                        stop,
+                        step: step_val,
+                    })
                 }
                 _ => classify_index_expr(expr),
             }
         };
 
         match index {
-            // Slice operation: tensor[start:stop]
-            Expr::Slice(ExprSlice { lower, upper, .. }) => {
+            // Slice operation: tensor[start:stop:step]
+            Expr::Slice(ExprSlice {
+                lower, upper, step, ..
+            }) => {
                 let start = lower.as_ref().map(|e| to_dim(e));
                 let stop = upper.as_ref().map(|e| to_dim(e));
-                match index_shape_slice(&tensor_type.shape, start, stop) {
+                let step_val = step.as_ref().and_then(|e| to_step(e));
+                match index_shape_slice(&tensor_type.shape, start, stop, step_val) {
                     Ok(shape) => TensorType::new(tensor_type.base_class.clone(), shape).to_type(),
                     Err(err) => self.error(
                         errors,
@@ -2414,6 +2472,33 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             // Bare ellipsis: tensor[...] - preserves entire shape
             Expr::EllipsisLiteral(_) => tensor_type.clone().to_type(),
+            // None index: tensor[None] - inserts a new dimension of size 1 at the front
+            Expr::NoneLiteral(_) => {
+                let one = self.heap.mk_size(SizeExpr::Literal(1));
+                let mut new_dims = vec![one];
+                match &tensor_type.shape {
+                    TensorShape::Concrete(dims) => {
+                        new_dims.extend(dims.iter().cloned());
+                        TensorType::new(
+                            tensor_type.base_class.clone(),
+                            TensorShape::from_types(new_dims),
+                        )
+                        .to_type()
+                    }
+                    TensorShape::Unpacked(box (prefix, middle, suffix)) => {
+                        new_dims.extend(prefix.iter().cloned());
+                        TensorType::new(
+                            tensor_type.base_class.clone(),
+                            TensorShape::Unpacked(Box::new((
+                                new_dims,
+                                middle.clone(),
+                                suffix.clone(),
+                            ))),
+                        )
+                        .to_type()
+                    }
+                }
+            }
             // Tuple index: tensor[:, -1, :] - apply each index to corresponding dimension
             Expr::Tuple(ExprTuple { elts, .. }) => {
                 // Check for ellipsis and validate at most one
@@ -2577,6 +2662,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         None
                     }
                 }
+            }
+            // Unary negation: -N, -1, -(N + 1), etc.
+            Expr::UnaryOp(x) if x.op == UnaryOp::USub => {
+                let inner = self.parse_dimension_expr(&x.operand, errors)?;
+                Some(self.heap.mk_size(SizeExpr::sub(
+                    self.heap.mk_size(SizeExpr::Literal(0)),
+                    inner,
+                )))
             }
             // Binary operations: N + M, N * M, etc.
             Expr::BinOp(ExprBinOp {

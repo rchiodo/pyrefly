@@ -1394,8 +1394,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
             // Unwrap Dim[T] → T so the DSL can extract literal ints.
             // After type param substitution, Dim[S] with S=0 becomes Type::Dim(Size(Literal(0))).
+            // For Optional[Dim[T]] (i.e., Dim[T] | None): if T is bound, unwrap to T;
+            // if T is unbound (Any), resolve to None — the DSL models missing values as None.
             let unwrapped = match field_ty {
                 Type::Dim(inner) => *inner,
+                Type::Union(ref u) => {
+                    let dim_inner = u.members.iter().find_map(|m| match m {
+                        Type::Dim(inner) => Some(inner.as_ref().clone()),
+                        _ => None,
+                    });
+                    match dim_inner {
+                        Some(Type::Any(_)) => Type::None,
+                        Some(inner) => inner,
+                        None => field_ty,
+                    }
+                }
                 other => other,
             };
             bound_args.insert(param_name.to_owned(), unwrapped);

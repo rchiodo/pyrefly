@@ -1546,9 +1546,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 &tensor.base_class.clone().to_type(),
                 &Type::ClassType(cls.clone()),
             ),
-            // Type::Dim is a subtype of int
-            // This allows Dim[N] values to be passed where int parameters are expected
-            (Type::Dim(_), Type::ClassType(cls)) if cls.is_builtin("int") => Ok(()),
+            // Type::Dim is a subtype of int and float (numeric tower: Dim <: int <: float)
+            // This allows Dim[N] values to be passed where int or float parameters are expected
+            (Type::Dim(_), Type::ClassType(cls))
+                if cls.is_builtin("int") || cls.is_builtin("float") =>
+            {
+                Ok(())
+            }
             (Type::Kwargs(_), _) => {
                 // We know kwargs will always be a dict w/ str keys
                 self.is_subset_eq(

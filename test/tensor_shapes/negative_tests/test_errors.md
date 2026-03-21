@@ -449,16 +449,16 @@ ERROR Returned type `Tensor[2, 3]` is not assignable to declared return type `Te
 ```scrut
 $ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_indexing.py"
 ERROR Returned type `Tensor[20]` is not assignable to declared return type `Tensor[10, 20]` [bad-return]
-   --> *test_tensor_indexing.py:256:12 (glob)
+   --> *test_tensor_indexing.py:317:12 (glob)
     |
-256 |     return x[0]  # ERROR: Tensor[20] not assignable to Tensor[10, 20]
+317 |     return x[0]  # ERROR: Tensor[20] not assignable to Tensor[10, 20]
     |            ^^^^
     |
   Tensor rank mismatch: expected 2 dimensions, got 1 dimensions
 ERROR Returned type `Tensor[5, 20]` is not assignable to declared return type `Tensor[3, 20]` [bad-return]
-   --> *test_tensor_indexing.py:261:12 (glob)
+   --> *test_tensor_indexing.py:322:12 (glob)
     |
-261 |     return x[:5]  # ERROR: Tensor[5, 20] not assignable to Tensor[3, 20]
+322 |     return x[:5]  # ERROR: Tensor[5, 20] not assignable to Tensor[3, 20]
     |            ^^^^^
     |
   Size mismatch: expected 3, got 5
