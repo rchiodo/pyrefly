@@ -222,21 +222,29 @@ def test_conv1d():
     conv = nn.Conv1d(16, 32, kernel_size=3, padding=1)
     x: Tensor[4, 16, 100] = torch.randn(4, 16, 100)
     y = conv(x)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 32, 100])
 
 
 def test_conv2d_padding():
     conv = nn.Conv2d(3, 64, kernel_size=3, padding=1)
     x: Tensor[4, 3, 32, 32] = torch.randn(4, 3, 32, 32)
     y = conv(x)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 64, 32, 32])
+
+
+def test_conv2d_default_stride():
+    """Conv2d with default stride=1 (PEP 696 default)."""
+    conv = nn.Conv2d(3, 16, kernel_size=5)
+    x: Tensor[4, 3, 28, 28] = torch.randn(4, 3, 28, 28)
+    y = conv(x)
+    assert_type(y, Tensor[4, 16, 24, 24])
 
 
 def test_conv_transpose2d():
     conv = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
     x: Tensor[4, 128, 16, 16] = torch.randn(4, 128, 16, 16)
     y = conv(x)
-    assert_type(y, Tensor)
+    assert_type(y, Tensor[4, 64, 32, 32])
 
 
 # ============================================================================

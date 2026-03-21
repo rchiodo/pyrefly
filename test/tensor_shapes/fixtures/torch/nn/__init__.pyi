@@ -460,122 +460,192 @@ class Identity(Module):
 # Convolution Modules
 # ==============================================================================
 
-class Conv1d[InC, OutC](Module):
-    """1D convolution. Tracks input and output channel dimensions."""
+class Conv1d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+    """1D convolution. Tracks channel and spatial dimensions.
+
+    Type parameters S, P, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults (S=1, P=0, D=1) apply when arguments are omitted.
+    """
+
+    weight: Tensor[OutC, InC, K]
 
     def __init__(
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        dilation: int = 1,
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        dilation: _Dim[D] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = "zeros",
         device: Any = None,
         dtype: Any = None,
     ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    def forward[B, L](
+        self, input: Tensor[B, InC, L]
+    ) -> Tensor[B, OutC, (L + 2 * P - D * (K - 1) - 1) // S + 1]: ...
 
-class Conv2d[InC, OutC](Module):
-    """2D convolution. Tracks input and output channel dimensions."""
+class Conv2d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+    """2D convolution. Tracks channel and spatial dimensions.
+
+    Type parameters S, P, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults (S=1, P=0, D=1) apply when arguments are omitted.
+    """
+
+    weight: Tensor[OutC, InC, K, K]
 
     def __init__(
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        dilation: int = 1,
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        dilation: _Dim[D] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = "zeros",
         device: Any = None,
         dtype: Any = None,
     ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    def forward[B, H, W](
+        self, input: Tensor[B, InC, H, W]
+    ) -> Tensor[
+        B,
+        OutC,
+        (H + 2 * P - D * (K - 1) - 1) // S + 1,
+        (W + 2 * P - D * (K - 1) - 1) // S + 1,
+    ]: ...
 
-class Conv3d[InC, OutC](Module):
-    """3D convolution. Tracks input and output channel dimensions."""
+class Conv3d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+    """3D convolution. Tracks channel and spatial dimensions.
+
+    Type parameters S, P, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults (S=1, P=0, D=1) apply when arguments are omitted.
+    """
+
+    weight: Tensor[OutC, InC, K, K, K]
 
     def __init__(
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        dilation: int = 1,
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        dilation: _Dim[D] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = "zeros",
         device: Any = None,
         dtype: Any = None,
     ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    def forward[B, D_, H, W](
+        self, input: Tensor[B, InC, D_, H, W]
+    ) -> Tensor[
+        B,
+        OutC,
+        (D_ + 2 * P - D * (K - 1) - 1) // S + 1,
+        (H + 2 * P - D * (K - 1) - 1) // S + 1,
+        (W + 2 * P - D * (K - 1) - 1) // S + 1,
+    ]: ...
 
-class ConvTranspose1d[InC, OutC](Module):
-    """1D transposed convolution. Tracks input and output channel dimensions."""
+class ConvTranspose1d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+    """1D transposed convolution. Tracks channel and spatial dimensions.
 
-    def __init__(
-        self,
-        in_channels: _Dim[InC],
-        out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        output_padding: int = 0,
-        groups: int = 1,
-        bias: bool = True,
-        dilation: int = 1,
-        padding_mode: str = "zeros",
-        device: Any = None,
-        dtype: Any = None,
-    ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults apply when arguments are omitted.
+    """
 
-class ConvTranspose2d[InC, OutC](Module):
-    """2D transposed convolution. Tracks input and output channel dimensions."""
+    weight: Tensor[InC, OutC, K]
 
     def __init__(
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        output_padding: int = 0,
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        output_padding: _Dim[OP] = 0,
         groups: int = 1,
         bias: bool = True,
-        dilation: int = 1,
+        dilation: _Dim[D] = 1,
         padding_mode: str = "zeros",
         device: Any = None,
         dtype: Any = None,
     ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    def forward[B, L](
+        self, input: Tensor[B, InC, L]
+    ) -> Tensor[B, OutC, (L - 1) * S - 2 * P + D * (K - 1) + OP + 1]: ...
 
-class ConvTranspose3d[InC, OutC](Module):
-    """3D transposed convolution. Tracks input and output channel dimensions."""
+class ConvTranspose2d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+    """2D transposed convolution. Tracks channel and spatial dimensions.
+
+    Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults apply when arguments are omitted.
+    """
+
+    weight: Tensor[InC, OutC, K, K]
 
     def __init__(
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: int,
-        stride: int = 1,
-        padding: int = 0,
-        output_padding: int = 0,
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        output_padding: _Dim[OP] = 0,
         groups: int = 1,
         bias: bool = True,
-        dilation: int = 1,
+        dilation: _Dim[D] = 1,
         padding_mode: str = "zeros",
         device: Any = None,
         dtype: Any = None,
     ) -> None: ...
-    def forward(self, input: Tensor) -> Tensor: ...
+    def forward[B, H, W](
+        self, input: Tensor[B, InC, H, W]
+    ) -> Tensor[
+        B,
+        OutC,
+        (H - 1) * S - 2 * P + D * (K - 1) + OP + 1,
+        (W - 1) * S - 2 * P + D * (K - 1) + OP + 1,
+    ]: ...
+
+class ConvTranspose3d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+    """3D transposed convolution. Tracks channel and spatial dimensions.
+
+    Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].
+    PEP 696 defaults apply when arguments are omitted.
+    """
+
+    weight: Tensor[InC, OutC, K, K, K]
+
+    def __init__(
+        self,
+        in_channels: _Dim[InC],
+        out_channels: _Dim[OutC],
+        kernel_size: _Dim[K],
+        stride: _Dim[S] = 1,
+        padding: _Dim[P] = 0,
+        output_padding: _Dim[OP] = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: _Dim[D] = 1,
+        padding_mode: str = "zeros",
+        device: Any = None,
+        dtype: Any = None,
+    ) -> None: ...
+    def forward[B, D_, H, W](
+        self, input: Tensor[B, InC, D_, H, W]
+    ) -> Tensor[
+        B,
+        OutC,
+        (D_ - 1) * S - 2 * P + D * (K - 1) + OP + 1,
+        (H - 1) * S - 2 * P + D * (K - 1) + OP + 1,
+        (W - 1) * S - 2 * P + D * (K - 1) + OP + 1,
+    ]: ...
 
 # ==============================================================================
 # Pooling Modules
