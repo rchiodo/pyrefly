@@ -2146,7 +2146,7 @@ impl<'a> Transaction<'a> {
         &self,
         handle: &Handle,
     ) -> Arc<crate::report::pysa::PysaSolutions> {
-        let module_data = self.get_module(&handle);
+        let module_data = self.get_module(handle);
         self.demand(module_data, Step::last());
         module_data
             .state

@@ -31,9 +31,9 @@ use crate::state::lsp::FindDefinitionItemWithDocstring;
 // Intentionally refer to decorators by names instead of uniquely identifying them. Some special handling
 // (i.e., see the usage of `GRAPHQL_DECORATORS`) are triggered when decorators are matched by names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct GraphQLDecoratorRef {
-    pub(crate) module: &'static str,
-    pub(crate) name: &'static str,
+pub struct GraphQLDecoratorRef {
+    pub module: &'static str,
+    pub name: &'static str,
 }
 
 impl GraphQLDecoratorRef {

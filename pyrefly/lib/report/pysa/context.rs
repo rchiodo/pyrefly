@@ -125,7 +125,7 @@ impl<'a> PysaResolver<'a> {
             .clone()
     }
 
-    pub fn with_solver<R: Sized>(
+    pub(crate) fn with_solver<R: Sized>(
         &self,
         label: &'static str,
         f: impl FnOnce(AnswersSolver<TransactionHandle>) -> R,
