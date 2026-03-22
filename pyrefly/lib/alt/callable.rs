@@ -510,19 +510,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// `*P.args` / `**P.kwargs` as the last positional and keyword arguments.
     /// Called when `var_to_rparams` returns `Err(q)` (the Var resolved to a
     /// still-quantified ParamSpec `q`).
-    fn check_paramspec_forwarding(
+    ///
+    /// `current_arg` is the arg that triggered ParamSpec expansion (first call
+    /// site only). When present, we check that it is `*P.args` — this catches
+    /// extra args *before* `*P.args`. We also always check that `args.last()`
+    /// is `*P.args` — this catches extra args *after* it and the case where
+    /// `*P.args` is missing entirely. On success, return the remaining
+    /// arguments after stripping the trailing `*P.args` / `**P.kwargs` pair.
+    fn paramspec_forwarding<'b>(
         &self,
         q: &Quantified,
-        args: &[CallArg],
-        keywords: &[CallKeyword],
+        current_arg: Option<&CallArg<'b>>,
+        args: &'b [CallArg<'b>],
+        keywords: &'b [CallKeyword<'b>],
         arguments_range: TextRange,
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-    ) {
-        let args_ok = args
+    ) -> Option<(&'b [CallArg<'b>], &'b [CallKeyword<'b>])> {
+        let current_ok = current_arg.is_none_or(|x| self.is_param_spec_args(x, q, arg_errors));
+        let last_ok = args
             .last()
             .is_some_and(|x| self.is_param_spec_args(x, q, arg_errors));
+        let args_ok = current_ok && last_ok;
         let kwargs_ok = keywords
             .last()
             .is_some_and(|x| self.is_param_spec_kwargs(x, q, arg_errors));
@@ -537,6 +547,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     q.name()
                 ),
             );
+            None
+        } else {
+            Some((&args[..args.len() - 1], &keywords[..keywords.len() - 1]))
         }
     }
 
@@ -643,10 +656,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         Ok(new_rparams) => rparams = new_rparams,
                         Err(q) => {
                             // Quantified ParamSpec forwarding: validate that the
-                            // remaining args/kwargs are the expected `*P.args` /
-                            // `**P.kwargs` pair and stop matching.
-                            self.check_paramspec_forwarding(
+                            // current arg is `*P.args`, it is the last positional
+                            // arg, and the last keyword is `**P.kwargs`.
+                            let _ = self.paramspec_forwarding(
                                 &q,
+                                Some(arg),
                                 args,
                                 keywords,
                                 arguments_range,
@@ -872,10 +886,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     match var_to_rparams(var) {
                         Ok(new_rparams) => rparams = new_rparams,
                         Err(q) => {
-                            // Quantified ParamSpec forwarding: validate both
-                            // *P.args and **P.kwargs in the original arguments.
-                            self.check_paramspec_forwarding(
+                            // Quantified ParamSpec forwarding: no current
+                            // positional arg triggered expansion; check that
+                            // `*P.args` is the last positional arg and
+                            // `**P.kwargs` is the last keyword.
+                            let _ = self.paramspec_forwarding(
                                 &q,
+                                None,
                                 args,
                                 keywords,
                                 arguments_range,
@@ -1318,32 +1335,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         &mut bound_args,
                     ),
                     Type::Quantified(q) => {
-                        if !args
-                            .last()
-                            .is_some_and(|x| self.is_param_spec_args(x, &q, arg_errors))
-                            || !keywords
-                                .last()
-                                .is_some_and(|x| self.is_param_spec_kwargs(x, &q, arg_errors))
-                        {
-                            self.error(
-                                call_errors,
-                                arguments_range,
-                                ErrorInfo::new(ErrorKind::InvalidParamSpec, context),
-                                format!(
-                                    "Expected *-unpacked {}.args and **-unpacked {}.kwargs",
-                                    q.name(),
-                                    q.name()
-                                ),
-                            );
-                        } else {
+                        if let Some((args, keywords)) = self.paramspec_forwarding(
+                            &q,
+                            None,
+                            args,
+                            keywords,
+                            arguments_range,
+                            arg_errors,
+                            call_errors,
+                            context,
+                        ) {
                             self.callable_infer_params(
                                 callable_name,
                                 &ParamList::new_types(concatenate.into_vec()),
                                 None,
                                 self_arg,
                                 self_qs,
-                                &args[0..args.len() - 1],
-                                &keywords[0..keywords.len() - 1],
+                                args,
+                                keywords,
                                 arguments_range,
                                 arg_errors,
                                 call_errors,

@@ -599,6 +599,36 @@ def level3(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
 );
 
 testcase!(
+    test_paramspec_forwarding_extra_arg_before_star,
+    r#"
+from typing import Callable, ParamSpec, TypeVar
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def inner(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+def outer(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    return inner(fn, 1, *args, **kwargs)  # E: Expected *-unpacked P.args and **-unpacked P.kwargs
+"#,
+);
+
+testcase!(
+    test_paramspec_forwarding_extra_arg_after_star,
+    r#"
+from typing import Callable, ParamSpec, TypeVar
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def inner(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R: ...
+
+def outer(fn: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
+    return inner(fn, *args, 1, **kwargs)  # E: Expected *-unpacked P.args and **-unpacked P.kwargs
+"#,
+);
+
+testcase!(
     test_paramspec_forwarding_kwargs_only,
     r#"
 from typing import Callable, Concatenate, ParamSpec, TypeVar
