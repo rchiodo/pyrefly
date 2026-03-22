@@ -48,6 +48,7 @@ use lsp_types::notification::PublishDiagnostics;
 use lsp_types::request::CodeActionRequest;
 use lsp_types::request::Completion;
 use lsp_types::request::DocumentDiagnosticRequest;
+use lsp_types::request::DocumentHighlightRequest;
 use lsp_types::request::FoldingRangeRequest;
 use lsp_types::request::GotoDefinition;
 use lsp_types::request::GotoImplementation;
@@ -1599,6 +1600,26 @@ impl LspInteraction {
         line: u32,
         col: u32,
     ) -> ClientRequestHandle<'_, GotoTypeDefinition> {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        self.client.send_request(json!({
+            "textDocument": {
+                "uri": cell_uri
+            },
+            "position": {
+                "line": line,
+                "character": col
+            }
+        }))
+    }
+
+    /// Sends a document highlight request for a notebook cell at the specified position
+    pub fn document_highlight_cell(
+        &self,
+        file_name: &str,
+        cell_name: &str,
+        line: u32,
+        col: u32,
+    ) -> ClientRequestHandle<'_, DocumentHighlightRequest> {
         let cell_uri = self.cell_uri(file_name, cell_name);
         self.client.send_request(json!({
             "textDocument": {
