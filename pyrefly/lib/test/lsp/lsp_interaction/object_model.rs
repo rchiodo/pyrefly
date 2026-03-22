@@ -1591,6 +1591,26 @@ impl LspInteraction {
         }))
     }
 
+    /// Sends a type definition request for a notebook cell at the specified position
+    pub fn type_definition_cell(
+        &self,
+        file_name: &str,
+        cell_name: &str,
+        line: u32,
+        col: u32,
+    ) -> ClientRequestHandle<'_, GotoTypeDefinition> {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        self.client.send_request(json!({
+            "textDocument": {
+                "uri": cell_uri
+            },
+            "position": {
+                "line": line,
+                "character": col
+            }
+        }))
+    }
+
     /// Sends a references request for a notebook cell at the specified position
     pub fn references_cell(
         &self,
