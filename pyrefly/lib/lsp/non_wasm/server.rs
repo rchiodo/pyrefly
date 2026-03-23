@@ -1670,23 +1670,8 @@ impl Server {
                 // Set up immediate per-call telemetry for ad-hoc solves. Each solve event is
                 // logged the instant it completes rather than batched.
                 {
-                    let server_state = self.telemetry_state();
-                    let activity_key = telemetry_event.activity_key.clone();
-                    let parent_task_id = telemetry_event.task_id;
-                    transaction.set_ad_hoc_solve_recorder(Box::new(
-                        move |label, start, duration| {
-                            let mut event = TelemetryEvent::new_task(
-                                TelemetryEventKind::AdHocSolve(label.to_owned()),
-                                server_state.clone(),
-                                QueueName::LspQueue,
-                                parent_task_id,
-                                start,
-                            );
-                            // todo(kylei): add file stats
-                            event.set_activity_key(activity_key.clone());
-                            telemetry.record_event(event, duration, None);
-                        },
-                    ));
+                    let sub_task_telemetry = SubTaskTelemetry::new(telemetry, telemetry_event);
+                    transaction.set_sub_task_telemetry(sub_task_telemetry);
                 }
 
                 // As an over-approximation, validate open files. This request might be based on a transaction where we

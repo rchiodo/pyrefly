@@ -51,7 +51,9 @@ use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
 use pyrefly_util::task_heap::TaskHeap;
+use pyrefly_util::telemetry::SubTaskTelemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
+use pyrefly_util::telemetry::TelemetryEventKind;
 use pyrefly_util::telemetry::TelemetryTransactionStats;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::uniques::UniqueFactory;
@@ -527,7 +529,7 @@ impl<'a> TransactionData<'a> {
                     state_lock_blocked,
                     ..Default::default()
                 }),
-                ad_hoc_solve_recorder: None,
+                sub_task_telemetry: None,
                 readable,
             })
         } else {
@@ -544,10 +546,7 @@ impl<'a> TransactionData<'a> {
 pub struct Transaction<'a> {
     data: TransactionData<'a>,
     stats: Mutex<TelemetryTransactionStats>,
-    /// Optional callback that logs each ad-hoc solve event the instant it completes.
-    /// When set, each call to `ad_hoc_solve` immediately invokes this recorder with the
-    /// operation label, start time, and duration, rather than batching stats for later.
-    ad_hoc_solve_recorder: Option<Box<dyn Fn(&'static str, Instant, Duration) + Send + Sync + 'a>>,
+    sub_task_telemetry: Option<SubTaskTelemetry<'a>>,
     readable: RwLockReadGuard<'a, StateData>,
 }
 
@@ -557,7 +556,7 @@ impl<'a> Transaction<'a> {
         let Transaction {
             data,
             stats,
-            ad_hoc_solve_recorder: _,
+            sub_task_telemetry: _,
             readable,
         } = self;
         drop(readable);
@@ -606,13 +605,11 @@ impl<'a> Transaction<'a> {
         self.data.todo.get_cancellation_handle()
     }
 
-    /// Sets a callback that will be invoked immediately each time an ad-hoc solve completes,
-    /// recording the operation label, start time, and duration as a telemetry event.
-    pub fn set_ad_hoc_solve_recorder(
-        &mut self,
-        recorder: Box<dyn Fn(&'static str, Instant, Duration) + Send + Sync + 'a>,
-    ) {
-        self.ad_hoc_solve_recorder = Some(recorder);
+    /// Sets an instance of a [`SubTaskTelemetry`], which will enable the creation and logging of
+    /// different sub-tasks that occur as part of this instance of a transaction before it's saved
+    /// or dropped.
+    pub fn set_sub_task_telemetry(&mut self, sub_task_telemetry: SubTaskTelemetry<'a>) {
+        self.sub_task_telemetry = Some(sub_task_telemetry);
     }
 
     pub fn get_solutions(&self, handle: &Handle) -> Option<Arc<Solutions>> {
@@ -1824,12 +1821,25 @@ impl<'a> Transaction<'a> {
             &thread_state,
             answers.1.heap(),
         );
-        let start = Instant::now();
-        let result = solve(solver);
-        let duration = start.elapsed();
-        if let Some(recorder) = &self.ad_hoc_solve_recorder {
-            recorder(label, start, duration);
-        }
+        let solve_timed = || {
+            #[cfg(target_arch = "wasm32")]
+            {
+                return solve(solver);
+            }
+
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let start = std::time::Instant::now();
+                let result = solve(solver);
+                if let Some(sub_task) = &self.sub_task_telemetry {
+                    let telemetry_event =
+                        sub_task.new_task(TelemetryEventKind::AdHocSolve(label), start);
+                    sub_task.finish_task(telemetry_event, None);
+                }
+                result
+            }
+        };
+        let result = solve_timed();
         Some(result)
     }
 
@@ -2823,7 +2833,7 @@ impl State {
                 state_lock_blocked,
                 ..Default::default()
             }),
-            ad_hoc_solve_recorder: None,
+            sub_task_telemetry: None,
             data: TransactionData {
                 state: self,
                 stdlib,
@@ -2892,7 +2902,7 @@ impl State {
                 Transaction {
                     readable,
                     stats,
-                    ad_hoc_solve_recorder: _,
+                    sub_task_telemetry: _,
                     data:
                         TransactionData {
                             stdlib,

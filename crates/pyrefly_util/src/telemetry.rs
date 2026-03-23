@@ -58,7 +58,7 @@ impl QueueName {
 pub enum TelemetryEventKind {
     LspEvent(String),
     CodeAction(&'static str),
-    AdHocSolve(String),
+    AdHocSolve(&'static str),
     SetMemory,
     InvalidateDisk,
     InvalidateFind,
