@@ -541,52 +541,72 @@ impl GleanState<'_> {
         }
     }
 
-    fn find_definition_for_expr(&self, expr: &Expr) -> Vec<DefinitionLocation> {
+    fn find_definition_for_expr(
+        &self,
+        expr: &Expr,
+        only_resolved_name: bool,
+    ) -> Vec<DefinitionLocation> {
         match expr {
-            Expr::Subscript(expr_subscript) => self.find_definition_for_expr(&expr_subscript.value),
+            Expr::Subscript(expr_subscript) => {
+                self.find_definition_for_expr(&expr_subscript.value, only_resolved_name)
+            }
             Expr::Attribute(attr) => self.find_definition_for_attribute(attr),
-            Expr::Name(name) => self.find_definition_for_expr_name(name),
+            Expr::Name(name) => self.find_definition_for_expr_name(name, only_resolved_name),
             _ => vec![],
         }
     }
 
-    fn find_definition_for_expr_name(&self, expr_name: &ExprName) -> Vec<DefinitionLocation> {
+    fn find_definition_for_expr_name(
+        &self,
+        expr_name: &ExprName,
+        only_resolved_name: bool,
+    ) -> Vec<DefinitionLocation> {
         let identifier = Ast::expr_name_identifier(expr_name.clone());
-        self.find_definition_for_name_use(identifier)
+        self.find_definition_for_name_use(identifier, only_resolved_name)
     }
 
-    fn get_additional_definitions(&self, range: TextRange) -> Vec<DefinitionLocation> {
+    fn get_additional_definitions(
+        &self,
+        range: TextRange,
+        only_resolved_name: bool,
+    ) -> Vec<DefinitionLocation> {
         let as_name = join_names(self.module_name.as_str(), self.module.code_at(range));
 
-        let mut definitions = vec![DefinitionLocation {
-            name: as_name.clone(),
-            file: Some(self.file_fact()),
-        }];
-
+        let mut definitions = vec![];
         if let Some((resolved_name, from_name)) = self.import_names.get(&as_name) {
             definitions.push(DefinitionLocation {
                 name: resolved_name.to_string(),
                 file: None,
             });
-            if let Some(name) = from_name.as_ref() {
+            if !only_resolved_name && let Some(name) = from_name.as_ref() {
                 definitions.push(DefinitionLocation {
                     name: name.to_string(),
                     file: None,
-                })
+                });
             }
-        };
-
+        }
+        if !only_resolved_name || definitions.is_empty() {
+            definitions.push(DefinitionLocation {
+                name: as_name,
+                file: Some(self.file_fact()),
+            });
+        }
         definitions
     }
 
-    fn find_definition_for_name_use(&self, identifier: Identifier) -> Vec<DefinitionLocation> {
+    fn find_definition_for_name_use(
+        &self,
+        identifier: Identifier,
+        only_resolved_name: bool,
+    ) -> Vec<DefinitionLocation> {
         let definition = self.transaction.find_definition_for_name_use(
             self.handle,
             &identifier,
             find_preference_glean(),
         );
 
-        let additional_definitions = self.get_additional_definitions(identifier.range());
+        let additional_definitions =
+            self.get_additional_definitions(identifier.range(), only_resolved_name);
 
         definition.map_or(additional_definitions.clone(), |def| {
             self.get_definition_location(
@@ -608,7 +628,7 @@ impl GleanState<'_> {
             find_preference_glean(),
         );
         let additional_definitions = if definition.is_some() || self.names.contains(&fqname) {
-            self.get_additional_definitions(range)
+            self.get_additional_definitions(range, false)
         } else {
             vec![]
         };
@@ -701,7 +721,7 @@ impl GleanState<'_> {
         };
 
         if definitions_with_type.is_empty() {
-            self.find_definition_for_expr(base_expr)
+            self.find_definition_for_expr(base_expr, false)
                 .into_iter()
                 .map(|base_expr| DefinitionLocation {
                     name: join_names(&base_expr.name, attr_name),
@@ -714,7 +734,7 @@ impl GleanState<'_> {
                 self.module.code_at(base_expr.range()),
             );
             let additional_definitions = if self.names.contains(&base_expr_name) {
-                self.get_additional_definitions(base_expr.range())
+                self.get_additional_definitions(base_expr.range(), false)
                     .into_iter()
                     .map(|ty| DefinitionLocation {
                         name: join_names(&ty.name, attr_name),
@@ -762,9 +782,10 @@ impl GleanState<'_> {
             arguments
                 .args
                 .iter()
-                .flat_map(|expr| {
-                    self.find_definition_for_expr(expr)
+                .filter_map(|expr| {
+                    self.find_definition_for_expr(expr, true)
                         .into_iter()
+                        .next()
                         .map(|def| python::ClassDeclaration::new(python::Name::new(def.name), None))
                 })
                 .collect()
@@ -808,7 +829,7 @@ impl GleanState<'_> {
             }
             Expr::Name(name) => {
                 if name.ctx.is_load() {
-                    self.find_definition_for_expr_name(name)
+                    self.find_definition_for_expr_name(name, false)
                         .into_iter()
                         .map(|x| (x, name.range()))
                         .collect()
@@ -1382,7 +1403,7 @@ impl GleanState<'_> {
     fn callee_to_caller_facts(&mut self, call: &ExprCall, caller: &python::FunctionDeclaration) {
         let caller_fact = &caller.key.name;
         let callee_names: Vec<String> = self
-            .find_definition_for_expr(call.func.as_ref())
+            .find_definition_for_expr(call.func.as_ref(), false)
             .into_iter()
             .map(|definition| definition.name)
             .collect();
