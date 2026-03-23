@@ -131,6 +131,21 @@ fn test_fixture_class_with_type_args() {
     check_fixture("class_with_type_args");
 }
 
+#[test]
+fn test_fixture_bound_method_defining_class() {
+    check_fixture("bound_method_defining_class");
+}
+
+#[test]
+fn test_fixture_callable_defining_func() {
+    check_fixture("callable_defining_func");
+}
+
+#[test]
+fn test_fixture_callable_defining_func_method() {
+    check_fixture("callable_defining_func_method");
+}
+
 // ---------------------------------------------------------------------------
 // Property-based unit tests
 // ---------------------------------------------------------------------------
@@ -375,38 +390,6 @@ y: Impl = Impl()
 }
 
 #[test]
-fn test_bound_method_defining_class() {
-    let state = create_state(
-        "test",
-        r#"
-class MyClass:
-    def greet(self) -> str:
-        return "hello"
-
-obj = MyClass()
-result = obj.greet()
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // Should have a BoundMethod entry with defining_class = "test.MyClass"
-    let has_bound_method = data.entries.iter().any(|entry| {
-        matches!(
-            &entry.ty,
-            StructuredType::BoundMethod { defining_class: Some(dc), .. } if dc == "test.MyClass"
-        )
-    });
-    assert!(
-        has_bound_method,
-        "expected a BoundMethod with defining_class 'test.MyClass', got: {:#?}",
-        data.entries
-    );
-}
-
-#[test]
 fn test_facet_narrow_mismatch() {
     let state = create_state(
         "test",
@@ -643,67 +626,6 @@ def f(d: MyDict) -> None:
     assert!(
         has_mismatch,
         "expected is_narrowed_mismatch == true for the narrowed d[\"x\"] access",
-    );
-}
-
-#[test]
-fn test_callable_defining_func() {
-    let state = create_state(
-        "test",
-        r#"
-def greet(name: str) -> str:
-    return "hello " + name
-
-x = greet
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // A Type::Function should produce a Callable entry with defining_func set
-    let has_defining_func = data.entries.iter().any(|entry| {
-        matches!(
-            &entry.ty,
-            StructuredType::Callable { defining_func: Some(df), .. } if df == "test.greet"
-        )
-    });
-    assert!(
-        has_defining_func,
-        "expected a Callable with defining_func 'test.greet', got: {:#?}",
-        data.entries
-    );
-}
-
-#[test]
-fn test_callable_defining_func_method() {
-    let state = create_state(
-        "test",
-        r#"
-class MyClass:
-    def greet(self) -> str:
-        return "hello"
-
-f = MyClass.greet
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // Accessing MyClass.greet (unbound) should produce a Callable with class prefix
-    let has_method_defining_func = data.entries.iter().any(|entry| {
-        matches!(
-            &entry.ty,
-            StructuredType::Callable { defining_func: Some(df), .. } if df == "test.MyClass.greet"
-        )
-    });
-    assert!(
-        has_method_defining_func,
-        "expected a Callable with defining_func 'test.MyClass.greet', got: {:#?}",
-        data.entries
     );
 }
 
