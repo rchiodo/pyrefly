@@ -126,6 +126,11 @@ fn test_fixture_literal_type() {
     check_fixture("literal_type");
 }
 
+#[test]
+fn test_fixture_class_with_type_args() {
+    check_fixture("class_with_type_args");
+}
+
 // ---------------------------------------------------------------------------
 // Property-based unit tests
 // ---------------------------------------------------------------------------
@@ -161,30 +166,6 @@ fn get_handle(
         .into_iter()
         .find(|h| h.module().as_str() == module_name)
         .unwrap_or_else(|| panic!("module `{module_name}` not found"))
-}
-
-#[test]
-fn test_class_with_type_args() {
-    let state = create_state(
-        "test",
-        r#"
-x: list[int] = [1, 2, 3]
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // Should have `builtins.list` with an `builtins.int` arg
-    let has_list = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.list" && args.len() == 1)
-    });
-    assert!(
-        has_list,
-        "expected `builtins.list` with type arg in the type table, got: {:#?}",
-        data.entries,
-    );
 }
 
 #[test]
