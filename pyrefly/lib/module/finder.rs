@@ -121,6 +121,7 @@ fn find_one_part_in_root(
     phantom_paths: &mut Option<&mut Vec<PathBuf>>,
 ) -> Option<FindResult> {
     let candidate_dir = root.join(name.as_str());
+
     // Do not filter by style filter here since __init__.pyi could potentially have .py files covered under it.
     // Instead, use `ModuleStyle` as a preference.
     let candidate_init_suffixes = if style_filter.is_some_and(|s| s == ModuleStyle::Executable) {
@@ -129,16 +130,29 @@ fn find_one_part_in_root(
         ["__init__.pyi", "__init__.py"]
     };
 
-    // First check if `name` corresponds to a regular package.
-    for candidate_init_suffix in candidate_init_suffixes {
-        let init_path = candidate_dir.join(candidate_init_suffix);
-        if init_path.exists() {
-            return Some(FindResult::RegularPackage(init_path, candidate_dir));
-        } else if let Some(v) = phantom_paths.as_deref_mut() {
-            v.push(init_path);
+    // Check if the directory exists first — this is a single stat call that
+    // lets us skip the __init__.py[i] lookups when the directory doesn't exist,
+    // saving 2 stat calls per non-existent directory path component.
+    let dir_exists = candidate_dir.is_dir();
+
+    if dir_exists {
+        // Check if `name` corresponds to a regular package.
+        for candidate_init_suffix in candidate_init_suffixes {
+            let init_path = candidate_dir.join(candidate_init_suffix);
+            if init_path.exists() {
+                return Some(FindResult::RegularPackage(init_path, candidate_dir));
+            } else if let Some(v) = phantom_paths.as_deref_mut() {
+                v.push(init_path);
+            }
+        }
+    } else if let Some(v) = phantom_paths.as_deref_mut() {
+        // Record phantom paths for the init files we would have checked.
+        for candidate_init_suffix in candidate_init_suffixes {
+            v.push(candidate_dir.join(candidate_init_suffix));
         }
     }
-    // Second check if `name` corresponds to a single-file module.
+
+    // Check if `name` corresponds to a single-file module.
     for candidate_file_suffix in ["pyi", "py"] {
         let candidate_path = root.join(format!("{name}.{candidate_file_suffix}"));
         if candidate_path.exists() {
@@ -175,11 +189,10 @@ fn find_one_part_in_root(
             v.push(candidate_path);
         }
     }
+
     // Finally check if `name` corresponds to a namespace package.
-    if candidate_dir.is_dir() {
-        let result = FindResult::NamespacePackage(Vec1::new(candidate_dir));
-        // Namespace packages don't have a style in the same sense, so we return them regardless of filter
-        return Some(result);
+    if dir_exists {
+        return Some(FindResult::NamespacePackage(Vec1::new(candidate_dir)));
     } else if let Some(v) = phantom_paths.as_deref_mut() {
         v.push(candidate_dir);
     }
