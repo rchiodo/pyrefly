@@ -51,6 +51,32 @@ pub fn find_comment_start(
     line: &str,
     in_triple_quote: Option<char>,
 ) -> (Option<usize>, Option<char>) {
+    // Fast path: when not inside a triple-quoted string, scan for the first
+    // byte that requires string-aware parsing (#, ', ", \). If the first such
+    // byte is '#', it is the comment start — no further analysis is needed.
+    // This avoids the per-byte state machine for the common case of plain code
+    // lines like `x = foo(bar)  # comment`.
+    if in_triple_quote.is_none() {
+        let bytes = line.as_bytes();
+        match bytes
+            .iter()
+            .position(|&b| b == b'#' || b == b'\'' || b == b'"' || b == b'\\')
+        {
+            None => return (None, None),
+            Some(pos) if bytes[pos] == b'#' => return (Some(pos), None),
+            _ => {} // quote or backslash found — need full parser
+        }
+    }
+
+    find_comment_start_slow(line, in_triple_quote)
+}
+
+/// Full string-aware comment finder. Handles triple-quoted strings, single-quoted
+/// strings, and escape sequences.
+fn find_comment_start_slow(
+    line: &str,
+    in_triple_quote: Option<char>,
+) -> (Option<usize>, Option<char>) {
     let mut bytes = line.bytes().enumerate().peekable();
     let mut triple_quote: Option<u8> = in_triple_quote.map(|c| c as u8);
     let mut single_quote: Option<u8> = None;
