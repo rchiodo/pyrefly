@@ -2292,8 +2292,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return answer;
         }
 
-        let current = CalcId(self.bindings().dupe(), K::to_anyidx(idx));
         let calculation = self.get_calculation(idx);
+
+        // Fast path: if the value is already calculated, return it immediately
+        // without constructing a CalcId or touching the CalcStack. This avoids
+        // the CalcId Arc increment, position_of hash map insert/remove, RefCell
+        // borrows, and SCC checks for the common case of re-reading an already-
+        // solved binding.
+        if let Some(v) = calculation.get() {
+            return v;
+        }
+
+        let current = CalcId(self.bindings().dupe(), K::to_anyidx(idx));
 
         // Check depth limit before any calculation
         if let Some(config) = self.recursion_limit_config()
