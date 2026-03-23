@@ -18,6 +18,7 @@ use pyrefly_types::types::Union;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::includes::Includes;
+use ruff_python_ast::Stmt;
 use ruff_python_ast::helpers::is_docstring_stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextSize;
@@ -35,6 +36,15 @@ use crate::types::heap::TypeHeap;
 use crate::types::simplify::unions_with_literals;
 use crate::types::stdlib::Stdlib;
 use crate::types::types::Type;
+
+/// Check if a statement is a `from __future__ import ...` statement.
+/// New imports must be inserted after `__future__` imports to produce valid Python.
+fn is_future_import_stmt(stmt: &Stmt) -> bool {
+    matches!(
+        stmt,
+        Stmt::ImportFrom(import_from) if import_from.module.as_ref().is_some_and(|m| m.id == "__future__")
+    )
+}
 
 #[deny(clippy::missing_docs_in_private_items)]
 /// Flags for controlling the behavior of the autotype command
@@ -202,6 +212,9 @@ fn format_hints(
         if formatted_hint.contains("Never") {
             continue;
         }
+        if formatted_hint.contains("Overload") {
+            continue;
+        }
         if formatted_hint == "None" && kind == AnnotationKind::Parameter {
             continue;
         }
@@ -343,7 +356,7 @@ impl InferArgs {
                     let position = ast
                         .body
                         .iter()
-                        .find(|stmt| !is_docstring_stmt(stmt))
+                        .find(|stmt| !is_docstring_stmt(stmt) && !is_future_import_stmt(stmt))
                         .map_or(ast.range.end(), |stmt| stmt.range().start());
                     let mut imports: Vec<(TextSize, String, String)> = needed_imports
                         .into_iter()
@@ -906,6 +919,57 @@ class MyClass:
             "Should not import from private module, got:\n{}",
             got_file,
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_imports_after_future_import() -> anyhow::Result<()> {
+        // New imports must be inserted after `from __future__ import annotations`,
+        // not before it, to produce valid Python.
+        let file_one = r#"from __future__ import annotations
+from file_two import get_a
+def foo():
+    return get_a()
+"#;
+        let file_two = r#"
+class ExampleA:
+    pass
+def get_a():
+    return ExampleA()
+"#;
+        let output = r#"from __future__ import annotations
+from file_two import ExampleA
+from file_two import get_a
+def foo() -> ExampleA:
+    return get_a()
+"#;
+        assert_imports_and_annotations(file_one, file_two, output);
+        Ok(())
+    }
+
+    #[test]
+    fn test_imports_after_future_import_with_docstring() -> anyhow::Result<()> {
+        // New imports must be inserted after both the docstring and `from __future__ import`.
+        let file_one = r#""""Module docstring."""
+from __future__ import annotations
+from file_two import get_a
+def foo():
+    return get_a()
+"#;
+        let file_two = r#"
+class ExampleA:
+    pass
+def get_a():
+    return ExampleA()
+"#;
+        let output = r#""""Module docstring."""
+from __future__ import annotations
+from file_two import ExampleA
+from file_two import get_a
+def foo() -> ExampleA:
+    return get_a()
+"#;
+        assert_imports_and_annotations(file_one, file_two, output);
         Ok(())
     }
 }
