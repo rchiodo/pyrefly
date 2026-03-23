@@ -111,6 +111,21 @@ fn test_fixture_function_types() {
     check_fixture("function_types");
 }
 
+#[test]
+fn test_fixture_simple_variable() {
+    check_fixture("simple_variable");
+}
+
+#[test]
+fn test_fixture_optional_type() {
+    check_fixture("optional_type");
+}
+
+#[test]
+fn test_fixture_literal_type() {
+    check_fixture("literal_type");
+}
+
 // ---------------------------------------------------------------------------
 // Property-based unit tests
 // ---------------------------------------------------------------------------
@@ -146,117 +161,6 @@ fn get_handle(
         .into_iter()
         .find(|h| h.module().as_str() == module_name)
         .unwrap_or_else(|| panic!("module `{module_name}` not found"))
-}
-
-#[test]
-fn test_simple_variable() {
-    let state = create_state("test", "x: int = 42");
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // We should have at least one located type (the variable `x`)
-    assert!(
-        !data.locations.is_empty(),
-        "expected at least one located type"
-    );
-    assert!(
-        !data.entries.is_empty(),
-        "expected at least one type table entry"
-    );
-
-    // The type table should contain a `builtins.int` class entry
-    let has_int = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::Class { qname, args, .. } if qname == "builtins.int" && args.is_empty())
-    });
-    assert!(
-        has_int,
-        "expected `builtins.int` in the type table, got: {:#?}",
-        data.entries
-    );
-}
-
-#[test]
-fn test_function_types() {
-    let state = create_state(
-        "test",
-        r#"
-def foo(x: int) -> str:
-    return str(x)
-
-y = foo(42)
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // Should have `int`, `str` class entries and a callable entry for `foo`
-    let has_str = data.entries.iter().any(
-        |entry| matches!(&entry.ty, StructuredType::Class { qname, .. } if qname == "builtins.str"),
-    );
-    let has_callable = data
-        .entries
-        .iter()
-        .any(|entry| matches!(&entry.ty, StructuredType::Callable { .. }));
-    assert!(has_str, "expected `builtins.str` in the type table");
-    assert!(has_callable, "expected a Callable entry for `foo`");
-
-    // Every location should reference a valid type table index
-    for loc in &data.locations {
-        assert!(
-            loc.type_index < data.entries.len(),
-            "location references out-of-bounds type index {} (table has {} entries)",
-            loc.type_index,
-            data.entries.len(),
-        );
-    }
-}
-
-#[test]
-fn test_optional_type() {
-    let state = create_state(
-        "test",
-        r#"
-x: int | None = None
-"#,
-    );
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // Should have a typing.Optional wrapping int
-    let has_optional = data.entries.iter().any(|entry| {
-        matches!(&entry.ty, StructuredType::OtherForm { qname, args } if qname == "typing.Optional" && args.len() == 1)
-    });
-    assert!(
-        has_optional,
-        "expected `typing.Optional` in the type table, got: {:#?}",
-        data.entries,
-    );
-}
-
-#[test]
-fn test_literal_type() {
-    let state = create_state("test", "x = 42");
-    let transaction = state.transaction();
-    let handle = get_handle("test", &transaction);
-
-    let data = collect_module_types(&transaction, &handle).expect("should collect types");
-
-    // The literal value `42` should produce a Literal entry
-    let has_literal = data
-        .entries
-        .iter()
-        .any(|entry| matches!(&entry.ty, StructuredType::Literal { value, .. } if value == "42"));
-    assert!(
-        has_literal,
-        "expected Literal(42) in the type table, got: {:#?}",
-        data.entries,
-    );
 }
 
 #[test]
