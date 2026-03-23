@@ -310,23 +310,24 @@ impl Errors {
         let unused_errors = self.collect_unused_ignore_errors();
         let mut result = CollectedErrors::default();
 
+        // Build a path-to-config map for O(1) lookup instead of O(loads) per error.
+        let config_by_path: SmallMap<&ModulePath, &ArcId<ConfigFile>> = self
+            .loads
+            .iter()
+            .map(|(load, config, _)| (load.module_info.path(), config))
+            .collect();
+
         for error in unused_errors {
-            // Find the config for this error's module
-            for (load, config, _) in &self.loads {
-                if load.module_info.path() == error.path() {
-                    let error_config = config.get_error_config(error.path().as_path());
-                    let severity = error_config
-                        .display_config
-                        .severity(ErrorKind::UnusedIgnore);
-                    match severity {
-                        Severity::Error => {
-                            result.ordinary.push(error.with_severity(Severity::Error))
-                        }
-                        Severity::Warn => result.ordinary.push(error.with_severity(Severity::Warn)),
-                        Severity::Info => result.ordinary.push(error.with_severity(Severity::Info)),
-                        Severity::Ignore => result.disabled.push(error),
-                    }
-                    break;
+            if let Some(config) = config_by_path.get(&error.path()) {
+                let error_config = config.get_error_config(error.path().as_path());
+                let severity = error_config
+                    .display_config
+                    .severity(ErrorKind::UnusedIgnore);
+                match severity {
+                    Severity::Error => result.ordinary.push(error.with_severity(Severity::Error)),
+                    Severity::Warn => result.ordinary.push(error.with_severity(Severity::Warn)),
+                    Severity::Info => result.ordinary.push(error.with_severity(Severity::Info)),
+                    Severity::Ignore => result.disabled.push(error),
                 }
             }
         }
