@@ -10,6 +10,7 @@
 use pretty_assertions::assert_eq;
 
 use crate::report::cinderx::collect::collect_module_types;
+use crate::report::cinderx::display::format_module_types;
 use crate::report::cinderx::types::StructuredType;
 use crate::report::cinderx::write_results;
 use crate::state::require::Require;
@@ -31,6 +32,88 @@ class char(int): pass
 class double(float): pass
 class single(float): pass
 "#;
+
+// ---------------------------------------------------------------------------
+// Fixture-based expect tests
+// ---------------------------------------------------------------------------
+
+/// Resolve the `fixtures/` directory from the current working directory.
+///
+/// Buck and cargo run tests from different roots, so we try several candidate
+/// paths. The function panics if none of the candidates exist.
+fn fixtures_dir() -> std::path::PathBuf {
+    let cwd = std::env::current_dir().expect("cwd should be available");
+    let mut candidates = vec![
+        cwd.join("fbcode/pyrefly/pyrefly/lib/test/cinderx/fixtures"),
+        cwd.join("pyrefly/lib/test/cinderx/fixtures"),
+        cwd.join("lib/test/cinderx/fixtures"),
+    ];
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        candidates.push(std::path::Path::new(manifest_dir).join("lib/test/cinderx/fixtures"));
+    }
+    candidates
+        .into_iter()
+        .find(|p| p.exists())
+        .unwrap_or_else(|| panic!("cinderx fixtures directory not found; tried multiple paths"))
+}
+
+/// Run a fixture-based expect test.
+///
+/// Reads `fixtures/<name>.py`, type-checks it (with the `__static__` stub
+/// always loaded), renders the output with `format_module_types`, then
+/// compares it against `fixtures/<name>.expected`.
+///
+/// Set the environment variable `UPDATE_EXPECT=1` to (re)generate the
+/// `.expected` file instead of asserting equality. Use this when adding a
+/// new fixture or when intentionally changing Pyrefly's output.
+fn check_fixture(name: &str) {
+    let fixtures = fixtures_dir();
+
+    let py_path = fixtures.join(format!("{name}.py"));
+    let source = std::fs::read_to_string(&py_path)
+        .unwrap_or_else(|e| panic!("could not read fixture {py_path:?}: {e}"));
+
+    let state = create_state_with_static(name, &source);
+    let transaction = state.transaction();
+    let handle = get_handle(name, &transaction);
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+    let actual = format_module_types(&data.entries, &data.locations);
+
+    let expected_path = fixtures.join(format!("{name}.expected"));
+
+    if std::env::var("UPDATE_EXPECT").is_ok() {
+        std::fs::write(&expected_path, &actual)
+            .unwrap_or_else(|e| panic!("could not write {expected_path:?}: {e}"));
+        return;
+    }
+
+    let expected = std::fs::read_to_string(&expected_path).unwrap_or_else(|_| {
+        panic!(
+            "expected file {expected_path:?} not found.\n\
+             To create it, run: UPDATE_EXPECT=1 cargo test {name}\n\
+             Actual output:\n{actual}"
+        )
+    });
+
+    assert_eq!(
+        expected, actual,
+        "fixture output mismatch for `{name}`.\n\
+         To update, run: UPDATE_EXPECT=1 cargo test {name}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Fixture tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_fixture_function_types() {
+    check_fixture("function_types");
+}
+
+// ---------------------------------------------------------------------------
+// Property-based unit tests
+// ---------------------------------------------------------------------------
 
 /// Create a type-checked state from a single module's Python source.
 fn create_state(module_name: &str, python_code: &str) -> crate::state::state::State {
