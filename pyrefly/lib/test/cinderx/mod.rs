@@ -295,7 +295,7 @@ x: Child = Child()
     );
     let transaction = state.transaction();
     let output_dir = tempfile::tempdir().expect("should create temp dir");
-    write_results(output_dir.path(), &transaction).expect("should write results");
+    write_results(output_dir.path(), &transaction, false).expect("should write results");
 
     // Read and parse class_metadata.json
     let metadata_json = std::fs::read_to_string(output_dir.path().join("class_metadata.json"))
@@ -356,7 +356,7 @@ y: Impl = Impl()
     );
     let transaction = state.transaction();
     let output_dir = tempfile::tempdir().expect("should create temp dir");
-    write_results(output_dir.path(), &transaction).expect("should write results");
+    write_results(output_dir.path(), &transaction, false).expect("should write results");
 
     let metadata_json = std::fs::read_to_string(output_dir.path().join("class_metadata.json"))
         .expect("class_metadata.json should exist");

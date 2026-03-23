@@ -20,6 +20,7 @@
 
 pub mod collect;
 pub mod convert;
+pub(crate) mod display;
 pub mod types;
 
 use std::collections::HashMap;
@@ -206,7 +207,17 @@ fn has_protocol_ancestor(
 /// - `index.json` listing every module
 /// - `types/<module>.json` for each module with type table + located types
 /// - `class_metadata.json` with global class metadata (MRO + semantic tags)
-pub fn write_results(output_dir: &Path, transaction: &Transaction) -> anyhow::Result<()> {
+///
+/// When `readable` is true, also writes `types/<module>.txt` alongside each
+/// JSON file. The `.txt` format inlines all type-table indices so that each
+/// expression location is followed by its fully-resolved type string (no
+/// index cross-referencing required). Intended for human debugging; mirrors
+/// the output of the `view_types.py` script.
+pub fn write_results(
+    output_dir: &Path,
+    transaction: &Transaction,
+    readable: bool,
+) -> anyhow::Result<()> {
     fs_anyhow::create_dir_all(output_dir)?;
     let types_dir = output_dir.join("types");
     fs_anyhow::create_dir_all(&types_dir)?;
@@ -234,8 +245,12 @@ pub fn write_results(output_dir: &Path, transaction: &Transaction) -> anyhow::Re
             locations: data.locations,
         };
         let module_json = serde_json::to_string_pretty(&report)?;
-        let filename = format!("{}.json", handle.module());
-        fs_anyhow::write(&types_dir.join(filename), module_json)?;
+        let stem = handle.module().to_string();
+        fs_anyhow::write(&types_dir.join(format!("{}.json", stem)), module_json)?;
+        if readable {
+            let txt = display::format_module_types(&report.type_table, &report.locations);
+            fs_anyhow::write(&types_dir.join(format!("{}.txt", stem)), txt)?;
+        }
     }
 
     let index = CinderxIndex {

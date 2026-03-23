@@ -262,6 +262,11 @@ struct OutputArgs {
     /// Generate a CinderX-format type report (experimental, internal-only).
     #[arg(long, value_name = "OUTPUT_DIR", hide = true)]
     report_cinderx: Option<PathBuf>,
+    /// Also write human-readable .txt files alongside the CinderX JSON report.
+    /// Each .txt file inlines type-table indices so types are fully readable without
+    /// cross-referencing the JSON. Intended for debugging; mirrors view_types.py output.
+    #[arg(long, hide = true)]
+    cinderx_include_readable: bool,
     /// Count the number of each error kind. Prints the top N [default=5] errors, sorted by count, or all errors if N is 0.
     #[arg(
         long,
@@ -1116,7 +1121,11 @@ impl CheckArgs {
             report::pysa::write_project_file(&pysa_reporter, transaction, handles, &output_errors)?;
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
-            report::cinderx::write_results(cinderx_directory, transaction)?;
+            report::cinderx::write_results(
+                cinderx_directory,
+                transaction,
+                self.output.cinderx_include_readable,
+            )?;
         }
         if let Some(path) = &self.output.report_binding_memory {
             fs_anyhow::write(path, report::binding_memory::binding_memory(transaction))?;
