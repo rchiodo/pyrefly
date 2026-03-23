@@ -81,8 +81,7 @@ impl ClassNamesFromType {
     pub fn from_class(class: &Class, context: &ModuleContext) -> ClassNamesFromType {
         ClassNamesFromType {
             classes: vec![ClassWithModifiers::new(ClassRef::from_class(
-                class,
-                context.module_ids(),
+                class, context,
             ))],
             is_exhaustive: true,
         }

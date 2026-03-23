@@ -12,8 +12,7 @@ use dashmap::DashMap;
 use dupe::Dupe;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::Module;
-use pyrefly_python::module_name::ModuleName;
-use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::sys_info::SysInfo;
 use serde::Serialize;
 
 use crate::report::pysa::step_logger::StepLogger;
@@ -30,36 +29,13 @@ impl ModuleId {
     }
 }
 
-/// Represents what makes a module unique
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModuleKey {
-    name: ModuleName,
-    path: ModulePath,
-}
-
-impl ModuleKey {
-    pub fn from_handle(handle: &Handle) -> ModuleKey {
-        ModuleKey {
-            name: handle.module(),
-            path: handle.path().dupe(),
-        }
-    }
-
-    pub fn from_module(module: &Module) -> ModuleKey {
-        ModuleKey {
-            name: module.name(),
-            path: module.path().dupe(),
-        }
-    }
-}
-
-/// Thread-safe map from `ModuleKey` to `ModuleId`.
+/// Thread-safe map from `Handle` to `ModuleId`.
 ///
 /// Project handles are pre-assigned deterministic IDs in sorted order.
 /// Dependency modules discovered during type checking get IDs assigned
 /// lazily on first access via `get_or_insert`.
 pub struct ModuleIds {
-    map: DashMap<ModuleKey, ModuleId>,
+    map: DashMap<Handle, ModuleId>,
     next_id: AtomicU32,
 }
 
@@ -72,18 +48,15 @@ impl ModuleIds {
             format!("Built unique module ids for {} modules", handles.len()).as_str(),
         );
 
-        let mut modules = handles
-            .iter()
-            .map(ModuleKey::from_handle)
-            .collect::<Vec<_>>();
-        modules.sort();
+        let mut sorted_handles = handles.to_vec();
+        sorted_handles.sort();
 
         let map = DashMap::new();
         let mut current_id = 1u32;
-        for module in modules {
+        for handle in sorted_handles {
             assert!(
-                map.insert(module, ModuleId(current_id)).is_none(),
-                "Found multiple handles with the same module name and path"
+                map.insert(handle, ModuleId(current_id)).is_none(),
+                "Found multiple handles with the same module name, path, and sys_info"
             );
             current_id += 1;
         }
@@ -95,11 +68,11 @@ impl ModuleIds {
         }
     }
 
-    /// Get or lazily assign a `ModuleId` for the given key.
-    fn get_or_insert(&self, key: ModuleKey) -> ModuleId {
+    /// Get or lazily assign a `ModuleId` for the given handle.
+    fn get_or_insert(&self, handle: Handle) -> ModuleId {
         *self
             .map
-            .entry(key)
+            .entry(handle)
             .or_insert_with(|| {
                 let id = self.next_id.fetch_add(1, Ordering::Relaxed);
                 ModuleId(id)
@@ -108,10 +81,10 @@ impl ModuleIds {
     }
 
     pub fn get_from_handle(&self, handle: &Handle) -> ModuleId {
-        self.get_or_insert(ModuleKey::from_handle(handle))
+        self.get_or_insert(handle.dupe())
     }
 
-    pub fn get_from_module(&self, module: &Module) -> ModuleId {
-        self.get_or_insert(ModuleKey::from_module(module))
+    pub fn get_from_module(&self, module: &Module, sys_info: SysInfo) -> ModuleId {
+        self.get_or_insert(Handle::new(module.name(), module.path().dupe(), sys_info))
     }
 }

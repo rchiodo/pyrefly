@@ -1536,7 +1536,7 @@ impl<'a> CallGraphVisitor<'a> {
             | Type::SuperInstance(box (_, SuperObj::Instance(class_type))) => ReceiverClassResult {
                 class: Some(ClassRef::from_class(
                     class_type.class_object(),
-                    self.module_context.module_ids(),
+                    self.module_context,
                 )),
                 is_class_def: false,
             },
@@ -1545,10 +1545,7 @@ impl<'a> CallGraphVisitor<'a> {
                 // However, we strip away the `type` part since it is implied by the `is_class_method` flag.
                 ReceiverClassResult {
                     class: if is_class_method {
-                        Some(ClassRef::from_class(
-                            &class_def,
-                            self.module_context.module_ids(),
-                        ))
+                        Some(ClassRef::from_class(&class_def, self.module_context))
                     } else {
                         None
                     },
@@ -1562,7 +1559,7 @@ impl<'a> CallGraphVisitor<'a> {
                 ReceiverClassResult {
                     class: Some(ClassRef::from_class(
                         class_type.class_object(),
-                        self.module_context.module_ids(),
+                        self.module_context,
                     )),
                     is_class_def: false,
                 }
@@ -1570,14 +1567,14 @@ impl<'a> CallGraphVisitor<'a> {
             Type::TypedDict(TypedDict::Anonymous(_)) => ReceiverClassResult {
                 class: Some(ClassRef::from_class(
                     self.module_answers_context.stdlib.dict_object(),
-                    self.module_context.module_ids(),
+                    self.module_context,
                 )),
                 is_class_def: false,
             },
             Type::TypedDict(TypedDict::TypedDict(typed_dict)) => ReceiverClassResult {
                 class: Some(ClassRef::from_class(
                     typed_dict.class_object(),
-                    self.module_context.module_ids(),
+                    self.module_context,
                 )),
                 is_class_def: false,
             },

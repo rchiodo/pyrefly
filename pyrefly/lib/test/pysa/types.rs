@@ -370,11 +370,11 @@ class MyTypedDict(TypedDict):
                 vec![
                     ClassRef::from_class(
                         context.answers_context.stdlib.int().class_object(),
-                        context.module_ids()
+                        &context,
                     ),
                     ClassRef::from_class(
                         context.answers_context.stdlib.float().class_object(),
-                        context.module_ids()
+                        &context,
                     ),
                 ],
                 /* is_exhaustive */ true

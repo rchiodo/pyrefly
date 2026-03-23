@@ -101,15 +101,15 @@ impl<'a> PysaResolver<'a> {
     /// Resolve pysa solutions for a given module, demanding it to Solutions
     /// if needed. Caches the result for subsequent lookups by ModuleId.
     pub fn resolve_pysa_solutions(&self, module: &Module) -> Arc<PysaSolutions> {
-        let module_id = self.module_ids.get_from_module(module);
-        if let Some(cached) = self.cache.borrow().get(&module_id) {
-            return cached.clone();
-        }
         let handle = Handle::new(
             module.name(),
             module.path().dupe(),
             self.current_handle.sys_info().dupe(),
         );
+        let module_id = self.module_ids.get_from_handle(&handle);
+        if let Some(cached) = self.cache.borrow().get(&module_id) {
+            return cached.clone();
+        }
         let solutions = self.transaction.resolve_pysa_solutions(&handle);
         self.cache.borrow_mut().insert(module_id, solutions.dupe());
         solutions
