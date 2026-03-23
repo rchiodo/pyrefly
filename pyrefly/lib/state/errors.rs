@@ -108,7 +108,17 @@ impl Errors {
         baseline_path: Option<&Path>,
         relative_to: &Path,
     ) -> CollectedErrors {
-        let mut errors = self.collect_errors();
+        let errors = self.collect_errors();
+        self.apply_baseline(errors, baseline_path, relative_to)
+    }
+
+    /// Apply baseline filtering to already-collected errors.
+    pub fn apply_baseline(
+        &self,
+        mut errors: CollectedErrors,
+        baseline_path: Option<&Path>,
+        relative_to: &Path,
+    ) -> CollectedErrors {
         if let Some(baseline_path) = baseline_path
             && let Ok(processor) = BaselineProcessor::from_file(baseline_path)
         {
@@ -130,8 +140,8 @@ impl Errors {
     /// Collects errors for unused ignore comments.
     /// Returns a vector of errors with ErrorKind::UnusedIgnore for each
     /// suppression comment that doesn't suppress any actual error.
-    pub fn collect_unused_ignore_errors(&self) -> Vec<Error> {
-        let collected = self.collect_errors();
+    /// Accepts pre-collected errors to avoid redundant error collection.
+    pub fn collect_unused_ignore_errors(&self, collected: &CollectedErrors) -> Vec<Error> {
         let mut unused_errors = Vec::new();
 
         // Build a map of which error codes were suppressed on each line, keyed by module path.
@@ -306,8 +316,12 @@ impl Errors {
     /// Collects unused ignore errors for display, respecting severity configuration.
     /// Unlike `collect_unused_ignore_errors()`, this applies severity filtering so
     /// errors with `Severity::Ignore` are not included in the ordinary results.
-    pub fn collect_unused_ignore_errors_for_display(&self) -> CollectedErrors {
-        let unused_errors = self.collect_unused_ignore_errors();
+    /// Accepts pre-collected errors to avoid redundant error collection.
+    pub fn collect_unused_ignore_errors_for_display(
+        &self,
+        collected: &CollectedErrors,
+    ) -> CollectedErrors {
+        let unused_errors = self.collect_unused_ignore_errors(collected);
         let mut result = CollectedErrors::default();
 
         // Build a path-to-config map for O(1) lookup instead of O(loads) per error.
@@ -434,7 +448,8 @@ def f() -> int:
     return 1
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert_eq!(unused.len(), 1);
         assert!(unused[0].msg().contains("Unused"));
     }
@@ -448,7 +463,8 @@ def f() -> int:
     return 1
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert_eq!(unused.len(), 1);
         assert!(unused[0].msg().contains("bad-override"));
     }
@@ -462,7 +478,8 @@ def f() -> int:
     return "hello"
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert!(unused.is_empty());
     }
 
@@ -475,7 +492,8 @@ def f() -> int:
     return "hello"
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert_eq!(unused.len(), 1);
         assert!(unused[0].msg().contains("bad-override"));
         assert!(!unused[0].msg().contains("bad-return"));
@@ -489,7 +507,8 @@ def f() -> int:
     return 1
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert!(unused.is_empty());
     }
 
@@ -506,7 +525,8 @@ def g() -> str:
     return "hello"
 "#;
         let (errors, _tdir) = get_errors(contents);
-        let unused = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused = errors.collect_unused_ignore_errors(&collected);
         assert_eq!(unused.len(), 2);
     }
 }

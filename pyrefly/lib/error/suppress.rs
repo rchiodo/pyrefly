@@ -616,7 +616,8 @@ mod tests {
 
     fn assert_remove_ignores(before: &str, after: &str, expected_removals: usize) {
         let (errors, tdir) = get_errors(before);
-        let unused_errors = errors.collect_unused_ignore_errors();
+        let collected = errors.collect_errors();
+        let unused_errors = errors.collect_unused_ignore_errors(&collected);
         let removals = suppress::remove_unused_ignores(unused_errors);
         let got_file = fs_anyhow::read_to_string(&get_path(&tdir)).unwrap();
         assert_eq!(after, got_file);

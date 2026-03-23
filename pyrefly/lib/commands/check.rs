@@ -924,8 +924,14 @@ impl CheckArgs {
             |x| PathBuf::from_str(x.as_str()).unwrap(),
         );
 
-        let errors = loads
-            .collect_errors_with_baseline(self.output.baseline.as_deref(), relative_to.as_path());
+        let collected = loads.collect_errors();
+        // Pass pre-collected errors to avoid redundant error collection.
+        let unused_ignore_errors = loads.collect_unused_ignore_errors_for_display(&collected);
+        let errors = loads.apply_baseline(
+            collected,
+            self.output.baseline.as_deref(),
+            relative_to.as_path(),
+        );
         let (directives, ordinary_errors) = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
             (
@@ -943,9 +949,6 @@ impl CheckArgs {
         } else {
             (errors.directives, errors.ordinary)
         };
-
-        // Collect unused ignore errors for display (respects severity configuration)
-        let unused_ignore_errors = loads.collect_unused_ignore_errors_for_display();
         let mut ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
             let filtered: Vec<_> = unused_ignore_errors
@@ -974,7 +977,8 @@ impl CheckArgs {
         }
         if self.behavior.remove_unused_ignores {
             // TODO: Move this into separate command
-            let unused_errors = loads.collect_unused_ignore_errors();
+            let collected = loads.collect_errors();
+            let unused_errors = loads.collect_unused_ignore_errors(&collected);
             suppress::remove_unused_ignores(unused_errors);
         }
 

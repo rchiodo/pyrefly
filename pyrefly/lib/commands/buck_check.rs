@@ -107,13 +107,12 @@ fn compute_errors(sys_info: SysInfo, sourcedb: impl SourceDatabase + 'static) ->
     let transaction = state.transaction();
     let errors = transaction.get_errors(&modules_to_check);
 
-    // Collect main errors and directives for display, re-sorting by module
-    // name, path, and source range so output preserves file/line
-    // interleaving across modules.
+    // Collect main errors (done once, shared with unused ignore check)
     let collected = errors.collect_errors();
+    let unused = errors.collect_unused_ignore_errors_for_display(&collected);
     let mut output_errors = collected.ordinary;
     output_errors.extend(collected.directives);
-    output_errors.extend(errors.collect_unused_ignore_errors_for_display().ordinary);
+    output_errors.extend(unused.ordinary);
     output_errors.sort_by_cached_key(|e| {
         (
             e.module().name(),
