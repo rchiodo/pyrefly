@@ -934,3 +934,18 @@ class A:
         assert_type(cls, None)
     "#,
 );
+
+testcase!(
+    test_unpacked_annotation_override,
+    r#"
+from typing import assert_type
+
+def f() -> str:
+    return ""
+
+x: int
+x, y = f(), f()  # E: `str` is not assignable to `int`
+assert_type(x, int)
+assert_type(y, str)
+    "#,
+);

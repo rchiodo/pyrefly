@@ -3654,7 +3654,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(ann) = ann.map(|idx| self.get_idx(idx)) {
             self.check_final_reassignment(&ann, range, errors);
             if let Some(want) = ann.ty(self.heap, self.stdlib) {
-                self.check_type(&got, &want, range, errors, &|| {
+                return self.check_and_return_type(got, &want, range, errors, &|| {
                     TypeCheckContext::of_kind(TypeCheckKind::UnpackedAssign)
                 });
             }
