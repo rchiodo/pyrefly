@@ -1658,9 +1658,9 @@ dependencies = [
 
 [[package]]
 name = "lock_free_hashtable"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc989b5e3e04411250b5d1ce0d880e5de77b36703f3012d56acb43e6ff07f31b"
+checksum = "675f71e608891537a702876c647c86beeb822e921069d168276ec469eae5f1a9"
 dependencies = [
  "allocative",
  "atomic",
