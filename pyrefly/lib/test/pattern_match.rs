@@ -794,3 +794,39 @@ def handle(c: C) -> None:
     assert_type(c, C)
 "#,
 );
+
+testcase!(
+    test_match_multi_subject_with_tuple_pattern,
+    r#"
+def test_multi_match1(o1: object, o2: object) -> None:
+    match o1, o2:
+        case _, ("a", 1): pass
+        case _, ("b", 1): pass
+        case _, ("c", 1): pass
+
+def test_multi_match2(o1: object, o2: object) -> None:
+    match o1, o2:
+        case ("a", 1), _: pass
+        case ("b", 1), _: pass
+        case ("c", 1), _: pass
+"#,
+);
+
+testcase!(
+    test_match_multi_subject_with_mapping_pattern,
+    r#"
+from typing import Any
+
+def test_multi_match_mapping1(o1: object, o2: dict[str, Any]) -> None:
+    match o1, o2:
+        case _, {"a": 1}: pass
+        case _, {"b": 1}: pass
+        case _, {"c": 1}: pass
+
+def test_multi_match_mapping2(o1: dict[str, Any], o2: object) -> None:
+    match o1, o2:
+        case {"a": 1}, _: pass
+        case {"b": 1}, _: pass
+        case {"c": 1}, _: pass
+"#,
+);
