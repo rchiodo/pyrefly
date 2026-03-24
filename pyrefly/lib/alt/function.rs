@@ -29,7 +29,10 @@ use pyrefly_util::owner::Owner;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
+use ruff_python_ast::ExprNumberLiteral;
 use ruff_python_ast::Identifier;
+use ruff_python_ast::Number;
+use ruff_python_ast::UnaryOp;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -63,6 +66,7 @@ use crate::error::context::TypeCheckContext;
 use crate::error::context::TypeCheckKind;
 use crate::solver::solver::QuantifiedHandle;
 use crate::types::callable::Callable;
+use crate::types::callable::DefaultValue;
 use crate::types::callable::FuncDefIndex;
 use crate::types::callable::FuncFlags;
 use crate::types::callable::FuncMetadata;
@@ -81,6 +85,25 @@ use crate::types::types::Forallable;
 use crate::types::types::Overload;
 use crate::types::types::OverloadType;
 use crate::types::types::Type;
+
+/// Extract a display string for default values whose types don't preserve the literal value.
+/// Float literals like `3.14` become `ClassType(float)` which loses the actual value.
+fn default_display_for_expr(expr: &Expr) -> Option<String> {
+    let (is_negative, inner_expr) = match expr {
+        Expr::UnaryOp(x) if x.op == UnaryOp::USub => (true, x.operand.as_ref()),
+        _ => (false, expr),
+    };
+
+    if let Expr::NumberLiteral(ExprNumberLiteral {
+        value: Number::Float(f),
+        ..
+    }) = inner_expr
+    {
+        Some(format!("{}{f}", if is_negative { "-" } else { "" }))
+    } else {
+        None
+    }
+}
 
 fn is_class_property_decorator_class_object(cls: &Class) -> bool {
     let cls_name = cls.name();
@@ -813,7 +836,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             {
                 Required::Optional(None)
             }
-            Some(default) => Required::Optional(Some(self.expr(default, check, errors))),
+            Some(default) => {
+                let display = default_display_for_expr(default);
+                let ty = self.expr(default, check, errors);
+                Required::Optional(Some(match display {
+                    Some(d) => DefaultValue::with_display(ty, d),
+                    None => DefaultValue::new(ty),
+                }))
+            }
             None => Required::Required,
         }
     }
@@ -877,10 +907,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ty.clone()
                 } else if let Some(hint) = hint {
                     hint.clone()
-                } else if let Required::Optional(Some(default_ty)) = &required {
+                } else if let Required::Optional(Some(default_val)) = &required {
                     self.union(
                         self.heap.mk_any_implicit(),
-                        default_ty.clone().promote_implicit_literals(self.stdlib),
+                        default_val
+                            .ty
+                            .clone()
+                            .promote_implicit_literals(self.stdlib),
                     )
                 } else {
                     self.heap.mk_any_implicit()
@@ -888,11 +921,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 (ty, required, true)
             }
         };
-        if let Required::Optional(Some(default)) = required {
+        if let Required::Optional(Some(default_val)) = required {
             // Mark literals as explicit so we don't promote them.
             // This has to happen after the param type has been computed because we do
             // want to promote literals while inferring the type.
-            required = Required::Optional(Some(default.explicit_literals()));
+            required = Required::Optional(Some(DefaultValue {
+                ty: default_val.ty.explicit_literals(),
+                ..default_val
+            }));
         }
         ParamTypeResult {
             ty,
@@ -1681,7 +1717,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Param::PosOnly(Some(name), _, Required::Optional(Some(default)))
                     | Param::Pos(name, _, Required::Optional(Some(default)))
                     | Param::KwOnly(name, _, Required::Optional(Some(default))) => {
-                        Some((name, default))
+                        Some((name, &default.ty))
                     }
                     _ => None,
                 })
