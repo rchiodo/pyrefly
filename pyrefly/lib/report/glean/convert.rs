@@ -1581,6 +1581,7 @@ impl GleanState<'_> {
             Stmt::Try(stmt_try) => {
                 stmt_try.handlers.iter().for_each(|x| match x {
                     ExceptHandler::ExceptHandler(x) => {
+                        self.visit_exprs(&x.type_, container);
                         if let Some(name) = &x.name {
                             let fq_name = self.make_fq_name_for_declaration(
                                 name,
