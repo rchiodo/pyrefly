@@ -2948,16 +2948,14 @@ impl State {
         );
         state.stdlib = stdlib;
         state.now = now;
-        for (handle, new_module_data) in updated_modules.iter_unordered() {
+        for (handle, new_module_data) in updated_modules {
             state
                 .modules
-                .insert(handle.dupe(), new_module_data.take_and_freeze());
+                .insert(handle, new_module_data.take_and_freeze());
         }
         state.memory.apply_overlay(memory_overlay);
-        for (loader_id, additional_loader) in updated_loaders.iter_unordered() {
-            state
-                .loaders
-                .insert(loader_id.dupe(), additional_loader.dupe());
+        for (loader_id, additional_loader) in updated_loaders {
+            state.loaders.insert(loader_id, additional_loader);
         }
 
         // Garbage-collect stale loader entries. Loaders are keyed by ArcId<ConfigFile>
