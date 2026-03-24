@@ -1541,7 +1541,9 @@ __all__ = ["NonExistent"]
 # pkg.py
 2 | __all__ = ["NonExistent"]
                  ^
-Definition Result: None
+Definition Result:
+2 | __all__ = ["NonExistent"]
+               ^^^^^^^^^^^^^
 
 
 "#

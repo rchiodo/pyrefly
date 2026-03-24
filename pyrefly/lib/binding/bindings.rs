@@ -547,13 +547,23 @@ impl Bindings {
 
         builder.process_deferred_bound_names();
 
-        // Validate that all entries in __all__ are defined in the module
-        for (range, name) in exports.invalid_dunder_all_entries(lookup, &module_info) {
+        // Validate that all entries in __all__ are defined in the module.
+        // Synthesize a binding so importers resolve to Any(Error) without
+        // a duplicate diagnostic. We collect (name, idx) pairs here and insert
+        // the KeyExport entries after the exportables loop to avoid conflicts
+        // with names that come from wildcard imports (e.g., builtins).
+        let mut invalid_all_exports: Vec<(Name, Idx<Key>)> = Vec::new();
+        for (range, name) in exports.invalid_dunder_all_entries(lookup) {
             builder.error(
                 range,
                 ErrorInfo::Kind(ErrorKind::BadDunderAll),
                 format!("Name `{name}` is listed in `__all__` but is not defined in the module"),
             );
+            let key = builder.insert_binding(
+                Key::Import(Box::new((name.clone(), range))),
+                Binding::Any(AnyStyle::Error),
+            );
+            invalid_all_exports.push((name, key));
         }
 
         // Warn if __all__ could not be statically analyzed
@@ -585,6 +595,7 @@ impl Bindings {
         }
 
         let exported = exports.exports(lookup);
+        let mut exported_names = SmallSet::new();
         for (name, exportable) in scope_trace.exportables().into_iter_hashed() {
             let binding = match exportable {
                 Exportable::Initialized(key, Some(ann)) => {
@@ -596,7 +607,19 @@ impl Bindings {
                 }
             };
             if exported.contains_key_hashed(name.as_ref()) {
-                builder.table.insert(KeyExport(name.into_key()), binding);
+                let key = name.into_key().clone();
+                exported_names.insert(key.clone());
+                builder.table.insert(KeyExport(key), binding);
+            }
+        }
+        // Insert KeyExport entries for invalid __all__ names that weren't
+        // already handled by the exportables loop (e.g., a name from builtins
+        // can appear in both exportables and invalid_dunder_all_entries).
+        for (name, key) in invalid_all_exports {
+            if !exported_names.contains(&name) {
+                builder
+                    .table
+                    .insert(KeyExport(name), BindingExport::Forward(key));
             }
         }
         Self(Arc::new(BindingsInner {
