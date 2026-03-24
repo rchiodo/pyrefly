@@ -2685,6 +2685,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Operator::FloorDiv => {
                         Some(self.heap.mk_size(SizeExpr::floor_div(left_dim, right_dim)))
                     }
+                    Operator::Pow => Some(self.heap.mk_size(SizeExpr::pow(left_dim, right_dim))),
                     _ => {
                         self.error(
                             errors,

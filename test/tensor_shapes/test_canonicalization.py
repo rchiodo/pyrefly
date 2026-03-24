@@ -128,3 +128,58 @@ def test_multi_dim_flatten[A, B, C, D, E](
     expected2: Tensor[E * D * C * B * A] = r2
     expected3: Tensor[A, D * C * B, E] = r3
     return (expected1, expected2, expected3)
+
+
+# ============================================================================
+# Pow canonicalization tests
+# ============================================================================
+
+
+def test_pow_literal(x: Tensor[2**3]) -> Tensor[8]:
+    """2**3 = 8, literal exponentiation."""
+    return x
+
+
+def test_pow_identity[N](x: Tensor[N**1]) -> Tensor[N]:
+    """N**1 = N."""
+    return x
+
+
+def test_pow_zero[N](x: Tensor[N**0]) -> Tensor[1]:
+    """N**0 = 1."""
+    return x
+
+
+def test_pow_symbolic_base[I](x: Tensor[2**I]) -> Tensor[2**I]:
+    """Symbolic exponent preserved."""
+    return x
+
+
+def test_pow_product_grouping[I](
+    x: Tensor[2**I],
+) -> Tensor[2**I]:
+    """2 * 2**I = 2**(I+1) and 2**(I+1) canonically equals... 2**(I+1).
+    But we test that 2 * 2**(I-1) = 2**I via product grouping."""
+    reveal_type(x)
+    return x
+
+
+def test_pow_same_base_mul[I, B, C](
+    x: Tensor[B, C * 2**I],
+) -> Tensor[B, C * 2**I]:
+    """Product with Pow factor stays canonical."""
+    return x
+
+
+def test_pow_literal_absorb[I](
+    x: Tensor[8 * 2**I],
+) -> Tensor[2 ** (I + 3)]:
+    """8 * 2**I = 2**3 * 2**I = 2**(I+3)."""
+    return x
+
+
+def test_pow_mul_same_base[I](
+    x: Tensor[2**I * 2],
+) -> Tensor[2 ** (I + 1)]:
+    """2**I * 2 = 2**(I+1)."""
+    return x

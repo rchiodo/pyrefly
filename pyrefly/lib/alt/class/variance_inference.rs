@@ -295,7 +295,8 @@ fn on_type(
                 SizeExpr::Add(l, r)
                 | SizeExpr::Sub(l, r)
                 | SizeExpr::Mul(l, r)
-                | SizeExpr::FloorDiv(l, r) => {
+                | SizeExpr::FloorDiv(l, r)
+                | SizeExpr::Pow(l, r) => {
                     on_type(Variance::Invariant, inj, l, on_edge, on_var);
                     on_type(Variance::Invariant, inj, r, on_edge, on_var);
                 }

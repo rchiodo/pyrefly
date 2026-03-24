@@ -94,9 +94,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return None;
         }
 
-        // Check if at least one operand is a symbolic dimension type
+        // Check if at least one operand is a symbolic dimension type or literal int
         let is_dim_operand = |ty: &Type| match ty {
             Type::Dim(_) | Type::Size(_) => true,
+            Type::Literal(box Literal {
+                value: Lit::Int(_), ..
+            }) => true,
             Type::QuantifiedValue(q) => {
                 matches!(q.kind, QuantifiedKind::TypeVar)
             }
@@ -147,10 +150,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             _ => unreachable!(),
         };
 
-        // If either operand is Dim, return Dim-wrapped result
-        // Otherwise (e.g., Dim-bounded type parameters), return unwrapped dimension type
+        // If either operand is Dim, return Dim-wrapped result.
+        // If both operands are Literal[int], convert result back to Literal[int].
+        // Otherwise (e.g., Dim-bounded type parameters), return unwrapped dimension type.
         if matches!(lhs, Type::Dim(_)) || matches!(rhs, Type::Dim(_)) {
             Some(self.heap.mk_dim(result_ty))
+        } else if matches!(
+            lhs,
+            Type::Literal(box Literal {
+                value: Lit::Int(_), ..
+            })
+        ) && matches!(
+            rhs,
+            Type::Literal(box Literal {
+                value: Lit::Int(_), ..
+            })
+        ) {
+            // Both operands are Literal[int], so convert SizeExpr::Literal back to Literal[int]
+            if let Type::Size(SizeExpr::Literal(n)) = &result_ty {
+                Some(Lit::Int(LitInt::new(*n)).to_implicit_type())
+            } else {
+                Some(result_ty)
+            }
         } else {
             Some(result_ty)
         }
