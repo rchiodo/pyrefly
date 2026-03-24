@@ -7,16 +7,15 @@
 UNet from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/pytorch_unet/pytorch_unet/unet/
-See model_port_changes.md for full change analysis.
 
 Port notes:
 - Removes dynamic padding in Up.forward (assumes power-of-2 spatial dims,
-  which is the standard UNet usage; the original pads to handle odd sizes)
+    which is the standard UNet usage; the original pads to handle odd sizes)
 - Splits Up into Up (non-bilinear) and UpBilinear to give each variant a
-  clear type signature; the original uses a runtime bilinear flag
+    clear type signature; the original uses a runtime bilinear flag
 """
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -38,7 +37,7 @@ class DoubleConv[InC, OutC](nn.Module):
     Shape: (B, InC, H, W) -> (B, OutC, H, W)  [spatial-preserving]
 
     Conv2d with kernel_size=3 and padding=1 preserves spatial dimensions:
-      (H + 2*1 - 1*(3-1) - 1) // 1 + 1 = H
+        (H + 2*1 - 1*(3-1) - 1) // 1 + 1 = H
     """
 
     def __init__(
@@ -143,11 +142,11 @@ class OutConv[InC, OutC](nn.Module):
     Shape: (B, InC, H, W) -> (B, OutC, H, W)
 
     Conv2d with kernel_size=1, padding=0 preserves spatial dimensions:
-      (H + 0 - 1*(1-1) - 1) // 1 + 1 = H
+        (H + 0 - 1*(1-1) - 1) // 1 + 1 = H
     """
 
     def __init__(self, c_in: Dim[InC], c_out: Dim[OutC]) -> None:
-        super(OutConv, self).__init__()
+        super().__init__()
         self.conv = nn.Conv2d(c_in, c_out, kernel_size=1)
 
     def forward[B, H, W](self, x: Tensor[B, InC, H, W]) -> Tensor[B, OutC, H, W]:
@@ -170,50 +169,79 @@ class UNet[NChannels, NClasses](nn.Module):
 
     Each Down block halves spatial dimensions; each Up block doubles them.
     Skip connections concatenate encoder features with decoder features.
+
+    Uses _encode/_decode with list[Stage[Any]] + narrowing annotation for
+    ModuleList dispatch, and shape-preserving recursive forward. The recursive
+    signature Tensor[B,C,H,W] -> Tensor[B,C,H,W] is verified by the type
+    checker: each level encodes (C -> 2C), recurses (preserves shape by
+    inductive hypothesis), then decodes (restores shape via skip connection).
     """
 
     def __init__(self, n_channels: Dim[NChannels], n_classes: Dim[NClasses]) -> None:
-        super(UNet, self).__init__()
+        super().__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
 
         self.inc = DoubleConv(n_channels, 64)
-        self.down1 = Down(64, 128)
-        self.down2 = Down(128, 256)
-        self.down3 = Down(256, 512)
-        self.down4 = Down(512, 1024)
-        self.up1 = Up(1024, 512)
-        self.up2 = Up(512, 256)
-        self.up3 = Up(256, 128)
-        self.up4 = Up(128, 64)
+        downs: list[Down[Any, Any]] = [
+            Down(64, 128),
+            Down(128, 256),
+            Down(256, 512),
+            Down(512, 1024),
+        ]
+        self.downs = nn.ModuleList(downs)
+        ups: list[Up[Any, Any]] = [
+            Up(128, 64),
+            Up(256, 128),
+            Up(512, 256),
+            Up(1024, 512),
+        ]
+        self.ups = nn.ModuleList(ups)
         self.outc = OutConv(64, n_classes)
+
+    def _encode[B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: int
+    ) -> Tensor[B, 2 * C, (H - 2) // 2 + 1, (W - 2) // 2 + 1]:
+        """Encode one level: doubles channels, halves spatial via Down[C, 2*C]."""
+        idx = len(self.downs) - depth
+        down: Down[C, 2 * C] = self.downs[idx]
+        return down(x)
+
+    def _decode[B, C, H, W](
+        self,
+        skip: Tensor[B, C, H, W],
+        deep: Tensor[B, 2 * C, (H - 2) // 2 + 1, (W - 2) // 2 + 1],
+        depth: int,
+    ) -> Tensor[B, C, H, W]:
+        """Decode one level: restores shape via Up[2*C, C] with skip connection."""
+        idx = len(self.ups) - depth
+        up: Up[2 * C, C] = self.ups[idx]
+        return up(deep, skip)
+
+    def recurse[I, B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: Dim[I]
+    ) -> Tensor[B, C, H, W]:
+        """Shape-preserving recursive encoder-decoder.
+
+        Base case (depth=0): identity (bottleneck).
+        Inductive step: encode (C -> 2C), recurse (preserves 2C), decode (2C -> C).
+        """
+        if depth == 0:
+            return x
+        skip = x
+        encoded = self._encode(x, depth)
+        middle = self.recurse(encoded, depth - 1)
+        decoded = self._decode(skip, middle, depth)
+        return decoded
 
     def forward[B](
         self, x: Tensor[B, NChannels, 256, 256]
     ) -> Tensor[B, NClasses, 256, 256]:
-        # Encoder
-        x1 = self.inc(x)
-        assert_type(x1, Tensor[B, 64, 256, 256])
-        x2 = self.down1(x1)
-        assert_type(x2, Tensor[B, 128, 128, 128])
-        x3 = self.down2(x2)
-        assert_type(x3, Tensor[B, 256, 64, 64])
-        x4 = self.down3(x3)
-        assert_type(x4, Tensor[B, 512, 32, 32])
-        x5 = self.down4(x4)
-        assert_type(x5, Tensor[B, 1024, 16, 16])
-
-        # Decoder with skip connections
-        d4 = self.up1(x5, x4)
-        assert_type(d4, Tensor[B, 512, 32, 32])
-        d3 = self.up2(d4, x3)
-        assert_type(d3, Tensor[B, 256, 64, 64])
-        d2 = self.up3(d3, x2)
-        assert_type(d2, Tensor[B, 128, 128, 128])
-        d1 = self.up4(d2, x1)
-        assert_type(d1, Tensor[B, 64, 256, 256])
-
-        logits = self.outc(d1)
+        features = self.inc(x)
+        assert_type(features, Tensor[B, 64, 256, 256])
+        features = self.recurse(features, 4)
+        assert_type(features, Tensor[B, 64, 256, 256])
+        logits = self.outc(features)
         return logits
 
 
@@ -233,7 +261,7 @@ class UNetBilinear[NChannels, NClasses](nn.Module):
     """
 
     def __init__(self, n_channels: Dim[NChannels], n_classes: Dim[NClasses]) -> None:
-        super(UNetBilinear, self).__init__()
+        super().__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
 

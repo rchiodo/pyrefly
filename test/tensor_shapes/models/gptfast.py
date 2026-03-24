@@ -3,11 +3,9 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
 import math
 from dataclasses import dataclass
-from typing import Any, assert_type, Optional, TYPE_CHECKING, TypedDict
+from typing import Any, assert_type, TYPE_CHECKING, TypedDict
 
 import torch
 import torch.nn as nn
@@ -478,7 +476,7 @@ class Transformer[
         assert_type(self.output, nn.Linear[D, VocabSize])
 
         self.freqs_cis: Tensor[BlockSize, (D // NHead) // 2, 2] | None = None
-        self.mask_cache: Optional[Tensor] = None
+        self.mask_cache: Tensor | None = None
         self.max_batch_size = -1
         self.max_seq_length = -1
         self.get_mask_mod = get_mask_mod

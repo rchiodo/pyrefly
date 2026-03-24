@@ -7,23 +7,22 @@
 DenseNet from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/phlippe_densenet/__init__.py
-See model_port_changes.md for full change analysis.
 
 Port notes:
 - DenseLayer breaks the original nn.Sequential into explicit calls for shape
-  tracking through BatchNorm2d → ReLU → Conv2d(1x1) → BatchNorm2d → ReLU →
-  Conv2d(3x3), then concatenates input with output (dense connection)
+    tracking through BatchNorm2d → ReLU → Conv2d(1x1) → BatchNorm2d → ReLU →
+    Conv2d(3x3), then concatenates input with output (dense connection)
 - WORKAROUND: Uses F.relu instead of configurable act_fn class parameter
-  (the original passes nn.ReLU/nn.Tanh/etc. as a class constructor)
+    (the original passes nn.ReLU/nn.Tanh/etc. as a class constructor)
 - TransitionLayer uses nn.AvgPool2d for spatial downsampling
-  (nn.AvgPool2d's forward returns unrefined Tensor, no DSL redirect)
+    (nn.AvgPool2d's forward returns unrefined Tensor, no DSL redirect)
 - DenseBlock chains DenseLayers explicitly in forward (not via nn.Sequential)
-  because each layer has different input channel counts
+    because each layer has different input channel counts
 - DenseNet uses concrete default config (growth_rate=16, bn_size=2,
-  num_layers=[6,6,6,6], num_classes=10) since channel arithmetic is dynamic
+    num_layers=[6,6,6,6], num_classes=10) since channel arithmetic is dynamic
 """
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, overload, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -112,40 +111,60 @@ class TransitionLayer[InC, OutC](nn.Module):
 
 
 class DenseBlock[C, GR, BnC](nn.Module):
-    """Dense block with 6 layers.
+    """Dense block with 6 layers, using recursive forward.
 
     Each DenseLayer adds GR channels via concatenation.
     Input channels grow: C → C+GR → C+2*GR → ... → C+6*GR
 
-    Uses explicit layer definitions instead of a dynamic loop to enable
-    static shape tracking through each layer.
+    Uses _apply_layer + _chain for recursive shape verification instead
+    of manually unrolled forward. The inductive step relies on symbolic
+    product distribution: (Ch + GR) + GR*(I-1) = Ch + GR*I.
     """
 
     def __init__(
         self, c_in: Dim[C], growth_rate: Dim[GR], bn_channels: Dim[BnC]
     ) -> None:
         super().__init__()
-        self.layer0 = DenseLayer(c_in, bn_channels, growth_rate)
-        self.layer1 = DenseLayer(c_in + growth_rate, bn_channels, growth_rate)
-        self.layer2 = DenseLayer(c_in + 2 * growth_rate, bn_channels, growth_rate)
-        self.layer3 = DenseLayer(c_in + 3 * growth_rate, bn_channels, growth_rate)
-        self.layer4 = DenseLayer(c_in + 4 * growth_rate, bn_channels, growth_rate)
-        self.layer5 = DenseLayer(c_in + 5 * growth_rate, bn_channels, growth_rate)
+        layers: list[DenseLayer[Any, Any, Any]] = [
+            DenseLayer(c_in, bn_channels, growth_rate),
+            DenseLayer(c_in + growth_rate, bn_channels, growth_rate),
+            DenseLayer(c_in + 2 * growth_rate, bn_channels, growth_rate),
+            DenseLayer(c_in + 3 * growth_rate, bn_channels, growth_rate),
+            DenseLayer(c_in + 4 * growth_rate, bn_channels, growth_rate),
+            DenseLayer(c_in + 5 * growth_rate, bn_channels, growth_rate),
+        ]
+        self.layers = nn.ModuleList(layers)
+
+    def _apply_layer[B, Ch, H, W](
+        self, x: Tensor[B, Ch, H, W], depth: int
+    ) -> Tensor[B, Ch + GR, H, W]:
+        idx = len(self.layers) - depth
+        layer: DenseLayer[Ch, BnC, GR] = self.layers[idx]
+        return layer(x)
 
     def forward[B, H, W](self, x: Tensor[B, C, H, W]) -> Tensor[B, C + 6 * GR, H, W]:
-        x0 = self.layer0(x)
-        assert_type(x0, Tensor[B, C + GR, H, W])
-        x1 = self.layer1(x0)
-        assert_type(x1, Tensor[B, C + 2 * GR, H, W])
-        x2 = self.layer2(x1)
-        assert_type(x2, Tensor[B, C + 3 * GR, H, W])
-        x3 = self.layer3(x2)
-        assert_type(x3, Tensor[B, C + 4 * GR, H, W])
-        x4 = self.layer4(x3)
-        assert_type(x4, Tensor[B, C + 5 * GR, H, W])
-        x5 = self.layer5(x4)
-        assert_type(x5, Tensor[B, C + 6 * GR, H, W])
-        return x5
+        return _dense_chain(self, x, 6)
+
+
+@overload
+def _dense_chain[GR, B, Ch, H, W](
+    block: DenseBlock[Any, GR, Any], x: Tensor[B, Ch, H, W], depth: Dim[1]
+) -> Tensor[B, Ch + GR, H, W]: ...
+
+
+@overload
+def _dense_chain[I, GR, B, Ch, H, W](
+    block: DenseBlock[Any, GR, Any], x: Tensor[B, Ch, H, W], depth: Dim[I]
+) -> Tensor[B, Ch + I * GR, H, W]: ...
+
+
+def _dense_chain[I, GR, B, Ch, H, W](
+    block: DenseBlock[Any, GR, Any], x: Tensor[B, Ch, H, W], depth: Dim[I]
+) -> Tensor[B, Ch + GR, H, W] | Tensor[B, Ch + I * GR, H, W]:
+    y = block._apply_layer(x, depth)
+    if depth == 1:
+        return y
+    return _dense_chain(block, y, depth - 1)
 
 
 # ============================================================================

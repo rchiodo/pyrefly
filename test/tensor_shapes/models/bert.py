@@ -7,7 +7,6 @@
 BERT from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/BERT_pytorch/bert_pytorch/model/
-See model_port_changes.md for full change analysis.
 """
 
 import math
@@ -35,7 +34,7 @@ class LayerNorm[Features](nn.Module):
     b_2: Tensor[Features]
 
     def __init__(self, features: Dim[Features], eps: float = 1e-6) -> None:
-        super(LayerNorm, self).__init__()
+        super().__init__()
         self.a_2 = nn.Parameter(torch.ones(features))
         self.b_2 = nn.Parameter(torch.zeros(features))
         self.eps = eps
@@ -55,7 +54,7 @@ class SublayerConnection[Hidden](nn.Module):
     """
 
     def __init__(self, size: Dim[Hidden], dropout: float) -> None:
-        super(SublayerConnection, self).__init__()
+        super().__init__()
         self.norm = LayerNorm(size)
         self.dropout = nn.Dropout(dropout)
 
@@ -74,7 +73,7 @@ class PositionwiseFeedForward[DModel, DFF](nn.Module):
     def __init__(
         self, d_model: Dim[DModel], d_ff: Dim[DFF], dropout: float = 0.1
     ) -> None:
-        super(PositionwiseFeedForward, self).__init__()
+        super().__init__()
         self.w_1 = nn.Linear(d_model, d_ff)
         self.w_2 = nn.Linear(d_ff, d_model)
         self.dropout = nn.Dropout(dropout)

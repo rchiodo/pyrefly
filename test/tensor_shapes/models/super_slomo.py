@@ -7,22 +7,21 @@
 Super SloMo from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/Super_SloMo/slomo_model.py
-See model_port_changes.md for full change analysis.
 
 Port notes:
 - Uses nn.AvgPool2d for spatial shape tracking (DSL redirect computes shapes)
 - Uses scale_factor=2 (int) instead of 2.0 (float) for F.interpolate
-  (the DSL's interpolate_ir expects int|symint for scale_factor)
+    (the DSL's interpolate_ir expects int|symint for scale_factor)
 - Uses (k - 1) // 2 instead of int((filterSize - 1) / 2) for padding
-  (equivalent for odd kernel sizes, keeps Dim type tracking)
+    (equivalent for odd kernel sizes, keeps Dim type tracking)
 - Variable reassignment with shape change requires unique variable names
 - backWarp ported as BackWarp[W, H]: added torch.meshgrid, expand_as,
-  F.grid_sample stubs; register_buffer → nn.Buffer; variable renames
+    F.grid_sample stubs; register_buffer → nn.Buffer; variable renames
 - getFlowCoeff/getWarpCoeff ported: torch.linspace, None-indexing, unary
-  negation, permute all work; tensor-as-index (t[ind]) returns shapeless Tensor
+    negation, permute all work; tensor-as-index (t[ind]) returns shapeless Tensor
 """
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -117,58 +116,104 @@ class UNet[InC, OutC](nn.Module):
 
     Architecture:
     - Input convolutions with 7x7 kernels (padding=3, spatial-preserving)
-    - 5 downsampling blocks with decreasing kernel sizes (5, 3, 3, 3, 3)
-    - 5 upsampling blocks with skip connections
+    - 4 regular downsampling blocks (C -> 2C) + 1 bottleneck (C -> C)
+    - 4 regular upsampling blocks with skip connections + 1 bottleneck
     - Output convolution with 3x3 kernel (padding=1, spatial-preserving)
+
+    Uses list[Stage[Any]] + narrowing annotation for ModuleList dispatch.
+    The bottleneck (down5 + up1, both 512->512) is stored separately since
+    it preserves channels rather than doubling/halving.
     """
 
     def __init__(self, c_in: Dim[InC], c_out: Dim[OutC]) -> None:
         super().__init__()
         self.conv1 = nn.Conv2d(c_in, 32, 7, stride=1, padding=3)
         self.conv2 = nn.Conv2d(32, 32, 7, stride=1, padding=3)
-        self.down1 = Down(32, 64, 5)
-        self.down2 = Down(64, 128, 3)
-        self.down3 = Down(128, 256, 3)
-        self.down4 = Down(256, 512, 3)
-        self.down5 = Down(512, 512, 3)
-        self.up1 = Up(512, 512)
-        self.up2 = Up(512, 256)
-        self.up3 = Up(256, 128)
-        self.up4 = Up(128, 64)
-        self.up5 = Up(64, 32)
+        # Regular encode levels: each doubles channels
+        downs: list[Down[Any, Any]] = [
+            Down(32, 64, 5),
+            Down(64, 128, 3),
+            Down(128, 256, 3),
+            Down(256, 512, 3),
+        ]
+        self.downs = nn.ModuleList(downs)
+        # Bottleneck: channels stay the same (512 -> 512)
+        bn_downs: list[Down[Any, Any]] = [Down(512, 512, 3)]
+        self.bn_downs = nn.ModuleList(bn_downs)
+        bn_ups: list[Up[Any, Any]] = [Up(512, 512)]
+        self.bn_ups = nn.ModuleList(bn_ups)
+        # Regular decode levels: each halves channels
+        ups: list[Up[Any, Any]] = [
+            Up(64, 32),
+            Up(128, 64),
+            Up(256, 128),
+            Up(512, 256),
+        ]
+        self.ups = nn.ModuleList(ups)
         self.conv3 = nn.Conv2d(32, c_out, 3, stride=1, padding=1)
+
+    def _encode[B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: int
+    ) -> Tensor[B, 2 * C, (H - 2) // 2 + 1, (W - 2) // 2 + 1]:
+        """Encode one level: doubles channels, halves spatial via Down[C, 2*C]."""
+        idx = len(self.downs) - depth
+        down: Down[C, 2 * C] = self.downs[idx]
+        return down(x)
+
+    def _decode[B, C, H, W](
+        self,
+        skip: Tensor[B, C, H, W],
+        deep: Tensor[B, 2 * C, (H - 2) // 2 + 1, (W - 2) // 2 + 1],
+        depth: int,
+    ) -> Tensor[B, C, H, W]:
+        """Decode one level: restores shape via Up[2*C, C] with skip connection.
+
+        Up expects skp spatial = deep_H * 2, but skip has H.
+        ((H-2)//2+1)*2 = H for even H (standard UNet usage), but the type
+        checker cannot prove this algebraic identity.
+        """
+        idx = len(self.ups) - depth
+        up: Up[2 * C, C] = self.ups[idx]
+        return up(deep, skip)  # type: ignore[bad-argument-type]
+
+    def _bottleneck[B, C, H, W](self, x: Tensor[B, C, H, W]) -> Tensor[B, C, H, W]:
+        """Shape-preserving bottleneck: down5 (512->512) + up1 (512->512).
+
+        The last encoder level doesn't double channels (512->512), and the
+        first decoder level doesn't halve them (512->512). Together they form
+        a shape-preserving bottleneck at the deepest level.
+
+        Same algebraic gap as _decode: ((H-2)//2+1)*2 = H for even H.
+        """
+        down: Down[C, C] = self.bn_downs[0]
+        up: Up[C, C] = self.bn_ups[0]
+        deep = down(x)
+        return up(deep, x)  # type: ignore[bad-argument-type]
+
+    def recurse[I, B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: Dim[I]
+    ) -> Tensor[B, C, H, W]:
+        """Shape-preserving recursive encoder-decoder.
+
+        Base case (depth=0): bottleneck (down5 + up1, shape-preserving).
+        Inductive step: encode (C -> 2C), recurse (preserves 2C), decode (2C -> C).
+        """
+        if depth == 0:
+            return self._bottleneck(x)
+        skip = x
+        encoded = self._encode(x, depth)
+        middle = self.recurse(encoded, depth - 1)
+        decoded = self._decode(skip, middle, depth)
+        return decoded
 
     def forward[B](self, x: Tensor[B, InC, 352, 352]) -> Tensor[B, OutC, 352, 352]:
         x0 = F.leaky_relu(self.conv1(x), negative_slope=0.1)
         assert_type(x0, Tensor[B, 32, 352, 352])
         s1 = F.leaky_relu(self.conv2(x0), negative_slope=0.1)
         assert_type(s1, Tensor[B, 32, 352, 352])
-
-        # Encoder: 352 -> 176 -> 88 -> 44 -> 22 -> 11
-        s2 = self.down1(s1)
-        assert_type(s2, Tensor[B, 64, 176, 176])
-        s3 = self.down2(s2)
-        assert_type(s3, Tensor[B, 128, 88, 88])
-        s4 = self.down3(s3)
-        assert_type(s4, Tensor[B, 256, 44, 44])
-        s5 = self.down4(s4)
-        assert_type(s5, Tensor[B, 512, 22, 22])
-        bot = self.down5(s5)
-        assert_type(bot, Tensor[B, 512, 11, 11])
-
-        # Decoder: 11 -> 22 -> 44 -> 88 -> 176 -> 352
-        d5 = self.up1(bot, s5)
-        assert_type(d5, Tensor[B, 512, 22, 22])
-        d4 = self.up2(d5, s4)
-        assert_type(d4, Tensor[B, 256, 44, 44])
-        d3 = self.up3(d4, s3)
-        assert_type(d3, Tensor[B, 128, 88, 88])
-        d2 = self.up4(d3, s2)
-        assert_type(d2, Tensor[B, 64, 176, 176])
-        d1 = self.up5(d2, s1)
-        assert_type(d1, Tensor[B, 32, 352, 352])
-
-        out = F.leaky_relu(self.conv3(d1), negative_slope=0.1)
+        features = self.recurse(s1, 4)
+        assert_type(features, Tensor[B, 32, 352, 352])
+        out = F.leaky_relu(self.conv3(features), negative_slope=0.1)
         return out
 
 

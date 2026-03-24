@@ -7,7 +7,6 @@
 Soft Actor-Critic networks from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/soft_actor_critic/nets.py
-See model_port_changes.md for full change analysis.
 
 Port notes:
 - MLP-based networks (BaselineActor, BaselineCritic, BigCritic,

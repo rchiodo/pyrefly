@@ -7,10 +7,9 @@
 Phlippe ResNet from TorchBenchmark with shape annotations.
 
 Original: pytorch/benchmark/torchbenchmark/models/phlippe_resnet/__init__.py
-See model_port_changes.md for full change analysis.
 """
 
-from typing import assert_type, Final, TYPE_CHECKING
+from typing import Any, assert_type, overload, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -109,8 +108,18 @@ class ResNetGroup[C](nn.Module):
 
 
 class ResNetModel[NumClasses](nn.Module):
-    c_hidden: Final = (16, 32, 64)
-    num_blocks: Final = (3, 3, 3)
+    """ResNet with recursive downsample chain (Pattern C — exponential).
+
+    Architecture:
+    - Input: Conv2d(3, 16, 3, padding=1) + BN + ReLU
+    - Initial group: 3 shape-preserving blocks at 16 channels
+    - Downsample chain (2 stages): 16→32→64, spatial 32→16→8
+        Each stage: ResNetDownsampleBlock(C, 2C) + ResNetGroup(2C, 2 blocks)
+    - Output: AdaptiveAvgPool2d(1,1) + Flatten + Linear(64, num_classes)
+
+    The 2 downsample stages use _chain with return type
+    Tensor[B, C * 2**I, (H-1) // 2**I + 1, (W-1) // 2**I + 1].
+    """
 
     def __init__(
         self,
@@ -119,37 +128,38 @@ class ResNetModel[NumClasses](nn.Module):
     ):
         super().__init__()
         self.act_fn_name = act_fn_name
-        self._create_network(num_classes)
-        self._init_params()
-
-    def _create_network(self, num_classes: Dim[NumClasses]) -> None:
-        c = self.c_hidden
-        n = self.num_blocks
         act_fn = nn.ReLU
 
-        # Input convolution: 3 channels -> c[0]
+        # Input convolution: 3 → 16
         self.input_net = nn.Sequential(
-            nn.Conv2d(3, c[0], kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(c[0]),
+            nn.Conv2d(3, 16, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(16),
             act_fn(),
         )
 
-        # Groups and transitions in a single Sequential.
-        # Sequential chaining threads types through each module's forward.
-        self.body = nn.Sequential(
-            ResNetGroup(c[0], n[0], act_fn),
-            ResNetDownsampleBlock(c[0], c[1], act_fn),
-            ResNetGroup(c[1], n[1] - 1, act_fn),
-            ResNetDownsampleBlock(c[1], c[2], act_fn),
-            ResNetGroup(c[2], n[2] - 1, act_fn),
-        )
+        # Initial group: 3 shape-preserving blocks at 16 channels
+        self.initial_group = ResNetGroup(16, 3, act_fn)
 
-        # Mapping to classification output
+        # Downsample stages: each doubles channels + 2 shape-preserving blocks
+        downs: list[ResNetDownsampleBlock[Any, Any]] = [
+            ResNetDownsampleBlock(16, 32, act_fn),
+            ResNetDownsampleBlock(32, 64, act_fn),
+        ]
+        self.downs = nn.ModuleList(downs)
+        groups: list[ResNetGroup[Any]] = [
+            ResNetGroup(32, 2, act_fn),
+            ResNetGroup(64, 2, act_fn),
+        ]
+        self.groups = nn.ModuleList(groups)
+
+        # Output: AdaptiveAvgPool → Flatten → Linear
         self.output_net = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(c[-1], num_classes),
+            nn.Linear(64, num_classes),
         )
+
+        self._init_params()
 
     def _init_params(self):
         for m in self.modules():
@@ -161,12 +171,44 @@ class ResNetModel[NumClasses](nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
+    def _apply_stage[B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: int
+    ) -> Tensor[B, 2 * C, (H - 1) // 2 + 1, (W - 1) // 2 + 1]:
+        idx = len(self.downs) - depth
+        down: ResNetDownsampleBlock[C, 2 * C] = self.downs[idx]
+        group: ResNetGroup[2 * C] = self.groups[idx]
+        y = down(x)
+        return group(y)
+
+    @overload
+    def _chain[B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: Dim[1]
+    ) -> Tensor[B, 2 * C, (H - 1) // 2 + 1, (W - 1) // 2 + 1]: ...
+
+    @overload
+    def _chain[I, B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: Dim[I]
+    ) -> Tensor[B, C * 2**I, (H - 1) // 2**I + 1, (W - 1) // 2**I + 1]: ...
+
+    def _chain[I, B, C, H, W](
+        self, x: Tensor[B, C, H, W], depth: Dim[I]
+    ) -> (
+        Tensor[B, 2 * C, (H - 1) // 2 + 1, (W - 1) // 2 + 1]
+        | Tensor[B, C * 2**I, (H - 1) // 2**I + 1, (W - 1) // 2**I + 1]
+    ):
+        y = self._apply_stage(x, depth)
+        if depth == 1:
+            return y
+        return self._chain(y, depth - 1)
+
     def forward[B](self, x: Tensor[B, 3, 32, 32]) -> Tensor[B, NumClasses]:
         x1 = self.input_net(x)
         assert_type(x1, Tensor[B, 16, 32, 32])
-        x2 = self.body(x1)
-        assert_type(x2, Tensor[B, 64, 8, 8])
-        return self.output_net(x2)
+        x2 = self.initial_group(x1)
+        assert_type(x2, Tensor[B, 16, 32, 32])
+        x3 = self._chain(x2, 2)  # 16→64, 32→8
+        assert_type(x3, Tensor[B, 64, 8, 8])
+        return self.output_net(x3)
 
 
 # ============================================================================

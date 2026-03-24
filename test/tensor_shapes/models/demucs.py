@@ -10,18 +10,17 @@ Original: pytorch/benchmark/torchbenchmark/models/demucs/demucs/model.py
 
 Port notes:
 - Demucs is a Wave-U-Net style encoder-decoder for audio source separation.
-  The encoder uses Conv1d to downsample, the decoder uses ConvTranspose1d
-  to upsample, with skip connections between corresponding layers.
-- This port covers the encoder/decoder building blocks with concrete dimensions
-  (non-GLU, rewrite=True config): Conv1d chains and ConvTranspose1d chains
-  wrapped in nn.Sequential.
+    The encoder uses Conv1d to downsample, the decoder uses ConvTranspose1d
+    to upsample, with skip connections between corresponding layers.
+- This port covers the encoder/decoder building blocks as generic modules
+    parameterized over channels (non-GLU, rewrite=True config).
 - Full Demucs forward ported: encoder → BLSTM → decoder with skip connections.
-  ModuleList loop inlined into explicit enc0/enc1/enc2 + dec2/dec1/dec0 calls.
-  Skip connections use center_trim (algebraic simplification resolves slice dims).
-  BLSTM bottleneck: nn.LSTM with num_directions=2 (bidirectional workaround).
-  GLU encoder variant also typed (EncoderBlockGLU with nn.GLU(dim=1)).
+    ModuleList loop inlined into explicit enc0/enc1/enc2 + dec2/dec1/dec0 calls.
+    Skip connections use center_trim (algebraic simplification resolves slice dims).
+    BLSTM bottleneck: nn.LSTM with num_directions=2 (bidirectional workaround).
+    GLU encoder variant also typed (EncoderBlockGLU with nn.GLU(dim=1)).
 - Config used: sources=4, audio_channels=2, channels=64, depth=3,
-  kernel_size=8, stride=4, growth=2, rewrite=True, glu=False, context=3
+    kernel_size=8, stride=4, growth=2, rewrite=True, glu=False, context=3
 
 Key patterns exercised:
 - Conv1d spatial formula: (L + 2*P - D*(K-1) - 1) // S + 1
@@ -87,23 +86,18 @@ def center_trim[B, C, T, R](
     Original: demucs/utils.py center_trim
     Trims (T - R) / 2 from each side, resulting in last dim = R.
 
-    The slicing expression tensor[..., delta//2:-(delta - delta//2)] uses
-    symbolic arithmetic. The type system resolves this to R via:
-    - AST-level detection of unary negation preserves Mul(-1, ...) for adjust_negative
-    - adjust_negative adds dim_size T, giving stop = T - (D - D//2)
-    - sub_dim(stop, start) = T - (D - D//2) - D//2 = T - D = R (D//2 terms cancel)
-
-    Changes from original: typed with generic params; reference is Tensor
-    not int (Demucs always passes a tensor).
+    Uses `tensor.size(-1) - (delta - delta // 2)` as stop instead of
+    negation, so it works for delta == 0 (no trim) without a conditional.
+    The type system resolves the slice result to R via:
+    - start = delta // 2 = (T - R) // 2
+    - stop = T - (delta - delta // 2) = T - ((T - R) - (T - R) // 2)
+    - sub_dim(stop, start) simplifies to R (the (T-R)//2 terms cancel)
     """
     reference_val = reference.size(-1)
     delta = tensor.size(-1) - reference_val
     if delta < 0:
         raise ValueError(f"tensor must be larger than reference. Delta is {delta}.")
-    if delta:
-        trimmed = tensor[..., delta // 2 : -(delta - delta // 2)]
-        return trimmed
-    return tensor  # type: ignore[return-type]  # T == R when delta == 0, but can't narrow
+    return tensor[..., delta // 2 : tensor.size(-1) - (delta - delta // 2)]
 
 
 def upsample[B, C, T](x: Tensor[B, C, T], stride: int) -> Tensor:
@@ -195,7 +189,7 @@ class EncoderBlockGLU(nn.Module):
 
 
 # ============================================================================
-# Encoder Blocks (Conv1d → ReLU → Conv1d → ReLU)
+# Encoder Block (generic over channels)
 # ============================================================================
 # In the original, each encoder layer is:
 #   Conv1d(in_ch, ch, kernel_size=8, stride=4) → ReLU
@@ -208,154 +202,55 @@ class EncoderBlockGLU(nn.Module):
 #   Layer 2: 128 → 256    (channels*growth → channels*growth^2)
 
 
-class EncoderBlock0(nn.Module):
-    """First encoder block: audio_channels(2) → channels(64).
+class EncoderBlock[InC, OutC](nn.Module):
+    """Encoder block: Conv1d(InC, OutC, 8, stride=4) → ReLU → Conv1d(OutC, OutC, 1) → ReLU.
 
-    Conv1d(2, 64, 8, stride=4) → ReLU → Conv1d(64, 64, 1) → ReLU
-    Spatial: L → (L - 8) // 4 + 1 → same (kernel=1, stride=1)
+    Spatial: L → (L - 8) // 4 + 1 (1x1 conv preserves spatial).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, in_ch: Dim[InC], out_ch: Dim[OutC]) -> None:
         super().__init__()
-        self.encode = nn.Sequential(
-            nn.Conv1d(2, 64, 8, stride=4),
-            nn.ReLU(),
-            nn.Conv1d(64, 64, 1),
-            nn.ReLU(),
-        )
+        self.conv1 = nn.Conv1d(in_ch, out_ch, 8, stride=4)
+        self.conv2 = nn.Conv1d(out_ch, out_ch, 1)
 
-    def forward[B, L](self, x: Tensor[B, 2, L]) -> Tensor[B, 64, (L - 8) // 4 + 1]:
-        out = self.encode(x)
-        assert_type(out, Tensor[B, 64, (L - 8) // 4 + 1])
-        return out
-
-
-class EncoderBlock1(nn.Module):
-    """Second encoder block: 64 → 128.
-
-    Conv1d(64, 128, 8, stride=4) → ReLU → Conv1d(128, 128, 1) → ReLU
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.encode = nn.Sequential(
-            nn.Conv1d(64, 128, 8, stride=4),
-            nn.ReLU(),
-            nn.Conv1d(128, 128, 1),
-            nn.ReLU(),
-        )
-
-    def forward[B, L](self, x: Tensor[B, 64, L]) -> Tensor[B, 128, (L - 8) // 4 + 1]:
-        out = self.encode(x)
-        assert_type(out, Tensor[B, 128, (L - 8) // 4 + 1])
-        return out
-
-
-class EncoderBlock2(nn.Module):
-    """Third encoder block: 128 → 256.
-
-    Conv1d(128, 256, 8, stride=4) → ReLU → Conv1d(256, 256, 1) → ReLU
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.encode = nn.Sequential(
-            nn.Conv1d(128, 256, 8, stride=4),
-            nn.ReLU(),
-            nn.Conv1d(256, 256, 1),
-            nn.ReLU(),
-        )
-
-    def forward[B, L](self, x: Tensor[B, 128, L]) -> Tensor[B, 256, (L - 8) // 4 + 1]:
-        out = self.encode(x)
-        assert_type(out, Tensor[B, 256, (L - 8) // 4 + 1])
+    def forward[B, L](self, x: Tensor[B, InC, L]) -> Tensor[B, OutC, (L - 8) // 4 + 1]:
+        h = F.relu(self.conv1(x))
+        assert_type(h, Tensor[B, OutC, (L - 8) // 4 + 1])
+        out = F.relu(self.conv2(h))
+        assert_type(out, Tensor[B, OutC, (L - 8) // 4 + 1])
         return out
 
 
 # ============================================================================
-# Decoder Blocks (Conv1d → ReLU → ConvTranspose1d [→ ReLU])
+# Decoder Block (generic over channels)
 # ============================================================================
 # In the original (rewrite=True, glu=False, upsample=False), each decoder layer:
 #   Conv1d(ch, ch, context=3) → ReLU  (rewrite conv)
 #   ConvTranspose1d(ch, out_ch, kernel_size=8, stride=4)
-#   ReLU (if not outermost layer)
-#
-# Decoder is reverse order:
-#   Layer 2 (innermost): 256 → 128, with ReLU
-#   Layer 1:             128 → 64,  with ReLU
-#   Layer 0 (outermost): 64 → 8 (sources*audio_channels), no final ReLU
+#   ReLU applied externally (not included here — outermost layer omits it)
 #
 # Conv1d(ch, ch, 3) spatial: L → L - 2
-# ConvTranspose1d(ch, out, 8, 4) spatial: L → (L-1)*4 + 8 = 4L + 4
+# ConvTranspose1d(ch, out, 8, 4) spatial: L-2 → (L-3)*4 + 8
+# The type system canonicalizes (L-3)*4 + 8 to 4*L - 4 via distributive law.
 
 
-class DecoderBlock2(nn.Module):
-    """Innermost decoder block: 256 → 128.
+class DecoderBlock[InC, OutC](nn.Module):
+    """Decoder block: Conv1d(InC, InC, 3) → ReLU → ConvTranspose1d(InC, OutC, 8, stride=4).
 
-    Conv1d(256, 256, 3) → ReLU → ConvTranspose1d(256, 128, 8, stride=4) → ReLU
-    Spatial: L → (L - 2) → ((L - 2) - 1) * 4 + 8 = 4*L + 0 = 4*L
-    Conv1d(256, 256, 3): L → L - 2
-    ConvTranspose1d(256, 128, 8, 4): L-2 → (L-2-1)*4 + 8 = (L-3)*4 + 8
-    The type system canonicalizes (L-3)*4 + 8 to 4*L - 4 via distributive law.
-    Both the annotation and inferred type canonicalize identically.
+    No final ReLU — caller applies it for non-outermost layers.
+    Spatial: L → (L-3)*4 + 8.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, in_ch: Dim[InC], out_ch: Dim[OutC]) -> None:
         super().__init__()
-        self.decode = nn.Sequential(
-            nn.Conv1d(256, 256, 3),
-            nn.ReLU(),
-            nn.ConvTranspose1d(256, 128, 8, stride=4),
-            nn.ReLU(),
-        )
+        self.context_conv = nn.Conv1d(in_ch, in_ch, 3)
+        self.deconv = nn.ConvTranspose1d(in_ch, out_ch, 8, stride=4)
 
-    def forward[B, L](self, x: Tensor[B, 256, L]) -> Tensor[B, 128, (L - 3) * 4 + 8]:
-        out = self.decode(x)
-        assert_type(out, Tensor[B, 128, (L - 3) * 4 + 8])
-        return out
-
-
-class DecoderBlock1(nn.Module):
-    """Middle decoder block: 128 → 64.
-
-    Conv1d(128, 128, 3) → ReLU → ConvTranspose1d(128, 64, 8, stride=4) → ReLU
-    Spatial: L → (L-3)*4 + 8 (same formula as DecoderBlock2)
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.decode = nn.Sequential(
-            nn.Conv1d(128, 128, 3),
-            nn.ReLU(),
-            nn.ConvTranspose1d(128, 64, 8, stride=4),
-            nn.ReLU(),
-        )
-
-    def forward[B, L](self, x: Tensor[B, 128, L]) -> Tensor[B, 64, (L - 3) * 4 + 8]:
-        out = self.decode(x)
-        assert_type(out, Tensor[B, 64, (L - 3) * 4 + 8])
-        return out
-
-
-class DecoderBlock0(nn.Module):
-    """Outermost decoder block: 64 → sources*audio_channels (8).
-
-    Conv1d(64, 64, 3) → ReLU → ConvTranspose1d(64, 8, 8, stride=4)
-    No final ReLU (outermost layer).
-    Spatial: L → (L-3)*4 + 8
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.decode = nn.Sequential(
-            nn.Conv1d(64, 64, 3),
-            nn.ReLU(),
-            nn.ConvTranspose1d(64, 8, 8, stride=4),
-        )
-
-    def forward[B, L](self, x: Tensor[B, 64, L]) -> Tensor[B, 8, (L - 3) * 4 + 8]:
-        out = self.decode(x)
-        assert_type(out, Tensor[B, 8, (L - 3) * 4 + 8])
+    def forward[B, L](self, x: Tensor[B, InC, L]) -> Tensor[B, OutC, (L - 3) * 4 + 8]:
+        h = F.relu(self.context_conv(x))
+        assert_type(h, Tensor[B, InC, L - 2])
+        out = self.deconv(h)
+        assert_type(out, Tensor[B, OutC, (L - 3) * 4 + 8])
         return out
 
 
@@ -372,19 +267,19 @@ class DemucsEncoder(nn.Module):
     """Three-layer encoder pipeline (no skip connections).
 
     Spatial progression for input length L:
-      After enc0: L0 = (L - 8) // 4 + 1 = L // 4 - 1  (S2 simplification)
-      After enc1: L1 = (L0 - 8) // 4 + 1 = (L // 4 - 1) // 4 - 1
-      After enc2: L2 = (L1 - 8) // 4 + 1 = ((L // 4 - 1) // 4 - 1) // 4 - 1
+        After enc0: L0 = (L - 8) // 4 + 1 = L // 4 - 1  (S2 simplification)
+        After enc1: L1 = (L0 - 8) // 4 + 1 = (L // 4 - 1) // 4 - 1
+        After enc2: L2 = (L1 - 8) // 4 + 1 = ((L // 4 - 1) // 4 - 1) // 4 - 1
 
     For L=1024: L0=255, L1=61+1=62? No: L0=1024//4-1=255,
-      L1=(255-8)//4+1=247//4+1=61+1=62, L2=(62-8)//4+1=54//4+1=13+1=14
+        L1=(255-8)//4+1=247//4+1=61+1=62, L2=(62-8)//4+1=54//4+1=13+1=14
     """
 
     def __init__(self) -> None:
         super().__init__()
-        self.enc0 = EncoderBlock0()
-        self.enc1 = EncoderBlock1()
-        self.enc2 = EncoderBlock2()
+        self.enc0 = EncoderBlock(2, 64)
+        self.enc1 = EncoderBlock(64, 128)
+        self.enc2 = EncoderBlock(128, 256)
 
     def forward[B, L](
         self, x: Tensor[B, 2, L]
@@ -438,13 +333,13 @@ class Demucs(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        self.enc0 = EncoderBlock0()
-        self.enc1 = EncoderBlock1()
-        self.enc2 = EncoderBlock2()
+        self.enc0 = EncoderBlock(2, 64)
+        self.enc1 = EncoderBlock(64, 128)
+        self.enc2 = EncoderBlock(128, 256)
         self.lstm = BLSTM(256)
-        self.dec2 = DecoderBlock2()
-        self.dec1 = DecoderBlock1()
-        self.dec0 = DecoderBlock0()
+        self.dec2 = DecoderBlock(256, 128)
+        self.dec1 = DecoderBlock(128, 64)
+        self.dec0 = DecoderBlock(64, 8)
 
     def forward[B, L](self, mix: Tensor[B, 2, L]):
         # Encoder: save outputs for skip connections
@@ -464,12 +359,13 @@ class Demucs(nn.Module):
         # Each decoder: Conv1d(ch, ch, 3) → ConvTranspose1d(ch, out, 8, stride=4)
         # Spatial: L' → (L'-3)*4+8 = 4*L'-4
         # Canonical form distributes the outermost -1 from L2 into the 4* coefficient.
+        # ReLU applied after non-outermost decoders (original has ReLU inside dec2/dec1).
         skip2 = center_trim(x2, xb)
-        d2 = self.dec2(xb + skip2)
+        d2 = F.relu(self.dec2(xb + skip2))
         assert_type(d2, Tensor[B, 128, 4 * (((L // 4 - 1) // 4 - 1) // 4) - 8])
 
         skip1 = center_trim(x1, d2)
-        d1 = self.dec1(d2 + skip1)
+        d1 = F.relu(self.dec1(d2 + skip1))
         assert_type(d1, Tensor[B, 64, 16 * (((L // 4 - 1) // 4 - 1) // 4) - 36])
 
         skip0 = center_trim(x0, d1)
@@ -490,7 +386,7 @@ def test_encoder_block0():
 
     With L=1024: (1024 - 8) // 4 + 1 = 1016 // 4 + 1 = 254 + 1 = 255
     """
-    enc = EncoderBlock0()
+    enc = EncoderBlock(2, 64)
     x: Tensor[2, 2, 1024] = torch.randn(2, 2, 1024)
     out = enc(x)
     assert_type(out, Tensor[2, 64, 255])
@@ -501,7 +397,7 @@ def test_encoder_block1():
 
     With L=255: (255 - 8) // 4 + 1 = 247 // 4 + 1 = 61 + 1 = 62
     """
-    enc = EncoderBlock1()
+    enc = EncoderBlock(64, 128)
     x: Tensor[2, 64, 255] = torch.randn(2, 64, 255)
     out = enc(x)
     assert_type(out, Tensor[2, 128, 62])
@@ -512,7 +408,7 @@ def test_encoder_block2():
 
     With L=62: (62 - 8) // 4 + 1 = 54 // 4 + 1 = 13 + 1 = 14
     """
-    enc = EncoderBlock2()
+    enc = EncoderBlock(128, 256)
     x: Tensor[2, 128, 62] = torch.randn(2, 128, 62)
     out = enc(x)
     assert_type(out, Tensor[2, 256, 14])
@@ -523,7 +419,7 @@ def test_decoder_block2():
 
     With L=14: (14-3)*4 + 8 = 52
     """
-    dec = DecoderBlock2()
+    dec = DecoderBlock(256, 128)
     x: Tensor[2, 256, 14] = torch.randn(2, 256, 14)
     out = dec(x)
     assert_type(out, Tensor[2, 128, 52])
@@ -534,7 +430,7 @@ def test_decoder_block1():
 
     With L=52: (52-3)*4 + 8 = 204
     """
-    dec = DecoderBlock1()
+    dec = DecoderBlock(128, 64)
     x: Tensor[2, 128, 52] = torch.randn(2, 128, 52)
     out = dec(x)
     assert_type(out, Tensor[2, 64, 204])
@@ -545,7 +441,7 @@ def test_decoder_block0():
 
     With L=204: (204-3)*4 + 8 = 812
     """
-    dec = DecoderBlock0()
+    dec = DecoderBlock(64, 8)
     x: Tensor[2, 64, 204] = torch.randn(2, 64, 204)
     out = dec(x)
     assert_type(out, Tensor[2, 8, 812])
@@ -650,8 +546,8 @@ def test_encoder_decoder_chain():
     (1024 vs 1016) because the conv context shrinks the decoder's spatial dim.
     The original handles this with center_trim.
     """
-    enc = EncoderBlock0()
-    dec = DecoderBlock0()
+    enc = EncoderBlock(2, 64)
+    dec = DecoderBlock(64, 8)
     x: Tensor[2, 2, 1024] = torch.randn(2, 2, 1024)
     encoded = enc(x)
     assert_type(encoded, Tensor[2, 64, 255])
@@ -663,14 +559,14 @@ def test_demucs_full():
     """End-to-end Demucs: [B, 2, L] → [B, 4, 2, T] with skip connections.
 
     Input L=16384:
-      enc0: [2, 2, 16384] → [2, 64, 4095]
-      enc1: [2, 64, 4095] → [2, 128, 1022]
-      enc2: [2, 128, 1022] → [2, 256, 254]
-      BLSTM: [2, 256, 254] → [2, 256, 254]
-      dec2: [2, 256, 254] → [2, 128, 1012]
-      dec1: [2, 128, 1012] → [2, 64, 4044]
-      dec0: [2, 64, 4044] → [2, 8, 16172]
-      view: [2, 8, 16172] → [2, 4, 2, 16172]
+        enc0: [2, 2, 16384] → [2, 64, 4095]
+        enc1: [2, 64, 4095] → [2, 128, 1022]
+        enc2: [2, 128, 1022] → [2, 256, 254]
+        BLSTM: [2, 256, 254] → [2, 256, 254]
+        dec2: [2, 256, 254] → [2, 128, 1012]
+        dec1: [2, 128, 1012] → [2, 64, 4044]
+        dec0: [2, 64, 4044] → [2, 8, 16172]
+        view: [2, 8, 16172] → [2, 4, 2, 16172]
     """
     model = Demucs()
     x: Tensor[2, 2, 16384] = torch.randn(2, 2, 16384)
