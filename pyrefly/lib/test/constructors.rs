@@ -884,3 +884,41 @@ class A[T]:
     def __init__(self: A[T]): ...  # E: self type cannot reference class type parameter `T`
     "#,
 );
+
+testcase!(
+    test_new_returns_concrete_inside_method,
+    r#"
+from typing import Self, reveal_type
+
+class C:
+    def __new__(cls) -> "C": ...
+
+    def method(self) -> None:
+        # __new__ explicitly returns C, not Self, so type(self)() returns C.
+        reveal_type(type(self)())  # E: revealed type: C
+
+class D(C): ...
+
+def check_subclass(d: D) -> None:
+    reveal_type(type(d)())  # E: revealed type: C
+    "#,
+);
+
+testcase!(
+    test_new_returns_list_self_inside_method,
+    r#"
+from typing import Self, reveal_type
+
+class C:
+    def __new__(cls) -> list[Self]: ...
+
+    def method(self) -> None:
+        # __new__ returns list[Self], so type(self)() preserves Self.
+        reveal_type(type(self)())  # E: revealed type: list[Self@C]
+
+class D(C): ...
+
+def check_subclass(d: D) -> None:
+    reveal_type(type(d)())  # E: revealed type: list[D]
+    "#,
+);

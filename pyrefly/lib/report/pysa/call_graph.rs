@@ -2207,7 +2207,7 @@ impl<'a> CallGraphVisitor<'a> {
                     .module_context
                     .resolver
                     .with_solver("call_graph_constructor", |solver| {
-                        let new_method = solver.get_dunder_new(&class_type);
+                        let new_method = solver.get_dunder_new(&class_type, false);
                         let overrides_new = new_method.is_some();
                         let init_method = solver.get_dunder_init(
                             &class_type,
@@ -3639,7 +3639,7 @@ impl<'a> CallGraphVisitor<'a> {
             .module_context
             .resolver
             .with_solver("call_graph_slice_constructor", |solver| {
-                let new_method = solver.get_dunder_new(&slice_class_type);
+                let new_method = solver.get_dunder_new(&slice_class_type, false);
                 let overrides_new = new_method.is_some();
                 let init_method = solver
                     .get_dunder_init(&slice_class_type, /* get_object_init */ !overrides_new);

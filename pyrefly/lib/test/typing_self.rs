@@ -311,3 +311,13 @@ class B(A[Y1 | Y2], Generic[Y1, Y2]):
     def __new__(cls, A: A[Y1], B: A[Y2]) -> Self: ...
     "#,
 );
+
+testcase!(
+    test_type_self_constructor_call,
+    r#"
+from typing import Self
+class C:
+    def foo(self) -> Self:
+        return type(self)()
+"#,
+);
