@@ -777,6 +777,7 @@ impl<'a> CalleesWithLocation<'a> {
             Type::Union(box Union { members: tys, .. }) => {
                 self.init_or_new_from_union(tys, callee_range)
             }
+            Type::Any(_) => vec![],
             x => {
                 panic!(
                     "unexpected type at [{}]: {x:?}",
