@@ -30,6 +30,7 @@ use percent_encoding::utf8_percent_encode;
 use pyrefly_build::handle::Handle;
 use pyrefly_config::args::ConfigOverrideArgs;
 use pyrefly_config::config::ConfigFile;
+use pyrefly_config::config::OutputFormat;
 use pyrefly_config::error_kind::ErrorKind;
 use pyrefly_config::finder::ConfigError;
 use pyrefly_python::module_name::ModuleName;
@@ -158,21 +159,6 @@ async fn run_check(
     }
 }
 
-#[derive(Debug, Clone, ValueEnum, Default, PartialEq, Eq)]
-enum OutputFormat {
-    /// Minimal text output, one line per error
-    MinText,
-    #[default]
-    /// Full, verbose text output
-    FullText,
-    /// JSON output
-    Json,
-    /// Emit GitHub Actions workflow commands
-    Github,
-    /// Only show error count, omitting individual errors
-    OmitErrors,
-}
-
 /// Main arguments for Pyrefly type checker
 #[deny(clippy::missing_docs_in_private_items)]
 #[derive(Debug, Parser, Clone)]
@@ -236,8 +222,8 @@ struct OutputArgs {
     #[arg(long, short = 'o', value_name = "OUTPUT_FILE")]
     output: Option<PathBuf>,
     /// Set the error output format.
-    #[arg(long, value_enum, default_value_t)]
-    output_format: OutputFormat,
+    #[arg(long, value_enum)]
+    output_format: Option<OutputFormat>,
     /// Produce debugging information about the type checking process.
     #[arg(long, value_name = "OUTPUT_FILE")]
     debug_info: Option<PathBuf>,
@@ -335,6 +321,24 @@ struct OutputArgs {
     min_severity: Option<Severity>,
 }
 
+impl OutputArgs {
+    fn inherit_defaults_from_config(&mut self, config: &ConfigFile) {
+        if self.baseline.is_none() {
+            self.baseline = config.baseline.clone();
+        }
+        if self.output_format.is_none() {
+            self.output_format = config.output_format;
+        }
+        if self.min_severity.is_none() {
+            self.min_severity = config.min_severity;
+        }
+    }
+
+    fn output_format(&self) -> OutputFormat {
+        self.output_format.unwrap_or_default()
+    }
+}
+
 #[derive(Clone, Debug, ValueEnum, Default, PartialEq, Eq)]
 enum Summary {
     None,
@@ -361,119 +365,121 @@ struct BehaviorArgs {
     remove_unused_ignores: bool,
 }
 
-impl OutputFormat {
-    fn write_error_text_to_file(
-        path: &Path,
-        relative_to: &Path,
-        errors: &[Error],
-        verbose: bool,
-    ) -> anyhow::Result<()> {
-        let mut file = BufWriter::new(File::create(path)?);
-        for e in errors {
-            e.write_line(&mut file, relative_to, verbose)?;
-        }
-        file.flush()?;
-        Ok(())
+fn write_errors_to_file(
+    format: OutputFormat,
+    path: &Path,
+    relative_to: &Path,
+    errors: &[Error],
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::MinText => write_error_text_to_file(path, relative_to, errors, false),
+        OutputFormat::FullText => write_error_text_to_file(path, relative_to, errors, true),
+        OutputFormat::Json => write_error_json_to_file(path, relative_to, errors),
+        OutputFormat::Github => write_error_github_to_file(path, errors),
+        OutputFormat::OmitErrors => Ok(()),
     }
+}
 
-    fn write_error_text_to_console(
-        relative_to: &Path,
-        errors: &[Error],
-        verbose: bool,
-    ) -> anyhow::Result<()> {
-        for error in errors {
-            error.print_colors(relative_to, verbose);
-        }
-        Ok(())
+fn write_errors_to_console(
+    format: OutputFormat,
+    relative_to: &Path,
+    errors: &[Error],
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::MinText => write_error_text_to_console(relative_to, errors, false),
+        OutputFormat::FullText => write_error_text_to_console(relative_to, errors, true),
+        OutputFormat::Json => write_error_json_to_console(relative_to, errors),
+        OutputFormat::Github => write_error_github_to_console(errors),
+        OutputFormat::OmitErrors => Ok(()),
     }
+}
 
-    fn write_error_json(
-        writer: &mut impl Write,
-        relative_to: &Path,
-        errors: &[Error],
-    ) -> anyhow::Result<()> {
-        let legacy_errors = LegacyErrors::from_errors(relative_to, errors);
-        serde_json::to_writer_pretty(writer, &legacy_errors)?;
-        Ok(())
+fn write_error_text_to_file(
+    path: &Path,
+    relative_to: &Path,
+    errors: &[Error],
+    verbose: bool,
+) -> anyhow::Result<()> {
+    let mut file = BufWriter::new(File::create(path)?);
+    for e in errors {
+        e.write_line(&mut file, relative_to, verbose)?;
     }
+    file.flush()?;
+    Ok(())
+}
 
-    fn buffered_write_error_json(
-        writer: impl Write,
-        relative_to: &Path,
-        errors: &[Error],
-    ) -> anyhow::Result<()> {
-        let mut writer = BufWriter::new(writer);
-        Self::write_error_json(&mut writer, relative_to, errors)?;
-        writer.flush()?;
-        Ok(())
+fn write_error_text_to_console(
+    relative_to: &Path,
+    errors: &[Error],
+    verbose: bool,
+) -> anyhow::Result<()> {
+    for error in errors {
+        error.print_colors(relative_to, verbose);
     }
+    Ok(())
+}
 
-    fn write_error_json_to_file(
-        path: &Path,
-        relative_to: &Path,
-        errors: &[Error],
-    ) -> anyhow::Result<()> {
-        fn f(path: &Path, relative_to: &Path, errors: &[Error]) -> anyhow::Result<()> {
-            let file = File::create(path)?;
-            OutputFormat::buffered_write_error_json(file, relative_to, errors)
-        }
-        f(path, relative_to, errors)
-            .with_context(|| format!("while writing JSON errors to `{}`", path.display()))
-    }
+fn write_error_json(
+    writer: &mut impl Write,
+    relative_to: &Path,
+    errors: &[Error],
+) -> anyhow::Result<()> {
+    let legacy_errors = LegacyErrors::from_errors(relative_to, errors);
+    serde_json::to_writer_pretty(writer, &legacy_errors)?;
+    Ok(())
+}
 
-    fn write_error_json_to_console(relative_to: &Path, errors: &[Error]) -> anyhow::Result<()> {
-        Self::buffered_write_error_json(stdout(), relative_to, errors)
-    }
+fn buffered_write_error_json(
+    writer: impl Write,
+    relative_to: &Path,
+    errors: &[Error],
+) -> anyhow::Result<()> {
+    let mut writer = BufWriter::new(writer);
+    write_error_json(&mut writer, relative_to, errors)?;
+    writer.flush()?;
+    Ok(())
+}
 
-    fn write_errors_to_file(
-        &self,
-        path: &Path,
-        relative_to: &Path,
-        errors: &[Error],
-    ) -> anyhow::Result<()> {
-        match self {
-            Self::MinText => Self::write_error_text_to_file(path, relative_to, errors, false),
-            Self::FullText => Self::write_error_text_to_file(path, relative_to, errors, true),
-            Self::Json => Self::write_error_json_to_file(path, relative_to, errors),
-            Self::Github => Self::write_error_github_to_file(path, errors),
-            Self::OmitErrors => Ok(()),
-        }
-    }
-
-    fn write_errors_to_console(&self, relative_to: &Path, errors: &[Error]) -> anyhow::Result<()> {
-        match self {
-            Self::MinText => Self::write_error_text_to_console(relative_to, errors, false),
-            Self::FullText => Self::write_error_text_to_console(relative_to, errors, true),
-            Self::Json => Self::write_error_json_to_console(relative_to, errors),
-            Self::Github => Self::write_error_github_to_console(errors),
-            Self::OmitErrors => Ok(()),
-        }
-    }
-
-    fn write_error_github(writer: &mut impl Write, errors: &[Error]) -> anyhow::Result<()> {
-        for error in errors {
-            if let Some(command) = github_actions_command(error) {
-                writeln!(writer, "{command}")?;
-            }
-        }
-        Ok(())
-    }
-
-    fn buffered_write_error_github(writer: impl Write, errors: &[Error]) -> anyhow::Result<()> {
-        let mut writer = BufWriter::new(writer);
-        Self::write_error_github(&mut writer, errors)?;
-        writer.flush()?;
-        Ok(())
-    }
-
-    fn write_error_github_to_file(path: &Path, errors: &[Error]) -> anyhow::Result<()> {
+fn write_error_json_to_file(
+    path: &Path,
+    relative_to: &Path,
+    errors: &[Error],
+) -> anyhow::Result<()> {
+    fn f(path: &Path, relative_to: &Path, errors: &[Error]) -> anyhow::Result<()> {
         let file = File::create(path)?;
-        Self::buffered_write_error_github(file, errors)
+        buffered_write_error_json(file, relative_to, errors)
     }
+    f(path, relative_to, errors)
+        .with_context(|| format!("while writing JSON errors to `{}`", path.display()))
+}
 
-    fn write_error_github_to_console(errors: &[Error]) -> anyhow::Result<()> {
-        Self::buffered_write_error_github(stdout(), errors)
+fn write_error_json_to_console(relative_to: &Path, errors: &[Error]) -> anyhow::Result<()> {
+    buffered_write_error_json(stdout(), relative_to, errors)
+}
+
+fn write_error_github(writer: &mut impl Write, errors: &[Error]) -> anyhow::Result<()> {
+    for error in errors {
+        if let Some(command) = github_actions_command(error) {
+            writeln!(writer, "{command}")?;
+        }
     }
+    Ok(())
+}
+
+fn buffered_write_error_github(writer: impl Write, errors: &[Error]) -> anyhow::Result<()> {
+    let mut writer = BufWriter::new(writer);
+    write_error_github(&mut writer, errors)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn write_error_github_to_file(path: &Path, errors: &[Error]) -> anyhow::Result<()> {
+    let file = File::create(path)?;
+    buffered_write_error_github(file, errors)
+}
+
+fn write_error_github_to_console(errors: &[Error]) -> anyhow::Result<()> {
+    buffered_write_error_github(stdout(), errors)
 }
 
 fn severity_to_github_command(severity: Severity) -> Option<&'static str> {
@@ -705,20 +711,17 @@ impl CheckArgs {
         );
         let (loaded_handles, _, sourcedb_errors) = handles.all(holder.as_ref().config_finder());
 
-        // If CLI doesn't provide baseline or min-severity, get from config
-        if (self.output.baseline.is_none() || self.output.min_severity.is_none())
+        // Project-level output settings can come from config when CLI flags are absent.
+        if (self.output.baseline.is_none()
+            || self.output.output_format.is_none()
+            || self.output.min_severity.is_none())
             && let Some(handle) = loaded_handles.first()
         {
             let config = holder.as_ref().config_finder().python_file(
                 ModuleNameWithKind::guaranteed(handle.module()),
                 handle.path(),
             );
-            if self.output.baseline.is_none() {
-                self.output.baseline = config.baseline.clone();
-            }
-            if self.output.min_severity.is_none() {
-                self.output.min_severity = config.min_severity;
-            }
+            self.output.inherit_defaults_from_config(&config);
         }
 
         let checked_file_count = loaded_handles.len();
@@ -754,12 +757,12 @@ impl CheckArgs {
         let sys_info = config.get_sys_info();
         let handle = Handle::new(module_name, module_path.clone(), sys_info);
 
-        // If CLI doesn't provide baseline or min-severity, get from config
-        if self.output.baseline.is_none() {
-            self.output.baseline = config.baseline.clone();
-        }
-        if self.output.min_severity.is_none() {
-            self.output.min_severity = config.min_severity;
+        // Project-level output settings can come from config when CLI flags are absent.
+        if self.output.baseline.is_none()
+            || self.output.output_format.is_none()
+            || self.output.min_severity.is_none()
+        {
+            self.output.inherit_defaults_from_config(&config);
         }
 
         let require_levels = self.get_required_levels();
@@ -800,9 +803,10 @@ impl CheckArgs {
         let mut handles = Handles::new(expanded_file_list);
         let state = State::new(config_finder);
 
-        // Track if CLI provided values - if so, never override them with config values
+        // Track which output settings were explicitly set on the CLI.
         let cli_provided_baseline = self.output.baseline.is_some();
         let cli_provided_min_severity = self.output.min_severity.is_some();
+        let cli_provided_output_format = self.output.output_format.is_some();
 
         let mut transaction = state.new_committable_transaction(require_levels.default, None);
         loop {
@@ -810,21 +814,26 @@ impl CheckArgs {
             let (loaded_handles, reloaded_configs, sourcedb_errors) =
                 handles.all(state.config_finder());
 
-            // If CLI didn't provide these values, get from config on every iteration
-            // to pick up config file changes
-            if (!cli_provided_baseline || !cli_provided_min_severity)
+            // Inherit project-level output settings from config on every iteration
+            // to pick up config file changes when the CLI did not override them.
+            // Reset non-CLI-provided fields first so updated config values are applied.
+            if (!cli_provided_baseline || !cli_provided_output_format || !cli_provided_min_severity)
                 && let Some(handle) = loaded_handles.first()
             {
+                if !cli_provided_baseline {
+                    self.output.baseline = None;
+                }
+                if !cli_provided_output_format {
+                    self.output.output_format = None;
+                }
+                if !cli_provided_min_severity {
+                    self.output.min_severity = None;
+                }
                 let config = state.config_finder().python_file(
                     ModuleNameWithKind::guaranteed(handle.module()),
                     handle.path(),
                 );
-                if !cli_provided_baseline {
-                    self.output.baseline = config.baseline.clone();
-                }
-                if !cli_provided_min_severity {
-                    self.output.min_severity = config.min_severity;
-                }
+                self.output.inherit_defaults_from_config(&config);
             }
             let mut_transaction = transaction.as_mut();
             mut_transaction.invalidate_find_for_configs(reloaded_configs);
@@ -928,6 +937,7 @@ impl CheckArgs {
             || std::env::current_dir().ok().unwrap_or_default(),
             |x| PathBuf::from_str(x.as_str()).unwrap(),
         );
+        let output_format = self.output.output_format();
 
         let collected = loads.collect_errors();
         // Pass pre-collected errors to avoid redundant error collection.
@@ -1014,11 +1024,7 @@ impl CheckArgs {
                     error.error_kind(),
                 )
             });
-            OutputFormat::write_error_json_to_file(
-                baseline_path,
-                relative_to.as_path(),
-                &new_baseline,
-            )?;
+            write_error_json_to_file(baseline_path, relative_to.as_path(), &new_baseline)?;
         }
 
         // Count only ordinary errors for exit code determination. Directives
@@ -1045,15 +1051,9 @@ impl CheckArgs {
         });
 
         if let Some(path) = &self.output.output {
-            self.output.output_format.write_errors_to_file(
-                path,
-                relative_to.as_path(),
-                &output_errors,
-            )?;
+            write_errors_to_file(output_format, path, relative_to.as_path(), &output_errors)?;
         } else {
-            self.output
-                .output_format
-                .write_errors_to_console(relative_to.as_path(), &output_errors)?;
+            write_errors_to_console(output_format, relative_to.as_path(), &output_errors)?;
         }
         memory_trace.stop();
         if let Some(limit) = self.output.count_errors {
@@ -1228,9 +1228,35 @@ mod tests {
     fn github_output_format_writes_commands() {
         let errors = vec![sample_error(vec1!["bad".into()])];
         let mut buf = Vec::new();
-        OutputFormat::write_error_github(&mut buf, &errors).unwrap();
+        write_error_github(&mut buf, &errors).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("::error file=/repo/foo.py"));
         assert!(output.ends_with("::bad\n"));
+    }
+
+    #[test]
+    fn output_args_inherit_output_format_from_config() {
+        let mut output = OutputArgs::parse_from(["pyrefly-check"]);
+        let config = ConfigFile {
+            output_format: Some(OutputFormat::MinText),
+            ..Default::default()
+        };
+
+        output.inherit_defaults_from_config(&config);
+
+        assert_eq!(output.output_format(), OutputFormat::MinText);
+    }
+
+    #[test]
+    fn cli_output_format_overrides_config_output_format() {
+        let mut output = OutputArgs::parse_from(["pyrefly-check", "--output-format", "json"]);
+        let config = ConfigFile {
+            output_format: Some(OutputFormat::MinText),
+            ..Default::default()
+        };
+
+        output.inherit_defaults_from_config(&config);
+
+        assert_eq!(output.output_format(), OutputFormat::Json);
     }
 }
