@@ -364,35 +364,48 @@ fn canonicalize_product(left: Type, right: Type) -> Type {
     }
 
     // Step 4: Separate literals from non-literals
-    let (literal_product, non_literal_factors) = separate_literal_factors(factors);
+    let (literal_product, mut non_literal_factors) = separate_literal_factors(factors);
 
-    // Step 5: Distributive law — c * (a + b) → c*a + c*b
-    // When we have a literal coefficient and exactly one non-literal factor that is
-    // a sum, distribute the coefficient across the sum terms. This enables like-term
-    // cancellation at the caller's sum level.
-    if literal_product != 1
-        && non_literal_factors.len() == 1
-        && matches!(&non_literal_factors[0], Type::Size(SizeExpr::Add(_, _)))
+    // Step 5: Distributive law — coeff * (a + b) → coeff*a + coeff*b
+    // When any factor (literal, symbolic, or both) multiplies a sum, distribute
+    // across the sum terms. This enables like-term cancellation at the caller's
+    // sum level. For example:
+    //   4 * (N + 2)       → 4*N + 8           (literal coefficient)
+    //   GR * (I + (-1))   → GR*I + (-1)*GR    (symbolic coefficient)
+    //   2 * GR * (I + 3)  → 2*GR*I + 6*GR     (mixed coefficient)
+    if let Some(sum_idx) = non_literal_factors
+        .iter()
+        .position(|f| matches!(f, Type::Size(SizeExpr::Add(_, _))))
     {
-        let sum = non_literal_factors.into_iter().next().unwrap();
-        let mut terms = Vec::new();
-        collect_terms(sum, &mut terms);
-        // Multiply each term by the literal coefficient and re-canonicalize
-        let distributed_terms: Vec<Type> = terms
-            .into_iter()
-            .map(|term| {
-                let product = Type::Size(SizeExpr::Mul(
-                    Box::new(Type::Size(SizeExpr::Literal(literal_product))),
-                    Box::new(term),
-                ));
-                canonicalize_inner(product)
-            })
-            .collect();
-        return rebuild_sum(distributed_terms);
+        // Only distribute if there's at least one other factor to distribute
+        let has_other_factors = literal_product != 1 || non_literal_factors.len() > 1;
+        if has_other_factors {
+            let sum = non_literal_factors.remove(sum_idx);
+
+            // Build coefficient from literal and remaining non-literal factors
+            let mut coeff_factors = Vec::new();
+            if literal_product != 1 {
+                coeff_factors.push(Type::Size(SizeExpr::Literal(literal_product)));
+            }
+            coeff_factors.extend(non_literal_factors);
+            let coeff = rebuild_product(coeff_factors);
+
+            // Distribute coefficient across each sum term
+            let mut terms = Vec::new();
+            collect_terms(sum, &mut terms);
+            let distributed_terms: Vec<Type> = terms
+                .into_iter()
+                .map(|term| {
+                    let product =
+                        Type::Size(SizeExpr::Mul(Box::new(coeff.clone()), Box::new(term)));
+                    canonicalize_inner(product)
+                })
+                .collect();
+            return rebuild_sum(distributed_terms);
+        }
     }
 
     // Step 6: Sort factors by canonical order
-    let mut non_literal_factors = non_literal_factors;
     non_literal_factors.sort_by(compare_type);
 
     // Step 7: Add literal coefficient if not 1

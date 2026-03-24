@@ -16,6 +16,8 @@ Each test documents:
 
 from typing import assert_type, reveal_type, TYPE_CHECKING
 
+import torch
+
 if TYPE_CHECKING:
     from torch import Tensor
 
@@ -82,6 +84,25 @@ def test_literal_evaluation[N](x: Tensor[N, 10]) -> Tensor[N * 10]:
     reveal_type(result)
     assert_type(result, Tensor[N * 10])
     return result
+
+
+def test_distributive_symbolic[GR, I](
+    a: Tensor[GR * I],
+    b: Tensor[GR],
+) -> None:
+    """Symbolic distribution enables like-term cancellation.
+
+    GR*I + GR = GR*(I+1): adding GR*I and GR should produce GR*(I+1).
+    This requires distributing GR across (I+1) and combining like terms.
+
+    Used in DenseNet: each block adds GR channels, so after I blocks
+    the channel count is InC + GR*I. Adding another GR gives InC + GR*(I+1).
+    """
+    # cat along dim 0: GR*I + GR
+    result = torch.cat((a, b), dim=0)
+    assert_type(result, Tensor[GR * I + GR])
+    # The checker should canonicalize GR*I + GR to GR*(I+1)
+    expected: Tensor[GR * (I + 1)] = result
 
 
 def test_multi_dim_flatten[A, B, C, D, E](
