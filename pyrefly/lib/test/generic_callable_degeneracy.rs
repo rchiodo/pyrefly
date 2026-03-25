@@ -141,3 +141,23 @@ takes_callback(out_c)
 reveal_type(out_c)  # E: revealed type: () -> Any
 "#,
 );
+
+// Concatenate preserves X in params (X survives stripping), but the generic
+// forall structure is still lost — X becomes a partial type.
+// Calling the result with a concrete arg pins X.
+testcase!(
+    bug = "Generic structure lost even though X survives in params after stripping",
+    test_concatenate_preserves_generic_param,
+    r#"
+from typing import Callable, Concatenate, Any, reveal_type
+def strip_first[**P, T](f: Callable[Concatenate[Any, P], T]) -> Callable[P, T]: ...
+def swap[X](ignored: int, x: X) -> X: ...
+reveal_type(strip_first(swap))  # E: revealed type: (x: @_) -> @_
+out_a = strip_first(swap)
+reveal_type(out_a)  # E: revealed type: (x: Unknown) -> Unknown
+out_b = strip_first(swap)
+called = out_b("hello")
+reveal_type(out_b)  # E: revealed type: (x: str) -> str
+reveal_type(called)  # E: revealed type: str
+"#,
+);
