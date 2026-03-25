@@ -55,6 +55,7 @@ use pyrefly_util::telemetry::SubTaskTelemetry;
 use pyrefly_util::telemetry::TelemetryEvent;
 use pyrefly_util::telemetry::TelemetryEventKind;
 use pyrefly_util::telemetry::TelemetryTransactionStats;
+use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::name::Name;
@@ -2788,6 +2789,18 @@ impl State {
     pub fn new(config_finder: ConfigFinder) -> Self {
         Self {
             threads: ThreadPool::new(),
+            uniques: UniqueFactory::new(),
+            config_finder,
+            state: RwLock::new(StateData::new()),
+            run_count: AtomicUsize::new(0),
+            committing_transaction_lock: Mutex::new(()),
+        }
+    }
+
+    /// Create a new `State` with an explicit thread count, bypassing the global thread pool.
+    pub fn with_thread_count(config_finder: ConfigFinder, thread_count: ThreadCount) -> Self {
+        Self {
+            threads: ThreadPool::with_thread_count(thread_count),
             uniques: UniqueFactory::new(),
             config_finder,
             state: RwLock::new(StateData::new()),

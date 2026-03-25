@@ -31,6 +31,9 @@ pub enum ThreadCount {
     NumThreads(NonZeroUsize),
 }
 
+/// Thread count used by tests. Enough threads to see parallelism bugs, but not too many to debug through.
+pub const TEST_THREAD_COUNT: ThreadCount = ThreadCount::NumThreads(NonZeroUsize::new(3).unwrap());
+
 impl FromStr for ThreadCount {
     type Err = String;
 

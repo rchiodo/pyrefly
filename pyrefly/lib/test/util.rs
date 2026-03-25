@@ -6,7 +6,6 @@
  */
 
 use std::collections::HashMap;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::LazyLock;
@@ -30,7 +29,7 @@ use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::prelude::SliceExt;
-use pyrefly_util::thread_pool::ThreadCount;
+pub use pyrefly_util::thread_pool::TEST_THREAD_COUNT;
 use pyrefly_util::thread_pool::init_thread_pool;
 use pyrefly_util::trace::init_tracing;
 use ruff_python_ast::name::Name;
@@ -631,8 +630,7 @@ fn get_batched_lsp_operations_report_no_cursor_helper(
 pub fn init_test() {
     ColorChoice::write_global(ColorChoice::Always);
     init_tracing(true, true);
-    // Enough threads to see parallelism bugs, but not too many to debug through.
-    init_thread_pool(ThreadCount::NumThreads(NonZeroUsize::new(3).unwrap()));
+    init_thread_pool(TEST_THREAD_COUNT);
 }
 
 /// Shared state with all the builtins already initialized (by a dummy module).
