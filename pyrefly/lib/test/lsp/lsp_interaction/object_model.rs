@@ -1331,6 +1331,14 @@ impl Telemetry for TestTelemetry {
     fn surface(&self) -> Option<String> {
         None
     }
+
+    fn agent_session_id(&self) -> Option<String> {
+        None
+    }
+
+    fn agent_invocation_id(&self) -> Option<String> {
+        None
+    }
 }
 
 impl LspInteraction {

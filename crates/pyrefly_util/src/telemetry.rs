@@ -20,12 +20,20 @@ use uuid::Uuid;
 pub trait Telemetry: Send + Sync {
     fn record_event(&self, event: TelemetryEvent, process: Duration, error: Option<&Error>);
     fn surface(&self) -> Option<String>;
+    fn agent_session_id(&self) -> Option<String>;
+    fn agent_invocation_id(&self) -> Option<String>;
 }
 pub struct NoTelemetry;
 
 impl Telemetry for NoTelemetry {
     fn record_event(&self, _event: TelemetryEvent, _process: Duration, _error: Option<&Error>) {}
     fn surface(&self) -> Option<String> {
+        None
+    }
+    fn agent_session_id(&self) -> Option<String> {
+        None
+    }
+    fn agent_invocation_id(&self) -> Option<String> {
         None
     }
 }
