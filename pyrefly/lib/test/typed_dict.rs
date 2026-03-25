@@ -2077,6 +2077,21 @@ assert_type(x["bar"], int | None)
 );
 
 testcase!(
+    test_typed_dict_empty_container_no_implicit_any,
+    TestEnv::new().enable_implicit_any_error(),
+    r#"
+from typing import TypedDict
+
+class ConfigDict(TypedDict):
+    env: dict[str, str]
+
+CONFIG: ConfigDict = {
+    'env': {},
+}
+"#,
+);
+
+testcase!(
     test_typed_dict_constructor_with_dict_literal,
     r#"
 from typing import TypedDict, NotRequired

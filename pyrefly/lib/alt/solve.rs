@@ -4279,7 +4279,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             prefix.push(FacetKind::Key(lit.value.to_string()));
             if let Ok(chain) = Vec1::try_from_vec(prefix.clone()) {
                 let swallower = self.error_swallower();
-                let value_ty = self.expr_infer(&item.value, &swallower);
+                let mut value_ty = self.expr_infer(&item.value, &swallower);
+                // Swallow errors when pinning inner placeholder types.
+                self.pin_all_placeholder_types(&mut value_ty, true, item.value.range(), &swallower);
+                self.expand_vars_mut(&mut value_ty);
                 info.record_key_completion(&chain, Some(value_ty.clone()));
                 self.populate_dict_literal_facets(info, prefix, &item.value);
             }
