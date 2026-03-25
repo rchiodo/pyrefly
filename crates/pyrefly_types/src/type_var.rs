@@ -62,7 +62,7 @@ impl Restriction {
         matches!(self, Self::Bound(_) | Self::Constraints(_))
     }
 
-    pub fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+    pub(crate) fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
         match self {
             Self::Bound(t) => t.clone(),
             Self::Constraints(ts) => unions(ts.clone(), heap),
