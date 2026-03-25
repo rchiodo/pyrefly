@@ -17,6 +17,7 @@ use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::util::CommandExitStatus;
 use crate::lsp::non_wasm::external_provider::ExternalProvider;
 use crate::lsp::non_wasm::module_helpers::PathRemapper;
+use crate::lsp::non_wasm::module_helpers::ThriftRemapper;
 use crate::lsp::non_wasm::server::Connection;
 use crate::lsp::non_wasm::server::InitializeInfo;
 use crate::lsp::non_wasm::server::MessageReader;
@@ -75,6 +76,7 @@ pub fn run_lsp(
     args: LspArgs,
     server_info: Option<ServerInfo>,
     path_remapper: Option<PathRemapper>,
+    thrift_remapper: Option<ThriftRemapper>,
     telemetry: &impl Telemetry,
     external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
@@ -90,6 +92,7 @@ pub fn run_lsp(
             args.workspace_indexing_limit,
             args.build_system_blocking,
             path_remapper,
+            thrift_remapper,
             telemetry,
             external_references,
             wrapper,
@@ -122,6 +125,7 @@ impl LspArgs {
         self,
         version: &str,
         path_remapper: Option<PathRemapper>,
+        thrift_remapper: Option<ThriftRemapper>,
         telemetry: &impl Telemetry,
         external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
@@ -144,6 +148,7 @@ impl LspArgs {
             self,
             Some(server_info),
             path_remapper,
+            thrift_remapper,
             telemetry,
             external_references,
             wrapper,

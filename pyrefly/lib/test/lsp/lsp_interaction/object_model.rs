@@ -1370,6 +1370,7 @@ impl LspInteraction {
                 args,
                 None,
                 None,
+                None,
                 &telemetry,
                 Arc::new(NoExternalProvider),
                 None,

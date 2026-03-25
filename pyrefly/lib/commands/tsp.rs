@@ -61,6 +61,7 @@ pub fn run_tsp(
             false,
             surface,
             None, // No path remapping for TSP
+            None, // No thrift remapping for TSP
             Arc::new(NoExternalProvider),
             wrapper,
         );

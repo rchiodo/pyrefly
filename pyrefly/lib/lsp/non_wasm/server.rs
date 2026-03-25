@@ -259,6 +259,7 @@ use crate::lsp::non_wasm::lsp::as_request_response_pair;
 use crate::lsp::non_wasm::lsp::new_notification;
 use crate::lsp::non_wasm::lsp::new_response;
 use crate::lsp::non_wasm::module_helpers::PathRemapper;
+use crate::lsp::non_wasm::module_helpers::ThriftRemapper;
 use crate::lsp::non_wasm::module_helpers::handle_from_module_path;
 use crate::lsp::non_wasm::module_helpers::make_open_handle;
 use crate::lsp::non_wasm::module_helpers::module_info_to_uri;
@@ -824,6 +825,8 @@ pub struct Server {
     awaiting_initial_workspace_config: AtomicBool,
     /// Optional callback for remapping paths before converting to URIs.
     path_remapper: Option<PathRemapper>,
+    #[allow(dead_code)]
+    thrift_remapper: Option<ThriftRemapper>,
     /// Accumulated file watcher events waiting to be processed as a batch.
     pending_watched_file_changes: Mutex<Vec<FileEvent>>,
     /// Categorized events waiting to be invalidated by the next heavy task.
@@ -1279,6 +1282,7 @@ pub fn lsp_loop(
     workspace_indexing_limit: usize,
     build_system_blocking: bool,
     path_remapper: Option<PathRemapper>,
+    thrift_remapper: Option<ThriftRemapper>,
     telemetry: &impl Telemetry,
     external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
@@ -1296,6 +1300,7 @@ pub fn lsp_loop(
         build_system_blocking,
         from,
         path_remapper,
+        thrift_remapper,
         external_references,
         wrapper,
     );
@@ -2240,6 +2245,7 @@ impl Server {
         build_system_blocking: bool,
         surface: Option<String>,
         path_remapper: Option<PathRemapper>,
+        thrift_remapper: Option<ThriftRemapper>,
         external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
     ) -> Self {
@@ -2311,6 +2317,7 @@ impl Server {
             // Will be set to true if we send a workspace/configuration request
             awaiting_initial_workspace_config: AtomicBool::new(should_request_workspace_settings),
             path_remapper,
+            thrift_remapper,
             pending_watched_file_changes: Mutex::new(Vec::new()),
             pending_invalidation_events: Arc::new(Mutex::new(CategorizedEvents::default())),
             external_references,

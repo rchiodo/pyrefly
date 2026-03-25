@@ -76,6 +76,7 @@ impl Command {
                 args.run(
                     version,
                     None,
+                    None,
                     telemetry,
                     Arc::new(NoExternalProvider),
                     config_configurer_wrapper,
