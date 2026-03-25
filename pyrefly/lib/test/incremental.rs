@@ -30,6 +30,7 @@ use crate::state::load::FileContents;
 use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::subscriber::TestSubscriber;
+use crate::test::util::TEST_THREAD_COUNT;
 use crate::test::util::init_test;
 
 #[derive(Default, Clone, Dupe, Debug)]
@@ -92,7 +93,7 @@ impl Incremental {
         Self {
             data: data.dupe(),
             require: None,
-            state: State::new(ConfigFinder::new_constant(config)),
+            state: State::with_thread_count(ConfigFinder::new_constant(config), TEST_THREAD_COUNT),
             to_set: Vec::new(),
         }
     }

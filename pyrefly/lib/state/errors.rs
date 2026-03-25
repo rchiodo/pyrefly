@@ -386,6 +386,7 @@ mod tests {
     use crate::state::load::FileContents;
     use crate::state::require::Require;
     use crate::state::state::State;
+    use crate::test::util::TEST_THREAD_COUNT;
 
     impl Errors {
         pub fn check_var_leak(&self) -> anyhow::Result<()> {
@@ -424,7 +425,7 @@ mod tests {
 
         let config = ArcId::new(config);
         let sys_info = SysInfo::default();
-        let state = State::new(ConfigFinder::new_constant(config));
+        let state = State::with_thread_count(ConfigFinder::new_constant(config), TEST_THREAD_COUNT);
         let handle = Handle::new(
             ModuleName::from_str(name),
             ModulePath::filesystem(get_path(&tdir)),

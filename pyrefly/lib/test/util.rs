@@ -399,7 +399,7 @@ impl TestEnv {
             .rev()
             .map(|(x, path, _)| Handle::new(*x, path.dupe(), config.dupe()))
             .collect::<Vec<_>>();
-        let state = State::new(self.config_finder());
+        let state = State::with_thread_count(self.config_finder(), TEST_THREAD_COUNT);
         let subscriber = TestSubscriber::new();
         let mut transaction = state.new_committable_transaction(
             self.default_require_level,
