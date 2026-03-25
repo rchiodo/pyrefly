@@ -70,6 +70,7 @@ use pyrefly::commands::lsp::IndexingMode;
 use pyrefly::commands::lsp::LspArgs;
 use pyrefly::commands::lsp::run_lsp;
 use pyrefly::lsp::non_wasm::external_provider::NoExternalProvider;
+use pyrefly::lsp::non_wasm::module_helpers::ThriftRemapper;
 use pyrefly::lsp::non_wasm::protocol::JsonRpcMessage;
 use pyrefly::lsp::non_wasm::protocol::Message;
 use pyrefly::lsp::non_wasm::protocol::Notification;
@@ -1344,7 +1345,17 @@ impl LspInteraction {
             build_system_blocking: false,
             enable_external_references: false,
         };
-        Self::new_with_args(args, NoTelemetry, None)
+        Self::new_with_args(args, NoTelemetry, None, None)
+    }
+
+    pub fn new_with_thrift_remapper(thrift_remapper: Option<ThriftRemapper>) -> Self {
+        let args = LspArgs {
+            indexing_mode: IndexingMode::None,
+            workspace_indexing_limit: 50,
+            build_system_blocking: false,
+            enable_external_references: false,
+        };
+        Self::new_with_args(args, NoTelemetry, None, thrift_remapper)
     }
 
     /// Create an `LspInteraction` with custom [`LspArgs`] and a custom
@@ -1354,6 +1365,7 @@ impl LspInteraction {
         args: LspArgs,
         telemetry: T,
         thread_count: Option<ThreadCount>,
+        thrift_remapper: Option<ThriftRemapper>,
     ) -> Self {
         init_test(thread_count.unwrap_or(ThreadCount::NumThreads(NonZeroUsize::new(3).unwrap())));
 
@@ -1370,7 +1382,7 @@ impl LspInteraction {
                 args,
                 None,
                 None,
-                None,
+                thrift_remapper,
                 &telemetry,
                 Arc::new(NoExternalProvider),
                 None,
