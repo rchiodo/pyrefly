@@ -825,7 +825,6 @@ pub struct Server {
     awaiting_initial_workspace_config: AtomicBool,
     /// Optional callback for remapping paths before converting to URIs.
     path_remapper: Option<PathRemapper>,
-    #[allow(dead_code)]
     thrift_remapper: Option<ThriftRemapper>,
     /// Accumulated file watcher events waiting to be processed as a batch.
     pending_watched_file_changes: Mutex<Vec<FileEvent>>,
@@ -3764,6 +3763,12 @@ impl Server {
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
             .collect::<Vec<_>>();
+        if let Some(remapper) = &self.thrift_remapper {
+            lsp_targets = lsp_targets
+                .into_iter()
+                .map(|loc| remapper(&loc).unwrap_or(loc))
+                .collect();
+        }
         if lsp_targets.is_empty() {
             None
         } else if lsp_targets.len() == 1 {
