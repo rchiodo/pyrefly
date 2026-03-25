@@ -927,24 +927,21 @@ testcase!(
     r#"
 from typing import assert_type, Any, Literal
 
-# Typeshed covers __pow__ for Literal[1..25] (-> int) and
-# Literal[-1..-25] (-> float).
-assert_type(2 ** 25, int)
-assert_type(2 ** -25, float)
-
-# x ** 0 is always 1.
+# We special-case int ** int:
+# exponent is 0 -> Literal[1]
+# exponent is positive -> int
+# exponent is negative -> float
 assert_type(2 ** 0, Literal[1])
 assert_type((-2) ** 0, Literal[1])
-
-# For exponents outside the typeshed range, we special-case int ** int:
-# positive exponent -> int, negative exponent -> float.
+assert_type(2 ** 25, int)
 assert_type(2 ** 26, int)
 assert_type(2 ** 100, int)
 assert_type((-2) ** 26, int)
+assert_type(2 ** -25, float)
 assert_type(2 ** -26, float)
 assert_type(2 ** -100, float)
 
-# When the exponent sign is unknown, fall back to Any like typeshed.
+# When the exponent sign is unknown, fall back to __pow__ (-> Any).
 def f(x: int, y: int) -> None:
     assert_type(x ** y, Any)
 "#,
