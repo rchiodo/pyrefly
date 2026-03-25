@@ -189,6 +189,12 @@ impl TypeVar {
         heap.mk_type_var(self.dupe())
     }
 
+    /// The upper bound of this legacy TypeVar as a type.
+    /// TypeVar is always of TypeVar kind, so unrestricted defaults to `object`.
+    pub fn bound_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+        self.restriction().as_type(stdlib, heap)
+    }
+
     pub fn type_eq_inner(&self, other: &Self, ctx: &mut TypeEqCtx) -> bool {
         self.0.type_eq(&other.0, ctx)
     }
