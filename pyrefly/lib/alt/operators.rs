@@ -423,13 +423,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     match rhs {
                         // Special case int ** int
+                        // if the exponent is 0, return Literal[1] (x ** 0 = 1)
                         // if the exponent is a positive int, return int
-                        // if the exponent is a negative int, retturn float
+                        // if the exponent is a negative int, return float
                         // if the exponent is unknown, call the `__pow__` method like normal
                         Type::Literal(box Literal {
                             value: Lit::Int(n), ..
                         }) => {
-                            if *n < LitInt::new(0) {
+                            if *n == LitInt::new(0) {
+                                LitInt::new(1).to_implicit_type()
+                            } else if *n < LitInt::new(0) {
                                 self.heap.mk_class_type(self.stdlib.float().clone())
                             } else {
                                 self.heap.mk_class_type(self.stdlib.int().clone())

@@ -925,12 +925,16 @@ def test(x, y):
 testcase!(
     test_int_pow_inference,
     r#"
-from typing import assert_type, Any
+from typing import assert_type, Any, Literal
 
 # Typeshed covers __pow__ for Literal[1..25] (-> int) and
 # Literal[-1..-25] (-> float).
 assert_type(2 ** 25, int)
 assert_type(2 ** -25, float)
+
+# x ** 0 is always 1.
+assert_type(2 ** 0, Literal[1])
+assert_type((-2) ** 0, Literal[1])
 
 # For exponents outside the typeshed range, we special-case int ** int:
 # positive exponent -> int, negative exponent -> float.
