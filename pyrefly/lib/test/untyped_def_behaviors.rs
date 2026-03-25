@@ -284,6 +284,41 @@ def missing_return(x: int) -> int:  # E: missing an explicit `return`
 "#,
 );
 
+// State 1b: async/generators with check-unannotated-defs=false, infer-return-types=never.
+// Return types must always be Any (wrapped in Coroutine for async).
+testcase!(
+    test_skip_check_no_infer_async_and_generators,
+    TestEnv::new_skip_check_no_infer(),
+    r#"
+from typing import assert_type, Any, Callable, Coroutine
+
+# Unannotated async: return type is Any (no Coroutine wrapping without inference)
+async def async_f():
+    return 42
+assert_type(async_f, Callable[[], Any])
+
+# Unannotated generator: return type is Any (no inference)
+def gen():
+    yield 42
+assert_type(gen, Callable[[], Any])
+
+# Unannotated async generator: return type is Any (no inference)
+async def async_gen():
+    yield 42
+assert_type(async_gen, Callable[[], Any])
+
+# Annotated async: return type is NOT inferred (still Any), wrapped in Coroutine
+async def annotated_async(x: int):
+    return x + 1
+assert_type(annotated_async(0), Coroutine[Any, Any, Any])
+
+# Annotated generator: return type is NOT inferred (still Any)
+def annotated_gen(x: int):
+    yield x
+assert_type(annotated_gen(0), Any)
+"#,
+);
+
 // State 2: check-unannotated-defs=false, infer-return-types=annotated.
 // Unannotated functions are skipped; annotated functions get return inference.
 testcase!(
@@ -301,6 +336,41 @@ def inferred_return(x: int, y: int):
     return x + y
 assert_type(unchecked(0, 0), Any)
 assert_type(inferred_return(0, 0), int)
+"#,
+);
+
+// State 2b: async/generators with check-unannotated-defs=false, infer-return-types=annotated.
+// Unannotated are Any; annotated get inference (including async/generator wrapping).
+testcase!(
+    test_skip_check_infer_annotated_async_and_generators,
+    TestEnv::new_skip_check_infer_return_types(),
+    r#"
+from typing import assert_type, Any, Callable, Coroutine, Generator, AsyncGenerator
+
+# Unannotated async: return type is Any (no inference, no Coroutine wrapping)
+async def unannotated_async():
+    return 42
+assert_type(unannotated_async, Callable[[], Any])
+
+# Unannotated generator: return type is Any (no inference)
+def unannotated_gen():
+    yield 42
+assert_type(unannotated_gen, Callable[[], Any])
+
+# Annotated async: return type IS inferred
+async def annotated_async(x: int):
+    return x + 1
+assert_type(annotated_async(0), Coroutine[Any, Any, int])
+
+# Annotated generator: return type IS inferred
+def annotated_gen(x: int):
+    yield x
+assert_type(annotated_gen(0), Generator[int, Any, None])
+
+# Annotated async generator: return type IS inferred
+async def annotated_async_gen(x: int):
+    yield x
+assert_type(annotated_async_gen(0), AsyncGenerator[int, Any])
 "#,
 );
 
@@ -330,6 +400,38 @@ assert_type(annotated_return(0), int)
 "#,
 );
 
+// State 5b: async/generators with check-unannotated-defs=true, infer-return-types=never.
+// All bodies are checked, return types are always Any.
+testcase!(
+    test_check_all_no_infer_async_and_generators,
+    TestEnv::new_check_all_no_infer(),
+    r#"
+from typing import assert_type, Any, Callable, Coroutine
+
+# Unannotated async: body IS checked, return type is Coroutine[Any, Any, Any]
+async def unannotated_async():
+    oops: int = "oops"  # E:
+    return 42
+assert_type(unannotated_async, Callable[[], Coroutine[Any, Any, Any]])
+
+# Unannotated generator: body IS checked, return type is Any
+def unannotated_gen():
+    oops: int = "oops"  # E:
+    yield 42
+assert_type(unannotated_gen, Callable[[], Any])
+
+# Annotated async: body IS checked, return type is NOT inferred
+async def annotated_async(x: int):
+    return x + 1
+assert_type(annotated_async(0), Coroutine[Any, Any, Any])
+
+# Annotated generator: body IS checked, return type is NOT inferred
+def annotated_gen(x: int):
+    yield x
+assert_type(annotated_gen(0), Any)
+"#,
+);
+
 // State 6: check-unannotated-defs=true, infer-return-types=annotated.
 // All bodies are checked, but return types are only inferred for functions
 // with at least one annotation.
@@ -353,7 +455,7 @@ assert_type(annotated_params(0, 0), int)
 );
 
 testcase!(
-    bug = "We do not yet implement @no_type_check",
+    bug = "@no_type_check on classes (applying to all methods) is not yet supported",
     test_no_type_check_decorator,
     r#"
 from typing import no_type_check, assert_type, Any
@@ -368,6 +470,23 @@ class C:
     def __init__(self, x: int) -> None:
         self.x = x
 
+assert_type(f(0), Any)
 assert_type(C(42).x, Any)
+"#,
+);
+
+// @no_type_check must return Any even when infer-return-types=never.
+testcase!(
+    test_no_type_check_with_skip_check_no_infer,
+    TestEnv::new_skip_check_no_infer(),
+    r#"
+from typing import no_type_check, assert_type, Any
+
+@no_type_check
+def f(x: int) -> int:
+    y: int = "y"
+    return "f"
+
+assert_type(f(0), Any)
 "#,
 );
