@@ -237,6 +237,63 @@ def f(b: bool) -> None:
 "#,
 );
 
+// Regression test for https://github.com/facebook/pyrefly/issues/2868
+testcase!(
+    test_return_while_else,
+    r#"
+def find_match(items: list[int], target: int) -> int:
+    i = 0
+    while i < len(items):
+        if items[i] == target:
+            return i
+        i += 1
+    else:
+        return -1
+"#,
+);
+
+testcase!(
+    test_return_while_break_else,
+    r#"
+def f(x: bool) -> int:  # E: Function declared to return `int`, but one or more paths are missing an explicit `return`
+    while x:
+        break
+    else:
+        return 1
+"#,
+);
+
+testcase!(
+    test_return_while_else_no_return,
+    r#"
+def f(x: bool) -> int:  # E: Function declared to return `int`, but one or more paths are missing an explicit `return`
+    while x:
+        return 1
+    else:
+        pass
+"#,
+);
+
+testcase!(
+    test_return_while_true_no_break,
+    r#"
+def f() -> int:
+    while True:
+        return 1
+"#,
+);
+
+testcase!(
+    test_return_while_false_break_else,
+    r#"
+def f() -> int:
+    while False:
+        break
+    else:
+        return 1
+"#,
+);
+
 testcase!(
     test_return_then_dead_code,
     r#"

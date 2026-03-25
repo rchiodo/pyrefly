@@ -783,15 +783,19 @@ fn function_last_expressions<'a>(
                 f(sys_info, &x.body, res)?;
             }
             Stmt::While(x) => {
-                // Infinite loops with no breaks cannot fall through
-                if sys_info.evaluate_bool(&x.test) != Some(true) {
-                    return None;
-                }
+                let test_value = sys_info.evaluate_bool(&x.test);
+                // Only scan for breaks when the body is reachable.
                 let mut has_break = false;
-                x.body
-                    .visit(&mut |stmt| loop_body_has_break_statement(stmt, &mut has_break));
-                if has_break {
+                if test_value != Some(false) {
+                    x.body
+                        .visit(&mut |stmt| loop_body_has_break_statement(stmt, &mut has_break));
+                }
+                if test_value == Some(true) && !has_break {
+                    // Infinite loop with no break never falls through.
+                } else if has_break || x.orelse.is_empty() {
                     return None;
+                } else {
+                    f(sys_info, &x.orelse, res)?;
                 }
             }
             Stmt::For(x) => {
