@@ -23,6 +23,7 @@ use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::fs_anyhow;
+use pyrefly_util::thread_pool::ThreadCount;
 use ruff_text_size::Ranged;
 use serde::Deserialize;
 use tracing::info;
@@ -69,7 +70,11 @@ fn read_input_file(path: &Path) -> anyhow::Result<InputFile> {
     Ok(input_file)
 }
 
-fn compute_errors(sys_info: SysInfo, sourcedb: impl SourceDatabase + 'static) -> Vec<Error> {
+fn compute_errors(
+    sys_info: SysInfo,
+    sourcedb: impl SourceDatabase + 'static,
+    thread_count: ThreadCount,
+) -> Vec<Error> {
     let modules_to_check = sourcedb.modules_to_check().into_iter().collect::<Vec<_>>();
 
     let mut config = ConfigFile::default();
@@ -93,7 +98,7 @@ fn compute_errors(sys_info: SysInfo, sourcedb: impl SourceDatabase + 'static) ->
     config.configure();
     let config = ArcId::new(config);
 
-    let state = State::new(ConfigFinder::new_constant(config));
+    let state = State::with_thread_count(ConfigFinder::new_constant(config), thread_count);
     state.run(
         &modules_to_check,
         RequireLevels {
@@ -147,7 +152,7 @@ fn write_output(errors: &[Error], path: Option<&Path>) -> anyhow::Result<()> {
 }
 
 impl BuckCheckArgs {
-    pub fn run(self) -> anyhow::Result<CommandExitStatus> {
+    pub fn run(self, thread_count: ThreadCount) -> anyhow::Result<CommandExitStatus> {
         let input_file = read_input_file(self.input_path.as_path())?;
         let python_version = PythonVersion::from_str(&input_file.py_version)?;
         let python_platform = PythonPlatform::new(&input_file.system_platform);
@@ -158,7 +163,7 @@ impl BuckCheckArgs {
             input_file.typeshed.as_slice(),
             sys_info.dupe(),
         )?;
-        let type_errors = compute_errors(sys_info, sourcedb);
+        let type_errors = compute_errors(sys_info, sourcedb, thread_count);
         let min_severity = self.min_severity.unwrap_or(Severity::Error);
         let displayed_errors: Vec<Error> = type_errors
             .into_iter()

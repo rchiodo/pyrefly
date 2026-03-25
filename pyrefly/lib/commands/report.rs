@@ -22,6 +22,7 @@ use pyrefly_types::class::ClassDefIndex;
 use pyrefly_types::types::Type;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::includes::Includes;
+use pyrefly_util::thread_pool::ThreadCount;
 use regex::Regex;
 use ruff_python_ast::Parameters;
 use ruff_python_ast::name::Name;
@@ -176,10 +177,16 @@ impl ReportArgs {
     pub fn run(
         self,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         self.config_override.validate()?;
         let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
-        Self::run_inner(files_to_check, config_finder, self.prefer_stubs)
+        Self::run_inner(
+            files_to_check,
+            config_finder,
+            self.prefer_stubs,
+            thread_count,
+        )
     }
 
     /// Helper to extract all parameters from Parameters struct
@@ -717,9 +724,10 @@ impl ReportArgs {
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
         prefer_stubs: bool,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
-        let state = State::new(config_finder);
+        let state = State::with_thread_count(config_finder, thread_count);
         let holder = Forgetter::new(state, false);
         let handles = Handles::new(expanded_file_list);
         let mut forgetter = Forgetter::new(

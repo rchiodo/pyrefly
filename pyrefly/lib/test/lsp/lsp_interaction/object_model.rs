@@ -8,7 +8,6 @@
 /// This file contains a new implementation of the lsp_interaction test suite. Soon it will replace the old one.
 use std::iter::once;
 use std::marker::PhantomData;
-use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -87,6 +86,7 @@ use pyrefly_util::thread_pool::ThreadCount;
 use serde_json::Value;
 use serde_json::json;
 
+use crate::init::TEST_THREAD_COUNT;
 use crate::init::init_test;
 
 #[derive(Debug)]
@@ -1375,7 +1375,9 @@ impl LspInteraction {
         thread_count: Option<ThreadCount>,
         thrift_remapper: Option<ThriftRemapper>,
     ) -> Self {
-        init_test(thread_count.unwrap_or(ThreadCount::NumThreads(NonZeroUsize::new(3).unwrap())));
+        init_test();
+
+        let thread_count = thread_count.unwrap_or(TEST_THREAD_COUNT);
 
         let ((conn_client, _client_reader), (conn_server, server_reader)) = Connection::memory();
 
@@ -1394,6 +1396,7 @@ impl LspInteraction {
                 &telemetry,
                 Arc::new(NoExternalProvider),
                 None,
+                thread_count,
             );
             finish_server.notify_finished();
         });

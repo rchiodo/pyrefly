@@ -46,6 +46,7 @@ use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::fs_anyhow;
 use pyrefly_util::includes::Includes;
 use pyrefly_util::memory::MemoryUsageTrace;
+use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::watcher::Watcher;
 use ruff_text_size::Ranged;
 use starlark_map::small_map::SmallMap;
@@ -122,10 +123,18 @@ impl FullCheckArgs {
     pub async fn run(
         self,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
         self.config_override.validate()?;
         let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
-        run_check(self.args, self.watch, files_to_check, config_finder).await
+        run_check(
+            self.args,
+            self.watch,
+            files_to_check,
+            config_finder,
+            thread_count,
+        )
+        .await
     }
 }
 
@@ -142,6 +151,7 @@ async fn run_check(
     watch: bool,
     files_to_check: Box<dyn Includes>,
     config_finder: ConfigFinder,
+    thread_count: ThreadCount,
 ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
     if watch {
         let roots = files_to_check.roots();
@@ -150,11 +160,12 @@ async fn run_check(
             display::intersperse_iter(";", || roots.iter().map(|p| p.display()))
         );
         let watcher = Watcher::notify(&roots)?;
-        args.run_watch(watcher, files_to_check, config_finder)
+        args.run_watch(watcher, files_to_check, config_finder, thread_count)
             .await?;
         Ok((CommandExitStatus::Success, None))
     } else {
-        let (status, _, check_result) = args.run_once(files_to_check, config_finder)?;
+        let (status, _, check_result) =
+            args.run_once(files_to_check, config_finder, thread_count)?;
         Ok((status, Some(check_result)))
     }
 }
@@ -197,6 +208,7 @@ impl SnippetCheckArgs {
     pub async fn run(
         self,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<(CommandExitStatus, Option<CheckResult>)> {
         let (_, config_finder) =
             FilesArgs::get(vec![], self.config, self.config_override, wrapper)?;
@@ -209,7 +221,8 @@ impl SnippetCheckArgs {
                 remove_unused_ignores: false,
             },
         };
-        let (status, check_result) = check_args.run_once_with_snippet(self.code, config_finder)?;
+        let (status, check_result) =
+            check_args.run_once_with_snippet(self.code, config_finder, thread_count)?;
         Ok((status, Some(check_result)))
     }
 }
@@ -679,6 +692,7 @@ impl CheckArgs {
         mut self,
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<(CommandExitStatus, Vec<Error>, CheckResult)> {
         let mut timings = Timings::new();
         let list_files_start = Instant::now();
@@ -700,7 +714,7 @@ impl CheckArgs {
             ));
         }
 
-        let holder = Forgetter::new(State::new(config_finder), true);
+        let holder = Forgetter::new(State::with_thread_count(config_finder, thread_count), true);
         let handles = Handles::new(expanded_file_list);
         let require_levels = self.get_required_levels();
         let mut transaction = Forgetter::new(
@@ -741,13 +755,14 @@ impl CheckArgs {
         mut self,
         code: String,
         config_finder: ConfigFinder,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<(CommandExitStatus, CheckResult)> {
         // Create a virtual module path for the snippet
         let path = PathBuf::from_str("snippet")?;
         let module_path = ModulePath::memory(path);
         let module_name = ModuleName::from_str("__main__");
 
-        let holder = Forgetter::new(State::new(config_finder), true);
+        let holder = Forgetter::new(State::with_thread_count(config_finder, thread_count), true);
 
         // Create a single handle for the virtual module
         let config = holder
@@ -795,13 +810,14 @@ impl CheckArgs {
         mut watcher: Watcher,
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<()> {
         // TODO: We currently make 1 unrealistic assumptions, which should be fixed in the future:
         // - Config search is stable across incremental runs.
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
         let require_levels = self.get_required_levels();
         let mut handles = Handles::new(expanded_file_list);
-        let state = State::new(config_finder);
+        let state = State::with_thread_count(config_finder, thread_count);
 
         // Track which output settings were explicitly set on the CLI.
         let cli_provided_baseline = self.output.baseline.is_some();

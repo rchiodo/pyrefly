@@ -12,6 +12,7 @@ use clap::Parser;
 use clap::ValueEnum;
 use lsp_types::ServerInfo;
 use pyrefly_util::telemetry::Telemetry;
+use pyrefly_util::thread_pool::ThreadCount;
 
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::util::CommandExitStatus;
@@ -80,6 +81,7 @@ pub fn run_lsp(
     telemetry: &impl Telemetry,
     external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
+    thread_count: ThreadCount,
 ) -> anyhow::Result<()> {
     if let Some(initialize_info) =
         initialize_connection(&connection, &mut reader, args.indexing_mode, server_info)?
@@ -96,6 +98,7 @@ pub fn run_lsp(
             telemetry,
             external_references,
             wrapper,
+            thread_count,
         )?;
     }
     Ok(())
@@ -129,6 +132,7 @@ impl LspArgs {
         telemetry: &impl Telemetry,
         external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         // Note that we must have our logging only write out to stderr.
         eprintln!("starting generic LSP server");
@@ -152,6 +156,7 @@ impl LspArgs {
             telemetry,
             external_references,
             wrapper,
+            thread_count,
         )?;
         io_threads.join()?;
         // We have shut down gracefully.

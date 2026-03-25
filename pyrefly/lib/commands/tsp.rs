@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use pyrefly_util::telemetry::Telemetry;
+use pyrefly_util::thread_pool::ThreadCount;
 
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::lsp::IndexingMode;
@@ -44,6 +45,7 @@ pub fn run_tsp(
     args: TspArgs,
     telemetry: &impl Telemetry,
     wrapper: Option<ConfigConfigurerWrapper>,
+    thread_count: ThreadCount,
 ) -> anyhow::Result<()> {
     if let Some(initialize_info) =
         initialize_tsp_connection(&connection, &mut reader, args.indexing_mode)?
@@ -64,6 +66,7 @@ pub fn run_tsp(
             None, // No thrift remapping for TSP
             Arc::new(NoExternalProvider),
             wrapper,
+            thread_count,
         );
 
         // Reuse the existing lsp_loop but with TSP initialization
@@ -93,6 +96,7 @@ impl TspArgs {
         self,
         telemetry: &impl Telemetry,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         // Note that we must have our logging only write out to stderr.
         eprintln!("starting TSP server");
@@ -101,7 +105,7 @@ impl TspArgs {
         // also be implemented to use sockets or HTTP.
         let (connection, reader, io_threads) = Connection::stdio();
 
-        run_tsp(connection, reader, self, telemetry, wrapper)?;
+        run_tsp(connection, reader, self, telemetry, wrapper, thread_count)?;
         io_threads.join()?;
         // We have shut down gracefully.
         // Use writeln! instead of eprintln! to avoid panicking if stderr is closed.

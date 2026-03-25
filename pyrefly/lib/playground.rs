@@ -34,6 +34,7 @@ use pyrefly_util::lined_buffer::DisplayRange;
 use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::telemetry::TelemetrySourceDbRebuildInstanceStats;
+use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::watch_pattern::WatchPattern;
 use ruff_text_size::TextSize;
 use serde::Deserialize;
@@ -248,7 +249,7 @@ impl Playground {
         let config = ArcId::new(config);
         let config_finder = ConfigFinder::new_constant(config.dupe());
 
-        let state = State::new(config_finder);
+        let state = State::with_thread_count(config_finder, ThreadCount::default());
         let config_finder_for_self = ConfigFinder::new_constant(config.dupe());
 
         Ok(Self {
@@ -348,7 +349,7 @@ impl Playground {
         let config = ArcId::new(config);
         let new_config_finder = ConfigFinder::new_constant(config.dupe());
 
-        self.state = State::new(new_config_finder);
+        self.state = State::with_thread_count(new_config_finder, ThreadCount::default());
         self.config_finder = ConfigFinder::new_constant(config.dupe());
 
         if self.handles.contains_key("sandbox.py") {

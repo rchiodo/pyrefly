@@ -19,6 +19,7 @@ use crate::config::config::ConfigFile;
 use crate::config::finder::ConfigFinder;
 use crate::query::PythonASTRange;
 use crate::query::Query;
+use crate::test::util::TEST_THREAD_COUNT;
 use crate::test::util::init_test;
 
 /// Helper to create a Query with a ConfigFinder that doesn't use sourcedb.
@@ -28,7 +29,7 @@ fn create_query() -> Query {
     config.python_environment.set_empty_to_default();
     config.configure();
     let config = ArcId::new(config);
-    Query::new(ConfigFinder::new_constant(config))
+    Query::new(ConfigFinder::new_constant(config), TEST_THREAD_COUNT)
 }
 
 /// Convert the result of get_types_in_file to a pretty-printed JSON string.

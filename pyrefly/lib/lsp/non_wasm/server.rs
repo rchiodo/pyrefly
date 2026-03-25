@@ -1285,6 +1285,7 @@ pub fn lsp_loop(
     telemetry: &impl Telemetry,
     external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
+    thread_count: ThreadCount,
 ) -> anyhow::Result<()> {
     info!("Reading messages");
     let lsp_queue = LspQueue::new();
@@ -1302,6 +1303,7 @@ pub fn lsp_loop(
         thrift_remapper,
         external_references,
         wrapper,
+        thread_count,
     );
     std::thread::scope(|scope| {
         // Spawn the event processing loop on a thread with a large stack
@@ -2247,6 +2249,7 @@ impl Server {
         thrift_remapper: Option<ThriftRemapper>,
         external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
+        thread_count: ThreadCount,
     ) -> Self {
         let folders = if let Some(capability) = &initialize_params.capabilities.workspace
             && let Some(true) = capability.workspace_folders
@@ -2289,7 +2292,7 @@ impl Server {
             indexing_mode,
             workspace_indexing_limit,
             build_system_blocking,
-            state: State::new(config_finder),
+            state: State::with_thread_count(config_finder, thread_count),
             open_notebook_cells: RwLock::new(HashMap::new()),
             open_files: RwLock::new(HashMap::new()),
             unsaved_file_tracker: UnsavedFileTracker::new(),

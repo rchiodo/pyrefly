@@ -48,6 +48,7 @@ use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
+use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Arguments;
 use ruff_python_ast::Decorator;
@@ -888,8 +889,8 @@ impl<'a> CalleesWithLocation<'a> {
 }
 
 impl Query {
-    pub fn new(config_finder: ConfigFinder) -> Self {
-        let state = State::new(config_finder);
+    pub fn new(config_finder: ConfigFinder, thread_count: ThreadCount) -> Self {
+        let state = State::with_thread_count(config_finder, thread_count);
         Self {
             state,
             sys_info: SysInfo::default(),
