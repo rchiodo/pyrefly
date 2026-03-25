@@ -596,7 +596,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         };
                         self.check_type(
                             &arg_for_check,
-                            &restriction.as_type(self.stdlib, self.heap),
+                            &param.bound_type(self.stdlib, self.heap),
                             range,
                             errors,
                             tcc,
