@@ -94,6 +94,7 @@ use crate::report::pysa::module_index::GRAPHQL_DECORATORS;
 use crate::report::pysa::module_index::GraphQLDecoratorRef;
 use crate::report::pysa::types::ScalarTypeProperties;
 use crate::report::pysa::types::string_for_type;
+use crate::state::lsp::DefinitionMetadata;
 use crate::state::lsp::FindPreference;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Hash, PartialOrd, Ord)]
@@ -2637,7 +2638,7 @@ impl<'a> CallGraphVisitor<'a> {
                 })
         });
 
-        let (functions_from_go_to_def, unused_go_to_definitions): (Vec<_>, Vec<_>) =
+        let (functions_from_go_to_def, mut unused_go_to_definitions): (Vec<_>, Vec<_>) =
             go_to_definitions.into_iter().partition_map(|definition| {
                 let short_identifier =
                     ShortIdentifier::from_text_range(definition.definition_range);
@@ -2655,7 +2656,6 @@ impl<'a> CallGraphVisitor<'a> {
                     None => Either::Right(definition),
                 }
             });
-        let has_non_function_definitions = !unused_go_to_definitions.is_empty();
 
         let (property_callees, non_property_callees): (Vec<FunctionRef>, Vec<FunctionRef>) =
             functions_from_go_to_def
@@ -2665,12 +2665,45 @@ impl<'a> CallGraphVisitor<'a> {
                     definition.is_property_getter || definition.is_property_setter
                 });
 
-        let has_property_callees = !property_callees.is_empty();
-        let (property_setters, property_getters) = if is_assignment_lhs {
+        let (property_setters, mut property_getters) = if is_assignment_lhs {
             (property_callees, vec![])
         } else {
             (vec![], property_callees)
         };
+
+        // For a single unused Attribute go-to definition referencing a property
+        // defined via assignment (e.g., `bar = property(get_bar)`), resolve the
+        // property getter using the definition's module and range. This works
+        // for both direct and inherited properties because go-to-definition
+        // already resolves to the defining class's module and field range.
+        if unused_go_to_definitions.len() == 1
+            && matches!(
+                unused_go_to_definitions[0].metadata,
+                DefinitionMetadata::Attribute
+            )
+        {
+            let definition = &unused_go_to_definitions[0];
+            if let Some(getter_ref) = self
+                .module_context
+                .resolver
+                .resolve_pysa_solutions(&definition.module)
+                .module_index
+                .get_property_getter_ref(definition.definition_range)
+                .cloned()
+            {
+                debug_println!(
+                    self.debug,
+                    "Found property getter for attribute at {:?}: {:?}",
+                    definition.definition_range,
+                    getter_ref,
+                );
+                property_getters.push(getter_ref);
+                unused_go_to_definitions.clear();
+            }
+        }
+
+        let has_non_function_definitions = !unused_go_to_definitions.is_empty();
+        let has_property_callees = !property_getters.is_empty() || !property_setters.is_empty();
 
         let unknown_callee_as_direct_call = true;
         let if_called = if non_property_callees.is_empty() {

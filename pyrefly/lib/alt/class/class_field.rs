@@ -730,6 +730,10 @@ impl ClassField {
             .and_then(|ty| make_bound_method(heap, instance.to_type(heap), ty).ok())
     }
 
+    pub fn is_property(&self) -> bool {
+        matches!(&self.0, ClassFieldInner::Property { .. })
+    }
+
     pub fn is_simple_instance_attribute(&self) -> bool {
         matches!(&self.0, ClassFieldInner::InstanceAttribute { .. })
     }

@@ -697,7 +697,16 @@ impl FunctionNode {
                 .property_metadata
                 .as_ref()
                 .map(|metadata| metadata.role.clone()),
-            FunctionNode::ClassField { .. } => None,
+            FunctionNode::ClassField { field, .. } => {
+                let ty = field.ty();
+                if ty.is_property_getter() {
+                    Some(PropertyRole::Getter)
+                } else if ty.is_property_setter_with_getter().is_some() {
+                    Some(PropertyRole::Setter)
+                } else {
+                    None
+                }
+            }
         }
     }
 
