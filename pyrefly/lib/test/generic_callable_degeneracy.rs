@@ -76,3 +76,17 @@ out_b.append(42)
 reveal_type(out_b)  # E: revealed type: list[int]
 "#,
 );
+
+// Type var present in return but absent from all param types.
+testcase!(
+    test_unsolved_typevar_not_in_params,
+    r#"
+from typing import reveal_type
+def f[T](x: int) -> T: ...
+reveal_type(f(42))  # E: revealed type: @_
+out_a = f(42)
+reveal_type(out_a)  # E: revealed type: Unknown
+out_b: str = f(42)
+reveal_type(out_b)  # E: revealed type: str
+"#,
+);
