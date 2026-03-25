@@ -53,6 +53,8 @@ pub fn run_tsp(
         // Create an LSP server instance for the TSP server to use.
         let lsp_queue = LspQueue::new();
         let surface = telemetry.surface();
+        let agent_session_id = telemetry.agent_session_id();
+        let agent_invocation_id = telemetry.agent_invocation_id();
         let lsp_server = Server::new(
             connection,
             lsp_queue,
@@ -62,6 +64,8 @@ pub fn run_tsp(
             args.workspace_indexing_limit,
             false,
             surface,
+            agent_session_id,
+            agent_invocation_id,
             None, // No path remapping for TSP
             None, // No thrift remapping for TSP
             Arc::new(NoExternalProvider),

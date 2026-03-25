@@ -793,6 +793,8 @@ pub struct Server {
     id: Uuid,
     /// The surface/entrypoint for the language server (`--from` CLI arg)
     surface: Option<String>,
+    agent_session_id: Option<String>,
+    agent_invocation_id: Option<String>,
     /// Whether to include comment section folding ranges (FoldingRangeKind::Region).
     /// Defaults to false.
     comment_folding_ranges: bool,
@@ -1290,6 +1292,8 @@ pub fn lsp_loop(
     info!("Reading messages");
     let lsp_queue = LspQueue::new();
     let from = telemetry.surface();
+    let agent_session_id = telemetry.agent_session_id();
+    let agent_invocation_id = telemetry.agent_invocation_id();
     let server = Server::new(
         connection,
         lsp_queue,
@@ -1299,6 +1303,8 @@ pub fn lsp_loop(
         workspace_indexing_limit,
         build_system_blocking,
         from,
+        agent_session_id,
+        agent_invocation_id,
         path_remapper,
         thrift_remapper,
         external_references,
@@ -2245,6 +2251,8 @@ impl Server {
         workspace_indexing_limit: usize,
         build_system_blocking: bool,
         surface: Option<String>,
+        agent_session_id: Option<String>,
+        agent_invocation_id: Option<String>,
         path_remapper: Option<PathRemapper>,
         thrift_remapper: Option<ThriftRemapper>,
         external_references: Arc<dyn ExternalProvider>,
@@ -2312,6 +2320,8 @@ impl Server {
             version_info: Mutex::new(HashMap::new()),
             id: Uuid::new_v4(),
             surface,
+            agent_session_id,
+            agent_invocation_id,
             comment_folding_ranges,
             currently_streaming_diagnostics_for_handles: RwLock::new(None),
             diagnostic_markdown_support,
@@ -2352,8 +2362,8 @@ impl Server {
             id: self.id,
             surface: self.surface.clone(),
             server_start_time: self.server_start_time,
-            agent_session_id: None,
-            agent_invocation_id: None,
+            agent_session_id: self.agent_session_id.clone(),
+            agent_invocation_id: self.agent_invocation_id.clone(),
         }
     }
 
