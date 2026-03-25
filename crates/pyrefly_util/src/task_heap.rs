@@ -115,6 +115,10 @@ impl<K: Ord, V> TaskHeap<K, V> {
         self.cancellation_handle.dupe()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().heap.is_empty()
+    }
+
     /// Push a task into the heap with specified ordering.
     /// If `is_lifo` is true, the task will be processed in LIFO order for equal values of `K`.
     /// If `is_lifo` is false, the task will be processed in FIFO order for equal values of `K`.

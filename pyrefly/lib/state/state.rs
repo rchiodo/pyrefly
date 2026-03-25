@@ -431,9 +431,8 @@ impl ModuleDataMut {
         }
     }
 
-    /// Take the data out of the `ModuleDataMut`, leaving a `ModuleData`.
-    /// Reusing the `ModuleDataMut` is not possible.
-    fn take_and_freeze(&self) -> ModuleData {
+    /// Consume the `ModuleDataMut` and produce a frozen `ModuleData`.
+    fn take_and_freeze(self) -> ModuleData {
         let ModuleDataMut {
             handle,
             config,
@@ -442,17 +441,13 @@ impl ModuleDataMut {
             deps,
             rdeps,
         } = self;
-        let imports = mem::take(&mut *imports.write());
-        let deps = mem::take(&mut *deps.write());
-        let rdeps = mem::take(&mut *rdeps.lock());
-        let state = state.take_and_freeze();
         ModuleData {
-            handle: handle.dupe(),
-            config: config.read().dupe(),
-            state,
-            imports,
-            deps,
-            rdeps,
+            handle,
+            config: config.into_inner(),
+            state: state.take_and_freeze(),
+            imports: imports.into_inner(),
+            deps: deps.into_inner(),
+            rdeps: rdeps.into_inner(),
         }
     }
 
@@ -2913,8 +2908,8 @@ impl State {
                             now,
                             default_require: _,
                             state: _,
-                            todo: _,
-                            changed: _,
+                            todo,
+                            changed,
                             dirty,
                             subscriber: _,
                             pysa_reporter: _,
@@ -2928,10 +2923,15 @@ impl State {
         let mut stats = stats.into_inner();
         stats.committed = true;
 
-        // If you make a transaction dirty, e.g. by calling an invalidate method,
-        // you must subsequently call `run` to drain the dirty queue.
-        // We could relax this restriction by storing `dirty` in the `State`,
-        // but no one wants to do this, so don't bother.
+        // ArcId<ModuleDataMut> is shared across todo, changed, dirty, and
+        // updated_modules during a transaction. All of these except
+        // updated_modules must be drained before commit so that
+        // ArcId::into_inner succeeds (refcount == 1) below.
+        assert!(todo.is_empty(), "Transaction has pending todo items");
+        assert!(
+            changed.into_inner().is_empty(),
+            "Transaction has uncommitted changes"
+        );
         assert!(dirty.into_inner().is_empty(), "Transaction is dirty");
 
         let state_lock_start = Instant::now();
@@ -2949,9 +2949,13 @@ impl State {
         state.stdlib = stdlib;
         state.now = now;
         for (handle, new_module_data) in updated_modules {
-            state
-                .modules
-                .insert(handle, new_module_data.take_and_freeze());
+            state.modules.insert(
+                handle,
+                new_module_data
+                    .into_inner()
+                    .expect("ArcId<ModuleDataMut> refcount should be 1 at commit")
+                    .take_and_freeze(),
+            );
         }
         state.memory.apply_overlay(memory_overlay);
         for (loader_id, additional_loader) in updated_loaders {
