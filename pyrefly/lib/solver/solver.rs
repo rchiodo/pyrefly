@@ -1755,12 +1755,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         },
                     )
                     | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
-                        let r1 = q1.restriction().clone();
-                        let r2 = q2.restriction().clone();
+                        let r1_restricted = q1.restriction().is_restricted();
+                        let r2_restricted = q2.restriction().is_restricted();
+                        let b1 = q1.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                        let b2 = q2.bound_type(self.type_order.stdlib(), &self.solver.heap);
                         drop(variable1);
                         drop(variable2);
 
-                        match (r1.is_restricted(), r2.is_restricted()) {
+                        match (r1_restricted, r2_restricted) {
                             (false, false) => {
                                 // Neither has a restriction, order doesn't matter
                                 variables.unify(*v1, *v2);
@@ -1775,8 +1777,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             }
                             (true, true) => {
                                 // Both have restrictions, need to compare bounds
-                                let b1 = r1.as_type(self.type_order.stdlib(), &self.solver.heap);
-                                let b2 = r2.as_type(self.type_order.stdlib(), &self.solver.heap);
                                 drop(variables);
 
                                 let b1_subtype_of_b2 = self.is_subset_eq(&b1, &b2).is_ok();
