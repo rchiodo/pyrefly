@@ -215,7 +215,7 @@ pub struct StepsMut {
     // Pre-rebuild data for diffing at the Solutions step.
     // Populated by `reset_for_rebuild()`, consumed by `ComputeGuard::take_old_*()`.
     // May remain unconsumed for modules that never reach Solutions (e.g.,
-    // require=Exports); cleared by `take_and_freeze()` at commit time.
+    // require=Exports); dropped when `take_and_freeze()` consumes `self`.
     pub old_exports: ArcSwapOption<Exports>,
     pub old_answers: ArcSwapOption<(Bindings, Arc<Answers>)>,
     pub old_solutions: ArcSwapOption<Solutions>,
@@ -338,33 +338,17 @@ impl StepsMut {
         self.current_step.store(new_last_step, Ordering::Relaxed);
     }
 
-    /// Drain all step data into a frozen `Steps`. The `StepsMut` should not be
-    /// reused after this call (it becomes empty).
-    pub fn take_and_freeze(&self) -> Steps {
-        // Drop any unconsumed old data (modules that never reached Solutions).
-        self.clear_old_data();
-
-        let last_step = self.current_step.load();
-        let load = self.load.swap(None);
-        let ast = self.ast.swap(None);
-        let exports_arc = self.exports.swap(None);
-        let answers = self.answers.swap(None);
-        let solutions = self.solutions.swap(None);
+    /// Consume and produce a frozen `Steps`.
+    pub fn take_and_freeze(self) -> Steps {
+        // old_exports/old_answers/old_solutions are dropped with `self`.
         Steps {
-            last_step,
-            load,
-            ast,
-            exports: exports_arc,
-            answers,
-            solutions,
+            last_step: self.current_step.load(),
+            load: self.load.into_inner(),
+            ast: self.ast.into_inner(),
+            exports: self.exports.into_inner(),
+            answers: self.answers.into_inner(),
+            solutions: self.solutions.into_inner(),
         }
-    }
-
-    /// Drop any unconsumed old data.
-    pub fn clear_old_data(&self) {
-        self.old_exports.swap(None);
-        self.old_answers.swap(None);
-        self.old_solutions.swap(None);
     }
 }
 
