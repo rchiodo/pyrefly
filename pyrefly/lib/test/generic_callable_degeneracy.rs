@@ -108,3 +108,36 @@ reveal_type(out_b)  # E: revealed type: (x: int) -> Awaitable[int]
 reveal_type(called)  # E: revealed type: Awaitable[int]
 "#,
 );
+
+// Concatenate strips the only binding site of X, producing a degenerate callable.
+// Unlike the other tests, this does NOT produce a partial type — X collapses to
+// Any, and downstream usage cannot recover type information.
+testcase!(
+    test_concatenate_strips_generic_param,
+    r#"
+from typing import Callable, Concatenate, Any, reveal_type
+
+def strip_first[**P, T](f: Callable[Concatenate[Any, P], T]) -> Callable[P, T]: ...
+def identity[X](x: X) -> X: ...
+
+# Stripping the first param of (X) -> X gives () -> X, but X has lost its
+# binding site and collapses to Any. The result is () -> Any.
+reveal_type(strip_first(identity))  # E: revealed type: () -> Any
+
+# out_a: degenerate pin. The callable is () -> Any, not a partial type.
+out_a = strip_first(identity)
+reveal_type(out_a)  # E: revealed type: () -> Any
+
+# out_b: calling it produces Any — no partial type to pin.
+out_b = strip_first(identity)
+called_b = out_b()
+reveal_type(out_b)  # E: revealed type: () -> Any
+reveal_type(called_b)  # E: revealed type: Any
+
+# out_c: calling it produces Any — no partial type to pin.
+out_c = strip_first(identity)
+def takes_callback(callback: Callable[[], int]) -> None: ...
+takes_callback(out_c)
+reveal_type(out_c)  # E: revealed type: () -> Any
+"#,
+);
