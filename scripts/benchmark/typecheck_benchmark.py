@@ -103,6 +103,7 @@ class AggregateStats(TypedDict, total=False):
     max_execution_time_s: float
     total_execution_time_s: float
     avg_peak_memory_mb: float
+    p50_peak_memory_mb: float
     p90_peak_memory_mb: float
     p95_peak_memory_mb: float
     max_peak_memory_mb: float
@@ -710,6 +711,7 @@ def compute_aggregate_stats(
             "avg_peak_memory_mb": round(sum(memories) / len(memories), 1)
             if memories
             else 0.0,
+            "p50_peak_memory_mb": round(compute_percentile(memories, 50), 1),
             "p90_peak_memory_mb": round(compute_percentile(memories, 90), 1),
             "p95_peak_memory_mb": round(compute_percentile(memories, 95), 1),
             "max_peak_memory_mb": round(max(memories), 1) if memories else 0.0,
@@ -1035,22 +1037,25 @@ def _print_summary(
 ) -> None:
     """Print a summary table."""
     print(
-        f"\n{'Checker':<12} {'Pkgs':>5} {'Avg Time':>9} {'P95 Time':>9} {'Max Time':>9} {'Avg Mem':>8} {'Max Mem':>8}"
+        f"\n{'Checker':<12} {'Pkgs':>5} {'P50 Time':>9} {'Avg Time':>9} {'P95 Time':>9} {'Max Time':>9} {'P50 Mem':>8} {'Avg Mem':>8} {'Max Mem':>8}"
     )
-    print("-" * 70)
+    print("-" * 88)
     for checker in type_checkers:
         s = stats.get(checker, {})
         if s.get("packages_tested", 0) == 0:
             print(f"{checker:<12} {'N/A':>5}")
             continue
+        p50_mem = s.get("p50_peak_memory_mb", 0)
         avg_mem = s.get("avg_peak_memory_mb", 0)
         max_mem = s.get("max_peak_memory_mb", 0)
         print(
             f"{checker:<12} "
             f"{s.get('packages_tested', 0):>5} "
+            f"{s.get('p50_execution_time_s', 0):>8.1f}s "
             f"{s.get('avg_execution_time_s', 0):>8.1f}s "
             f"{s.get('p95_execution_time_s', 0):>8.1f}s "
             f"{s.get('max_execution_time_s', 0):>8.1f}s "
+            f"{p50_mem:>7.0f}M "
             f"{avg_mem:>7.0f}M "
             f"{max_mem:>7.0f}M"
         )
