@@ -12,7 +12,10 @@ use pyrefly_build::handle::Handle;
 use ruff_text_size::TextSize;
 
 use crate::lsp::wasm::hover::get_hover;
+use crate::state::require::Require;
 use crate::state::state::State;
+use crate::test::util::TestEnv;
+use crate::test::util::extract_cursors_for_test;
 use crate::test::util::get_batched_lsp_operations_report;
 use crate::test::util::get_batched_lsp_operations_report_allow_error;
 
@@ -1257,5 +1260,30 @@ f(x=1.0)
     assert!(
         report.contains("x: float = -1.5"),
         "Expected hover to show negative float default '-1.5', got: {report}"
+    );
+}
+
+/// When `check_unannotated_defs = false`, hover should still work inside
+/// unannotated function bodies so IDE features remain functional.
+#[test]
+fn hover_works_in_unannotated_function_with_skip_check() {
+    let code = r#"
+def unannotated():
+    x = 42
+#   ^
+    return x
+"#;
+    let mut test_env = TestEnv::new_skip_check_no_infer();
+    test_env.add("main", code);
+    let (state, handle_fn) = test_env
+        .with_default_require_level(Require::Exports)
+        .to_state();
+    let handle = handle_fn("main");
+    let cursors = extract_cursors_for_test(code);
+    assert_eq!(cursors.len(), 1);
+    let result = get_hover(&state.transaction(), &handle, cursors[0], true);
+    assert!(
+        result.is_none(),
+        "Expected no hover result for variable inside unannotated function body when check is skipped"
     );
 }
