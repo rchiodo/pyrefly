@@ -622,6 +622,7 @@ impl Bindings {
         // can appear in both exportables and invalid_dunder_all_entries).
         for (name, key) in invalid_all_exports {
             if !exported_names.contains(&name) {
+                exported_names.insert(name.clone());
                 builder
                     .table
                     .insert(KeyExport(name), BindingExport::Forward(key));
