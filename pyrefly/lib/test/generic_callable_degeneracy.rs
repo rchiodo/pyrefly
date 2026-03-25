@@ -90,3 +90,21 @@ out_b: str = f(42)
 reveal_type(out_b)  # E: revealed type: str
 "#,
 );
+
+// Passing a generic function through a ParamSpec wrapper loses generic structure.
+// The result is a partial callable; calling it with a concrete arg pins the types.
+testcase!(
+    test_paramspec_wrap_generic,
+    r#"
+from typing import Callable, Awaitable, reveal_type
+def wrap[**P, T](f: Callable[P, T]) -> Callable[P, Awaitable[T]]: ...
+def identity[X](x: X) -> X: ...
+reveal_type(wrap(identity))  # E: revealed type: (x: @_) -> Awaitable[@_]
+out_a = wrap(identity)
+reveal_type(out_a)  # E: revealed type: (x: Unknown) -> Awaitable[Unknown]
+out_b = wrap(identity)
+called = out_b(42)
+reveal_type(out_b)  # E: revealed type: (x: int) -> Awaitable[int]
+reveal_type(called)  # E: revealed type: Awaitable[int]
+"#,
+);
