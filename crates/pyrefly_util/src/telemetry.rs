@@ -109,6 +109,8 @@ pub struct TelemetryServerState {
     /// The surface/entrypoint for the language server
     pub surface: Option<String>,
     pub server_start_time: Instant,
+    pub agent_session_id: Option<String>,
+    pub agent_invocation_id: Option<String>,
 }
 
 #[derive(Default)]

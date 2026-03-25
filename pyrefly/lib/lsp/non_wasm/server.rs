@@ -2349,6 +2349,8 @@ impl Server {
             id: self.id,
             surface: self.surface.clone(),
             server_start_time: self.server_start_time,
+            agent_session_id: None,
+            agent_invocation_id: None,
         }
     }
 
