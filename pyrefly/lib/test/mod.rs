@@ -34,6 +34,7 @@ mod enums;
 mod flow_branching;
 mod flow_looping;
 mod generic_basic;
+mod generic_callable_degeneracy;
 mod generic_legacy;
 mod generic_restrictions;
 mod generic_sub;
