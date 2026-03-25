@@ -564,6 +564,14 @@ pub struct ConfigFile {
     /// may speed up LSP operations on large projects.
     #[serde(default, skip_serializing_if = "crate::util::skip_default_false")]
     pub skip_lsp_config_indexing: bool,
+
+    /// Additional file extensions to treat as Python source files.
+    /// Used for Python dialects that use non-standard extensions.
+    /// Unlike standard Python extensions, these extensions become part
+    /// of the module name — for example, a file `foo.cinc` has module
+    /// name `foo.cinc`, not `foo`.
+    #[serde(skip)]
+    pub extra_file_extensions: Vec<String>,
 }
 
 impl Default for ConfigFile {
@@ -596,6 +604,7 @@ impl Default for ConfigFile {
             min_severity: None,
             output_format: None,
             skip_lsp_config_indexing: false,
+            extra_file_extensions: Vec::new(),
         }
     }
 }
@@ -715,6 +724,11 @@ impl ConfigFile {
         // we can use unwrap here, because the value in the root config must
         // be set in `ConfigFile::configure()`.
         self.python_environment.python_platform.as_ref().unwrap()
+    }
+
+    /// Returns true if extra file extensions are configured.
+    pub fn has_extra_file_extensions(&self) -> bool {
+        !self.extra_file_extensions.is_empty()
     }
 
     pub fn search_path(&self) -> impl Iterator<Item = &PathBuf> + Clone {
@@ -1553,6 +1567,7 @@ mod tests {
                 baseline: None,
                 min_severity: None,
                 skip_lsp_config_indexing: false,
+                extra_file_extensions: Vec::new(),
             }
         );
     }
@@ -1795,6 +1810,7 @@ mod tests {
             baseline: Some(PathBuf::from("baseline.json")),
             min_severity: None,
             skip_lsp_config_indexing: false,
+            extra_file_extensions: Vec::new(),
         };
 
         let current_dir = std::env::current_dir().unwrap();
@@ -1856,6 +1872,7 @@ mod tests {
             baseline: Some(test_path.join("baseline.json")),
             min_severity: None,
             skip_lsp_config_indexing: false,
+            extra_file_extensions: Vec::new(),
         };
         assert_eq!(config, expected_config);
     }
