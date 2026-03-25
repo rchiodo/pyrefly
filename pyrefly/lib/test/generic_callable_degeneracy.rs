@@ -161,3 +161,26 @@ reveal_type(out_b)  # E: revealed type: (x: str) -> str
 reveal_type(called)  # E: revealed type: str
 "#,
 );
+
+// ParamSpec pins to first overload instead of preserving overload structure.
+// This is the core bug from GitHub issue #2105.
+testcase!(
+    bug = "ParamSpec pins to first overload (issue #2105)",
+    test_overload_paramspec_pins_first,
+    r#"
+from typing import Callable, Protocol, overload
+
+class Foo(Protocol):
+    @overload
+    def __call__(self, ignore_errors: bool, onerror: int | None) -> None: ...
+    @overload
+    def __call__(self, ignore_errors: bool = False) -> None: ...
+
+def callback[**P, T](
+    callback: Callable[P, T], /, *args: P.args, **kwds: P.kwargs
+) -> Callable[P, T]: ...
+
+def test(rmtree: Foo) -> None:
+    callback(rmtree, ignore_errors=True)  # E: Missing argument `onerror` in function `callback`
+"#,
+);
