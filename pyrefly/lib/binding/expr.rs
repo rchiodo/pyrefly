@@ -573,6 +573,7 @@ impl<'a> BindingsBuilder<'a> {
                 members,
                 &mut call.arguments.keywords,
                 false,
+                None,
             ),
             SpecialExport::TypingNamedTuple => self.synthesize_typing_named_tuple_def(
                 class_name,
@@ -580,6 +581,7 @@ impl<'a> BindingsBuilder<'a> {
                 &mut call.func,
                 members,
                 false,
+                None,
             ),
             _ => unreachable!("caller only passes CollectionsNamedTuple or TypingNamedTuple"),
         };
