@@ -29,6 +29,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use vec1::Vec1;
 
 use crate::state::lsp::FindPreference;
 use crate::state::lsp::visit_keyword_arguments_until_match;
@@ -339,6 +340,8 @@ impl Transaction<'_> {
         preference: FindPreference,
     ) -> Option<(TextRange, Module)> {
         self.find_definition(handle, pos, preference)
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
             .into_iter()
             .find_map(|item| {
                 item.docstring_range

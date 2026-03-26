@@ -43,6 +43,7 @@ use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 use starlark_map::small_set::SmallSet;
+use vec1::Vec1;
 
 use crate::module::module_info::ModuleInfo;
 use crate::report::glean::facts::*;
@@ -619,11 +620,10 @@ impl GleanState<'_> {
         identifier: Identifier,
         only_resolved_name: bool,
     ) -> Vec<DefinitionLocation> {
-        let definition = self.transaction.find_definition_for_name_use(
-            self.handle,
-            &identifier,
-            find_preference_glean(),
-        );
+        let definition = self
+            .transaction
+            .find_definition_for_name_use(self.handle, &identifier, find_preference_glean())
+            .unwrap_or(None);
 
         let additional_definitions =
             self.get_additional_definitions(identifier.range(), only_resolved_name);
@@ -642,11 +642,10 @@ impl GleanState<'_> {
         let name = self.module.code_at(range);
         let fqname = join_names(self.module_name.as_str(), name);
         let identifier = Identifier::new(name, range);
-        let definition = self.transaction.find_definition_for_name_use(
-            self.handle,
-            &identifier,
-            find_preference_glean(),
-        );
+        let definition = self
+            .transaction
+            .find_definition_for_name_use(self.handle, &identifier, find_preference_glean())
+            .unwrap_or(None);
         let additional_definitions = if definition.is_some() || self.names.contains(&fqname) {
             self.get_additional_definitions(range, false)
         } else {
@@ -1168,9 +1167,11 @@ impl GleanState<'_> {
     }
 
     fn find_definition(&self, position: TextSize) -> Vec<DefinitionLocation> {
-        let definitions =
-            self.transaction
-                .find_definition(self.handle, position, find_preference_glean());
+        let definitions = self
+            .transaction
+            .find_definition(self.handle, position, find_preference_glean())
+            .map(Vec1::into_vec)
+            .unwrap_or_default();
 
         definitions
             .into_iter()
@@ -1181,11 +1182,10 @@ impl GleanState<'_> {
     }
 
     fn find_definition_for_imported_module(&self, module: ModuleName) -> DefinitionLocation {
-        let definition = self.transaction.find_definition_for_imported_module(
-            self.handle,
-            module,
-            find_preference_glean(),
-        );
+        let definition = self
+            .transaction
+            .find_definition_for_imported_module(self.handle, module, find_preference_glean())
+            .unwrap_or(None);
 
         let name = module.to_string();
         let file = definition.map(|def| file_fact(&def.module));

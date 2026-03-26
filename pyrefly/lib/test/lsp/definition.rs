@@ -17,7 +17,10 @@ use crate::test::util::get_batched_lsp_operations_report;
 use crate::test::util::get_batched_lsp_operations_report_allow_error;
 
 fn get_test_report(state: &State, handle: &Handle, position: TextSize) -> String {
-    let defs = state.transaction().goto_definition(handle, position);
+    let defs = state
+        .transaction()
+        .goto_definition(handle, position)
+        .unwrap_or_default();
     if !defs.is_empty() {
         defs.into_iter()
             .map(

@@ -23,6 +23,7 @@ use ruff_python_ast::ModModule;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use vec1::Vec1;
 
 use crate::alt::answers::Answers;
 use crate::alt::answers_solver::AnswersSolver;
@@ -141,6 +142,8 @@ impl<'a> PysaResolver<'a> {
     ) -> Vec<FindDefinitionItemWithDocstring> {
         self.transaction
             .find_definition(&self.current_handle, position, preference)
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
     }
 
     pub fn find_definition_for_name_use(
@@ -150,6 +153,7 @@ impl<'a> PysaResolver<'a> {
     ) -> Option<FindDefinitionItemWithDocstring> {
         self.transaction
             .find_definition_for_name_use(&self.current_handle, name, preference)
+            .unwrap_or(None)
     }
 
     pub fn find_definition_for_attribute(
@@ -158,12 +162,10 @@ impl<'a> PysaResolver<'a> {
         name: &Name,
         preference: FindPreference,
     ) -> Vec<FindDefinitionItemWithDocstring> {
-        self.transaction.find_definition_for_attribute(
-            &self.current_handle,
-            base_range,
-            name,
-            preference,
-        )
+        self.transaction
+            .find_definition_for_attribute(&self.current_handle, base_range, name, preference)
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
     }
 
     pub fn current_module_solutions(&self) -> &PysaSolutions {

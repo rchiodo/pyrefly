@@ -599,6 +599,7 @@ impl Playground {
         };
         transaction
             .goto_definition(handle, position)
+            .unwrap_or_default()
             .into_iter()
             .map(|r| Range::new(r.module.display_range(r.range)))
             .collect()

@@ -71,6 +71,7 @@ use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
+use vec1::Vec1;
 
 use crate::alt::answers::Answers;
 use crate::alt::answers_solver::AnswersSolver;
@@ -295,6 +296,8 @@ impl<'a> CalleesWithLocation<'a> {
                         ..FindPreference::default()
                     },
                 )
+                .map(Vec1::into_vec)
+                .unwrap_or_default()
                 .into_iter()
                 .collect_vec()
                 .as_slice()
@@ -695,6 +698,8 @@ impl<'a> CalleesWithLocation<'a> {
                     ..FindPreference::default()
                 },
             )
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
             .into_iter()
             // filter out attributes since we don't know how to handle them
             .filter(|d| !matches!(d.metadata, DefinitionMetadata::Attribute))

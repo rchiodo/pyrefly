@@ -235,6 +235,7 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;
+use vec1::Vec1;
 
 use crate::ModuleInfo;
 use crate::alt::types::class_metadata::ClassMro;
@@ -3837,7 +3838,9 @@ impl Server {
         let info = transaction.get_module_info(&handle)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction.goto_definition(&handle, range);
+        let targets = transaction
+            .goto_definition(&handle, range)
+            .unwrap_or_default();
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
@@ -3867,7 +3870,9 @@ impl Server {
         let info = transaction.get_module_info(&handle)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction.goto_declaration(&handle, range);
+        let targets = transaction
+            .goto_declaration(&handle, range)
+            .unwrap_or_default();
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
@@ -3891,7 +3896,9 @@ impl Server {
         let info = transaction.get_module_info(&handle)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction.goto_type_definition(&handle, range);
+        let targets = transaction
+            .goto_type_definition(&handle, range)
+            .unwrap_or_default();
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
@@ -4378,6 +4385,8 @@ impl Server {
         let position = self.from_lsp_position(uri, &info, position);
         let Some(definition) = transaction
             .find_definition(&handle, position, find_preference)
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
             // TODO: handle more than 1 definition
             .into_iter()
             .next()
@@ -5511,7 +5520,10 @@ impl Server {
             params.text_document_position_params.position,
         );
 
-        let definitions = transaction.find_definition(&handle, position, FindPreference::default());
+        let definitions = transaction
+            .find_definition(&handle, position, FindPreference::default())
+            .map(Vec1::into_vec)
+            .unwrap_or_default();
 
         for def in definitions {
             // Get the URI for the definition's module
@@ -5672,7 +5684,10 @@ impl Server {
             params.text_document_position_params.position,
         );
 
-        let definitions = transaction.find_definition(&handle, position, FindPreference::default());
+        let definitions = transaction
+            .find_definition(&handle, position, FindPreference::default())
+            .map(Vec1::into_vec)
+            .unwrap_or_default();
 
         for def in definitions {
             let Some(def_uri) = module_info_to_uri(&def.module, self.path_remapper.as_ref()) else {

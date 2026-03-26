@@ -38,6 +38,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use vec1::Vec1;
 
 use crate::alt::answers_solver::AnswersSolver;
 use crate::error::error::Error;
@@ -368,6 +369,8 @@ fn parameter_documentation_for_callee(
                 ..Default::default()
             },
         )
+        .map(Vec1::into_vec)
+        .unwrap_or_default()
         .into_iter()
         .find_map(|item| {
             item.docstring_range
@@ -376,6 +379,8 @@ fn parameter_documentation_for_callee(
         .or_else(|| {
             transaction
                 .find_definition(handle, position, FindPreference::default())
+                .map(Vec1::into_vec)
+                .unwrap_or_default()
                 .into_iter()
                 .find_map(|item| {
                     item.docstring_range
@@ -559,6 +564,8 @@ pub fn get_hover(
                 ..Default::default()
             },
         )
+        .map(Vec1::into_vec)
+        .unwrap_or_default()
         // TODO: handle more than 1 definition
         .into_iter()
         .next()
@@ -638,6 +645,8 @@ pub fn get_hover(
             ..
         }) = transaction
             .find_definition(handle, position, FindPreference::default())
+            .map(Vec1::into_vec)
+            .unwrap_or_default()
             .into_iter()
             .next()
     {
