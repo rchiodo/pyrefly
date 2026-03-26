@@ -582,9 +582,37 @@ pub fn get_hover(
     let name = name.or_else(|| identifier_text_at(transaction, handle, position));
 
     let name_for_display = name.clone();
+    let show_constructor = kind == Some(SymbolKind::Class)
+        && !transaction
+            .identifier_at(handle, position)
+            .is_some_and(|id| matches!(id.context, IdentifierContext::ClassDef { .. }));
     let type_display = transaction.ad_hoc_solve(handle, "hover_display", {
         let mut cloned = type_.clone();
         move |solver| {
+            if show_constructor {
+                let constructor = match cloned {
+                    Type::ClassDef(ref cls)
+                        if !solver.get_metadata_for_class(cls).is_typed_dict() =>
+                    {
+                        Some(solver.type_order().constructor_to_callable(
+                            &solver.promote_nontypeddict_silently_to_classtype(cls),
+                        ))
+                    }
+                    Type::Type(box Type::ClassType(ref cls)) => {
+                        Some(solver.type_order().constructor_to_callable(cls))
+                    }
+                    _ => None,
+                };
+                if let Some(mut constructor) = constructor {
+                    constructor.transform_toplevel_callable(|c| {
+                        expand_callable_kwargs_for_hover(&solver, c)
+                    });
+                    return constructor.as_lsp_string_with_fallback_name(
+                        name_for_display.as_deref(),
+                        LspDisplayMode::Hover,
+                    );
+                }
+            }
             cloned.transform_toplevel_callable(|c| expand_callable_kwargs_for_hover(&solver, c));
             cloned.as_lsp_string_with_fallback_name(
                 name_for_display.as_deref(),

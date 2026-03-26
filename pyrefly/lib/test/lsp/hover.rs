@@ -908,6 +908,107 @@ from lib import bar as baz
 }
 
 #[test]
+fn hover_on_imported_class_shows_constructor_signature_and_docstring() {
+    let lib = r#"
+class Person:
+    """Test docstring"""
+    def __init__(self, name: str, age: int) -> None: ...
+"#;
+    let code = r#"
+from lib import Person
+#                ^
+"#;
+    let report =
+        get_batched_lsp_operations_report(&[("main", code), ("lib", lib)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+2 | from lib import Person
+                     ^
+```python
+(class) Person: def __init__(
+    name: str,
+    age: int
+) -> Person: ...
+```
+---
+Test docstring
+
+
+# lib.py
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn hover_on_class_in_type_annotation_shows_constructor() {
+    let code = r#"
+class Foo:
+    """Foo docstring"""
+    def __init__(self, x: int) -> None: ...
+
+y: Foo
+#  ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+6 | y: Foo
+       ^
+```python
+(class) Foo: def __init__(x: int) -> Foo: ...
+```
+---
+Foo docstring
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn hover_on_imported_pyi_class_shows_constructor_signature() {
+    let mut test_env = TestEnv::new();
+    test_env.add_with_path(
+        "lib",
+        "lib.pyi",
+        r#"
+class Widget:
+    """Widget docstring"""
+    def __init__(self, width: int, height: int) -> None: ...
+"#,
+    );
+    let main_code = r#"
+from lib import Widget
+#                ^
+"#;
+    test_env.add("main", main_code);
+    let (state, handle) = test_env
+        .with_default_require_level(Require::Exports)
+        .to_state();
+    let main_handle = handle("main");
+    let positions = extract_cursors_for_test(main_code);
+    let position = positions[0];
+    let report = get_test_report(&state, &main_handle, position);
+    assert_eq!(
+        r#"
+```python
+(class) Widget: def __init__(
+    width: int,
+    height: int
+) -> Widget: ...
+```
+---
+Widget docstring"#
+            .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn hover_on_first_component_of_multi_part_import() {
     let mymod_init = r#"# mymod/__init__.py
 def version() -> str: ...
