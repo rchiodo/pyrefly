@@ -570,7 +570,7 @@ pub struct ConfigFile {
     /// Unlike standard Python extensions, these extensions become part
     /// of the module name — for example, a file `foo.cinc` has module
     /// name `foo.cinc`, not `foo`.
-    #[serde(skip)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub extra_file_extensions: Vec<String>,
 }
 
