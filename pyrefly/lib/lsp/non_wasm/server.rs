@@ -4705,11 +4705,12 @@ impl Server {
         params: DocumentSymbolParams,
     ) -> Option<Vec<DocumentSymbol>> {
         let uri = &params.text_document.uri;
-        if self.open_notebook_cells.read().contains_key(uri) {
-            // TODO(yangdanny) handle notebooks
-            return None;
-        }
-        let path = self.path_for_uri(uri)?;
+        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let path = if let Some(notebook_path) = self.open_notebook_cells.read().get(uri) {
+            notebook_path.clone()
+        } else {
+            self.path_for_uri(uri)?
+        };
         if self
             .workspaces
             .get_with(path, |(_, workspace)| workspace.disable_language_services)
@@ -4725,7 +4726,7 @@ impl Server {
             return None;
         }
         let handle = self.make_handle_if_enabled(uri, Some(DocumentSymbolRequest::METHOD))?;
-        transaction.symbols(&handle)
+        transaction.symbols(&handle, maybe_cell_idx)
     }
 
     /// Run local and external workspace symbol queries in parallel, merging
