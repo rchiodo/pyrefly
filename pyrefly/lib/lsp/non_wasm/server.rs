@@ -4905,20 +4905,18 @@ impl Server {
         transaction: &Transaction<'_>,
         text_document: &TextDocumentIdentifier,
     ) -> Option<Vec<Range>> {
-        if self
-            .open_notebook_cells
-            .read()
-            .contains_key(&text_document.uri)
-        {
-            // TODO(yangdanny) handle notebooks
-            return None;
-        }
-        let handle = self.make_handle_if_enabled(&text_document.uri, None)?;
+        let uri = &text_document.uri;
+        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let handle = self.make_handle_if_enabled(uri, None)?;
         let module = transaction.get_module_info(&handle)?;
         let docstring_ranges = transaction.docstring_ranges(&handle)?;
         Some(
             docstring_ranges
                 .into_iter()
+                .filter(|range| {
+                    maybe_cell_idx.is_none()
+                        || module.to_cell_for_lsp(range.start()) == maybe_cell_idx
+                })
                 .map(|range| module.to_lsp_range(range))
                 .collect(),
         )
@@ -4929,16 +4927,9 @@ impl Server {
         transaction: &Transaction<'_>,
         params: FoldingRangeParams,
     ) -> Option<Vec<FoldingRange>> {
-        if self
-            .open_notebook_cells
-            .read()
-            .contains_key(&params.text_document.uri)
-        {
-            // TODO(yangdanny) handle notebooks
-            return None;
-        }
-        let handle = self
-            .make_handle_if_enabled(&params.text_document.uri, Some(FoldingRangeRequest::METHOD))?;
+        let uri = &params.text_document.uri;
+        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let handle = self.make_handle_if_enabled(uri, Some(FoldingRangeRequest::METHOD))?;
         let module = transaction.get_module_info(&handle)?;
         let ranges = transaction.folding_ranges(&handle)?;
 
@@ -4946,6 +4937,12 @@ impl Server {
             ranges
                 .into_iter()
                 .filter_map(|(range, kind)| {
+                    // Skip ranges that belong to a different notebook cell
+                    if maybe_cell_idx.is_some()
+                        && module.to_cell_for_lsp(range.start()) != maybe_cell_idx
+                    {
+                        return None;
+                    }
                     // Filter out comment section folding ranges (Region) unless enabled
                     if !self.comment_folding_ranges && kind == Some(FoldingRangeKind::Region) {
                         return None;
