@@ -1822,6 +1822,26 @@ impl LspInteraction {
         }))
     }
 
+    /// Sends a provide_type request for a notebook cell at the specified position
+    pub fn provide_type_cell(
+        &self,
+        file_name: &str,
+        cell_name: &str,
+        line: u32,
+        col: u32,
+    ) -> ClientRequestHandle<'_, ProvideType> {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        self.client.send_request(json!({
+            "textDocument": {
+                "uri": cell_uri
+            },
+            "positions": [{
+                "line": line,
+                "character": col
+            }]
+        }))
+    }
+
     /// Sends a prepare rename request for a notebook cell at the specified position
     pub fn prepare_rename_cell(
         &self,

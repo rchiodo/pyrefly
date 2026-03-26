@@ -34,6 +34,7 @@ mod notebook_document_symbols;
 mod notebook_hover;
 mod notebook_implementation;
 mod notebook_inlay_hint;
+mod notebook_provide_type;
 mod notebook_references;
 mod notebook_rename;
 mod notebook_signature_help;
