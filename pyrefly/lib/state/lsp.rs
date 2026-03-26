@@ -1497,6 +1497,97 @@ impl<'a> Transaction<'a> {
         .unwrap_or_default()
     }
 
+    /// Try to find the dunder method associated with an operator at the cursor.
+    /// Returns `Some((base_type, dunder_name))` for operators with dunders,
+    /// `None` for non-navigable operators (`not`, `is`, `is not`) or when no
+    /// operator node is found.
+    fn find_operator_dunder<'b>(
+        &self,
+        handle: &Handle,
+        covering_nodes: &'b [AnyNodeRef],
+    ) -> Option<(Type, Name)> {
+        covering_nodes.iter().find_map(|node| match node {
+            AnyNodeRef::ExprCompare(compare) => {
+                for op in &compare.ops {
+                    // Handle membership test operators (in/not in) - uses __contains__ on the right operand
+                    if matches!(op, CmpOp::In | CmpOp::NotIn)
+                        && let Some(answers) = self.get_answers(handle)
+                        && let Some(right_type) =
+                            answers.get_type_trace(compare.comparators.first()?.range())
+                    {
+                        return Some((right_type, dunder::CONTAINS));
+                    }
+                    // Handle rich comparison operators
+                    if let Some(dunder_name) = dunder::rich_comparison_dunder(*op)
+                        && let Some(answers) = self.get_answers(handle)
+                        && let Some(left_type) = answers.get_type_trace(compare.left.range())
+                    {
+                        return Some((left_type, dunder_name));
+                    }
+                }
+                None
+            }
+            AnyNodeRef::ExprBinOp(binop) => {
+                let dunder_name = Name::new_static(binop.op.dunder());
+                if let Some(answers) = self.get_answers(handle)
+                    && let Some(left_type) = answers.get_type_trace(binop.left.range())
+                {
+                    return Some((left_type, dunder_name));
+                }
+                None
+            }
+            AnyNodeRef::ExprUnaryOp(unaryop) => {
+                let dunder_name = match unaryop.op {
+                    UnaryOp::Invert => Some(dunder::INVERT),
+                    UnaryOp::Not => None,
+                    UnaryOp::UAdd => Some(dunder::POS),
+                    UnaryOp::USub => Some(dunder::NEG),
+                };
+                if let Some(dunder_name) = dunder_name
+                    && let Some(answers) = self.get_answers(handle)
+                    && let Some(operand_type) = answers.get_type_trace(unaryop.operand.range())
+                {
+                    return Some((operand_type, dunder_name));
+                }
+                None
+            }
+            AnyNodeRef::ExprSubscript(subscript) => {
+                let dunder_name = match subscript.ctx {
+                    ExprContext::Load => Some(dunder::GETITEM),
+                    ExprContext::Store => Some(dunder::SETITEM),
+                    ExprContext::Del => Some(dunder::DELITEM),
+                    ExprContext::Invalid => None,
+                };
+                if let Some(dunder_name) = dunder_name
+                    && let Some(answers) = self.get_answers(handle)
+                    && let Some(base_type) = answers.get_type_trace(subscript.value.range())
+                {
+                    return Some((base_type, dunder_name));
+                }
+                None
+            }
+            // Handle iteration `in` keyword in for loops
+            AnyNodeRef::StmtFor(stmt_for) => {
+                if let Some(answers) = self.get_answers(handle)
+                    && let Some(iter_type) = answers.get_type_trace(stmt_for.iter.range())
+                {
+                    return Some((iter_type, dunder::ITER));
+                }
+                None
+            }
+            // Handle iteration `in` keyword in comprehensions
+            AnyNodeRef::Comprehension(comp) => {
+                if let Some(answers) = self.get_answers(handle)
+                    && let Some(iter_type) = answers.get_type_trace(comp.iter.range())
+                {
+                    return Some((iter_type, dunder::ITER));
+                }
+                None
+            }
+            _ => None,
+        })
+    }
+
     fn find_definition_for_operator(
         &self,
         handle: &Handle,
@@ -1504,86 +1595,7 @@ impl<'a> Transaction<'a> {
         preference: FindPreference,
     ) -> Vec<FindDefinitionItemWithDocstring> {
         let Some((base_type, dunder_method_name)) =
-            covering_nodes.iter().find_map(|node| match node {
-                AnyNodeRef::ExprCompare(compare) => {
-                    for op in &compare.ops {
-                        // Handle membership test operators (in/not in) - uses __contains__ on the right operand
-                        if matches!(op, CmpOp::In | CmpOp::NotIn)
-                            && let Some(answers) = self.get_answers(handle)
-                            && let Some(right_type) =
-                                answers.get_type_trace(compare.comparators.first()?.range())
-                        {
-                            return Some((right_type, dunder::CONTAINS));
-                        }
-                        // Handle rich comparison operators
-                        if let Some(dunder_name) = dunder::rich_comparison_dunder(*op)
-                            && let Some(answers) = self.get_answers(handle)
-                            && let Some(left_type) = answers.get_type_trace(compare.left.range())
-                        {
-                            return Some((left_type, dunder_name));
-                        }
-                    }
-                    None
-                }
-                AnyNodeRef::ExprBinOp(binop) => {
-                    let dunder_name = Name::new_static(binop.op.dunder());
-                    if let Some(answers) = self.get_answers(handle)
-                        && let Some(left_type) = answers.get_type_trace(binop.left.range())
-                    {
-                        return Some((left_type, dunder_name));
-                    }
-                    None
-                }
-                AnyNodeRef::ExprUnaryOp(unaryop) => {
-                    let dunder_name = match unaryop.op {
-                        UnaryOp::Invert => Some(dunder::INVERT),
-                        UnaryOp::Not => None,
-                        UnaryOp::UAdd => Some(dunder::POS),
-                        UnaryOp::USub => Some(dunder::NEG),
-                    };
-                    if let Some(dunder_name) = dunder_name
-                        && let Some(answers) = self.get_answers(handle)
-                        && let Some(operand_type) = answers.get_type_trace(unaryop.operand.range())
-                    {
-                        return Some((operand_type, dunder_name));
-                    }
-                    None
-                }
-                AnyNodeRef::ExprSubscript(subscript) => {
-                    let dunder_name = match subscript.ctx {
-                        ExprContext::Load => Some(dunder::GETITEM),
-                        ExprContext::Store => Some(dunder::SETITEM),
-                        ExprContext::Del => Some(dunder::DELITEM),
-                        ExprContext::Invalid => None,
-                    };
-                    if let Some(dunder_name) = dunder_name
-                        && let Some(answers) = self.get_answers(handle)
-                        && let Some(base_type) = answers.get_type_trace(subscript.value.range())
-                    {
-                        return Some((base_type, dunder_name));
-                    }
-                    None
-                }
-                // Handle iteration `in` keyword in for loops
-                AnyNodeRef::StmtFor(stmt_for) => {
-                    if let Some(answers) = self.get_answers(handle)
-                        && let Some(iter_type) = answers.get_type_trace(stmt_for.iter.range())
-                    {
-                        return Some((iter_type, dunder::ITER));
-                    }
-                    None
-                }
-                // Handle iteration `in` keyword in comprehensions
-                AnyNodeRef::Comprehension(comp) => {
-                    if let Some(answers) = self.get_answers(handle)
-                        && let Some(iter_type) = answers.get_type_trace(comp.iter.range())
-                    {
-                        return Some((iter_type, dunder::ITER));
-                    }
-                    None
-                }
-                _ => None,
-            })
+            self.find_operator_dunder(handle, covering_nodes)
         else {
             return vec![];
         };
