@@ -6,7 +6,7 @@
  */
 
 use lsp_types::Url;
-use serde_json::json;
+use pyrefly::commands::lsp::IndexingMode;
 
 use crate::object_model::InitializeSettings;
 use crate::object_model::LspInteraction;
@@ -55,16 +55,16 @@ fn test_notebook_references() {
     interaction.shutdown().unwrap();
 }
 
-/// Notebooks are not indexed from disk (they are JSON files, not Python source),
-/// so references inside a notebook are only found when the notebook is open.
-/// This test verifies that a non-open notebook does not contribute references.
+/// Notebooks (.ipynb) are indexed from disk just like .py files, so references
+/// inside a notebook are found even when the notebook is not open.
+/// This test verifies that an on-disk notebook contributes references.
 #[test]
-fn test_references_from_file_excludes_non_open_notebook() {
+fn test_references_from_file_includes_indexed_notebook() {
     let root = get_test_files_root();
     let root_path = root.path().join("tests_requiring_config");
     let scope_uri = Url::from_file_path(root_path.clone()).unwrap();
 
-    let mut interaction = LspInteraction::new();
+    let mut interaction = LspInteraction::new_with_indexing_mode(IndexingMode::LazyBlocking);
     interaction.set_root(root_path.clone());
     interaction
         .initialize(InitializeSettings {
@@ -74,14 +74,16 @@ fn test_references_from_file_excludes_non_open_notebook() {
         })
         .unwrap();
 
-    // Open only the .py files — do NOT open a notebook
+    // Open only the .py files — do NOT open the notebook
     interaction.client.did_open("bar.py");
     interaction.client.did_open("foo.py");
     interaction.client.did_open("various_imports.py");
     interaction.client.did_open("with_synthetic_bindings.py");
 
     // Find references to "Bar" from bar.py line 10.
-    // Should only return .py file results (9 total), no notebook references.
+    // Should include results from .py files (9) plus the indexed notebook (2),
+    // for 11 total. The notebook references use file:// URIs since the notebook
+    // is not open (no vscode-notebook-cell remapping).
     interaction
         .client
         .references("bar.py", 10, 1, true)
@@ -89,13 +91,19 @@ fn test_references_from_file_excludes_non_open_notebook() {
             let Some(locations) = response else {
                 return false;
             };
-            assert_eq!(locations.len(), 9, "Expected 9 .py file references only");
-            let has_notebook_ref = locations
+            assert_eq!(
+                locations.len(),
+                11,
+                "Expected 11 references (9 .py + 2 from indexed notebook)"
+            );
+            let notebook_refs: Vec<_> = locations
                 .iter()
-                .any(|loc| loc.uri.scheme() == "vscode-notebook-cell");
-            assert!(
-                !has_notebook_ref,
-                "Non-open notebook references should not appear"
+                .filter(|loc| loc.uri.path().ends_with("notebook_refs.ipynb"))
+                .collect();
+            assert_eq!(
+                notebook_refs.len(),
+                2,
+                "Expected 2 references from the indexed notebook"
             );
             true
         })
