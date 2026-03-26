@@ -1644,7 +1644,6 @@ pub mod tests {
             Name::new_static("MyAlias"),
             Type::None,
             TypeAliasStyle::LegacyImplicit,
-            Vec::new(),
         ))));
         let wrapped = Type::concrete_tuple(vec![alias.clone()]);
         let mut ctx = TypeDisplayContext::new(&[]);

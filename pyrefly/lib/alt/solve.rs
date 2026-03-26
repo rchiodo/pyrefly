@@ -1232,7 +1232,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             self.heap.mk_type_form(ty)
         };
-        TypeAlias::new(name.clone(), stored_ty, style, Vec::new())
+        TypeAlias::new(name.clone(), stored_ty, style)
     }
 
     /// Check whether a type alias body contains a cyclic self-reference.
