@@ -37,6 +37,14 @@ use yansi::Paint;
 use crate::config::error_kind::ErrorKind;
 use crate::config::error_kind::Severity;
 
+/// A secondary annotation that labels a span in the same file as the primary error.
+/// Used to show additional context, e.g. the types of both operands in a binary operation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SecondaryAnnotation {
+    pub range: TextRange,
+    pub label: Box<str>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Error {
     module: Module,
@@ -49,6 +57,8 @@ pub struct Error {
     /// The rest of the error message after the first line.
     /// Note that this is formatted for pretty-printing, with two spaces at the beginning and after every newline.
     msg_details: Option<Box<str>>,
+    /// Additional labeled spans in the same file for richer diagnostics.
+    secondary_annotations: Vec<SecondaryAnnotation>,
 }
 
 impl Ranged for Error {
@@ -135,25 +145,34 @@ impl Error {
         // Maximum number of lines to print in the snippet.
         const MAX_LINES: u32 = 5;
 
+        // Compute the line range that covers the primary span and all secondary annotations.
+        let mut start_line = self.display_range.start.line_within_file();
+        let mut end_line = self.display_range.end.line_within_file();
+        for ann in &self.secondary_annotations {
+            let ann_display = self.module.display_range(ann.range);
+            start_line = cmp::min(start_line, ann_display.start.line_within_file());
+            end_line = cmp::max(end_line, ann_display.end.line_within_file());
+        }
+        // Cap at MAX_LINES from the earliest start line.
+        end_line = cmp::min(
+            LineNumber::from_zero_indexed(start_line.to_zero_indexed() + MAX_LINES),
+            end_line,
+        );
+        // Always include the primary error span's end line, even if it's beyond the cap.
+        // This ensures the primary error is always visible when secondary annotations
+        // pull the start line earlier.
+        let primary_end_line = self.display_range.end.line_within_file();
+        if !self.secondary_annotations.is_empty() {
+            end_line = cmp::max(end_line, primary_end_line);
+        }
+
         // Warning: The SourceRange is char indexed, while the snippet is byte indexed.
         //          Be careful in the conversion.
-        let source = self.module.lined_buffer().content_in_line_range(
-            self.display_range.start.line_within_file(),
-            cmp::min(
-                LineNumber::from_zero_indexed(
-                    self.display_range
-                        .start
-                        .line_within_file()
-                        .to_zero_indexed()
-                        + MAX_LINES,
-                ),
-                self.display_range.end.line_within_file(),
-            ),
-        );
-        let line_start = self
+        let source = self
             .module
             .lined_buffer()
-            .line_start(self.display_range.start.line_within_file());
+            .content_in_line_range(start_line, end_line);
+        let line_start = self.module.lined_buffer().line_start(start_line);
 
         let level = match self.severity {
             Severity::Error => Level::Error,
@@ -163,12 +182,35 @@ impl Error {
         };
         let span_start = (self.range.start() - line_start).to_usize();
         let span_end = cmp::min(span_start + self.range.len().to_usize(), source.len());
-        Level::None.title("").snippet(
-            Snippet::source(source)
-                .line_start(self.display_range.start.line_within_cell().get() as usize)
-                .origin(origin)
-                .annotation(level.span(span_start..span_end)),
-        )
+
+        // Use the display_range of the earliest annotation for the line start in the cell.
+        let cell_line_start = self
+            .module
+            .display_range(TextRange::new(line_start, line_start))
+            .start
+            .line_within_cell()
+            .get() as usize;
+
+        let mut snippet = Snippet::source(source)
+            .line_start(cell_line_start)
+            .origin(origin)
+            .annotation(level.span(span_start..span_end));
+
+        // Add secondary annotations as warning-level labeled spans.
+        for ann in &self.secondary_annotations {
+            let ann_start = ann
+                .range
+                .start()
+                .to_usize()
+                .saturating_sub(line_start.to_usize());
+            let ann_end = cmp::min(ann_start + ann.range.len().to_usize(), source.len());
+            if ann_start <= ann_end && ann_end <= source.len() {
+                snippet =
+                    snippet.annotation(Level::Info.span(ann_start..ann_end).label(&ann.label));
+            }
+        }
+
+        Level::None.title("").snippet(snippet)
     }
 
     pub fn with_severity(&self, severity: Severity) -> Self {
@@ -267,7 +309,18 @@ impl Error {
             severity: error_kind.default_severity(),
             msg_header,
             msg_details,
+            secondary_annotations: Vec::new(),
         }
+    }
+
+    /// Add a secondary labeled annotation to this error. These appear as additional
+    /// underlined spans with labels in the source snippet.
+    pub fn with_annotation(mut self, range: TextRange, label: String) -> Self {
+        self.secondary_annotations.push(SecondaryAnnotation {
+            range,
+            label: label.into_boxed_str(),
+        });
+        self
     }
 
     pub fn display_range(&self) -> &DisplayRange {
@@ -399,6 +452,51 @@ mod tests {
 5 | | X
 6 | | X
   | |__^
+  |
+"#,
+        );
+    }
+
+    #[test]
+    fn test_error_with_secondary_annotations() {
+        // Source: "val * 2" where val is at bytes 0..3, * at 4, 2 at 6
+        let source = "val * 2";
+        let module_info = Module::new(
+            ModuleName::from_str("test"),
+            ModulePath::filesystem(PathBuf::from("test.py")),
+            Arc::new(source.to_owned()),
+        );
+        let error = Error::new(
+            module_info,
+            // Primary span covers the whole expression
+            TextRange::new(TextSize::new(0), TextSize::new(7)),
+            vec1!["`*` is not supported between `int | str` and `int`".to_owned()],
+            ErrorKind::UnsupportedOperation,
+        )
+        .with_annotation(
+            TextRange::new(TextSize::new(0), TextSize::new(3)),
+            "has type `int | str`".to_owned(),
+        )
+        .with_annotation(
+            TextRange::new(TextSize::new(6), TextSize::new(7)),
+            "has type `int`".to_owned(),
+        );
+        let root = PathBuf::new();
+        let mut output = Vec::new();
+        error
+            .write_line(&mut Cursor::new(&mut output), root.as_path(), true)
+            .unwrap();
+
+        assert_eq!(
+            str::from_utf8(&output).unwrap(),
+            r#"ERROR `*` is not supported between `int | str` and `int` [unsupported-operation]
+ --> test.py:1:1
+  |
+1 | val * 2
+  | ---^^^-
+  | |     |
+  | |     info: has type `int`
+  | info: has type `int | str`
   |
 "#,
         );

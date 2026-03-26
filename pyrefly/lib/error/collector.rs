@@ -147,6 +147,34 @@ impl ErrorCollector {
         self.errors.lock().push(err);
     }
 
+    /// Add an error with secondary annotations for richer diagnostics.
+    pub fn add_with_annotations(
+        &self,
+        range: TextRange,
+        info: ErrorInfo,
+        mut msg: Vec1<String>,
+        annotations: Vec<(TextRange, String)>,
+    ) {
+        if self.style == ErrorStyle::Never {
+            return;
+        }
+        let (kind, ctx) = match info {
+            ErrorInfo::Context(ctx) => {
+                let ctx = ctx();
+                (ctx.as_error_kind(), Some(ctx))
+            }
+            ErrorInfo::Kind(kind) => (kind, None),
+        };
+        if let Some(ctx) = ctx {
+            msg.insert(0, ctx.format());
+        }
+        let mut err = Error::new(self.module_info.dupe(), range, msg, kind);
+        for (range, label) in annotations {
+            err = err.with_annotation(range, label);
+        }
+        self.errors.lock().push(err);
+    }
+
     pub fn internal_error(&self, range: TextRange, mut msg: Vec1<String>) {
         msg.push(
             "Sorry, Pyrefly encountered an internal error, this is always a bug in Pyrefly itself"
