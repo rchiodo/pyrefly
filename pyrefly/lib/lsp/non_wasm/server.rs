@@ -243,6 +243,7 @@ use crate::commands::lsp::IndexingMode;
 use crate::config::config::ConfigFile;
 use crate::error::error::Error;
 use crate::lsp::module_helpers::to_real_path;
+use crate::module::bundled::BundledStub;
 use crate::lsp::non_wasm::build_system::should_requery_build_system;
 use crate::lsp::non_wasm::call_hierarchy::convert_external_references_to_incoming_calls;
 use crate::lsp::non_wasm::call_hierarchy::find_function_at_position_in_ast;
@@ -5833,7 +5834,7 @@ impl TspInterface for Server {
         // internal heuristics, not stable directories the client should depend
         // on.
         let mut seen = std::collections::HashSet::new();
-        let paths: Vec<String> = config
+        let mut paths: Vec<String> = config
             .search_path()
             .chain(config.site_package_path())
             .filter_map(|p| {
@@ -5843,6 +5844,20 @@ impl TspInterface for Server {
             })
             .filter(|uri| seen.insert(uri.clone()))
             .collect();
+
+        // Include the materialized typeshed stdlib path so the client can
+        // remap declaration URIs that reference our bundled typeshed.
+        if let Ok(ts) = crate::module::typeshed::typeshed() {
+            if let Ok(ts_path) = ts.materialized_path_on_disk() {
+                if let Ok(url) = Url::from_file_path(&ts_path) {
+                    let uri = url.to_string();
+                    if seen.insert(uri.clone()) {
+                        paths.push(uri);
+                    }
+                }
+            }
+        }
+
         Ok(paths)
     }
 
@@ -5852,18 +5867,26 @@ impl TspInterface for Server {
         line: u32,
         character: u32,
     ) -> Option<pyrefly_types::types::Type> {
+        eprintln!("TSP: get_type_at_position: uri={}, line={}, char={}", uri, line, character);
         let url = Url::parse(uri)
             .ok()
             .or_else(|| Url::from_file_path(uri).ok())?;
         let path = url.to_file_path().ok()?;
+        eprintln!("TSP: parsed path={:?}", path);
 
         let handle = make_open_handle(&self.state, &path);
+        eprintln!("TSP: got handle, getting transaction...");
         let transaction = self.state.transaction();
+        eprintln!("TSP: got transaction, getting module_info...");
         let module_info = transaction.get_module_info(&handle)?;
+        eprintln!("TSP: got module_info, converting position...");
         let position = module_info.from_lsp_position(
             lsp_types::Position { line, character },
             /* notebook_cell */ None,
         );
-        transaction.get_type_at(&handle, position)
+        eprintln!("TSP: calling get_type_at...");
+        let result = transaction.get_type_at(&handle, position);
+        eprintln!("TSP: get_type_at returned: is_some={}", result.is_some());
+        result
     }
 }
