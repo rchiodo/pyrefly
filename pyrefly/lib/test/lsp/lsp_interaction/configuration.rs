@@ -457,7 +457,7 @@ fn test_disable_language_services() {
     interaction
         .client
         .definition("foo.py", 6, 16)
-        .expect_response(json!([]))
+        .expect_response(json!(null))
         .expect("Failed to receive expected response");
 
     interaction.shutdown().expect("Failed to shutdown");
@@ -506,7 +506,7 @@ fn test_disable_language_services_default_workspace() {
     interaction
         .client
         .definition("foo.py", 6, 16)
-        .expect_response(json!([]))
+        .expect_response(json!(null))
         .expect("Failed to receive expected response");
 
     interaction.shutdown().expect("Failed to shutdown");
@@ -584,7 +584,7 @@ fn test_disable_specific_language_services_via_analysis_config() {
     interaction
         .client
         .hover("foo.py", 6, 17)
-        .expect_response(json!({"contents": []}))
+        .expect_response(json!(null))
         .expect("Failed to receive expected response");
 
     // But definition should still work
@@ -1082,7 +1082,7 @@ fn test_initialization_options_respected() {
     interaction
         .client
         .definition("foo.py", 6, 16)
-        .expect_response(json!([]))
+        .expect_response(json!(null))
         .expect("Failed to receive expected response");
 
     interaction.shutdown().expect("Failed to shutdown");
@@ -1114,7 +1114,7 @@ fn test_initialization_options_without_workspace_folders() {
     interaction
         .client
         .definition("foo.py", 6, 16)
-        .expect_response(json!([]))
+        .expect_response(json!(null))
         .expect("Failed to receive expected response");
 
     interaction.shutdown().expect("Failed to shutdown");

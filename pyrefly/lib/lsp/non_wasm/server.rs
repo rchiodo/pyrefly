@@ -78,7 +78,6 @@ use lsp_types::GlobPattern;
 use lsp_types::GotoDefinitionParams;
 use lsp_types::GotoDefinitionResponse;
 use lsp_types::Hover;
-use lsp_types::HoverContents;
 use lsp_types::HoverParams;
 use lsp_types::HoverProviderCapability;
 use lsp_types::ImplementationProviderCapability;
@@ -1812,12 +1811,9 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        let default_response = GotoDefinitionResponse::Array(Vec::new());
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .goto_definition(&transaction, params)
-                                .unwrap_or(default_response)),
+                            Ok(self.goto_definition(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<GotoDeclaration>(&x) {
@@ -1834,12 +1830,9 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        let default_response = GotoDefinitionResponse::Array(Vec::new());
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .goto_declaration(&transaction, params)
-                                .unwrap_or(default_response)),
+                            Ok(self.goto_declaration(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<GotoTypeDefinition>(&x) {
@@ -1856,12 +1849,9 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        let default_response = GotoTypeDefinitionResponse::Array(Vec::new());
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .goto_type_definition(&transaction, params)
-                                .unwrap_or(default_response)),
+                            Ok(self.goto_type_definition(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<GotoImplementation>(&x) {
@@ -1895,9 +1885,7 @@ impl Server {
                         let sub_task_telemetry = SubTaskTelemetry::new(telemetry, telemetry_event);
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .code_action(&mut transaction, params, sub_task_telemetry)
-                                .unwrap_or_default()),
+                            Ok(self.code_action(&mut transaction, params, sub_task_telemetry)),
                         ));
                     }
                 } else if let Some(params) = as_request::<Completion>(&x) {
@@ -2030,13 +2018,9 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        let default_response = Hover {
-                            contents: HoverContents::Array(Vec::new()),
-                            range: None,
-                        };
                         self.send_response(new_response(
                             x.id,
-                            Ok(self.hover(&transaction, params).unwrap_or(default_response)),
+                            Ok(self.hover(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<InlayHintRequest>(&x) {
@@ -2048,7 +2032,7 @@ impl Server {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         self.send_response(new_response(
                             x.id,
-                            Ok(self.inlay_hints(&transaction, params).unwrap_or_default()),
+                            Ok(self.inlay_hints(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<SemanticTokensFullRequest>(&x) {
@@ -2058,15 +2042,9 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        let default_response = SemanticTokensResult::Tokens(SemanticTokens {
-                            result_id: None,
-                            data: Vec::new(),
-                        });
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .semantic_tokens_full(&transaction, params)
-                                .unwrap_or(default_response)),
+                            Ok(self.semantic_tokens_full(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<SemanticTokensRangeRequest>(&x) {
@@ -2076,15 +2054,9 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        let default_response = SemanticTokensRangeResult::Tokens(SemanticTokens {
-                            result_id: None,
-                            data: Vec::new(),
-                        });
                         self.send_response(new_response(
                             x.id,
-                            Ok(self
-                                .semantic_tokens_ranged(&transaction, params)
-                                .unwrap_or(default_response)),
+                            Ok(self.semantic_tokens_ranged(&transaction, params)),
                         ));
                     }
                 } else if let Some(params) = as_request::<DocumentSymbolRequest>(&x) {
@@ -2096,10 +2068,9 @@ impl Server {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         self.send_response(new_response(
                             x.id,
-                            Ok(DocumentSymbolResponse::Nested(
-                                self.hierarchical_document_symbols(&transaction, params)
-                                    .unwrap_or_default(),
-                            )),
+                            Ok(self
+                                .hierarchical_document_symbols(&transaction, params)
+                                .map(DocumentSymbolResponse::Nested)),
                         ));
                     }
                 } else if let Some(params) = as_request::<WorkspaceSymbolRequest>(&x) {
