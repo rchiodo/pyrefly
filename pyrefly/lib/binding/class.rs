@@ -71,7 +71,6 @@ use crate::binding::binding::KeyVarianceCheck;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::CurrentIdx;
 use crate::binding::bindings::LegacyTParamCollector;
-use crate::binding::django::DjangoFieldInfo;
 use crate::binding::pydantic::PydanticConfigDict;
 use crate::binding::scope::ClassIndices;
 use crate::binding::scope::FlowStyle;
@@ -385,27 +384,13 @@ impl<'a> BindingsBuilder<'a> {
         );
         let field_definitions = self.scopes.finish_class_and_get_field_definitions();
 
-        let mut django_primary_key_field: Option<Name> = None;
-        let mut django_foreign_key_fields: Vec<Name> = Vec::new();
-        let mut django_fields_with_choices: Vec<Name> = Vec::new();
+        let django_field_info = self.extract_django_fields_from_class_body(&field_definitions);
         let mut fields = SmallMap::with_capacity(field_definitions.len());
         for (name, (definition, range)) in field_definitions.into_iter_hashed() {
             if let ClassFieldDefinition::AssignedInBody { value, .. } = &definition
                 && let ExprOrBinding::Expr(e) = value.as_ref()
             {
                 self.extract_pydantic_config_dict(e, &name, &mut pydantic_config_dict);
-
-                if self.extract_django_primary_key(e) {
-                    django_primary_key_field = Some(name.clone().into_key());
-                }
-
-                if self.extract_django_foreign_key(e) {
-                    django_foreign_key_fields.push(name.clone().into_key());
-                }
-
-                if self.extract_django_choices(e) {
-                    django_fields_with_choices.push(name.clone().into_key());
-                }
             }
             let (is_initialized_on_class, is_annotated, is_defined_in_class_body) =
                 match &definition {
@@ -515,11 +500,7 @@ impl<'a> BindingsBuilder<'a> {
                 decorators: decorators.into_boxed_slice(),
                 is_new_type: false,
                 pydantic_config_dict,
-                django_field_info: Box::new(DjangoFieldInfo {
-                    primary_key_field: django_primary_key_field,
-                    foreign_key_fields: django_foreign_key_fields,
-                    fields_with_choices: django_fields_with_choices,
-                }),
+                django_field_info: Box::new(django_field_info),
             },
         );
         self.insert_binding_idx(
