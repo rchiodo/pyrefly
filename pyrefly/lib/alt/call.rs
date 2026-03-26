@@ -698,6 +698,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         let hint = None; // discard hint
         let class_metadata = self.get_metadata_for_class(cls.class_object());
+        // Tracks whether we've already recorded a trace for IDE features.
+        // Priority: metaclass __call__ > overridden __new__ > __init__.
+        let mut recorded_trace = false;
         if let Some(ret) =
             self.call_metaclass(&cls, arguments_range, args, keywords, errors, context, hint)
         {
@@ -712,6 +715,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     );
                 }
                 self.record_resolved_trace(arguments_range, metaclass_dunder_call);
+                recorded_trace = true;
             }
             // Enum construction is routed through EnumMeta.__call__, which performs
             // member lookup by value. A custom enum __new__ is used for member creation
@@ -774,7 +778,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         callee_range,
                     );
                 }
-                self.record_resolved_trace(arguments_range, new_method);
+                if !recorded_trace {
+                    self.record_resolved_trace(arguments_range, new_method);
+                    recorded_trace = true;
+                }
                 if self.is_compatible_constructor_return(&ret, cls.class_object()) {
                     dunder_new_ret = Some(ret);
                 } else if !matches!(ret, Type::Any(AnyStyle::Error | AnyStyle::Implicit)) {
@@ -829,7 +836,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     callee_range,
                 );
             }
-            self.record_resolved_trace(arguments_range, init_method);
+            if !recorded_trace {
+                self.record_resolved_trace(arguments_range, init_method);
+            }
         }
         if class_metadata.is_pydantic_model()
             && let Some(dataclass) = class_metadata.dataclass_metadata()

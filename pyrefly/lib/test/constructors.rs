@@ -922,3 +922,22 @@ def check_subclass(d: D) -> None:
     reveal_type(type(d)())  # E: revealed type: list[D]
     "#,
 );
+
+testcase!(
+    test_metaclass_call_with_overridden_new,
+    r#"
+from typing import Self, assert_type
+
+class Meta(type):
+    def __call__[T](cls: type[T], x: int) -> T: ...
+
+class C(metaclass=Meta):
+    def __new__(cls, x: int) -> Self:
+        return super().__new__(cls)
+
+c = C(5)
+assert_type(c, C)
+C()     # E: Missing argument `x`  # E: Missing argument `x` in function `C.__new__`
+C("5")  # E: Argument `Literal['5']` is not assignable to parameter `x` with type `int`  # E: Argument `Literal['5']` is not assignable to parameter `x` with type `int` in function `C.__new__`
+    "#,
+);

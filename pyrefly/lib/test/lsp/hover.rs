@@ -1176,6 +1176,46 @@ Person("Alice", 25)
 }
 
 #[test]
+fn hover_on_namedtuple_constructor_shows_field_signature() {
+    let code = r#"
+from typing import NamedTuple
+
+class Test(NamedTuple):
+    a: str
+    b: int
+
+Test()
+#^
+"#;
+    let report = get_batched_lsp_operations_report_allow_error(
+        &[("main", code)],
+        |state, handle, position| match get_hover(&state.transaction(), handle, position, false) {
+            Some(Hover {
+                contents: HoverContents::Markup(markup),
+                ..
+            }) => markup.value,
+            _ => "None".to_owned(),
+        },
+    );
+    assert_eq!(
+        r#"
+# main.py
+8 | Test()
+     ^
+```python
+(method) __init__: def __init__(
+    cls: type[Test],
+    a: str,
+    b: int
+) -> Test: ...
+```
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn hover_over_in_keyword_in_for_loop() {
     let code = r#"
 for x in [1, 2, 3]:
