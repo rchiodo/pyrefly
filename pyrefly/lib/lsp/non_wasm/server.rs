@@ -2186,18 +2186,19 @@ impl Server {
                 } else if &x.method == "pyrefly/textDocument/typeErrorDisplayStatus" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
                     self.set_file_stats(text_document.uri.clone(), telemetry_event);
-                    if !self
-                        .open_notebook_cells
-                        .read()
-                        .contains_key(&text_document.uri)
-                        && let Some(path) = self.path_for_uri(&text_document.uri)
+                    let path = if let Some(notebook_path) =
+                        self.open_notebook_cells.read().get(&text_document.uri)
                     {
+                        Some(notebook_path.clone())
+                    } else {
+                        self.path_for_uri(&text_document.uri)
+                    };
+                    if let Some(path) = path {
                         self.send_response(new_response(
                             x.id,
                             Ok(self.type_error_display_status(path.as_path())),
                         ));
                     } else {
-                        // TODO(yangdanny): handle notebooks
                         self.send_response(new_response(
                             x.id,
                             Ok(TypeErrorDisplayStatus::NoConfigFile),

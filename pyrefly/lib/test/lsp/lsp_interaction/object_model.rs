@@ -1884,6 +1884,35 @@ impl LspInteraction {
         }))
     }
 
+    /// Sends a typeErrorDisplayStatus request for a notebook cell and returns the status string.
+    pub fn type_error_display_status_cell(&self, file_name: &str, cell_name: &str) -> String {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        let id = self.client.next_request_id();
+        self.client.send_message(Message::Request(Request {
+            id: id.clone(),
+            method: "pyrefly/textDocument/typeErrorDisplayStatus".to_owned(),
+            params: json!({
+                "uri": cell_uri
+            }),
+            activity_key: None,
+        }));
+        self.client
+            .expect_message(
+                "Response for pyrefly/textDocument/typeErrorDisplayStatus",
+                |msg| {
+                    if let Message::Response(x) = msg
+                        && x.id == id
+                    {
+                        let result: String = serde_json::from_value(x.result.unwrap()).unwrap();
+                        Some(Ok(result))
+                    } else {
+                        None
+                    }
+                },
+            )
+            .unwrap()
+    }
+
     /// Testing helper: Sets a flag on the server to prevent the next recheck from committing.
     /// The recheck queue task will loop without committing the transaction until
     /// `continue_recheck` is called.
