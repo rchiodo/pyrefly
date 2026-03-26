@@ -219,7 +219,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 fn is_valid_literal(x: &Type) -> bool {
                     match x {
                         Type::None | Type::Literal(_) | Type::Any(AnyStyle::Error) => true,
-                        Type::Annotated(inner) => is_valid_literal(inner),
+                        Type::Annotated(inner, _) => is_valid_literal(inner),
                         Type::Union(box Union { members: xs, .. }) => {
                             xs.iter().all(is_valid_literal)
                         }
@@ -561,7 +561,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ),
             SpecialForm::Annotated if arguments.len() > 1 => {
                 let inner = self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors);
-                Type::Annotated(Box::new(inner))
+                Type::Annotated(Box::new(inner), Box::new([]))
             }
             SpecialForm::Annotated => self.error(
                 errors,

@@ -991,7 +991,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             && let Forallable::TypeAlias(type_alias) = &forall.body
                             && let quantified = match self.get_type_alias(type_alias).as_type() {
                                 Type::Type(box Type::Quantified(q))
-                                | Type::Annotated(box Type::Quantified(q)) => Some(q),
+                                | Type::Annotated(box Type::Quantified(q), _) => Some(q),
                                 _ => None,
                             }
                             && let Some(quantified) = quantified
