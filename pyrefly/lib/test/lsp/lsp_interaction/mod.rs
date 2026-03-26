@@ -20,6 +20,7 @@ mod definition;
 mod diagnostic;
 mod did_change;
 mod document_symbols;
+mod empty_response_reason;
 mod file_watcher;
 mod folding_range;
 mod hover;

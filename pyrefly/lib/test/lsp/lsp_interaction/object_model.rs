@@ -1295,7 +1295,6 @@ pub struct TestTelemetry {
 }
 
 impl TestTelemetry {
-    #[expect(dead_code)]
     pub fn new() -> Self {
         Self {
             subscribers: Mutex::new(Vec::new()),
@@ -1304,7 +1303,6 @@ impl TestTelemetry {
 
     /// Register a new subscriber. Returns a [`Receiver`] that will receive all
     /// future [`RecordedTelemetryEvent`]s wrapped in [`Arc`].
-    #[expect(dead_code)]
     pub fn subscribe(&self) -> Receiver<Arc<RecordedTelemetryEvent>> {
         let (sender, receiver) = crossbeam_channel::unbounded();
         self.subscribers
