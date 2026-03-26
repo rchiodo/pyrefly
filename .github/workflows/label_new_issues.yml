@@ -40,7 +40,7 @@ jobs:
             }
 
             // Framework/library mentions
-            if (text.includes('pydantic')) {
+            if (text.includes('pydantic') || text.includes('basemodel')) {
               labels.push('pydantic');
             }
             if (text.includes('django')) {
@@ -51,6 +51,11 @@ jobs:
             }
             if (text.includes('sqlalchemy')) {
               labels.push('sqlalchemy');
+            }
+
+            // Language server issues
+            if (text.includes('hover') || text.includes('editor') || text.includes('lspconfig') || text.includes('completion') || text.includes('highlight') || text.includes('semantic')) {
+              labels.push('language-server');
             }
 
             if (labels.length > 0) {
