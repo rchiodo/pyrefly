@@ -13,6 +13,24 @@ jobs:
     runs-on: ubuntu-latest
     name: Label the PR size
     steps:
+      - name: Remove existing size labels
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
+        continue-on-error: true
+        with:
+          script: |
+            const sizeLabels = ['size/xs', 'size/s', 'size/m', 'size/l', 'size/xl'];
+            for (const label of sizeLabels) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  name: label,
+                });
+              } catch (e) {
+                // Label may not exist on the PR; ignore errors
+              }
+            }
       - uses: codelytv/pr-size-labeler@4ec67706cd878fbc1c8db0a5dcd28b6bb412e85a # v1
         with:
           xs_label: 'size/xs'
