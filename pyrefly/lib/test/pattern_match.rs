@@ -813,6 +813,36 @@ def test_multi_match2(o1: object, o2: object) -> None:
 );
 
 testcase!(
+    bug = "OR patterns in match cases not recognized for exhaustiveness with attribute subject",
+    test_exhaustive_enum_or_pattern_no_missing_return,
+    r#"
+from enum import StrEnum
+
+class ParamKind(StrEnum):
+    POSITIONAL_ONLY = "positional-only"
+    POSITIONAL_OR_KEYWORD = "positional or keyword"
+    VAR_POSITIONAL = "variadic positional"
+    KEYWORD_ONLY = "keyword-only"
+    VAR_KEYWORD = "variadic keyword"
+
+class Param:
+    kind: ParamKind
+    name: str
+
+    def key(self, index: int) -> int | str:  # E: missing an explicit `return`
+        match self.kind:
+            case ParamKind.POSITIONAL_ONLY:
+                return index
+            case ParamKind.KEYWORD_ONLY | ParamKind.POSITIONAL_OR_KEYWORD:
+                return self.name
+            case ParamKind.VAR_POSITIONAL:
+                return "*"
+            case ParamKind.VAR_KEYWORD:
+                return "**"
+"#,
+);
+
+testcase!(
     test_match_multi_subject_with_mapping_pattern,
     r#"
 from typing import Any
