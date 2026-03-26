@@ -934,6 +934,7 @@ struct ScopeMethod {
 
 #[derive(Clone, Debug)]
 struct ScopeFunction {
+    name: Identifier,
     parameters: SmallMap<Name, ParameterUsage>,
     yields_and_returns: YieldsAndReturns,
     is_async: bool,
@@ -979,15 +980,10 @@ pub struct UnusedVariable {
     pub range: TextRange,
 }
 
-impl Default for ScopeFunction {
-    fn default() -> Self {
-        Self::new(false)
-    }
-}
-
 impl ScopeFunction {
-    fn new(is_async: bool) -> Self {
+    fn new(name: Identifier, is_async: bool) -> Self {
         Self {
+            name,
             parameters: SmallMap::new(),
             yields_and_returns: Default::default(),
             is_async,
@@ -1166,18 +1162,18 @@ impl Scope {
         )
     }
 
-    pub fn function(range: TextRange, is_async: bool) -> Self {
+    pub fn function(range: TextRange, name: Identifier, is_async: bool) -> Self {
         Self::new(
             range,
             FlowBarrier::BlockFlow,
-            ScopeKind::Function(ScopeFunction::new(is_async)),
+            ScopeKind::Function(ScopeFunction::new(name, is_async)),
         )
     }
-    pub fn lambda(range: TextRange, is_async: bool) -> Self {
+    pub fn lambda(range: TextRange, name: Identifier, is_async: bool) -> Self {
         Self::new(
             range,
             FlowBarrier::AllowFlowUnchecked,
-            ScopeKind::Function(ScopeFunction::new(is_async)),
+            ScopeKind::Function(ScopeFunction::new(name, is_async)),
         )
     }
 
@@ -1390,6 +1386,26 @@ impl Scopes {
     pub fn in_function_scope(&self) -> bool {
         self.iter_rev()
             .any(|scope| matches!(scope.kind, ScopeKind::Function(_) | ScopeKind::Method(_)))
+    }
+
+    /// Reconstruct the current `NestingContext` from the scope stack.
+    pub fn nesting_context(&self) -> NestingContext {
+        let mut ctx = NestingContext::toplevel();
+        for node in self.scopes.iter() {
+            match &node.scope.kind {
+                ScopeKind::Class(c) => {
+                    ctx = NestingContext::class(ShortIdentifier::new(&c.name), ctx);
+                }
+                ScopeKind::Function(f) => {
+                    ctx = NestingContext::function(ShortIdentifier::new(&f.name), ctx);
+                }
+                ScopeKind::Method(m) => {
+                    ctx = NestingContext::function(ShortIdentifier::new(&m.name), ctx);
+                }
+                _ => {}
+            }
+        }
+        ctx
     }
 
     pub fn current_static_contains(&self, name: &Name) -> bool {
@@ -1613,7 +1629,7 @@ impl Scopes {
         if in_class {
             self.push(Scope::method(range, name.clone(), is_async));
         } else {
-            self.push(Scope::function(range, is_async));
+            self.push(Scope::function(range, name.clone(), is_async));
         }
     }
 

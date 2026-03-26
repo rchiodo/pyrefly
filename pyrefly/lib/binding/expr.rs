@@ -30,6 +30,7 @@ use ruff_python_ast::ExprYieldFrom;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::Operator;
 use ruff_python_ast::StringLiteral;
+use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
@@ -469,7 +470,11 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
         }
-        self.scopes.push(Scope::lambda(lambda.range, false));
+        self.scopes.push(Scope::lambda(
+            lambda.range,
+            Identifier::new("<lambda>", lambda.range),
+            false,
+        ));
         let owner = usage.current_idx();
         if let Some(parameters) = &lambda.parameters {
             for x in parameters {
@@ -547,6 +552,41 @@ impl<'a> BindingsBuilder<'a> {
         } else {
             None
         }
+    }
+
+    fn bind_inline_functional_named_tuple(&mut self, call: &mut ExprCall, kind: SpecialExport) {
+        let Some(Expr::StringLiteral(name)) = call.arguments.args.first() else {
+            return;
+        };
+        let class_name = Identifier::new(Name::new(name.value.to_str()), name.range());
+        let parent = self.scopes.nesting_context();
+        let (_arg_name, members) = call
+            .arguments
+            .args
+            .split_first_mut()
+            .expect("caller guarantees at least one arg");
+        let class_idx = match kind {
+            SpecialExport::CollectionsNamedTuple => self.synthesize_collections_named_tuple_def(
+                class_name,
+                &parent,
+                &mut call.func,
+                members,
+                &mut call.arguments.keywords,
+                false,
+            ),
+            SpecialExport::TypingNamedTuple => self.synthesize_typing_named_tuple_def(
+                class_name,
+                &parent,
+                &mut call.func,
+                members,
+                false,
+            ),
+            _ => unreachable!("caller only passes CollectionsNamedTuple or TypingNamedTuple"),
+        };
+        self.insert_binding(
+            Key::Anon(call.range),
+            Binding::ClassDef(class_idx, Box::new([])),
+        );
     }
 
     fn record_yield(&mut self, mut x: ExprYield) {
@@ -660,6 +700,17 @@ impl<'a> BindingsBuilder<'a> {
                     self.finish_branch();
                     self.finish_bool_op_fork();
                 }
+            }
+            Expr::Call(call)
+                if matches!(
+                    self.as_special_export(&call.func),
+                    Some(SpecialExport::CollectionsNamedTuple | SpecialExport::TypingNamedTuple)
+                ) && matches!(call.arguments.args.first(), Some(Expr::StringLiteral(_))) =>
+            {
+                let kind = self
+                    .as_special_export(&call.func)
+                    .expect("guard already matched");
+                self.bind_inline_functional_named_tuple(call, kind);
             }
             Expr::Call(ExprCall {
                 node_index: _,

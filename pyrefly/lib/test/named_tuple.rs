@@ -80,6 +80,58 @@ Point3(1)  # E: Missing argument `y` in function `Point3.__new__`
     "#,
 );
 
+// Regression test for https://github.com/facebook/pyrefly/issues/2811
+testcase!(
+    test_inline_collections_namedtuple_constructor,
+    r#"
+import collections
+from typing import Any, assert_type
+
+device = collections.namedtuple("FakeDevice", ["type", "index"])("lazy-caster", 0)
+assert_type(device.type, Any)
+assert_type(device.index, Any)
+    "#,
+);
+
+// Regression test for https://github.com/facebook/pyrefly/issues/2811
+testcase!(
+    test_inline_typing_namedtuple_constructor,
+    r#"
+from typing import NamedTuple, assert_type
+
+point = NamedTuple("Point", [("x", int), ("y", int)])(1, 2)
+assert_type(point.x, int)
+assert_type(point.y, int)
+    "#,
+);
+
+// Verify that the constructor call arguments of an inline namedtuple are type-checked.
+testcase!(
+    test_inline_typing_namedtuple_constructor_bad_args,
+    r#"
+from typing import NamedTuple
+
+point = NamedTuple("Point", [("x", int), ("y", int)])("not_int", "also_not_int")  # E: is not assignable to parameter `x`  # E: is not assignable to parameter `y`
+    "#,
+);
+
+// Namedtuple elements like `index` and `count` shadow tuple methods but are
+// not true overrides — verify no spurious BadOverride error.
+testcase!(
+    test_named_tuple_element_shadows_tuple_method,
+    r#"
+from typing import NamedTuple, assert_type
+
+class MyTuple(NamedTuple):
+    index: int
+    count: str
+
+t = MyTuple(index=1, count="a")
+assert_type(t.index, int)
+assert_type(t.count, str)
+    "#,
+);
+
 // Regression test for https://github.com/facebook/pyrefly/issues/2734
 // Starred expressions in field lists can't be fully resolved statically,
 // so the namedtuple has dynamic fields. String literals alongside the
