@@ -843,6 +843,20 @@ class Param:
 );
 
 testcase!(
+    bug = "alias capture leaks into other case branches without being flagged as uninitialized",
+    test_match_alias_capture_uninitialized_in_other_branch,
+    r#"
+def f(items: list[object]) -> None:
+    for item in items:
+        match item:
+            case str() as inner:
+                print(inner)
+            case _:
+                print(inner)
+"#,
+);
+
+testcase!(
     test_match_multi_subject_with_mapping_pattern,
     r#"
 from typing import Any
