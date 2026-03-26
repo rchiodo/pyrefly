@@ -66,6 +66,7 @@ use crate::error::legacy::LegacyErrors;
 use crate::error::legacy::severity_to_str;
 use crate::error::summarize::print_error_summary;
 use crate::error::suppress;
+use crate::error::suppress::CommentLocation;
 use crate::error::suppress::SerializedError;
 use crate::module::typeshed::stdlib_search_path;
 use crate::report;
@@ -998,16 +999,16 @@ impl CheckArgs {
         // Suppress operates on ordinary diagnostics only — directives are
         // structurally excluded since they live in `directives`, not `ordinary_errors`.
         if self.behavior.suppress_errors {
-            // TODO: Move this into separate command
+            // TODO: Deprecate this in favor of `pyrefly suppress`
             let serialized_errors: Vec<SerializedError> = ordinary_errors
                 .iter()
                 .filter_map(SerializedError::from_error)
                 .filter(|e| !e.is_unused_ignore())
                 .collect();
-            suppress::suppress_errors(serialized_errors);
+            suppress::suppress_errors(serialized_errors, CommentLocation::LineBefore);
         }
         if self.behavior.remove_unused_ignores {
-            // TODO: Move this into separate command
+            // TODO: Deprecate this in favor of `pyrefly suppress`
             let collected = loads.collect_errors();
             let unused_errors = loads.collect_unused_ignore_errors(&collected);
             suppress::remove_unused_ignores(unused_errors);

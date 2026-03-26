@@ -34,9 +34,10 @@ use crate::error::error::Error;
 use crate::error::expectation::Expectation;
 use crate::state::load::Load;
 
-/// Extracts `(start_line, end_line)` ranges for all multi-line f-strings and
-/// t-strings from the AST. Single-line f/t-strings (where start == end) are
-/// excluded. The returned list is sorted by start_line.
+/// Extracts `(start_line, end_line)` ranges for all multi-line string
+/// literals from the AST, including f-strings, t-strings, regular strings,
+/// and byte strings. Single-line literals (where start == end) are excluded.
+/// The returned list is sorted by start_line.
 pub fn sorted_multi_line_fstring_ranges(
     ast: &ModModule,
     module: &Module,
@@ -46,6 +47,8 @@ pub fn sorted_multi_line_fstring_ranges(
         let text_range = match expr {
             Expr::FString(x) => Some(x.range),
             Expr::TString(x) => Some(x.range),
+            Expr::StringLiteral(x) => Some(x.range),
+            Expr::BytesLiteral(x) => Some(x.range),
             _ => None,
         };
         if let Some(range) = text_range {

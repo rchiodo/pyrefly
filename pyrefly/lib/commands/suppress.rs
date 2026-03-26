@@ -16,6 +16,7 @@ use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::files::FilesArgs;
 use crate::commands::util::CommandExitStatus;
 use crate::error::suppress;
+use crate::error::suppress::CommentLocation;
 use crate::error::suppress::SerializedError;
 
 /// Suppress type errors by adding ignore comments to source files.
@@ -37,6 +38,11 @@ pub struct SuppressArgs {
     /// Remove unused ignore comments instead of adding suppressions.
     #[arg(long)]
     remove_unused: bool,
+
+    /// Where to place suppression comments: on the line before the error
+    /// (`line-before`, the default) or on the same line (`same-line`).
+    #[arg(long, default_value = "line-before")]
+    comment_location: CommentLocation,
 }
 
 impl SuppressArgs {
@@ -110,7 +116,7 @@ impl SuppressArgs {
             };
 
             // Apply suppressions
-            suppress::suppress_errors(serialized_errors);
+            suppress::suppress_errors(serialized_errors, self.comment_location);
         }
 
         Ok(CommandExitStatus::Success)
