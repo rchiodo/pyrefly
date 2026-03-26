@@ -34,6 +34,7 @@ use starlark_map::small_set::SmallSet;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
+use crate::alt::class::django::is_django_choices_subclass;
 use crate::alt::solve::TypeFormContext;
 use crate::alt::types::abstract_class::AbstractClassMembers;
 use crate::alt::types::class_metadata::ClassMetadata;
@@ -714,13 +715,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
         errors: &ErrorCollector,
     ) -> Option<EnumMetadata> {
-        let is_django = bases_with_metadata.iter().any(|(base, base_meta)| {
-            base.has_toplevel_qname(ModuleName::django_models_enums().as_str(), "Choices")
-                || base_meta
-                    .enum_metadata()
-                    .as_ref()
-                    .is_some_and(|meta| meta.is_django)
-        });
+        let is_django = is_django_choices_subclass(bases_with_metadata);
 
         if let Some(metaclass) = metaclass
             && self

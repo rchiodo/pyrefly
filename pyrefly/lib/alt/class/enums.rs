@@ -15,7 +15,6 @@ use pyrefly_types::annotation::Annotation;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::literal::LitEnum;
 use pyrefly_types::read_only::ReadOnlyReason;
-use pyrefly_types::tuple::Tuple;
 use ruff_python_ast::helpers::is_dunder;
 use ruff_python_ast::helpers::is_sunder;
 use ruff_python_ast::name::Name;
@@ -25,6 +24,7 @@ use starlark_map::small_set::SmallSet;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::class_field::ClassAttribute;
+use crate::alt::class::django::transform_django_enum_value;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::EnumMetadata;
 use crate::binding::binding::ClassFieldDefinition;
@@ -220,14 +220,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     fn enum_literal_to_value_type(&self, lit_enum: LitEnum, is_django: bool) -> Type {
-        let ty = match lit_enum.ty {
-            Type::Tuple(Tuple::Concrete(elements)) if is_django && elements.len() >= 2 => {
-                // The last element is the label.
-                let value_len = elements.len() - 1;
-                self.heap
-                    .mk_concrete_tuple(elements.into_iter().take(value_len).collect())
-            }
-            ty => ty,
+        let ty = if is_django {
+            transform_django_enum_value(lit_enum.ty, self.heap)
+        } else {
+            lit_enum.ty
         };
         let int_ty = self.heap.mk_class_type(self.stdlib.int().clone());
         ty.transform(&mut |t| {
