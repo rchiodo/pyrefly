@@ -556,6 +556,37 @@ def f(x: TupleChild[int, str]):
 );
 
 testcase!(
+    test_tuple_subclass_getitem_override,
+    r#"
+from typing import assert_type
+
+class Foo(tuple[int, ...]):
+    def __getitem__(self, name: str) -> int:  # E: `Foo.__getitem__` has type
+        ...
+
+def test(foo: Foo) -> None:
+    assert_type(foo["test"], int)
+    "#,
+);
+
+testcase!(
+    test_tuple_subclass_inherited_getitem_override,
+    r#"
+from typing import assert_type
+
+class Parent(tuple[int, ...]):
+    def __getitem__(self, name: str) -> int:  # E: `Parent.__getitem__` has type
+        ...
+
+class Child(Parent):
+    pass
+
+def test(c: Child) -> None:
+    assert_type(c["test"], int)
+    "#,
+);
+
+testcase!(
     test_starred_empty_tuple_no_panic,
     r#"
 (),*()
