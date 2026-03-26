@@ -2271,3 +2271,23 @@ def f(x: float):
     reveal_type(max(0, x))  # E: revealed type: float
     "#,
 );
+
+testcase!(
+    bug = "Pyrefly gets Unknown rather than a precise return type",
+    test_open_return_type,
+    r#"
+from io import BufferedReader, TextIOWrapper
+from typing import Any, assert_type, BinaryIO
+def f(fi: Any, buffering1: int, buffering2: Any):
+    with open(fi, "r") as f:
+        assert_type(f, TextIOWrapper)  # E: Unknown
+    with open(fi, "rb") as f:
+        assert_type(f, BufferedReader)  # E: Unknown
+    with open(fi, "rb", 1) as f:
+        assert_type(f, BufferedReader)  # E: Unknown
+    with open(fi, "rb", buffering1) as f:
+        assert_type(f, BinaryIO)  # E: Unknown
+    with open(fi, "rb", buffering2) as f:
+        assert_type(f, Any)
+    "#,
+);
