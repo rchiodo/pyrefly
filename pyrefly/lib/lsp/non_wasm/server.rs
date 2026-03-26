@@ -8,9 +8,12 @@
 use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::hash_map::Entry;
+use std::hash::Hasher;
 use std::io::BufReader;
 use std::io::Stdin;
+use std::io::Write;
 use std::iter::once;
 use std::num::NonZeroUsize;
 use std::path::Path;
@@ -229,6 +232,7 @@ use serde_json::Value;
 use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use uuid::Uuid;
@@ -322,7 +326,7 @@ pub struct InitializeInfo {
     pub supports_diagnostic_markdown: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DiagnosticSource {
     // The diagnostic comes from an in-progress transaction on the recheck thread
@@ -574,40 +578,6 @@ impl ServerConnection {
             ));
         }
     }
-
-    fn publish_diagnostics(
-        &self,
-        diags: SmallMap<PathBuf, Vec<Diagnostic>>,
-        notebook_cell_urls: SmallMap<PathBuf, Url>,
-        version_info: HashMap<PathBuf, i32>,
-        source: DiagnosticSource,
-        diagnostic_markdown_support: bool,
-    ) {
-        for (path, diags) in diags {
-            if let Some(url) = notebook_cell_urls.get(&path) {
-                self.publish_diagnostics_for_uri(
-                    url.clone(),
-                    diags,
-                    None,
-                    source,
-                    diagnostic_markdown_support,
-                )
-            } else {
-                let path = path.absolutize();
-                let version = version_info.get(&path).copied();
-                match Url::from_file_path(&path) {
-                    Ok(uri) => self.publish_diagnostics_for_uri(
-                        uri,
-                        diags,
-                        version,
-                        source,
-                        diagnostic_markdown_support,
-                    ),
-                    Err(_) => eprint!("Unable to convert path to uri: {path:?}"),
-                }
-            }
-        }
-    }
 }
 
 fn diagnostic_markdown_support(params: &Value) -> bool {
@@ -766,6 +736,8 @@ pub struct Server {
     /// should be mapped through here in case they correspond to a cell.
     open_notebook_cells: RwLock<HashMap<Url, PathBuf>>,
     open_files: RwLock<HashMap<PathBuf, Arc<LspFile>>>,
+    /// Last published fingerprint for unversioned file-backed workspace diagnostics.
+    published_workspace_diagnostics: Mutex<HashMap<Url, u64>>,
     /// Tracks URIs (including virtual/untitled ones) to synthetic on-disk paths so we can
     /// treat them like regular files throughout the server.
     unsaved_file_tracker: UnsavedFileTracker,
@@ -1388,6 +1360,112 @@ pub fn lsp_loop(
 
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
+
+    fn clear_published_workspace_diagnostics(&self) {
+        self.published_workspace_diagnostics.lock().clear();
+    }
+
+    fn workspace_diagnostics_fingerprint(diags: &[Diagnostic]) -> u64 {
+        struct HasherWriter(DefaultHasher);
+
+        impl Write for HasherWriter {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.write(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        // Adapter so serde_json can stream JSON bytes directly into the hasher without allocating.
+        let mut writer = HasherWriter(DefaultHasher::new());
+        serde_json::to_writer(&mut writer, diags)
+            .expect("publishDiagnostics payload should be serializable");
+        writer.0.finish()
+    }
+
+    fn should_publish_diagnostics(
+        &self,
+        uri: &Url,
+        diags: &[Diagnostic],
+        version: Option<i32>,
+        source: DiagnosticSource,
+    ) -> bool {
+        if version.is_some() || uri.scheme() != "file" {
+            if self
+                .published_workspace_diagnostics
+                .lock()
+                .remove(uri)
+                .is_some()
+            {
+                debug!(
+                    "Discarded workspace diagnostics fingerprint for {uri} after versioned publish"
+                );
+            }
+            return true;
+        }
+
+        let mut published_diagnostics = self.published_workspace_diagnostics.lock();
+        if diags.is_empty() {
+            let should_publish = published_diagnostics.remove(uri).is_some();
+            if !should_publish {
+                debug!(
+                    "Skipped empty workspace diagnostics for {uri}; nothing was published previously"
+                );
+            }
+            return should_publish;
+        }
+
+        let fingerprint = Self::workspace_diagnostics_fingerprint(diags);
+        if published_diagnostics.get(uri) == Some(&fingerprint) {
+            debug!("Deduplicated {source:?} workspace diagnostics for {uri}");
+            return false;
+        }
+        published_diagnostics.insert(uri.clone(), fingerprint);
+        true
+    }
+
+    fn publish_diagnostics_for_uri(
+        &self,
+        uri: Url,
+        diags: Vec<Diagnostic>,
+        version: Option<i32>,
+        source: DiagnosticSource,
+    ) {
+        if !self.should_publish_diagnostics(&uri, &diags, version, source) {
+            return;
+        }
+        self.connection.publish_diagnostics_for_uri(
+            uri,
+            diags,
+            version,
+            source,
+            self.diagnostic_markdown_support,
+        );
+    }
+
+    fn publish_diagnostics(
+        &self,
+        diags: SmallMap<PathBuf, Vec<Diagnostic>>,
+        notebook_cell_urls: SmallMap<PathBuf, Url>,
+        version_info: HashMap<PathBuf, i32>,
+        source: DiagnosticSource,
+    ) {
+        for (path, diags) in diags {
+            if let Some(url) = notebook_cell_urls.get(&path) {
+                self.publish_diagnostics_for_uri(url.clone(), diags, None, source)
+            } else {
+                let path = path.absolutize();
+                let version = version_info.get(&path).copied();
+                match Url::from_file_path(&path) {
+                    Ok(uri) => self.publish_diagnostics_for_uri(uri, diags, version, source),
+                    Err(_) => eprint!("Unable to convert path to uri: {path:?}"),
+                }
+            }
+        }
+    }
 
     fn path_for_uri(&self, uri: &Url) -> Option<PathBuf> {
         if let Ok(path) = uri.to_file_path() {
@@ -2305,6 +2383,7 @@ impl Server {
             state: State::with_thread_count(config_finder, thread_count),
             open_notebook_cells: RwLock::new(HashMap::new()),
             open_files: RwLock::new(HashMap::new()),
+            published_workspace_diagnostics: Mutex::new(HashMap::new()),
             unsaved_file_tracker: UnsavedFileTracker::new(),
             indexed_configs: Mutex::new(HashSet::new()),
             indexed_workspaces: Mutex::new(HashSet::new()),
@@ -2660,12 +2739,11 @@ impl Server {
             let handle = make_open_handle(&self.state, path);
             Self::append_ide_specific_diagnostics(transaction, &handle, diagnostics);
         }
-        self.connection.publish_diagnostics(
+        self.publish_diagnostics(
             diags,
             notebook_cell_urls,
             self.version_info.lock().clone(),
             source,
-            self.diagnostic_markdown_support,
         );
         if self
             .initialize_params
@@ -3073,13 +3151,7 @@ impl Server {
 
         // Clear stale diagnostics for files that were deleted from disk.
         for uri in deleted_uris {
-            self.connection.publish_diagnostics_for_uri(
-                uri,
-                Vec::new(),
-                None,
-                DiagnosticSource::DidClose,
-                self.diagnostic_markdown_support,
-            );
+            self.publish_diagnostics_for_uri(uri, Vec::new(), None, DiagnosticSource::DidClose);
         }
     }
 
@@ -3522,12 +3594,11 @@ impl Server {
                 DidCloseKind::NotebookDocument => {
                     let cell_urls: Vec<_> = notebook.cell_urls().to_vec();
                     for cell in cell_urls {
-                        self.connection.publish_diagnostics_for_uri(
+                        self.publish_diagnostics_for_uri(
                             cell.clone(),
                             Vec::new(),
                             version,
                             DiagnosticSource::DidClose,
-                            self.diagnostic_markdown_support,
                         );
                         self.open_notebook_cells.write().remove(&cell);
                     }
@@ -3549,12 +3620,11 @@ impl Server {
                     // check. The file transitions from versioned (open-file) to
                     // unversioned (workspace) diagnostics.
                     if self.workspaces.diagnostic_mode(&path) != DiagnosticMode::Workspace {
-                        self.connection.publish_diagnostics_for_uri(
+                        self.publish_diagnostics_for_uri(
                             url.clone(),
                             Vec::new(),
                             version,
                             DiagnosticSource::DidClose,
-                            self.diagnostic_markdown_support,
                         );
                     }
                     entry.remove();
@@ -3583,12 +3653,17 @@ impl Server {
                     .state
                     .commit_transaction(transaction, Some(telemetry_event));
                 if server.workspaces.diagnostic_mode(&path) == DiagnosticMode::Workspace
-                    && path.exists()
                     && path
                         .extension()
                         .and_then(|e| e.to_str())
-                        .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                        .is_some_and(|ext| ext == "py" || ext == "pyi")
                 {
+                    // didClose processing races with file deletion. If the file disappeared
+                    // before this callback runs, there is nothing left to republish and the
+                    // delete path clears any stale workspace diagnostics separately.
+                    if !path.exists() {
+                        return;
+                    }
                     let transaction = server.state.transaction();
                     let handle = handle_from_module_path(
                         &server.state,
@@ -3610,6 +3685,7 @@ impl Server {
         telemetry_event: &mut TelemetryEvent,
     ) {
         self.workspaces.changed(params.event);
+        self.clear_published_workspace_diagnostics();
         self.setup_file_watcher_if_necessary(Some(telemetry_event));
         self.request_settings_for_all_workspaces();
     }
@@ -3684,15 +3760,15 @@ impl Server {
                                 .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
                             && let Ok(uri) = Url::from_file_path(path)
                         {
-                            server.connection.publish_diagnostics_for_uri(
+                            server.publish_diagnostics_for_uri(
                                 uri,
                                 Vec::new(),
                                 None,
                                 DiagnosticSource::DidClose,
-                                server.diagnostic_markdown_support,
                             );
                         }
                     }
+                    server.clear_published_workspace_diagnostics();
                 }
             }),
         );
