@@ -2354,8 +2354,15 @@ impl Server {
         }
     }
 
+    /// Record file-level telemetry stats for the given URI.
+    /// If the URI is a notebook cell, maps it to the parent notebook path.
     pub fn set_file_stats(&self, uri: Url, telemetry: &mut TelemetryEvent) {
-        let config_root = if let Ok(path) = uri.to_file_path() {
+        let path = if let Some(notebook_path) = self.open_notebook_cells.read().get(&uri) {
+            Some(notebook_path.clone())
+        } else {
+            uri.to_file_path().ok()
+        };
+        let config_root = if let Some(path) = path {
             let config = self.state.config_finder().python_file(
                 ModuleNameWithKind::guaranteed(ModuleName::unknown()),
                 &ModulePath::filesystem(path),
