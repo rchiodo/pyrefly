@@ -210,6 +210,7 @@ use pyrefly_util::prelude::VecExt;
 use pyrefly_util::task_heap::CancellationHandle;
 use pyrefly_util::task_heap::Cancelled;
 use pyrefly_util::telemetry::ActivityKey;
+use pyrefly_util::telemetry::EmptyResponseReason;
 use pyrefly_util::telemetry::QueueName;
 use pyrefly_util::telemetry::SubTaskTelemetry;
 use pyrefly_util::telemetry::Telemetry;
@@ -1358,6 +1359,24 @@ pub fn lsp_loop(
     Ok(())
 }
 
+/// Why `make_handle_*` failed to produce a handle.
+/// Convertible to `EmptyResponseReason` for telemetry.
+enum HandleError {
+    NoFilePath,
+    LanguageServicesDisabled,
+    MethodDisabled,
+}
+
+impl From<HandleError> for EmptyResponseReason {
+    fn from(err: HandleError) -> Self {
+        match err {
+            HandleError::NoFilePath => EmptyResponseReason::NoFilePath,
+            HandleError::LanguageServicesDisabled => EmptyResponseReason::LanguageServicesDisabled,
+            HandleError::MethodDisabled => EmptyResponseReason::MethodDisabled,
+        }
+    }
+}
+
 impl Server {
     const FILEWATCHER_ID: &str = "FILEWATCHER";
 
@@ -1812,10 +1831,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.goto_definition(&transaction, params)),
-                        ));
+                        let response = match self.goto_definition(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<GotoDeclaration>(&x) {
                     if let Some(params) = self
@@ -1831,10 +1854,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.goto_declaration(&transaction, params)),
-                        ));
+                        let response = match self.goto_declaration(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<GotoTypeDefinition>(&x) {
                     if let Some(params) = self
@@ -1850,10 +1877,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.goto_type_definition(&transaction, params)),
-                        ));
+                        let response = match self.goto_type_definition(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<GotoImplementation>(&x) {
                     if let Some(params) = self
@@ -1869,12 +1900,15 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.async_go_to_implementations(
-                            x.id,
+                        if let Err(reason) = self.async_go_to_implementations(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if let Some(params) = as_request::<CodeActionRequest>(&x) {
                     if let Some(params) = self
@@ -1884,10 +1918,15 @@ impl Server {
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let sub_task_telemetry = SubTaskTelemetry::new(telemetry, telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.code_action(&mut transaction, params, sub_task_telemetry)),
-                        ));
+                        let response =
+                            match self.code_action(&mut transaction, params, sub_task_telemetry) {
+                                Ok(response) => response,
+                                Err(reason) => {
+                                    telemetry_event.set_empty_response_reason(reason);
+                                    None
+                                }
+                            };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<Completion>(&x) {
                     if let Some(params) = self
@@ -1897,10 +1936,18 @@ impl Server {
                             params.text_document_position.text_document.uri.clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            self.completion(&transaction, params),
-                        ));
+                        match self.completion(&transaction, params) {
+                            Ok(response) => {
+                                self.send_response(new_response(x.id, Ok(response)));
+                            }
+                            Err(reason) => {
+                                self.send_response(new_response(
+                                    x.id,
+                                    Ok(None::<CompletionResponse>),
+                                ));
+                                telemetry_event.set_empty_response_reason(reason);
+                            }
+                        }
                     }
                 } else if let Some(params) = as_request::<ResolveCompletionItem>(&x) {
                     if let Some(params) = self
@@ -1925,10 +1972,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.document_highlight(&transaction, params)),
-                        ));
+                        let response = match self.document_highlight(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<References>(&x) {
                     if let Some(params) = self
@@ -1938,12 +1989,15 @@ impl Server {
                             params.text_document_position.text_document.uri.clone(),
                             telemetry_event,
                         );
-                        self.references(
-                            x.id,
+                        if let Err(reason) = self.references(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if let Some(params) = as_request::<PrepareRenameRequest>(&x) {
                     if let Some(params) = self
@@ -1952,10 +2006,14 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.prepare_rename(&transaction, params)),
-                        ));
+                        let response = match self.prepare_rename(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<Rename>(&x) {
                     if let Some(params) =
@@ -1967,25 +2025,35 @@ impl Server {
                         );
                         // First check if rename is allowed via prepare_rename. If a rename is not allowed we
                         // send back an error. Otherwise we continue with the rename operation.
-                        if let Some(_range) =
-                            self.prepare_rename(&transaction, params.text_document_position.clone())
+                        match self
+                            .prepare_rename(&transaction, params.text_document_position.clone())
                         {
-                            self.rename(
-                                x.id,
-                                &transaction,
-                                params,
-                                telemetry_event.activity_key.clone(),
-                            );
-                        } else {
-                            self.send_response(Response {
-                                id: x.id,
-                                result: None,
-                                error: Some(ResponseError {
-                                    code: ErrorCode::InvalidRequest as i32,
-                                    message: "Third-party symbols cannot be renamed".to_owned(),
-                                    data: None,
-                                }),
-                            });
+                            Ok(Some(_range)) => {
+                                if let Err(reason) = self.rename(
+                                    x.id.clone(),
+                                    &transaction,
+                                    params,
+                                    telemetry_event.activity_key.clone(),
+                                ) {
+                                    self.send_response(new_response(x.id, Ok(None::<()>)));
+                                    telemetry_event.set_empty_response_reason(reason);
+                                }
+                            }
+                            Ok(None) => {
+                                self.send_response(Response {
+                                    id: x.id,
+                                    result: None,
+                                    error: Some(ResponseError {
+                                        code: ErrorCode::InvalidRequest as i32,
+                                        message: "Third-party symbols cannot be renamed".to_owned(),
+                                        data: None,
+                                    }),
+                                });
+                            }
+                            Err(reason) => {
+                                self.send_response(new_response(x.id, Ok(None::<()>)));
+                                telemetry_event.set_empty_response_reason(reason);
+                            }
                         }
                     }
                 } else if let Some(params) = as_request::<SignatureHelpRequest>(&x) {
@@ -2002,10 +2070,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.signature_help(&transaction, params)),
-                        ));
+                        let response = match self.signature_help(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<HoverRequest>(&x) {
                     if let Some(params) = self
@@ -2019,10 +2091,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.hover(&transaction, params)),
-                        ));
+                        let response = match self.hover(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<InlayHintRequest>(&x) {
                     if let Some(params) = self
@@ -2031,10 +2107,14 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.inlay_hints(&transaction, params)),
-                        ));
+                        let response = match self.inlay_hints(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<SemanticTokensFullRequest>(&x) {
                     if let Some(params) = self
@@ -2043,10 +2123,14 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.semantic_tokens_full(&transaction, params)),
-                        ));
+                        let response = match self.semantic_tokens_full(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<SemanticTokensRangeRequest>(&x) {
                     if let Some(params) = self
@@ -2055,10 +2139,14 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.semantic_tokens_ranged(&transaction, params)),
-                        ));
+                        let response = match self.semantic_tokens_ranged(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<DocumentSymbolRequest>(&x) {
                     if let Some(params) = self
@@ -2067,12 +2155,15 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self
-                                .hierarchical_document_symbols(&transaction, params)
-                                .map(DocumentSymbolResponse::Nested)),
-                        ));
+                        let response =
+                            match self.hierarchical_document_symbols(&transaction, params) {
+                                Ok(response) => response.map(DocumentSymbolResponse::Nested),
+                                Err(reason) => {
+                                    telemetry_event.set_empty_response_reason(reason);
+                                    None
+                                }
+                            };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<WorkspaceSymbolRequest>(&x) {
                     if let Some(params) = self
@@ -2149,9 +2240,13 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
-                        let result = self
-                            .folding_ranges(&transaction, params)
-                            .unwrap_or_default();
+                        let result = match self.folding_ranges(&transaction, params) {
+                            Ok(response) => response.unwrap_or_default(),
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                Vec::new()
+                            }
+                        };
                         self.send_response(new_response(x.id, Ok(result)));
                     }
                 } else if let Some(params) = as_request::<CallHierarchyPrepare>(&x) {
@@ -2168,10 +2263,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.prepare_call_hierarchy(&transaction, params)),
-                        ));
+                        let response = match self.prepare_call_hierarchy(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<CallHierarchyIncomingCalls>(&x) {
                     if let Some(params) = self
@@ -2180,12 +2279,15 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_call_hierarchy_incoming_calls(
-                            x.id,
+                        if let Err(reason) = self.async_call_hierarchy_incoming_calls(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if let Some(params) = as_request::<CallHierarchyOutgoingCalls>(&x) {
                     if let Some(params) = self
@@ -2194,12 +2296,15 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_call_hierarchy_outgoing_calls(
-                            x.id,
+                        if let Err(reason) = self.async_call_hierarchy_outgoing_calls(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if let Some(params) = as_request::<TypeHierarchyPrepare>(&x) {
                     if let Some(params) = self
@@ -2215,10 +2320,14 @@ impl Server {
                                 .clone(),
                             telemetry_event,
                         );
-                        self.send_response(new_response(
-                            x.id,
-                            Ok(self.prepare_type_hierarchy(&transaction, params)),
-                        ));
+                        let response = match self.prepare_type_hierarchy(&transaction, params) {
+                            Ok(response) => response,
+                            Err(reason) => {
+                                telemetry_event.set_empty_response_reason(reason);
+                                None
+                            }
+                        };
+                        self.send_response(new_response(x.id, Ok(response)));
                     }
                 } else if let Some(params) = as_request::<TypeHierarchySupertypes>(&x) {
                     if let Some(params) = self
@@ -2227,12 +2336,15 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_type_hierarchy_supertypes(
-                            x.id,
+                        if let Err(reason) = self.async_type_hierarchy_supertypes(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if let Some(params) = as_request::<TypeHierarchySubtypes>(&x) {
                     if let Some(params) = self
@@ -2241,12 +2353,15 @@ impl Server {
                         )
                     {
                         self.set_file_stats(params.item.uri.clone(), telemetry_event);
-                        self.async_type_hierarchy_subtypes(
-                            x.id,
+                        if let Err(reason) = self.async_type_hierarchy_subtypes(
+                            x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        );
+                        ) {
+                            self.send_response(new_response(x.id, Ok(None::<()>)));
+                            telemetry_event.set_empty_response_reason(reason);
+                        }
                     }
                 } else if &x.method == "pyrefly/textDocument/docstringRanges" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
@@ -2570,7 +2685,7 @@ impl Server {
         params: ProvideTypeParams,
     ) -> Option<ProvideTypeResponse> {
         let uri = &params.text_document.uri;
-        let handle = self.make_handle_if_enabled(uri, None)?;
+        let handle = self.make_handle_if_enabled(uri, None).ok()?;
         provide_type(transaction, &handle, params.positions)
     }
 
@@ -3296,7 +3411,7 @@ impl Server {
                 "File {} changed, prepare to validate open files.",
                 file_path.display()
             );
-            if let Some(handle) =
+            if let Ok(handle) =
                 self.make_handle_if_enabled(&uri, Some(DidChangeTextDocument::METHOD))
             {
                 self.currently_streaming_diagnostics_for_handles
@@ -3782,7 +3897,8 @@ impl Server {
     }
 
     /// Create a handle with analysis config that decides language service behavior.
-    /// Return None if the workspace has language services disabled (and thus you shouldn't do anything).
+    /// Returns `Err(HandleError)` if the URI has no file path, the workspace has
+    /// language services disabled, or the specific method is disabled.
     ///
     /// `method` should be the LSP request METHOD string from lsp_types::request::* types
     /// (e.g., GotoDefinition::METHOD, HoverRequest::METHOD, etc.)
@@ -3790,13 +3906,15 @@ impl Server {
         &self,
         uri: &Url,
         method: Option<&str>,
-    ) -> Option<(Handle, Option<LspAnalysisConfig>)> {
-        let path = self.path_for_uri_or_notebook_cell(uri)?;
+    ) -> Result<(Handle, Option<LspAnalysisConfig>), HandleError> {
+        let path = self
+            .path_for_uri_or_notebook_cell(uri)
+            .ok_or(HandleError::NoFilePath)?;
         self.workspaces.get_with(path.clone(), |(_, workspace)| {
             // Check if all language services are disabled
             if workspace.disable_language_services {
                 info!("Skipping request - language services disabled");
-                return None;
+                return Err(HandleError::LanguageServicesDisabled);
             }
 
             // Check if the specific service is disabled
@@ -3805,7 +3923,7 @@ impl Server {
                 && disabled_services.is_disabled(method)
             {
                 info!("Skipping request - {} service disabled", method);
-                return None;
+                return Err(HandleError::MethodDisabled);
             }
 
             let module_path = if self.open_files.read().contains_key(&path) {
@@ -3813,7 +3931,7 @@ impl Server {
             } else {
                 ModulePath::filesystem(path)
             };
-            Some((
+            Ok((
                 handle_from_module_path(&self.state, module_path),
                 workspace.lsp_analysis_config,
             ))
@@ -3823,7 +3941,11 @@ impl Server {
     /// make handle if enabled
     /// if method (the lsp method str exactly) is provided, we will check workspace settings
     /// for whether to enable it
-    fn make_handle_if_enabled(&self, uri: &Url, method: Option<&str>) -> Option<Handle> {
+    fn make_handle_if_enabled(
+        &self,
+        uri: &Url,
+        method: Option<&str>,
+    ) -> Result<Handle, HandleError> {
         self.make_handle_with_lsp_analysis_config_if_enabled(uri, method)
             .map(|(handle, _)| handle)
     }
@@ -3832,15 +3954,15 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: GotoDefinitionParams,
-    ) -> Option<GotoDefinitionResponse> {
+    ) -> Result<Option<GotoDefinitionResponse>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(GotoDefinition::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction
-            .goto_definition(&handle, range)
-            .unwrap_or_default();
+        let targets = transaction.goto_definition(&handle, range)?;
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
@@ -3852,11 +3974,13 @@ impl Server {
                 .collect();
         }
         if lsp_targets.is_empty() {
-            None
+            Ok(None)
         } else if lsp_targets.len() == 1 {
-            Some(GotoDefinitionResponse::Scalar(lsp_targets.pop().unwrap()))
+            Ok(Some(GotoDefinitionResponse::Scalar(
+                lsp_targets.pop().unwrap(),
+            )))
         } else {
-            Some(GotoDefinitionResponse::Array(lsp_targets))
+            Ok(Some(GotoDefinitionResponse::Array(lsp_targets)))
         }
     }
 
@@ -3864,25 +3988,27 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: GotoDefinitionParams,
-    ) -> Option<GotoDefinitionResponse> {
+    ) -> Result<Option<GotoDefinitionResponse>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(GotoDeclaration::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction
-            .goto_declaration(&handle, range)
-            .unwrap_or_default();
+        let targets = transaction.goto_declaration(&handle, range)?;
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
             .collect::<Vec<_>>();
         if lsp_targets.is_empty() {
-            None
+            Ok(None)
         } else if lsp_targets.len() == 1 {
-            Some(GotoDefinitionResponse::Scalar(lsp_targets.pop().unwrap()))
+            Ok(Some(GotoDefinitionResponse::Scalar(
+                lsp_targets.pop().unwrap(),
+            )))
         } else {
-            Some(GotoDefinitionResponse::Array(lsp_targets))
+            Ok(Some(GotoDefinitionResponse::Array(lsp_targets)))
         }
     }
 
@@ -3890,27 +4016,27 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: GotoTypeDefinitionParams,
-    ) -> Option<GotoTypeDefinitionResponse> {
+    ) -> Result<Option<GotoTypeDefinitionResponse>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(GotoTypeDefinition::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let range =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        let targets = transaction
-            .goto_type_definition(&handle, range)
-            .unwrap_or_default();
+        let targets = transaction.goto_type_definition(&handle, range)?;
         let mut lsp_targets = targets
             .iter()
             .filter_map(|x| self.to_lsp_location(x))
             .collect::<Vec<_>>();
         if lsp_targets.is_empty() {
-            None
+            Ok(None)
         } else if lsp_targets.len() == 1 {
-            Some(GotoTypeDefinitionResponse::Scalar(
+            Ok(Some(GotoTypeDefinitionResponse::Scalar(
                 lsp_targets.pop().unwrap(),
-            ))
+            )))
         } else {
-            Some(GotoTypeDefinitionResponse::Array(lsp_targets))
+            Ok(Some(GotoTypeDefinitionResponse::Array(lsp_targets)))
         }
     }
 
@@ -3920,15 +4046,9 @@ impl Server {
         transaction: &Transaction<'a>,
         params: GotoImplementationParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
-        let Some(handle) = self.make_handle_if_enabled(uri, Some(GotoImplementation::METHOD))
-        else {
-            return self.send_response(new_response::<Option<GotoImplementationResponse>>(
-                request_id,
-                Ok(None),
-            ));
-        };
+        let handle = self.make_handle_if_enabled(uri, Some(GotoImplementation::METHOD))?;
         let path_remapper = self.path_remapper.clone();
         let open_notebooks = self.snapshot_open_notebooks();
         self.async_find_from_definition_helper(
@@ -4001,26 +4121,17 @@ impl Server {
                     Some(GotoImplementationResponse::Array(lsp_targets))
                 }
             },
-        );
+        )
     }
 
     fn completion(
         &self,
         transaction: &Transaction<'_>,
         params: CompletionParams,
-    ) -> anyhow::Result<CompletionResponse> {
+    ) -> Result<CompletionResponse, EmptyResponseReason> {
         let uri = &params.text_document_position.text_document.uri;
-        let (handle, lsp_config) = match self
-            .make_handle_with_lsp_analysis_config_if_enabled(uri, Some(Completion::METHOD))
-        {
-            None => {
-                return Ok(CompletionResponse::List(CompletionList {
-                    is_incomplete: false,
-                    items: Vec::new(),
-                }));
-            }
-            Some((x, config)) => (x, config),
-        };
+        let (handle, lsp_config) =
+            self.make_handle_with_lsp_analysis_config_if_enabled(uri, Some(Completion::METHOD))?;
         let import_format = lsp_config.and_then(|c| c.import_format).unwrap_or_default();
         let complete_function_parens = lsp_config
             .and_then(|c| c.complete_function_parens)
@@ -4033,27 +4144,24 @@ impl Server {
             ),
         };
         let mru_snapshot = self.completion_mru.lock().clone();
-        let (items, is_incomplete) = transaction
+        let info = transaction
             .get_module_info(&handle)
-            .map(|info| {
-                transaction.completion_with_incomplete_mru(
-                    &handle,
-                    self.from_lsp_position(uri, &info, params.text_document_position.position),
-                    import_format,
-                    completion_options,
-                    |item| {
-                        let (label, auto_import_text) =
-                            Self::break_completion_item_into_mru_parts(item);
-                        if label.is_empty() {
-                            None
-                        } else {
-                            mru_snapshot.index_for(label, auto_import_text)
-                        }
-                    },
-                    Some(&self.lsp_thread_pool),
-                )
-            })
-            .unwrap_or_default();
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
+        let (items, is_incomplete) = transaction.completion_with_incomplete_mru(
+            &handle,
+            self.from_lsp_position(uri, &info, params.text_document_position.position),
+            import_format,
+            completion_options,
+            |item| {
+                let (label, auto_import_text) = Self::break_completion_item_into_mru_parts(item);
+                if label.is_empty() {
+                    None
+                } else {
+                    mru_snapshot.index_for(label, auto_import_text)
+                }
+            },
+            Some(&self.lsp_thread_pool),
+        );
         Ok(CompletionResponse::List(CompletionList {
             is_incomplete,
             items,
@@ -4065,14 +4173,16 @@ impl Server {
         transaction: &mut Transaction<'_>,
         params: CodeActionParams,
         sub_task_telemetry: SubTaskTelemetry,
-    ) -> Option<CodeActionResponse> {
+    ) -> Result<Option<CodeActionResponse>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let (handle, lsp_config) = self.make_handle_with_lsp_analysis_config_if_enabled(
             uri,
             Some(CodeActionRequest::METHOD),
         )?;
         let import_format = lsp_config.and_then(|c| c.import_format).unwrap_or_default();
-        let module_info = transaction.get_module_info(&handle)?;
+        let module_info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let range = self.from_lsp_range(uri, &module_info, params.range);
         let only_kinds = params.context.only.as_ref();
         let allow_quickfix = only_kinds
@@ -4199,7 +4309,7 @@ impl Server {
         if let Some(trigger_kind) = params.context.trigger_kind
             && trigger_kind == CodeActionTriggerKind::AUTOMATIC
         {
-            return (!actions.is_empty()).then_some(actions);
+            return Ok((!actions.is_empty()).then_some(actions));
         }
         if allow_refactor {
             let mut push_refactor_actions = |refactors: Vec<LocalRefactorCodeAction>| {
@@ -4326,27 +4436,29 @@ impl Server {
             actions.push(action);
         }
         record_code_action_telemetry("safe_delete_file", start);
-        (!actions.is_empty()).then_some(actions)
+        Ok((!actions.is_empty()).then_some(actions))
     }
 
     fn document_highlight(
         &self,
         transaction: &Transaction<'_>,
         params: DocumentHighlightParams,
-    ) -> Option<Vec<DocumentHighlight>> {
+    ) -> Result<Option<Vec<DocumentHighlight>>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(DocumentHighlightRequest::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        Some(
+        Ok(Some(
             transaction
                 .find_local_references(&handle, position, true)
                 .into_map(|range| DocumentHighlight {
                     range: info.to_lsp_range(range),
                     kind: None,
                 }),
-        )
+        ))
     }
 
     /// Compute references or implementations of a symbol at a given position. This is a non-blocking
@@ -4378,20 +4490,19 @@ impl Server {
         + Sync
         + 'static,
         transform_result: impl FnOnce(T) -> V + Send + Sync + 'static,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let Some(info) = transaction.get_module_info(&handle) else {
-            return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
+            return Err(EmptyResponseReason::ModuleInfoNotFound);
         };
         let position = self.from_lsp_position(uri, &info, position);
-        let Some(definition) = transaction
-            .find_definition(&handle, position, find_preference)
-            .map(Vec1::into_vec)
-            .unwrap_or_default()
-            // TODO: handle more than 1 definition
-            .into_iter()
-            .next()
-        else {
-            return self.send_response(new_response::<Option<V>>(request_id, Ok(None)));
+        let definition = match transaction.find_definition(&handle, position, find_preference) {
+            Ok(defs) => {
+                // TODO: handle more than 1 definition
+                defs.into_vec().swap_remove(0)
+            }
+            Err(reason) => {
+                return Err(reason);
+            }
         };
         self.find_reference_queue.queue_task(
             TelemetryEventKind::FindFromDefinition,
@@ -4433,6 +4544,7 @@ impl Server {
                 }
             }),
         );
+        Ok(())
     }
 
     /// Compute references of a symbol at a given position using the standard find_global_references_from_definition
@@ -4448,7 +4560,7 @@ impl Server {
         include_declaration: bool,
         activity_key: Option<ActivityKey>,
         map_result: impl FnOnce(Vec<(Url, Vec<Range>)>) -> V + Send + Sync + 'static,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let path_remapper = self.path_remapper.clone();
         let external_references = self.external_references.clone();
         let source_uri = uri.clone();
@@ -4552,11 +4664,9 @@ impl Server {
         transaction: &Transaction<'a>,
         params: ReferenceParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = &params.text_document_position.text_document.uri;
-        let Some(handle) = self.make_handle_if_enabled(uri, Some(References::METHOD)) else {
-            return self.send_response(new_response::<Option<Vec<Location>>>(request_id, Ok(None)));
-        };
+        let handle = self.make_handle_if_enabled(uri, Some(References::METHOD))?;
         self.async_find_references_helper(
             request_id,
             transaction,
@@ -4577,7 +4687,7 @@ impl Server {
                 }
                 locations
             },
-        );
+        )
     }
 
     fn rename<'a>(
@@ -4586,11 +4696,9 @@ impl Server {
         transaction: &Transaction<'a>,
         params: RenameParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = &params.text_document_position.text_document.uri;
-        let Some(handle) = self.make_handle_if_enabled(uri, Some(Rename::METHOD)) else {
-            return self.send_response(new_response::<Option<WorkspaceEdit>>(request_id, Ok(None)));
-        };
+        let handle = self.make_handle_if_enabled(uri, Some(Rename::METHOD))?;
         self.async_find_references_helper(
             request_id,
             transaction,
@@ -4615,66 +4723,80 @@ impl Server {
                     ..Default::default()
                 }
             },
-        );
+        )
     }
 
     fn prepare_rename(
         &self,
         transaction: &Transaction<'_>,
         params: TextDocumentPositionParams,
-    ) -> Option<PrepareRenameResponse> {
+    ) -> Result<Option<PrepareRenameResponse>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(Rename::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position = self.from_lsp_position(uri, &info, params.position);
-        transaction
+        Ok(transaction
             .prepare_rename(&handle, position)
-            .map(|range| PrepareRenameResponse::Range(info.to_lsp_range(range)))
+            .map(|range| PrepareRenameResponse::Range(info.to_lsp_range(range))))
     }
 
     fn signature_help(
         &self,
         transaction: &Transaction<'_>,
         params: SignatureHelpParams,
-    ) -> Option<SignatureHelp> {
+    ) -> Result<Option<SignatureHelp>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, Some(SignatureHelpRequest::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
-        transaction.get_signature_help_at(&handle, position)
+        Ok(transaction.get_signature_help_at(&handle, position))
     }
 
-    fn hover(&self, transaction: &Transaction<'_>, params: HoverParams) -> Option<Hover> {
+    fn hover(
+        &self,
+        transaction: &Transaction<'_>,
+        params: HoverParams,
+    ) -> Result<Option<Hover>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let (handle, lsp_config) =
             self.make_handle_with_lsp_analysis_config_if_enabled(uri, Some(HoverRequest::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position =
             self.from_lsp_position(uri, &info, params.text_document_position_params.position);
         let show_go_to_links = lsp_config
             .and_then(|c| c.show_hover_go_to_links)
             .unwrap_or(true);
-        get_hover(transaction, &handle, position, show_go_to_links)
+        Ok(get_hover(transaction, &handle, position, show_go_to_links))
     }
 
     fn inlay_hints(
         &self,
         transaction: &Transaction<'_>,
         params: InlayHintParams,
-    ) -> Option<Vec<InlayHint>> {
+    ) -> Result<Option<Vec<InlayHint>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
         let range = &params.range;
         let (handle, lsp_analysis_config) = self
             .make_handle_with_lsp_analysis_config_if_enabled(uri, Some(InlayHintRequest::METHOD))?;
-        let info = transaction.get_module_info(&handle)?;
-        let t = transaction.inlay_hints(
+        let info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
+        let Some(t) = transaction.inlay_hints(
             &handle,
             lsp_analysis_config
                 .and_then(|c| c.inlay_hints)
                 .unwrap_or_default(),
-        )?;
+        ) else {
+            return Ok(None);
+        };
         let res = t
             .into_iter()
             .filter_map(|hint_data| {
@@ -4729,67 +4851,73 @@ impl Server {
                 }
             })
             .collect();
-        Some(res)
+        Ok(Some(res))
     }
 
     fn semantic_tokens_full(
         &self,
         transaction: &Transaction<'_>,
         params: SemanticTokensParams,
-    ) -> Option<SemanticTokensResult> {
+    ) -> Result<Option<SemanticTokensResult>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(SemanticTokensFullRequest::METHOD))?;
-        Some(SemanticTokensResult::Tokens(SemanticTokens {
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
             data: transaction
                 .semantic_tokens(&handle, None, maybe_cell_idx)
                 .unwrap_or_default(),
-        }))
+        })))
     }
 
     fn semantic_tokens_ranged(
         &self,
         transaction: &Transaction<'_>,
         params: SemanticTokensRangeParams,
-    ) -> Option<SemanticTokensRangeResult> {
+    ) -> Result<Option<SemanticTokensRangeResult>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(SemanticTokensRangeRequest::METHOD))?;
-        let module_info = transaction.get_module_info(&handle)?;
+        let module_info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let range = self.from_lsp_range(uri, &module_info, params.range);
-        Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
+        Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data: transaction
                 .semantic_tokens(&handle, Some(range), maybe_cell_idx)
                 .unwrap_or_default(),
-        }))
+        })))
     }
 
     fn hierarchical_document_symbols(
         &self,
         transaction: &Transaction<'_>,
         params: DocumentSymbolParams,
-    ) -> Option<Vec<DocumentSymbol>> {
+    ) -> Result<Option<Vec<DocumentSymbol>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
-        let path = self.path_for_uri_or_notebook_cell(uri)?;
+        let path = self
+            .path_for_uri_or_notebook_cell(uri)
+            .ok_or(EmptyResponseReason::NoFilePath)?;
         if self
             .workspaces
             .get_with(path, |(_, workspace)| workspace.disable_language_services)
-            || !self
-                .initialize_params
-                .capabilities
-                .text_document
-                .as_ref()?
-                .document_symbol
-                .as_ref()?
-                .hierarchical_document_symbol_support?
         {
-            return None;
+            return Err(EmptyResponseReason::LanguageServicesDisabled);
         }
+        let Some(true) = self
+            .initialize_params
+            .capabilities
+            .text_document
+            .as_ref()
+            .and_then(|t| t.document_symbol.as_ref())
+            .and_then(|d| d.hierarchical_document_symbol_support)
+        else {
+            return Ok(None);
+        };
         let handle = self.make_handle_if_enabled(uri, Some(DocumentSymbolRequest::METHOD))?;
-        transaction.symbols(&handle, maybe_cell_idx)
+        Ok(transaction.symbols(&handle, maybe_cell_idx))
     }
 
     /// Run local and external workspace symbol queries in parallel, merging
@@ -4973,7 +5101,7 @@ impl Server {
     ) -> Option<Vec<Range>> {
         let uri = &text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
-        let handle = self.make_handle_if_enabled(uri, None)?;
+        let handle = self.make_handle_if_enabled(uri, None).ok()?;
         let module = transaction.get_module_info(&handle)?;
         let docstring_ranges = transaction.docstring_ranges(&handle)?;
         Some(
@@ -4992,14 +5120,18 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: FoldingRangeParams,
-    ) -> Option<Vec<FoldingRange>> {
+    ) -> Result<Option<Vec<FoldingRange>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(FoldingRangeRequest::METHOD))?;
-        let module = transaction.get_module_info(&handle)?;
-        let ranges = transaction.folding_ranges(&handle)?;
+        let module = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
+        let Some(ranges) = transaction.folding_ranges(&handle) else {
+            return Ok(None);
+        };
 
-        Some(
+        Ok(Some(
             ranges
                 .into_iter()
                 .filter_map(|(range, kind)| {
@@ -5037,7 +5169,7 @@ impl Server {
                     })
                 })
                 .collect(),
-        )
+        ))
     }
 
     fn document_diagnostics(
@@ -5368,16 +5500,10 @@ impl Server {
         transaction: &Transaction<'a>,
         params: lsp_types::CallHierarchyIncomingCallsParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = params.item.uri.clone();
 
-        let Some(handle) =
-            self.make_handle_if_enabled(&uri, Some(CallHierarchyIncomingCalls::METHOD))
-        else {
-            return self.send_response(new_response::<
-                Option<Vec<lsp_types::CallHierarchyIncomingCall>>,
-            >(request_id, Ok(None)));
-        };
+        let handle = self.make_handle_if_enabled(&uri, Some(CallHierarchyIncomingCalls::METHOD))?;
 
         let path_remapper = self.path_remapper.clone();
         let external_references = self.external_references.clone();
@@ -5447,7 +5573,7 @@ impl Server {
 
                 incoming_calls
             },
-        );
+        )
     }
 
     /// Asynchronously finds outgoing calls (callees) of a function.
@@ -5460,16 +5586,10 @@ impl Server {
         transaction: &Transaction<'a>,
         params: lsp_types::CallHierarchyOutgoingCallsParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = params.item.uri.clone();
 
-        let Some(handle) =
-            self.make_handle_if_enabled(&uri, Some(CallHierarchyOutgoingCalls::METHOD))
-        else {
-            return self.send_response(new_response::<
-                Option<Vec<lsp_types::CallHierarchyOutgoingCall>>,
-            >(request_id, Ok(None)));
-        };
+        let handle = self.make_handle_if_enabled(&uri, Some(CallHierarchyOutgoingCalls::METHOD))?;
 
         // Clone uri for use in the transform closure
         let uri_for_transform = uri.clone();
@@ -5497,7 +5617,7 @@ impl Server {
             move |(callees, source_module)| {
                 transform_outgoing_calls(callees, &source_module, &uri_for_transform)
             },
-        );
+        )
     }
 
     /// Prepares the call hierarchy by validating that the symbol at the cursor is a function/method.
@@ -5510,10 +5630,12 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: lsp_types::CallHierarchyPrepareParams,
-    ) -> Option<Vec<lsp_types::CallHierarchyItem>> {
+    ) -> Result<Option<Vec<lsp_types::CallHierarchyItem>>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, None)?;
-        let module_info = transaction.get_module_info(&handle)?;
+        let module_info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position = self.from_lsp_position(
             uri,
             &module_info,
@@ -5532,7 +5654,7 @@ impl Server {
             };
 
             // Get the handle for the definition's module (could be different from the current file)
-            let Some(def_handle) = self.make_handle_if_enabled(&def_uri, None) else {
+            let Ok(def_handle) = self.make_handle_if_enabled(&def_uri, None) else {
                 continue;
             };
 
@@ -5545,10 +5667,10 @@ impl Server {
                 find_function_at_position_in_ast(&ast, def.definition_range.start())
             {
                 let item = prepare_call_hierarchy_item(func_def, &def.module, def_uri);
-                return Some(vec![item]);
+                return Ok(Some(vec![item]));
             }
         }
-        None
+        Ok(None)
     }
 
     fn type_hierarchy_target_from_definition(
@@ -5674,10 +5796,12 @@ impl Server {
         &self,
         transaction: &Transaction<'_>,
         params: lsp_types::TypeHierarchyPrepareParams,
-    ) -> Option<Vec<TypeHierarchyItem>> {
+    ) -> Result<Option<Vec<TypeHierarchyItem>>, EmptyResponseReason> {
         let uri = &params.text_document_position_params.text_document.uri;
         let handle = self.make_handle_if_enabled(uri, None)?;
-        let module_info = transaction.get_module_info(&handle)?;
+        let module_info = transaction
+            .get_module_info(&handle)
+            .ok_or(EmptyResponseReason::ModuleInfoNotFound)?;
         let position = self.from_lsp_position(
             uri,
             &module_info,
@@ -5693,7 +5817,7 @@ impl Server {
             let Some(def_uri) = module_info_to_uri(&def.module, self.path_remapper.as_ref()) else {
                 continue;
             };
-            let Some(def_handle) = self.make_handle_if_enabled(&def_uri, None) else {
+            let Ok(def_handle) = self.make_handle_if_enabled(&def_uri, None) else {
                 continue;
             };
             let Some(ast) = transaction.get_ast(&def_handle) else {
@@ -5703,10 +5827,10 @@ impl Server {
                 find_class_at_position_in_ast(&ast, def.definition_range.start())
             {
                 let item = prepare_type_hierarchy_item(class_def, &def.module, def_uri);
-                return Some(vec![item]);
+                return Ok(Some(vec![item]));
             }
         }
-        None
+        Ok(None)
     }
 
     fn async_type_hierarchy_supertypes<'a>(
@@ -5715,15 +5839,9 @@ impl Server {
         transaction: &Transaction<'a>,
         params: lsp_types::TypeHierarchySupertypesParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = params.item.uri.clone();
-        let Some(handle) = self.make_handle_if_enabled(&uri, Some(TypeHierarchySupertypes::METHOD))
-        else {
-            return self.send_response(new_response::<Option<Vec<TypeHierarchyItem>>>(
-                request_id,
-                Ok(None),
-            ));
-        };
+        let handle = self.make_handle_if_enabled(&uri, Some(TypeHierarchySupertypes::METHOD))?;
 
         let path_remapper = self.path_remapper.clone();
         let type_hierarchy_item_from_class_type =
@@ -5781,7 +5899,7 @@ impl Server {
                 Ok(items)
             },
             |items| items,
-        );
+        )
     }
 
     fn async_type_hierarchy_subtypes<'a>(
@@ -5790,15 +5908,9 @@ impl Server {
         transaction: &Transaction<'a>,
         params: lsp_types::TypeHierarchySubtypesParams,
         activity_key: Option<ActivityKey>,
-    ) {
+    ) -> Result<(), EmptyResponseReason> {
         let uri = params.item.uri.clone();
-        let Some(handle) = self.make_handle_if_enabled(&uri, Some(TypeHierarchySubtypes::METHOD))
-        else {
-            return self.send_response(new_response::<Option<Vec<TypeHierarchyItem>>>(
-                request_id,
-                Ok(None),
-            ));
-        };
+        let handle = self.make_handle_if_enabled(&uri, Some(TypeHierarchySubtypes::METHOD))?;
 
         let path_remapper = self.path_remapper.clone();
         self.async_find_from_definition_helper(
@@ -5831,7 +5943,7 @@ impl Server {
                 ))
             },
             |items| items,
-        );
+        )
     }
 }
 
