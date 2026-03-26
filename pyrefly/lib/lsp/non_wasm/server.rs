@@ -1871,16 +1871,11 @@ impl Server {
                 } else if let Some(params) = as_request::<Rename>(&x) {
                     if let Some(params) =
                         self.extract_request_params_or_send_err_response::<Rename>(params, &x.id)
-                        && !self
-                            .open_notebook_cells
-                            .read()
-                            .contains_key(&params.text_document_position.text_document.uri)
                     {
                         self.set_file_stats(
                             params.text_document_position.text_document.uri.clone(),
                             telemetry_event,
                         );
-                        // TODO(yangdanny) handle notebooks
                         // First check if rename is allowed via prepare_rename. If a rename is not allowed we
                         // send back an error. Otherwise we continue with the rename operation.
                         if let Some(_range) =
@@ -4562,10 +4557,6 @@ impl Server {
         params: TextDocumentPositionParams,
     ) -> Option<PrepareRenameResponse> {
         let uri = &params.text_document.uri;
-        if self.open_notebook_cells.read().contains_key(uri) {
-            // TODO(yangdanny) handle notebooks
-            return None;
-        }
         let handle = self.make_handle_if_enabled(uri, Some(Rename::METHOD))?;
         let info = transaction.get_module_info(&handle)?;
         let position = self.from_lsp_position(uri, &info, params.position);

@@ -55,8 +55,10 @@ use lsp_types::request::GotoTypeDefinition;
 use lsp_types::request::HoverRequest;
 use lsp_types::request::Initialize;
 use lsp_types::request::InlayHintRequest;
+use lsp_types::request::PrepareRenameRequest;
 use lsp_types::request::References;
 use lsp_types::request::RegisterCapability;
+use lsp_types::request::Rename;
 use lsp_types::request::Request as _;
 use lsp_types::request::SemanticTokensFullRequest;
 use lsp_types::request::SemanticTokensRangeRequest;
@@ -1817,6 +1819,48 @@ impl LspInteraction {
             "context": {
                 "diagnostics": []
             }
+        }))
+    }
+
+    /// Sends a prepare rename request for a notebook cell at the specified position
+    pub fn prepare_rename_cell(
+        &self,
+        file_name: &str,
+        cell_name: &str,
+        line: u32,
+        col: u32,
+    ) -> ClientRequestHandle<'_, PrepareRenameRequest> {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        self.client.send_request(json!({
+            "textDocument": {
+                "uri": cell_uri
+            },
+            "position": {
+                "line": line,
+                "character": col
+            }
+        }))
+    }
+
+    /// Sends a rename request for a notebook cell at the specified position
+    pub fn rename_cell(
+        &self,
+        file_name: &str,
+        cell_name: &str,
+        line: u32,
+        col: u32,
+        new_name: &str,
+    ) -> ClientRequestHandle<'_, Rename> {
+        let cell_uri = self.cell_uri(file_name, cell_name);
+        self.client.send_request(json!({
+            "textDocument": {
+                "uri": cell_uri
+            },
+            "position": {
+                "line": line,
+                "character": col
+            },
+            "newName": new_name
         }))
     }
 
