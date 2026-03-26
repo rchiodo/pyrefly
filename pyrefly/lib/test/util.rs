@@ -117,6 +117,7 @@ pub struct TestEnv {
     not_required_key_access_error: bool,
     strict_callable_subtyping: bool,
     default_require_level: Require,
+    extra_file_extensions: Vec<String>,
 }
 
 impl TestEnv {
@@ -142,6 +143,7 @@ impl TestEnv {
             not_required_key_access_error: false,
             strict_callable_subtyping: false,
             default_require_level: Require::Exports,
+            extra_file_extensions: Vec::new(),
         }
     }
 
@@ -275,14 +277,26 @@ impl TestEnv {
         self
     }
 
+    pub fn with_extra_file_extensions(mut self, extensions: Vec<String>) -> Self {
+        self.extra_file_extensions = extensions;
+        self
+    }
+
     pub fn with_version(mut self, version: PythonVersion) -> Self {
         self.version = version;
         self
     }
 
     pub fn add_with_path(&mut self, name: &str, path: &str, code: &str) {
+        let has_extra_ext = self
+            .extra_file_extensions
+            .iter()
+            .any(|ext| path.ends_with(&format!(".{ext}")));
         assert!(
-            path.ends_with(".py") || path.ends_with(".pyi") || path.ends_with(".rs"),
+            path.ends_with(".py")
+                || path.ends_with(".pyi")
+                || path.ends_with(".rs")
+                || has_extra_ext,
             "{path} doesn't look like a reasonable path"
         );
         self.modules.push((
@@ -374,6 +388,7 @@ impl TestEnv {
         if self.not_required_key_access_error {
             errors.set_error_severity(ErrorKind::NotRequiredKeyAccess, Severity::Error);
         }
+        config.extra_file_extensions = self.extra_file_extensions.clone();
         let mut sourcedb = MapDatabase::new(config.get_sys_info());
         for (name, path, _) in self.modules.iter() {
             sourcedb.insert(*name, path.dupe());
