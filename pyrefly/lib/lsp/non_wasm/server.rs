@@ -3095,6 +3095,11 @@ impl Server {
 
         let transaction = self.state.transaction();
         let open_files = self.open_files.read();
+        let configs = self.workspaces.loaded_configs.clean_and_get_configs();
+        let extra_extensions: SmallSet<&str> = configs
+            .iter()
+            .flat_map(|c| c.extra_file_extensions.iter().map(|s| s.as_str()))
+            .collect();
 
         let mut deleted_uris: Vec<Url> = Vec::new();
         let handles: Vec<Handle> = transaction
@@ -3114,11 +3119,14 @@ impl Server {
                 if open_files.contains_key(&path.to_path_buf()) {
                     return false;
                 }
-                // Only include .py/.pyi files
+                // Only include Python source files (standard extensions + any
+                // extra extensions from config)
                 if !path
                     .extension()
                     .and_then(|e| e.to_str())
-                    .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                    .is_some_and(|ext| {
+                        PYTHON_EXTENSIONS.contains(&ext) || extra_extensions.contains(ext)
+                    })
                 {
                     return false;
                 }
@@ -3751,13 +3759,21 @@ impl Server {
                     // Mode is off — clear diagnostics for non-open indexed files.
                     let transaction = server.state.transaction();
                     let open_files = server.open_files.read();
+                    let configs = server.workspaces.loaded_configs.clean_and_get_configs();
+                    let extra_extensions: SmallSet<&str> = configs
+                        .iter()
+                        .flat_map(|c| c.extra_file_extensions.iter().map(|s| s.as_str()))
+                        .collect();
                     for handle in transaction.handles() {
                         let path = handle.path().as_path();
                         if !open_files.contains_key(&path.to_path_buf())
                             && path
                                 .extension()
                                 .and_then(|e| e.to_str())
-                                .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+                                .is_some_and(|ext| {
+                                    PYTHON_EXTENSIONS.contains(&ext)
+                                        || extra_extensions.contains(ext)
+                                })
                             && let Ok(uri) = Url::from_file_path(path)
                         {
                             server.publish_diagnostics_for_uri(

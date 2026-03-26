@@ -987,7 +987,13 @@ impl ConfigFile {
             config
                 .search_path()
                 .chain(config.site_package_path())
-                .cartesian_product(PYTHON_EXTENSIONS.iter().chain(COMPILED_FILE_SUFFIXES))
+                .cartesian_product(
+                    PYTHON_EXTENSIONS
+                        .iter()
+                        .chain(COMPILED_FILE_SUFFIXES)
+                        .copied()
+                        .chain(config.extra_file_extensions.iter().map(|s| s.as_str())),
+                )
                 .for_each(|(s, suffix)| {
                     result.insert(WatchPattern::root(
                         InternedPath::from_path(s),
