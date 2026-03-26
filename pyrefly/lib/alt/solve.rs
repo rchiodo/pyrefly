@@ -1204,9 +1204,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if !self.has_valid_annotation_syntax(expr, errors) {
             return TypeAlias::error(name.clone(), style);
         }
-        // Check whether the original type was Annotated before it gets rebound below.
-        // We use this later to decide whether to wrap the stored type in Annotated.
-        let original_was_annotated = matches!(ty, Type::Annotated(_, _));
+        let annotated_metadata = match &ty {
+            Type::Annotated(_, metadata) => Some(metadata.clone()),
+            _ => None,
+        };
         let untyped = self.untype_opt(ty.clone(), range, errors);
         let ty = if let Some(untyped) = untyped {
             let validated =
@@ -1224,20 +1225,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
             return TypeAlias::error(name.clone(), style);
         };
-        // Extract Annotated metadata; skip the first element since that's the type and collect the rest of the vector
-        let annotated_metadata = self
-            .get_annotated_metadata(expr, TypeFormContext::TypeAlias, errors)
-            .iter()
-            .map(|e| self.expr_infer(e, &self.error_swallower()))
-            .collect();
         // If the original type was Annotated[T, ...], preserve the wrapper so that
         // the alias is not callable and not assignable to type[T] in value position.
-        let stored_ty = if original_was_annotated {
-            Type::Annotated(Box::new(ty), Box::new([]))
+        let stored_ty = if let Some(metadata) = annotated_metadata {
+            Type::Annotated(Box::new(ty), metadata)
         } else {
             self.heap.mk_type_form(ty)
         };
-        TypeAlias::new(name.clone(), stored_ty, style, annotated_metadata)
+        TypeAlias::new(name.clone(), stored_ty, style, Vec::new())
     }
 
     /// Check whether a type alias body contains a cyclic self-reference.
