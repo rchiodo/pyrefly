@@ -1844,10 +1844,6 @@ impl Server {
                 } else if let Some(params) = as_request::<References>(&x) {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<References>(params, &x.id)
-                        && !self
-                            .open_notebook_cells
-                            .read()
-                            .contains_key(&params.text_document_position.text_document.uri)
                     {
                         self.set_file_stats(
                             params.text_document_position.text_document.uri.clone(),
@@ -1859,11 +1855,6 @@ impl Server {
                             params,
                             telemetry_event.activity_key.clone(),
                         );
-                    } else {
-                        // TODO(yangdanny) handle notebooks
-                        let locations: Vec<Location> = Vec::new();
-                        self.connection
-                            .send(Message::Response(new_response(x.id, Ok(Some(locations)))));
                     }
                 } else if let Some(params) = as_request::<PrepareRenameRequest>(&x) {
                     if let Some(params) = self
@@ -4389,6 +4380,17 @@ impl Server {
         let path_remapper = self.path_remapper.clone();
         let external_references = self.external_references.clone();
         let source_uri = uri.clone();
+        // Snapshot open notebook cell URLs so we can remap file URIs to cell URIs
+        // in the transform closure (which doesn't have access to self).
+        let open_notebooks: HashMap<PathBuf, Arc<LspNotebook>> = self
+            .open_files
+            .read()
+            .iter()
+            .filter_map(|(path, file)| match &**file {
+                LspFile::Notebook(notebook) => Some((path.clone(), notebook.clone())),
+                _ => None,
+            })
+            .collect();
 
         self.async_find_from_definition_helper(
             request_id,
@@ -4450,9 +4452,21 @@ impl Server {
 
                 let mut locations: SmallMap<Url, Vec<Range>> = SmallMap::new();
                 for (info, ranges) in local_results {
-                    if let Some(uri) = module_info_to_uri(&info, path_remapper.as_ref()) {
-                        let lsp_ranges = ranges.into_map(|range| info.to_lsp_range(range));
-                        locations.entry(uri).or_default().extend(lsp_ranges);
+                    if let Some(mut uri) = module_info_to_uri(&info, path_remapper.as_ref()) {
+                        for range in ranges {
+                            // Remap file URIs to notebook cell URIs when the target is in a notebook
+                            if let Some(cell_idx) = info.to_cell_for_lsp(range.start())
+                                && let Some(path) = to_real_path(info.path())
+                                && let Some(notebook) = open_notebooks.get(&path)
+                                && let Some(cell_url) = notebook.get_cell_url(cell_idx)
+                            {
+                                uri = cell_url.clone();
+                            }
+                            locations
+                                .entry(uri.clone())
+                                .or_default()
+                                .push(info.to_lsp_range(range));
+                        }
                     }
                 }
 
