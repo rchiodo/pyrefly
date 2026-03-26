@@ -946,3 +946,20 @@ def f(x: int, y: int) -> None:
     assert_type(x ** y, Any)
 "#,
 );
+
+testcase!(
+    bug = "Wrong asserted type in f2",
+    test_augassign,
+    r#"
+from typing import Any, assert_type
+def f1(x):
+    y = 1
+    y = y + x
+    # `x` may be a non-`int` with an `__radd__` method with an unknown return type
+    assert_type(y, Any)
+def f2(x):
+    y = 1
+    y += x
+    assert_type(y, Any)  # E: assert_type(int, Any)
+    "#,
+);
