@@ -3851,13 +3851,6 @@ impl Server {
         activity_key: Option<ActivityKey>,
     ) {
         let uri = &params.text_document_position_params.text_document.uri;
-        if self.open_notebook_cells.read().contains_key(uri) {
-            // TODO(yangdanny) handle notebooks
-            return self.send_response(new_response::<Option<GotoImplementationResponse>>(
-                request_id,
-                Ok(None),
-            ));
-        }
         let Some(handle) = self.make_handle_if_enabled(uri, Some(GotoImplementation::METHOD))
         else {
             return self.send_response(new_response::<Option<GotoImplementationResponse>>(
@@ -3866,6 +3859,17 @@ impl Server {
             ));
         };
         let path_remapper = self.path_remapper.clone();
+        // Snapshot open notebook cell URLs so we can remap file URIs to cell URIs
+        // in the transform closure (which doesn't have access to self).
+        let open_notebooks: HashMap<PathBuf, Arc<LspNotebook>> = self
+            .open_files
+            .read()
+            .iter()
+            .filter_map(|(path, file)| match &**file {
+                LspFile::Notebook(notebook) => Some((path.clone(), notebook.clone())),
+                _ => None,
+            })
+            .collect();
         self.async_find_from_definition_helper(
             request_id,
             transaction,
@@ -3909,8 +3913,16 @@ impl Server {
             move |results: Vec<(ModuleInfo, Vec<TextRange>)>| {
                 let mut lsp_targets = Vec::new();
                 for (info, ranges) in results {
-                    if let Some(uri) = module_info_to_uri(&info, path_remapper.as_ref()) {
+                    if let Some(mut uri) = module_info_to_uri(&info, path_remapper.as_ref()) {
                         for range in ranges {
+                            // Remap file URIs to notebook cell URIs when the target is in a notebook
+                            if let Some(cell_idx) = info.to_cell_for_lsp(range.start())
+                                && let Some(path) = to_real_path(info.path())
+                                && let Some(notebook) = open_notebooks.get(&path)
+                                && let Some(cell_url) = notebook.get_cell_url(cell_idx)
+                            {
+                                uri = cell_url.clone();
+                            }
                             lsp_targets.push(Location {
                                 uri: uri.clone(),
                                 range: info.to_lsp_range(range),

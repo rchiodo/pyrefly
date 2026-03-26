@@ -31,6 +31,7 @@ mod notebook_completion;
 mod notebook_definition;
 mod notebook_document_highlight;
 mod notebook_hover;
+mod notebook_implementation;
 mod notebook_inlay_hint;
 mod notebook_references;
 mod notebook_signature_help;
