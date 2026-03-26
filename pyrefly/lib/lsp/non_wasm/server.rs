@@ -1400,6 +1400,28 @@ impl Server {
         None
     }
 
+    fn path_for_uri_or_notebook_cell(&self, uri: &Url) -> Option<PathBuf> {
+        if let Some(notebook_path) = self.open_notebook_cells.read().get(uri) {
+            Some(notebook_path.clone())
+        } else {
+            self.path_for_uri(uri)
+        }
+    }
+
+    /// Returns a snapshot of all currently open notebooks, keyed by their filesystem path.
+    /// Used to remap file paths to notebook cell URIs in closures that don't have
+    /// access to `self`.
+    fn snapshot_open_notebooks(&self) -> HashMap<PathBuf, Arc<LspNotebook>> {
+        self.open_files
+            .read()
+            .iter()
+            .filter_map(|(path, file)| match &**file {
+                LspFile::Notebook(notebook) => Some((path.clone(), notebook.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn break_completion_item_into_mru_parts(item: &CompletionItem) -> (&str, &str) {
         let label = item.label.trim();
         let auto_import_text = if item.additional_text_edits.is_some() {
@@ -2186,14 +2208,7 @@ impl Server {
                 } else if &x.method == "pyrefly/textDocument/typeErrorDisplayStatus" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
                     self.set_file_stats(text_document.uri.clone(), telemetry_event);
-                    let path = if let Some(notebook_path) =
-                        self.open_notebook_cells.read().get(&text_document.uri)
-                    {
-                        Some(notebook_path.clone())
-                    } else {
-                        self.path_for_uri(&text_document.uri)
-                    };
-                    if let Some(path) = path {
+                    if let Some(path) = self.path_for_uri_or_notebook_cell(&text_document.uri) {
                         self.send_response(new_response(
                             x.id,
                             Ok(self.type_error_display_status(path.as_path())),
@@ -3712,11 +3727,7 @@ impl Server {
         uri: &Url,
         method: Option<&str>,
     ) -> Option<(Handle, Option<LspAnalysisConfig>)> {
-        let path = if let Some(notebook_path) = self.open_notebook_cells.read().get(uri) {
-            notebook_path.clone()
-        } else {
-            self.path_for_uri(uri)?
-        };
+        let path = self.path_for_uri_or_notebook_cell(uri)?;
         self.workspaces.get_with(path.clone(), |(_, workspace)| {
             // Check if all language services are disabled
             if workspace.disable_language_services {
@@ -3849,17 +3860,7 @@ impl Server {
             ));
         };
         let path_remapper = self.path_remapper.clone();
-        // Snapshot open notebook cell URLs so we can remap file URIs to cell URIs
-        // in the transform closure (which doesn't have access to self).
-        let open_notebooks: HashMap<PathBuf, Arc<LspNotebook>> = self
-            .open_files
-            .read()
-            .iter()
-            .filter_map(|(path, file)| match &**file {
-                LspFile::Notebook(notebook) => Some((path.clone(), notebook.clone())),
-                _ => None,
-            })
-            .collect();
+        let open_notebooks = self.snapshot_open_notebooks();
         self.async_find_from_definition_helper(
             request_id,
             transaction,
@@ -4379,17 +4380,7 @@ impl Server {
         let path_remapper = self.path_remapper.clone();
         let external_references = self.external_references.clone();
         let source_uri = uri.clone();
-        // Snapshot open notebook cell URLs so we can remap file URIs to cell URIs
-        // in the transform closure (which doesn't have access to self).
-        let open_notebooks: HashMap<PathBuf, Arc<LspNotebook>> = self
-            .open_files
-            .read()
-            .iter()
-            .filter_map(|(path, file)| match &**file {
-                LspFile::Notebook(notebook) => Some((path.clone(), notebook.clone())),
-                _ => None,
-            })
-            .collect();
+        let open_notebooks = self.snapshot_open_notebooks();
 
         self.async_find_from_definition_helper(
             request_id,
@@ -4710,11 +4701,7 @@ impl Server {
     ) -> Option<Vec<DocumentSymbol>> {
         let uri = &params.text_document.uri;
         let maybe_cell_idx = self.maybe_get_cell_index(uri);
-        let path = if let Some(notebook_path) = self.open_notebook_cells.read().get(uri) {
-            notebook_path.clone()
-        } else {
-            self.path_for_uri(uri)?
-        };
+        let path = self.path_for_uri_or_notebook_cell(uri)?;
         if self
             .workspaces
             .get_with(path, |(_, workspace)| workspace.disable_language_services)
