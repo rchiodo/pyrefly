@@ -54,7 +54,10 @@ ERROR `+` is not supported * (glob)
  --> */bad.py:1:1 (glob)
   |
 1 | 1 + '2'
-  | ^^^^^^^
+  | -^^^---
+  | |   |
+  | |   has type `Literal['2']`
+  | has type `Literal[1]`
   |
   Argument * is not assignable * (glob)
 [1]

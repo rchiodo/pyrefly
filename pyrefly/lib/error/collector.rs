@@ -133,17 +133,20 @@ impl ErrorCollector {
         if self.style == ErrorStyle::Never {
             return;
         }
-        let (kind, ctx) = match info {
+        let (kind, annotations) = match info {
             ErrorInfo::Context(ctx) => {
                 let ctx = ctx();
-                (ctx.as_error_kind(), Some(ctx))
+                let kind = ctx.as_error_kind();
+                let annotations = ctx.annotations();
+                msg.insert(0, ctx.format());
+                (kind, annotations)
             }
-            ErrorInfo::Kind(kind) => (kind, None),
+            ErrorInfo::Kind(kind) => (kind, Vec::new()),
         };
-        if let Some(ctx) = ctx {
-            msg.insert(0, ctx.format());
+        let mut err = Error::new(self.module_info.dupe(), range, msg, kind);
+        for (range, label) in annotations {
+            err = err.with_annotation(range, label);
         }
-        let err = Error::new(self.module_info.dupe(), range, msg, kind);
         self.errors.lock().push(err);
     }
 

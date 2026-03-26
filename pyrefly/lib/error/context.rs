@@ -9,9 +9,11 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_types::callable::Callable;
 use pyrefly_types::callable::FunctionKind;
 use ruff_python_ast::name::Name;
+use ruff_text_size::TextRange;
 
 use crate::binding::binding::AnnotationTarget;
 use crate::config::error_kind::ErrorKind;
+use crate::types::display::TypeDisplayContext;
 use crate::types::types::Type;
 
 /// General context for an error. For many errors, the root cause is some steps removed from what
@@ -30,11 +32,13 @@ pub enum ErrorContext {
     /// with x: ...
     BadContextManager(Type),
     /// Unary operation like `+x`
-    UnaryOp(String, Type),
+    UnaryOp(String, Type, TextRange),
     /// Binary operation like `x + y`
-    BinaryOp(String, Type, Type),
+    // TODO: Consider refactoring to a named struct to improve readability of the 5 fields.
+    BinaryOp(String, Type, Type, TextRange, TextRange),
     /// In-place binary operation like `x += y`
-    InplaceBinaryOp(String, Type, Type),
+    // TODO: Consider refactoring to a named struct to improve readability of the 5 fields.
+    InplaceBinaryOp(String, Type, Type, TextRange, TextRange),
     /// for x in y: ...
     Iteration(Type),
     /// async for x in y: ...
@@ -54,6 +58,30 @@ pub enum ErrorContext {
 }
 
 impl ErrorContext {
+    /// Return secondary annotations that label relevant spans with type information.
+    pub fn annotations(&self) -> Vec<(TextRange, String)> {
+        match self {
+            Self::BinaryOp(_op, left, right, left_range, right_range) => {
+                let ctx = TypeDisplayContext::new(&[left, right]);
+                vec![
+                    (*left_range, format!("has type `{}`", ctx.display(left))),
+                    (*right_range, format!("has type `{}`", ctx.display(right))),
+                ]
+            }
+            Self::InplaceBinaryOp(_op, left, right, left_range, right_range) => {
+                let ctx = TypeDisplayContext::new(&[left, right]);
+                vec![
+                    (*left_range, format!("has type `{}`", ctx.display(left))),
+                    (*right_range, format!("has type `{}`", ctx.display(right))),
+                ]
+            }
+            Self::UnaryOp(_op, operand, operand_range) => {
+                vec![(*operand_range, format!("has type `{operand}`"))]
+            }
+            _ => Vec::new(),
+        }
+    }
+
     pub fn as_error_kind(&self) -> ErrorKind {
         match self {
             Self::BadContextManager(..) => ErrorKind::BadContextManager,

@@ -206,7 +206,7 @@ impl Error {
             let ann_end = cmp::min(ann_start + ann.range.len().to_usize(), source.len());
             if ann_start <= ann_end && ann_end <= source.len() {
                 snippet =
-                    snippet.annotation(Level::Info.span(ann_start..ann_end).label(&ann.label));
+                    snippet.annotation(Level::Warning.span(ann_start..ann_end).label(&ann.label));
             }
         }
 
@@ -367,6 +367,11 @@ impl Error {
     pub fn error_kind(&self) -> ErrorKind {
         self.error_kind
     }
+
+    /// Return the secondary annotations attached to this error.
+    pub fn secondary_annotations(&self) -> &[SecondaryAnnotation] {
+        &self.secondary_annotations
+    }
 }
 
 #[cfg(test)]
@@ -380,6 +385,7 @@ mod tests {
     use vec1::vec1;
 
     use super::*;
+    use crate::test::util::TestEnv;
 
     #[test]
     fn test_error_render() {
@@ -495,10 +501,32 @@ mod tests {
 1 | val * 2
   | ---^^^-
   | |     |
-  | |     info: has type `int`
-  | info: has type `int | str`
+  | |     has type `int`
+  | has type `int | str`
   |
 "#,
         );
+    }
+
+    /// Integration test: verify that binary operator errors from the type checker
+    /// produce secondary annotations labeling both operands with their types.
+    #[test]
+    fn test_binop_error_has_type_annotations() {
+        let code = r#"
+def f(x: None) -> None:
+    y = x * 2  # E: `*` is not supported between `None` and `Literal[2]`
+"#;
+        let (state, handle) = TestEnv::one("main", code).to_state();
+        let errors = state
+            .transaction()
+            .get_errors(&[handle("main")])
+            .collect_errors()
+            .ordinary;
+        assert_eq!(errors.len(), 1);
+        let err = &errors[0];
+        let annotations = err.secondary_annotations();
+        assert_eq!(annotations.len(), 2);
+        assert_eq!(&*annotations[0].label, "has type `None`");
+        assert_eq!(&*annotations[1].label, "has type `Literal[2]`");
     }
 }

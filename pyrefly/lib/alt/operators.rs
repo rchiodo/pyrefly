@@ -359,12 +359,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     fn binop_types(&self, x: &ExprBinOp, lhs: &Type, rhs: &Type, errors: &ErrorCollector) -> Type {
+        let left_range = x.left.range();
+        let right_range = x.right.range();
         let binop_call = |op: Operator, lhs: &Type, rhs: &Type, range: TextRange| -> Type {
             let context = || {
                 ErrorContext::BinaryOp(
                     op.as_str().to_owned(),
                     self.for_display(lhs.clone()),
                     self.for_display(rhs.clone()),
+                    left_range,
+                    right_range,
                 )
             };
             // Reflected operator implementation: This deviates from the runtime semantics by calling the reflected dunder if the regular dunder call errors.
@@ -444,6 +448,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     x.op.as_str().to_owned(),
                                     self.for_display(lhs.clone()),
                                     self.for_display(rhs.clone()),
+                                    left_range,
+                                    right_range,
                                 )
                             };
                             let calls = [
@@ -488,12 +494,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         x: &StmtAugAssign,
         errors: &ErrorCollector,
     ) -> Type {
+        let target_range = x.target.range();
+        let value_range = x.value.range();
         let binop_call = |op: Operator, lhs: &Type, rhs: &Type, range: TextRange| -> Type {
             let context = || {
                 ErrorContext::InplaceBinaryOp(
                     op.as_str().to_owned(),
                     self.for_display(lhs.clone()),
                     self.for_display(rhs.clone()),
+                    target_range,
+                    value_range,
                 )
             };
             let calls_to_try = [
@@ -557,8 +567,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors,
             );
 
-            let result =
-                self.compare_types(x, *op, &current_left, &right, current_left_range, errors);
+            let right_range = comparator.range();
+            let result = self.compare_types(
+                x,
+                *op,
+                &current_left,
+                &right,
+                current_left_range,
+                right_range,
+                errors,
+            );
             results.push(result);
             // For next comparison, the current right becomes the new left
             current_left = right;
@@ -584,6 +602,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         left: &Type,
         right: &Type,
         current_left_range: TextRange,
+        current_right_range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
         self.distribute_over_union(left, |left| {
@@ -604,6 +623,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 constraint,
                                 constraint,
                                 current_left_range,
+                                current_right_range,
                                 errors,
                             )
                         }))
@@ -618,6 +638,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             &left_restriction,
                             right,
                             current_left_range,
+                            current_right_range,
                             errors,
                         )
                     }
@@ -630,6 +651,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             left,
                             &right_restriction,
                             current_left_range,
+                            current_right_range,
                             errors,
                         )
                     }
@@ -639,6 +661,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 op.as_str().to_owned(),
                                 self.for_display(left.clone()),
                                 self.for_display(right.clone()),
+                                current_left_range,
+                                current_right_range,
                             )
                         };
                         match op {
@@ -711,8 +735,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn unop_infer(&self, x: &ExprUnaryOp, errors: &ErrorCollector) -> Type {
         let t = self.expr_infer(&x.operand, errors);
         let unop = |t: &Type, f: &dyn Fn(&Lit) -> Option<Type>, method: &Name| {
-            let context =
-                || ErrorContext::UnaryOp(x.op.as_str().to_owned(), self.for_display(t.clone()));
+            let operand_range = x.operand.range();
+            let context = || {
+                ErrorContext::UnaryOp(
+                    x.op.as_str().to_owned(),
+                    self.for_display(t.clone()),
+                    operand_range,
+                )
+            };
             match t {
                 Type::Literal(lit) if let Some(ret) = f(&lit.value) => ret,
                 Type::ClassType(_)
