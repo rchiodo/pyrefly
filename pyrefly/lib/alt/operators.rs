@@ -699,9 +699,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                             &self.get_produced_type(iterables),
                                             x.range,
                                             errors,
-                                            &|| TypeCheckContext {
-                                                kind: TypeCheckKind::Container,
-                                                context: Some(context()),
+                                            &|| {
+                                                TypeCheckContext::of_kind(TypeCheckKind::Container)
+                                                    .with_context(Some(context()))
                                             },
                                         );
                                     } else {

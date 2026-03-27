@@ -1728,12 +1728,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .mk_optional(self.heap.mk_class_type(self.stdlib.bool().clone())),
                 range,
                 errors,
-                &|| TypeCheckContext {
-                    kind: TypeCheckKind::MagicMethodReturn(
+                &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::MagicMethodReturn(
                         self.for_display(context_manager_type.clone()),
                         kind.context_exit_dunder(),
-                    ),
-                    context: Some(context()),
+                    ))
+                    .with_context(Some(context()))
                 },
             );
             // TODO: `exit_type` may also affect exceptional control flow, which is yet to be supported:

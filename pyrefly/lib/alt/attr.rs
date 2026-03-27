@@ -1097,16 +1097,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let ty = match &got {
             TypeOrExpr::Expr(got) => self.expr(
                 got,
-                Some((&attr_ty, &|| TypeCheckContext {
-                    kind: TypeCheckKind::Attribute(attr_name.clone()),
-                    context: context.map(|ctx| ctx()),
+                Some((&attr_ty, &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::Attribute(attr_name.clone()))
+                        .with_context(context.map(|ctx| ctx()))
                 })),
                 errors,
             ),
             TypeOrExpr::Type(got, _) => {
-                self.check_type(got, &attr_ty, range, errors, &|| TypeCheckContext {
-                    kind: TypeCheckKind::Attribute(attr_name.clone()),
-                    context: context.map(|ctx| ctx()),
+                self.check_type(got, &attr_ty, range, errors, &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::Attribute(attr_name.clone()))
+                        .with_context(context.map(|ctx| ctx()))
                 });
                 (*got).clone()
             }

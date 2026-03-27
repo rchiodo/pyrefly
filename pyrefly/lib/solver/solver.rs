@@ -1172,12 +1172,23 @@ impl Solver {
         if let Some(subset_error_msg) = subset_error.to_error_msg() {
             msg_lines.push(subset_error_msg);
         }
+        let extra_annotations = tcc.annotations;
         match tcc.context {
             Some(ctx) => {
-                errors.add(loc, ErrorInfo::Context(&|| ctx.clone()), msg_lines);
+                errors.add_with_annotations(
+                    loc,
+                    ErrorInfo::Context(&|| ctx.clone()),
+                    msg_lines,
+                    extra_annotations,
+                );
             }
             None => {
-                errors.add(loc, ErrorInfo::Kind(tcc.kind.as_error_kind()), msg_lines);
+                errors.add_with_annotations(
+                    loc,
+                    ErrorInfo::Kind(tcc.kind.as_error_kind()),
+                    msg_lines,
+                    extra_annotations,
+                );
             }
         }
     }

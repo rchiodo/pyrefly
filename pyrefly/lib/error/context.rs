@@ -132,6 +132,8 @@ impl<'a> ErrorInfo<'a> {
 pub struct TypeCheckContext {
     pub kind: TypeCheckKind,
     pub context: Option<ErrorContext>,
+    /// Optional secondary annotations to attach to the error.
+    pub annotations: Vec<(TextRange, String)>,
 }
 
 impl TypeCheckContext {
@@ -139,7 +141,18 @@ impl TypeCheckContext {
         Self {
             kind,
             context: None,
+            annotations: Vec::new(),
         }
+    }
+
+    pub fn with_context(mut self, context: Option<ErrorContext>) -> Self {
+        self.context = context;
+        self
+    }
+
+    pub fn with_annotations(mut self, annotations: Vec<(TextRange, String)>) -> Self {
+        self.annotations = annotations;
+        self
     }
 }
 

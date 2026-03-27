@@ -354,13 +354,13 @@ impl CallArgPreEval<'_> {
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
     ) -> Option<Type> {
-        let tcc = &|| TypeCheckContext {
-            kind: if vararg {
+        let tcc = &|| {
+            TypeCheckContext::of_kind(if vararg {
                 TypeCheckKind::CallVarArgs(false, param_name.cloned(), callable_name.cloned())
             } else {
                 TypeCheckKind::CallArgument(param_name.cloned(), callable_name.cloned())
-            },
-            context: context.map(|ctx| ctx()),
+            })
+            .with_context(context.map(|ctx| ctx()))
         };
         match self {
             Self::Type(ty, done) => {
@@ -860,13 +860,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 unpacked_param_ty,
                 arguments_range,
                 arg_errors,
-                &|| TypeCheckContext {
-                    kind: TypeCheckKind::CallVarArgs(
+                &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::CallVarArgs(
                         true,
                         unpacked_name.cloned(),
                         callable_name.cloned(),
-                    ),
-                    context: context.map(|ctx| ctx()),
+                    ))
+                    .with_context(context.map(|ctx| ctx()))
                 },
             );
         }
@@ -989,13 +989,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             }
                             if let Some(want) = &hint {
                                 self.check_type(&field.ty, want, kw.range, call_errors, &|| {
-                                    TypeCheckContext {
-                                        kind: TypeCheckKind::CallArgument(
-                                            Some(name.clone()),
-                                            callable_name.cloned(),
-                                        ),
-                                        context: context.map(|ctx| ctx()),
-                                    }
+                                    TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
+                                        Some(name.clone()),
+                                        callable_name.cloned(),
+                                    ))
+                                    .with_context(context.map(|ctx| ctx()))
                                 });
                             }
                         }
@@ -1012,13 +1010,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                             want,
                                             kw.range,
                                             call_errors,
-                                            &|| TypeCheckContext {
-                                                kind: TypeCheckKind::CallKwArgs(
-                                                    None,
-                                                    name.cloned(),
-                                                    callable_name.cloned(),
-                                                ),
-                                                context: context.map(|ctx| ctx()),
+                                            &|| {
+                                                TypeCheckContext::of_kind(
+                                                    TypeCheckKind::CallKwArgs(
+                                                        None,
+                                                        name.cloned(),
+                                                        callable_name.cloned(),
+                                                    ),
+                                                )
+                                                .with_context(context.map(|ctx| ctx()))
                                             },
                                         );
                                     };
@@ -1068,8 +1068,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     } else if kwargs.is_none() {
                         unexpected_keyword_error(&id.id, id.range);
                     }
-                    let tcc: &dyn Fn() -> TypeCheckContext = &|| TypeCheckContext {
-                        kind: if has_matching_param {
+                    let tcc: &dyn Fn() -> TypeCheckContext = &|| {
+                        TypeCheckContext::of_kind(if has_matching_param {
                             TypeCheckKind::CallArgument(Some(id.id.clone()), callable_name.cloned())
                         } else {
                             TypeCheckKind::CallKwArgs(
@@ -1077,8 +1077,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 kwargs.as_ref().and_then(|(name, _)| name.cloned()),
                                 callable_name.cloned(),
                             )
-                        },
-                        context: context.map(|ctx| ctx()),
+                        })
+                        .with_context(context.map(|ctx| ctx()))
                     };
                     let arg_ty = match kw.value {
                         TypeOrExpr::Expr(x) => self.expr_with_separate_check_errors(
@@ -1150,12 +1150,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
                 for (ty, range) in &splat_kwargs {
-                    self.check_type(ty, want, *range, call_errors, &|| TypeCheckContext {
-                        kind: TypeCheckKind::CallUnpackKwArg(
+                    self.check_type(ty, want, *range, call_errors, &|| {
+                        TypeCheckContext::of_kind(TypeCheckKind::CallUnpackKwArg(
                             (*name).clone(),
                             callable_name.cloned(),
-                        ),
-                        context: context.map(|ctx| ctx()),
+                        ))
+                        .with_context(context.map(|ctx| ctx()))
                     });
                 }
             }
