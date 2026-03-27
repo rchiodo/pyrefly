@@ -10,14 +10,12 @@
 use std::env;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::LazyLock;
 
 use human_bytes::human_bytes;
 use tracing::debug;
 use tracing::info;
 
 use crate::display::number_thousands;
-use crate::lock::Mutex;
 
 /// The stack size for all created threads.
 ///
@@ -50,13 +48,6 @@ impl FromStr for ThreadCount {
     }
 }
 
-static THREADS: LazyLock<Mutex<ThreadCount>> = LazyLock::new(|| Mutex::new(ThreadCount::default()));
-
-/// Set up the global thread pool.
-pub fn init_thread_pool(threads: ThreadCount) {
-    *THREADS.lock() = threads;
-}
-
 /// A WASM compatible thread-pool.
 pub struct ThreadPool(
     // Will be None on WASM
@@ -80,7 +71,7 @@ impl ThreadPool {
         }
     }
 
-    pub fn with_thread_count(count: ThreadCount) -> Self {
+    pub fn new(count: ThreadCount) -> Self {
         if cfg!(target_arch = "wasm32") {
             // ThreadPool doesn't work on WASM
             return Self(None);
@@ -107,10 +98,6 @@ impl ThreadPool {
             human_bytes(stack_size as f64)
         );
         Self(Some(pool))
-    }
-
-    pub fn new() -> Self {
-        Self::with_thread_count(*THREADS.lock())
     }
 
     /// Spawns `f` on the thread pool, or runs it directly if running single-threaded.

@@ -895,7 +895,7 @@ impl<'a> CalleesWithLocation<'a> {
 
 impl Query {
     pub fn new(config_finder: ConfigFinder, thread_count: ThreadCount) -> Self {
-        let state = State::with_thread_count(config_finder, thread_count);
+        let state = State::new(config_finder, thread_count);
         Self {
             state,
             sys_info: SysInfo::default(),

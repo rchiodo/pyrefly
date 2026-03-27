@@ -7,11 +7,9 @@
 
 use anstream::ColorChoice;
 pub use pyrefly_util::thread_pool::TEST_THREAD_COUNT;
-use pyrefly_util::thread_pool::init_thread_pool;
 use pyrefly_util::trace::init_tracing;
 
 pub fn init_test() {
     ColorChoice::write_global(ColorChoice::Always);
     init_tracing(true, true);
-    init_thread_pool(TEST_THREAD_COUNT);
 }

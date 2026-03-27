@@ -59,7 +59,7 @@ else:
         "import lib; x: str = lib.value  # E: `Literal[42]` is not assignable to `str`",
     );
     let config_file = test_env.config();
-    let state = State::with_thread_count(test_env.config_finder(), TEST_THREAD_COUNT);
+    let state = State::new(test_env.config_finder(), TEST_THREAD_COUNT);
 
     let f = |name: &str, sys_info: &SysInfo| {
         let name = ModuleName::from_str(name);
@@ -113,7 +113,7 @@ fn test_multiple_path() {
     config.configure();
     let config = ArcId::new(config);
 
-    let state = State::with_thread_count(
+    let state = State::new(
         ConfigFinder::new_constant(config.clone()),
         TEST_THREAD_COUNT,
     );
@@ -136,7 +136,7 @@ fn test_multiple_path() {
 #[test]
 fn test_change_require() {
     let env = TestEnv::one("foo", "x: str = 1\ny: int = 'x'");
-    let state = State::with_thread_count(env.config_finder(), TEST_THREAD_COUNT);
+    let state = State::new(env.config_finder(), TEST_THREAD_COUNT);
     let handle = Handle::new(
         ModuleName::from_str("foo"),
         ModulePath::memory(PathBuf::from("foo.py")),
@@ -306,7 +306,7 @@ x: int = 1
     config.configure();
     let config = ArcId::new(config);
 
-    let state = State::with_thread_count(
+    let state = State::new(
         ConfigFinder::new_constant(config.clone()),
         TEST_THREAD_COUNT,
     );
@@ -441,7 +441,7 @@ fn test_notebook_reload_after_parse_failure() {
     config.configure();
     let config = ArcId::new(config);
     let sys_info = config.get_sys_info();
-    let state = State::with_thread_count(ConfigFinder::new_constant(config), TEST_THREAD_COUNT);
+    let state = State::new(ConfigFinder::new_constant(config), TEST_THREAD_COUNT);
     let module_name = ModuleName::from_str("test");
     let module_path = ModulePath::filesystem(notebook_path.clone());
     let handle = Handle::new(module_name, module_path, sys_info);
@@ -542,7 +542,7 @@ fn test_crash_on_cross_module_type_alias_ref() {
     let sys_info = SysInfo::new(PythonVersion::default(), PythonPlatform::linux());
     let handle = Handle::new(ModuleName::from_str("main"), main_path, sys_info);
 
-    let state = State::with_thread_count(finder, TEST_THREAD_COUNT);
+    let state = State::new(finder, TEST_THREAD_COUNT);
     let mut transaction = state.new_transaction(Require::Exports, None);
     transaction.run(&[handle], Require::Everything, None);
 }
@@ -556,7 +556,7 @@ fn test_crash_on_cross_module_type_alias_ref() {
 #[test]
 fn test_stdlib_cached_on_recheck() {
     let env = TestEnv::one("foo", "x: int = 1");
-    let state = State::with_thread_count(env.config_finder(), TEST_THREAD_COUNT);
+    let state = State::new(env.config_finder(), TEST_THREAD_COUNT);
     let handle = Handle::new(
         ModuleName::from_str("foo"),
         ModulePath::memory(PathBuf::from("foo.py")),

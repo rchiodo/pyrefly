@@ -290,7 +290,7 @@ impl InferArgs {
         thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
-        let state = State::with_thread_count(config_finder, thread_count);
+        let state = State::new(config_finder, thread_count);
         let holder = Forgetter::new(state, false);
         let handles = Handles::new(expanded_file_list);
         // Use Exports as the default require level for dependency modules —

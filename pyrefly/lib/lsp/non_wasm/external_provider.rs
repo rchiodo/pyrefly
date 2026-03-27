@@ -238,7 +238,7 @@ mod tests {
         // transaction.get_ast() returns None for any handle, exercising
         // the re-parse fallback inside compute_qualified_name.
         let env = TestEnv::one("unrelated", "");
-        let state = State::with_thread_count(env.config_finder(), TEST_THREAD_COUNT);
+        let state = State::new(env.config_finder(), TEST_THREAD_COUNT);
         let transaction = state.transaction();
 
         let handle = Handle::new(module_name, module_path, env.sys_info());
@@ -264,7 +264,7 @@ mod tests {
         let module = Module::new(module_name, module_path.dupe(), Arc::new(code.to_owned()));
 
         let env = TestEnv::one("unrelated", "");
-        let state = State::with_thread_count(env.config_finder(), TEST_THREAD_COUNT);
+        let state = State::new(env.config_finder(), TEST_THREAD_COUNT);
         let transaction = state.transaction();
 
         let handle = Handle::new(module_name, module_path, env.sys_info());

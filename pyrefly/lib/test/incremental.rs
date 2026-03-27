@@ -93,7 +93,7 @@ impl Incremental {
         Self {
             data: data.dupe(),
             require: None,
-            state: State::with_thread_count(ConfigFinder::new_constant(config), TEST_THREAD_COUNT),
+            state: State::new(ConfigFinder::new_constant(config), TEST_THREAD_COUNT),
             to_set: Vec::new(),
         }
     }

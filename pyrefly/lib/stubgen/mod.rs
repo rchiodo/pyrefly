@@ -48,7 +48,7 @@ mod tests {
         let config_finder = t.config_finder();
 
         let expanded = config_finder.checkpoint(f_globs.files()).unwrap();
-        let state = State::with_thread_count(config_finder, TEST_THREAD_COUNT);
+        let state = State::new(config_finder, TEST_THREAD_COUNT);
         let holder = Forgetter::new(state, false);
 
         let handles_obj = crate::commands::check::Handles::new(expanded);

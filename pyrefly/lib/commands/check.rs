@@ -715,7 +715,7 @@ impl CheckArgs {
             ));
         }
 
-        let holder = Forgetter::new(State::with_thread_count(config_finder, thread_count), true);
+        let holder = Forgetter::new(State::new(config_finder, thread_count), true);
         let handles = Handles::new(expanded_file_list);
         let require_levels = self.get_required_levels();
         let mut transaction = Forgetter::new(
@@ -763,7 +763,7 @@ impl CheckArgs {
         let module_path = ModulePath::memory(path);
         let module_name = ModuleName::from_str("__main__");
 
-        let holder = Forgetter::new(State::with_thread_count(config_finder, thread_count), true);
+        let holder = Forgetter::new(State::new(config_finder, thread_count), true);
 
         // Create a single handle for the virtual module
         let config = holder
@@ -818,7 +818,7 @@ impl CheckArgs {
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
         let require_levels = self.get_required_levels();
         let mut handles = Handles::new(expanded_file_list);
-        let state = State::with_thread_count(config_finder, thread_count);
+        let state = State::new(config_finder, thread_count);
 
         // Track which output settings were explicitly set on the CLI.
         let cli_provided_baseline = self.output.baseline.is_some();

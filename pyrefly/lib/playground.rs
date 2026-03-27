@@ -249,7 +249,7 @@ impl Playground {
         let config = ArcId::new(config);
         let config_finder = ConfigFinder::new_constant(config.dupe());
 
-        let state = State::with_thread_count(config_finder, ThreadCount::default());
+        let state = State::new(config_finder, ThreadCount::default());
         let config_finder_for_self = ConfigFinder::new_constant(config.dupe());
 
         Ok(Self {
@@ -349,7 +349,7 @@ impl Playground {
         let config = ArcId::new(config);
         let new_config_finder = ConfigFinder::new_constant(config.dupe());
 
-        self.state = State::with_thread_count(new_config_finder, ThreadCount::default());
+        self.state = State::new(new_config_finder, ThreadCount::default());
         self.config_finder = ConfigFinder::new_constant(config.dupe());
 
         if self.handles.contains_key("sandbox.py") {

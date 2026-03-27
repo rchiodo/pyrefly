@@ -98,7 +98,7 @@ fn compute_errors(
     config.configure();
     let config = ArcId::new(config);
 
-    let state = State::with_thread_count(ConfigFinder::new_constant(config), thread_count);
+    let state = State::new(ConfigFinder::new_constant(config), thread_count);
     state.run(
         &modules_to_check,
         RequireLevels {

@@ -30,7 +30,6 @@ use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::prelude::SliceExt;
 pub use pyrefly_util::thread_pool::TEST_THREAD_COUNT;
-use pyrefly_util::thread_pool::init_thread_pool;
 use pyrefly_util::trace::init_tracing;
 use ruff_python_ast::name::Name;
 use ruff_source_file::LineIndex;
@@ -414,7 +413,7 @@ impl TestEnv {
             .rev()
             .map(|(x, path, _)| Handle::new(*x, path.dupe(), config.dupe()))
             .collect::<Vec<_>>();
-        let state = State::with_thread_count(self.config_finder(), TEST_THREAD_COUNT);
+        let state = State::new(self.config_finder(), TEST_THREAD_COUNT);
         let subscriber = TestSubscriber::new();
         let mut transaction = state.new_committable_transaction(
             self.default_require_level,
@@ -645,7 +644,6 @@ fn get_batched_lsp_operations_report_no_cursor_helper(
 pub fn init_test() {
     ColorChoice::write_global(ColorChoice::Always);
     init_tracing(true, true);
-    init_thread_pool(TEST_THREAD_COUNT);
 }
 
 /// Shared state with all the builtins already initialized (by a dummy module).

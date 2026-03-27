@@ -2786,21 +2786,9 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(config_finder: ConfigFinder) -> Self {
+    pub fn new(config_finder: ConfigFinder, thread_count: ThreadCount) -> Self {
         Self {
-            threads: ThreadPool::new(),
-            uniques: UniqueFactory::new(),
-            config_finder,
-            state: RwLock::new(StateData::new()),
-            run_count: AtomicUsize::new(0),
-            committing_transaction_lock: Mutex::new(()),
-        }
-    }
-
-    /// Create a new `State` with an explicit thread count, bypassing the global thread pool.
-    pub fn with_thread_count(config_finder: ConfigFinder, thread_count: ThreadCount) -> Self {
-        Self {
-            threads: ThreadPool::with_thread_count(thread_count),
+            threads: ThreadPool::new(thread_count),
             uniques: UniqueFactory::new(),
             config_finder,
             state: RwLock::new(StateData::new()),

@@ -2383,7 +2383,7 @@ impl Server {
             indexing_mode,
             workspace_indexing_limit,
             build_system_blocking,
-            state: State::with_thread_count(config_finder, thread_count),
+            state: State::new(config_finder, thread_count),
             open_notebook_cells: RwLock::new(HashMap::new()),
             open_files: RwLock::new(HashMap::new()),
             published_workspace_diagnostics: Mutex::new(HashMap::new()),
@@ -2391,7 +2391,7 @@ impl Server {
             indexed_configs: Mutex::new(HashSet::new()),
             indexed_workspaces: Mutex::new(HashSet::new()),
             cancellation_handles: Mutex::new(HashMap::new()),
-            lsp_thread_pool: ThreadPool::with_thread_count(ThreadCount::NumThreads(
+            lsp_thread_pool: ThreadPool::new(ThreadCount::NumThreads(
                 NonZeroUsize::new(8).unwrap(),
             )),
             uris_pending_close: Mutex::new(HashMap::new()),

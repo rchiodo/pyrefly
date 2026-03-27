@@ -676,7 +676,7 @@ mod tests {
 
         let config = ArcId::new(config);
         let sys_info = SysInfo::default();
-        let state = State::with_thread_count(ConfigFinder::new_constant(config), TEST_THREAD_COUNT);
+        let state = State::new(ConfigFinder::new_constant(config), TEST_THREAD_COUNT);
         let handle = Handle::new(
             ModuleName::from_str(name),
             ModulePath::filesystem(get_path(&tdir)),
