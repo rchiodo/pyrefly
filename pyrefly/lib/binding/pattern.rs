@@ -293,6 +293,19 @@ impl<'a> BindingsBuilder<'a> {
                     && x.arguments.patterns.len() == 1
                     && x.arguments.keywords.is_empty();
 
+                // Check whether all sub-patterns are irrefutable (e.g. wildcards like `_`).
+                // If so, the class pattern matches all instances, so we don't need a
+                // Placeholder that would block negative narrowing.
+                let all_args_irrefutable = x
+                    .arguments
+                    .patterns
+                    .iter()
+                    .all(|p| p.is_irrefutable() || p.is_wildcard())
+                    && x.arguments
+                        .keywords
+                        .iter()
+                        .all(|kw| kw.pattern.is_irrefutable() || kw.pattern.is_wildcard());
+
                 let mut narrow_ops = if let Some(ref subject) = match_subject {
                     let mut narrow_for_subject = NarrowOps::from_single_narrow_op_for_subject(
                         subject.clone(),
@@ -305,6 +318,7 @@ impl<'a> BindingsBuilder<'a> {
                     // the placeholder. Similarly, single-slot builtins with one positional arg are exhaustive.
                     if (!x.arguments.patterns.is_empty() || !x.arguments.keywords.is_empty())
                         && !is_exhaustive_single_slot
+                        && !all_args_irrefutable
                     {
                         let placeholder = NarrowOps::from_single_narrow_op_for_subject(
                             subject.clone(),
@@ -373,6 +387,16 @@ impl<'a> BindingsBuilder<'a> {
                         narrow_ops.and_all(self.bind_pattern(subject_for_attr, pattern, attr_key))
                     },
                 );
+                // When all sub-patterns are irrefutable, strip Placeholders that `and_all`
+                // added for unmerged names. These Placeholders would incorrectly block
+                // negative narrowing (preventing the class from being narrowed away in
+                // subsequent match cases).
+                if all_args_irrefutable
+                    && let Some(ref subject) = match_subject
+                    && let Some((op, _)) = narrow_ops.0.get_mut(subject.name())
+                {
+                    op.strip_placeholders();
+                }
                 narrow_ops
             }
             Pattern::MatchOr(x) => {
