@@ -861,3 +861,23 @@ o = arbitrary_method("a", 2, ImplementedModel)
 assert_type(o, ImplementedModel)
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2924
+testcase!(
+    bug = "Should reject overriding reserved NamedTuple methods like _asdict and _make",
+    test_named_tuple_reserved_method_override,
+    r#"
+from typing import NamedTuple
+
+class Record(NamedTuple):
+    name: str
+    value: int
+
+    def _asdict(self) -> dict[str, object]:
+        return {}
+
+    @classmethod
+    def _make(cls, iterable: object) -> "Record":
+        return cls("", 0)
+"#,
+);
