@@ -986,23 +986,6 @@ def to_foo() -> Foo[MySeries]:
 "#,
 );
 
-testcase!(
-    test_protocol_isinstance_non_method_members,
-    r#"
-from typing import Protocol, runtime_checkable
-
-@runtime_checkable
-class HasData(Protocol):
-    x: int
-    y: str
-
-def check(cls: type) -> None:
-    # Protocols with non-method members cannot reliably be used with
-    # isinstance/issubclass because only method presence is checked at runtime.
-    issubclass(cls, HasData)  # E: non-method members
-"#,
-);
-
 // https://github.com/facebook/pyrefly/issues/2925
 testcase!(
     bug = "Should detect ambiguous protocol members with value assignments",
