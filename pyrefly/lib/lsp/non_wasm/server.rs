@@ -1882,16 +1882,15 @@ impl Server {
                         .extract_request_params_or_send_err_response::<GotoImplementation>(
                             params, &x.id,
                         )
-                    {
-                        if let Err(reason) = self.async_go_to_implementations(
+                        && let Err(reason) = self.async_go_to_implementations(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if let Some(params) = as_request::<CodeActionRequest>(&x) {
                     if let Some(params) = self
@@ -1954,16 +1953,15 @@ impl Server {
                 } else if let Some(params) = as_request::<References>(&x) {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<References>(params, &x.id)
-                    {
-                        if let Err(reason) = self.references(
+                        && let Err(reason) = self.references(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if let Some(params) = as_request::<PrepareRenameRequest>(&x) {
                     if let Some(params) = self
@@ -2207,32 +2205,30 @@ impl Server {
                         .extract_request_params_or_send_err_response::<CallHierarchyIncomingCalls>(
                             params, &x.id,
                         )
-                    {
-                        if let Err(reason) = self.async_call_hierarchy_incoming_calls(
+                        && let Err(reason) = self.async_call_hierarchy_incoming_calls(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if let Some(params) = as_request::<CallHierarchyOutgoingCalls>(&x) {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<CallHierarchyOutgoingCalls>(
                             params, &x.id,
                         )
-                    {
-                        if let Err(reason) = self.async_call_hierarchy_outgoing_calls(
+                        && let Err(reason) = self.async_call_hierarchy_outgoing_calls(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if let Some(params) = as_request::<TypeHierarchyPrepare>(&x) {
                     if let Some(params) = self
@@ -2254,32 +2250,30 @@ impl Server {
                         .extract_request_params_or_send_err_response::<TypeHierarchySupertypes>(
                             params, &x.id,
                         )
-                    {
-                        if let Err(reason) = self.async_type_hierarchy_supertypes(
+                        && let Err(reason) = self.async_type_hierarchy_supertypes(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if let Some(params) = as_request::<TypeHierarchySubtypes>(&x) {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<TypeHierarchySubtypes>(
                             params, &x.id,
                         )
-                    {
-                        if let Err(reason) = self.async_type_hierarchy_subtypes(
+                        && let Err(reason) = self.async_type_hierarchy_subtypes(
                             x.id.clone(),
                             &transaction,
                             params,
                             telemetry_event.activity_key.clone(),
-                        ) {
-                            self.send_response(new_response(x.id, Ok(None::<()>)));
-                            telemetry_event.set_empty_response_reason(reason);
-                        }
+                        )
+                    {
+                        self.send_response(new_response(x.id, Ok(None::<()>)));
+                        telemetry_event.set_empty_response_reason(reason);
                     }
                 } else if &x.method == "pyrefly/textDocument/docstringRanges" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
