@@ -239,3 +239,37 @@ f(A)
 f(A[int])
     "#,
 );
+
+testcase!(
+    test_duplicate_base_class,
+    r#"
+class A: ...
+
+class Bad(A, A): ...  # E: nonlinearizable inheritance chain
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2919
+testcase!(
+    bug = "Should detect duplicate Protocol base class",
+    test_duplicate_protocol_base,
+    r#"
+from typing import Protocol
+
+class P(Protocol, Protocol): ...
+"#,
+);
+
+testcase!(
+    test_conflicting_metaclass,
+    r#"
+class MetaA(type): ...
+class MetaB(type): ...
+
+class Alpha(metaclass=MetaA): ...
+class Beta(metaclass=MetaB): ...
+
+# MetaA and MetaB are unrelated metaclasses, so this should fail at runtime.
+class Gamma(Alpha, Beta): ...  # E: metaclass `MetaA` which is not a subclass of metaclass `MetaB`
+"#,
+);
