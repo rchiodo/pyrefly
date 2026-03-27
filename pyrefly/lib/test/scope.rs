@@ -1350,3 +1350,34 @@ def test_2(cond: bool):
         assert_type(active_session, int)
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2930
+testcase!(
+    bug = "del in dead code should still make the variable local, hiding the outer binding",
+    test_del_in_dead_code_makes_local,
+    r#"
+x = 1
+
+def f():
+    # Even though the del is in unreachable code, Python's compiler
+    # still marks x as local in f's scope.
+    print(x)
+    if False:
+        del x
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2929
+testcase!(
+    bug = "Should detect possibly-missing attribute on conditionally-defined class members",
+    test_conditionally_defined_class_member,
+    r#"
+def coin() -> bool:
+    return True
+
+class Config:
+    name: str = "default"
+    if coin():
+        debug = True
+"#,
+);
