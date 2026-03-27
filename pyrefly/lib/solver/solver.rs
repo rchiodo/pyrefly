@@ -390,11 +390,10 @@ impl Solver {
             }
             Variable::PartialContained(_) => None,
             Variable::Unwrap(lower_bounds) => {
-                *variable = Variable::Answer(if lower_bounds.is_empty() {
-                    Type::any_implicit()
-                } else {
+                *variable = Variable::Answer(
                     self.solve_lower_bounds(mem::take(lower_bounds))
-                });
+                        .unwrap_or_else(Type::any_implicit),
+                );
                 None
             }
         }
@@ -472,9 +471,11 @@ impl Solver {
                         lower_bounds,
                     }
                     | Variable::Unwrap(lower_bounds)
-                        if expand_unfinished_variables && !lower_bounds.is_empty() =>
+                        if expand_unfinished_variables
+                            && let Some(lower_bound) =
+                                self.solve_lower_bounds(lower_bounds.clone()) =>
                     {
-                        *t = self.solve_lower_bounds(lower_bounds.clone());
+                        *t = lower_bound;
                         drop(variable);
                         drop(lock);
                         self.expand_with_limit(t, limit - 1, recurser, expand_unfinished_variables);
@@ -496,8 +497,10 @@ impl Solver {
         let variables = self.variables.lock();
         match &*variables.get(v) {
             Variable::Answer(t) => t.clone(),
-            Variable::Unwrap(lower_bounds) if !lower_bounds.is_empty() => {
-                self.solve_lower_bounds(lower_bounds.clone())
+            Variable::Unwrap(lower_bounds)
+                if let Some(lower_bound) = self.solve_lower_bounds(lower_bounds.clone()) =>
+            {
+                lower_bound
             }
             _ => v.to_type(&self.heap),
         }
@@ -522,17 +525,13 @@ impl Solver {
                     Variable::Quantified {
                         quantified: q,
                         lower_bounds,
-                    } => {
-                        if lower_bounds.is_empty() {
-                            q.as_gradual_type()
-                        } else {
-                            self.solve_lower_bounds(mem::take(lower_bounds))
-                        }
-                    }
+                    } => self
+                        .solve_lower_bounds(mem::take(lower_bounds))
+                        .unwrap_or_else(|| q.as_gradual_type()),
                     Variable::PartialQuantified(q) => q.as_gradual_type(),
-                    Variable::Unwrap(lower_bounds) if !lower_bounds.is_empty() => {
-                        self.solve_lower_bounds(mem::take(lower_bounds))
-                    }
+                    Variable::Unwrap(lower_bounds) => self
+                        .solve_lower_bounds(mem::take(lower_bounds))
+                        .unwrap_or_else(|| self.heap.mk_any_implicit()),
                     _ => self.heap.mk_any_implicit(),
                 };
                 *e = Variable::Answer(ty.clone());
@@ -959,13 +958,16 @@ impl Solver {
         }
     }
 
-    fn solve_lower_bounds(&self, mut lower_bounds: Vec<Type>) -> Type {
+    fn solve_lower_bounds(&self, mut lower_bounds: Vec<Type>) -> Option<Type> {
+        if lower_bounds.is_empty() {
+            return None;
+        }
         // Keeping `Any` bounds causes `Any` to propagate to too many places,
         // so we filter them out unless `Any` is the only solution.
         if lower_bounds.iter().any(|t| !t.is_any()) {
             lower_bounds.retain(|t| !t.is_any());
         }
-        unions(lower_bounds, &self.heap)
+        Some(unions(lower_bounds, &self.heap))
     }
 
     /// Called after a quantified function has been called. Given `def f[T](x: int): list[T]`,
@@ -991,19 +993,16 @@ impl Solver {
                     }
                 }
                 Variable::Quantified {
-                    quantified: _,
+                    quantified: q,
                     lower_bounds,
-                } if !lower_bounds.is_empty() => {
+                } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
                     }
-                    *e = Variable::Answer(self.solve_lower_bounds(mem::take(lower_bounds)));
-                }
-                Variable::Quantified {
-                    quantified: q,
-                    lower_bounds: _,
-                } => {
-                    *e = if infer_with_first_use {
+                    *e = if let Some(lower_bound) = self.solve_lower_bounds(mem::take(lower_bounds))
+                    {
+                        Variable::Answer(lower_bound)
+                    } else if infer_with_first_use {
                         Variable::finished(q)
                     } else {
                         Variable::Answer(q.as_gradual_type())
@@ -1906,9 +1905,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         lower_bounds,
                     }
                     | Variable::Unwrap(lower_bounds)
-                        if !lower_bounds.is_empty() =>
+                        if let Some(lower_bound) =
+                            self.solver.solve_lower_bounds(lower_bounds.clone()) =>
                     {
-                        let lower_bound = self.solver.solve_lower_bounds(lower_bounds.clone());
                         drop(v1_ref);
                         drop(variables);
                         self.is_subset_eq(&lower_bound, t2)
