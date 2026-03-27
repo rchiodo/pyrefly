@@ -963,3 +963,106 @@ def f2(x):
     assert_type(y, Any)  # E: assert_type(int, Any)
     "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2915
+testcase!(
+    bug = "Should detect division by zero with literal zero divisor",
+    test_division_by_zero_literal,
+    r#"
+from typing import Literal
+
+x = 10 / 0
+y = 10 // 0
+z = 10 % 0
+
+# Variable with Literal[0] type
+zero: Literal[0] = 0
+a = 10 / zero
+b = 10 // zero
+c = 10 % zero
+
+# Union containing Literal[0]
+mixed: int | Literal[0] = 0
+d = 10 / mixed
+e = 10 // mixed
+f = 10 % mixed
+"#,
+);
+
+testcase!(
+    test_unary_op_on_class_object,
+    r#"
+class Widget:
+    def __pos__(self) -> int:
+        return 1
+    def __neg__(self) -> int:
+        return -1
+    def __invert__(self) -> int:
+        return 0
+
+# These are fine on instances:
+w = Widget()
++w
+-w
+~w
+
+# Instance operators don't apply to class objects:
++Widget  # E: Unary `+` is not supported on `type[Widget]`
+-Widget  # E: Unary `-` is not supported on `type[Widget]`
+~Widget  # E: Unary `~` is not supported on `type[Widget]`
+"#,
+);
+
+testcase!(
+    test_binop_on_class_object,
+    r#"
+class Vector:
+    def __add__(self, other: "Vector") -> "Vector":
+        return Vector()
+
+# Fine on instances:
+Vector() + Vector()
+
+# Instance operators don't apply to class objects:
+Vector + Vector  # E: `+` is not supported
+"#,
+);
+
+testcase!(
+    test_augmented_assign_unsupported,
+    r#"
+class Point:
+    pass
+
+p = Point()
+p += 1  # E: `+=` is not supported
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2914
+testcase!(
+    bug = "Should detect unsupported-bool-conversion when __bool__ is not callable",
+    test_bool_conversion_non_callable,
+    r#"
+class BadBool:
+    __bool__: int = 3
+
+assert BadBool()
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2913
+testcase!(
+    bug = "Should detect unsupported-bool-conversion in membership tests",
+    test_bool_conversion_in_contains,
+    r#"
+class BadBool:
+    __bool__: int = 3
+
+class Container:
+    def __contains__(self, item: object) -> BadBool:
+        return BadBool()
+
+10 in Container()
+"#,
+);
