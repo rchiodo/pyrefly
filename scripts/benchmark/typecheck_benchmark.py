@@ -487,6 +487,8 @@ def _write_dummy_mypy_config(
         f.write("[mypy]\n")
         if check_paths:
             f.write(f"files = {', '.join(check_paths)}\n")
+        # Check bodies of untyped functions (other checkers do this by default)
+        f.write("check_untyped_defs = True\n")
         # Exclude test dirs to avoid duplicate module / syntax errors
         # that cause mypy to bail out without checking anything
         f.write("exclude = (?x)(\n    /tests/\n    | /test_\n    | /testing/\n  )\n")
@@ -517,19 +519,6 @@ def _write_dummy_pyrefly_config(
         if check_paths:
             paths_toml = ", ".join(f'"{p}"' for p in check_paths)
             f.write(f"project_includes = [{paths_toml}]\n")
-    return config_path
-
-
-def _write_dummy_zuban_config(
-    package_path: Path,
-    check_paths: list[str] | None = None,
-) -> Path:
-    """Write minimal mypy-style config for zuban benchmarking."""
-    config_path = package_path / "zuban.benchmark.ini"
-    with open(config_path, "w", encoding="utf-8") as f:
-        f.write("[mypy]\n")
-        if check_paths:
-            f.write(f"files = {', '.join(check_paths)}\n")
     return config_path
 
 
