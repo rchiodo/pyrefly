@@ -918,3 +918,13 @@ def process(value: int | float):
         (v, value) = divmod(value, 7)
 "#,
 );
+
+testcase!(
+    test_possibly_unresolved_after_loop,
+    r#"
+items: list[int] = []
+for item in items:
+    last = item
+last  # E: `last` may be uninitialized
+"#,
+);
