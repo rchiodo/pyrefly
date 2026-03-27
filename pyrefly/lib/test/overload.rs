@@ -1698,7 +1698,6 @@ def g(x: int | None):
 );
 
 testcase!(
-    bug = "Pyrefly gets Unknown rather than a precise return type",
     test_match_overload_using_literal_arg,
     r#"
 from typing import Any, assert_type, Literal, overload
@@ -1712,7 +1711,7 @@ def f(x: int, y: str) -> int | str: ...
 def f(x, y) -> int | str: ...
 
 def g(x: Any):
-    assert_type(f(x, 'y'), int)  # E: Unknown
+    assert_type(f(x, 'y'), int)
     "#,
 );
 

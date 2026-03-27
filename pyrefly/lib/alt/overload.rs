@@ -562,15 +562,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Step 5, part 1: for each overload, check whether it's the case that all possible
                 // materializations of each argument are assignable to the corresponding parameter.
                 // If so, eliminate all subsequent overloads.
+                //
+                // Additional filter (non-spec-compliant): only materialize arguments that have
+                // multiple possible parameter types. If an argument contains `Any` but has the
+                // same parameter type in all candidate overloads, it does not contribute to
+                // ambiguity in overload selection. This matches pyright, mypy, and ty.
                 let owner = Owner::new();
                 let mut changed = false;
+                let has_multiple_param_types = |arg_range| {
+                    let mut param_types = matched_overloads
+                        .iter()
+                        .filter_map(|o| o.expected_types.get(&arg_range));
+                    let Some(first) = param_types.next() else {
+                        // If we can't find the expected type, be conservative and assume there may be multiple.
+                        return true;
+                    };
+                    for t in param_types {
+                        if !self.is_equivalent(first, t) {
+                            return true;
+                        }
+                    }
+                    false
+                };
                 let materialized_args = args.map(|arg| {
-                    let (materialized_arg, arg_changed) = arg.materialize(self, errors, &owner);
+                    let (materialized_arg, arg_changed) = if has_multiple_param_types(arg.range()) {
+                        arg.materialize(self, errors, &owner)
+                    } else {
+                        (arg.clone(), false)
+                    };
                     changed |= arg_changed;
                     materialized_arg
                 });
                 let materialized_keywords = keywords.map(|kw| {
-                    let (materialized_kw, kw_changed) = kw.materialize(self, errors, &owner);
+                    let (materialized_kw, kw_changed) = if has_multiple_param_types(kw.range()) {
+                        kw.materialize(self, errors, &owner)
+                    } else {
+                        (kw.clone(), false)
+                    };
                     changed |= kw_changed;
                     materialized_kw
                 });
