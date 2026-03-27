@@ -948,7 +948,6 @@ def f(x: int, y: int) -> None:
 );
 
 testcase!(
-    bug = "Wrong asserted type in f2",
     test_augassign,
     r#"
 from typing import Any, assert_type
@@ -960,7 +959,7 @@ def f1(x):
 def f2(x):
     y = 1
     y += x
-    assert_type(y, Any)  # E: assert_type(int, Any)
+    assert_type(y, Any)
     "#,
 );
 

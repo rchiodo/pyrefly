@@ -519,7 +519,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             &|| TypeCheckContext::of_kind(TypeCheckKind::AugmentedAssignment);
         let result = self.distribute_over_union(&base, |lhs| {
             self.distribute_over_union(&rhs, |rhs| {
-                if let Type::Any(style) = &base {
+                if let Type::Any(style) = &lhs {
+                    style.propagate()
+                } else if let Type::Any(style) = &rhs {
                     style.propagate()
                 } else if x.op == Operator::Add
                     && base.is_literal_string()
