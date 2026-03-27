@@ -96,6 +96,10 @@ impl Bounds {
         self.lower.extend(other.lower);
         self.upper.extend(other.upper);
     }
+
+    fn is_empty(&self) -> bool {
+        self.lower.is_empty()
+    }
 }
 
 #[derive(Debug)]
@@ -1103,7 +1107,7 @@ impl Solver {
                     bounds,
                 } = &*lock.get(*v)
                 // If the variable has already been solved, do not generalize it.
-                && bounds.lower.is_empty()
+                && bounds.is_empty()
                 && *q == *param
             {
                 *t = param.clone().to_type(&self.heap);
