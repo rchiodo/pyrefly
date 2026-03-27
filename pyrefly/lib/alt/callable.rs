@@ -1217,6 +1217,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     //   error collector.
     // Callers can pass the same error collector for both, and most callers do. We use two collectors
     // for overload matching.
+    //
+    // Returns: (return_type, specialization_errors, expected_types) where expected_types maps each
+    // argument's source range to the parameter type it was matched against.
     pub fn callable_infer(
         &self,
         callable: Callable,
@@ -1232,7 +1235,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         mut ctor_targs: Option<&mut TArgs>,
         callee_range: Option<TextRange>,
-    ) -> (Type, Vec<TypeVarSpecializationError>) {
+    ) -> (
+        Type,
+        Vec<TypeVarSpecializationError>,
+        HashMap<TextRange, Type>,
+    ) {
         // Look up meta-shape early so we can conditionally collect bound args.
         // Only consult the registry when tensor_shapes is enabled to avoid
         // unnecessary DSL parsing and per-call HashMap lookups.
@@ -1300,69 +1307,64 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             QuantifiedHandle::empty()
         };
         let self_arg = self_obj.as_ref().map(|ty| CallArg::ty(ty, arguments_range));
-        match callable.params {
-            Params::List(params) => {
-                self.callable_infer_params(
-                    callable_name,
-                    &params,
-                    None,
-                    self_arg,
-                    self_qs,
-                    args,
-                    keywords,
-                    arguments_range,
-                    arg_errors,
-                    call_errors,
-                    context,
-                    &mut bound_args,
-                    callee_range,
-                );
-            }
+        let expected_types = match callable.params {
+            Params::List(params) => self.callable_infer_params(
+                callable_name,
+                &params,
+                None,
+                self_arg,
+                self_qs,
+                args,
+                keywords,
+                arguments_range,
+                arg_errors,
+                call_errors,
+                context,
+                &mut bound_args,
+                callee_range,
+            ),
             Params::Ellipsis | Params::Materialization => {
                 // Deal with Callable[..., R]
                 for arg in self_arg.iter().chain(args.iter()) {
                     arg.pre_eval(self, arg_errors).post_infer(self, arg_errors)
                 }
+                HashMap::new()
             }
             Params::ParamSpec(concatenate, p) => {
                 let p = self.solver().expand_vars(p);
                 match p {
-                    Type::ParamSpecValue(params) => {
-                        self.callable_infer_params(
-                            callable_name,
-                            &params.prepend_types(&concatenate),
-                            None,
-                            self_arg,
-                            self_qs,
-                            args,
-                            keywords,
-                            arguments_range,
-                            arg_errors,
-                            call_errors,
-                            context,
-                            &mut bound_args,
-                            callee_range,
-                        );
-                    }
+                    Type::ParamSpecValue(params) => self.callable_infer_params(
+                        callable_name,
+                        &params.prepend_types(&concatenate),
+                        None,
+                        self_arg,
+                        self_qs,
+                        args,
+                        keywords,
+                        arguments_range,
+                        arg_errors,
+                        call_errors,
+                        context,
+                        &mut bound_args,
+                        callee_range,
+                    ),
                     // This can happen with a signature like `(f: Callable[P, None], *args: P.args, **kwargs: P.kwargs)`.
                     // Before we match an argument to `f`, we don't know what `P` is, so we don't have an answer for the Var yet.
-                    Type::Var(var) => {
-                        self.callable_infer_params(
-                            callable_name,
-                            &ParamList::new_types(concatenate.into_vec()),
-                            Some(var),
-                            self_arg,
-                            self_qs,
-                            args,
-                            keywords,
-                            arguments_range,
-                            arg_errors,
-                            call_errors,
-                            context,
-                            &mut bound_args,
-                            callee_range,
-                        );
-                    }
+                    Type::Var(var) => self.callable_infer_params(
+                        callable_name,
+                        &ParamList::new_types(concatenate.into_vec()),
+                        Some(var),
+                        self_arg,
+                        self_qs,
+                        args,
+                        keywords,
+                        arguments_range,
+                        arg_errors,
+                        call_errors,
+                        context,
+                        &mut bound_args,
+                        callee_range,
+                    ),
                     Type::Quantified(q) => {
                         if let Some((args, keywords)) = self.paramspec_forwarding(
                             &q,
@@ -1388,10 +1390,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 context,
                                 &mut bound_args,
                                 callee_range,
-                            );
+                            )
+                        } else {
+                            HashMap::new()
                         }
                     }
-                    Type::Any(_) | Type::Ellipsis => {}
+                    Type::Any(_) | Type::Ellipsis => HashMap::new(),
                     _ => {
                         // This could well be our error, but not really sure
                         self.error(
@@ -1400,6 +1404,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             ErrorInfo::new(ErrorKind::InvalidParamSpec, context),
                             format!("Unexpected ParamSpec type: `{}`", self.for_display(p)),
                         );
+                        HashMap::new()
                     }
                 }
             }
@@ -1447,7 +1452,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             callable.ret.clone()
         };
 
-        (self.solver().finish_function_return(ret), errors)
+        (
+            self.solver().finish_function_return(ret),
+            errors,
+            expected_types,
+        )
     }
 
     /// Look up whether a callable has a registered meta-shape function.

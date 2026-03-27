@@ -1331,7 +1331,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             *targs = chosen_targs;
         }
-        let (ty, specialization_errors) = chosen_res;
+        let (ty, specialization_errors, _expected_types) = chosen_res;
         if let Ok(errors) = Vec1::try_from_vec(specialization_errors) {
             self.add_specialization_errors(errors, arguments_range, call_errors, context);
         }

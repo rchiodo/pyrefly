@@ -653,7 +653,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let tparams = callable.0.as_deref();
 
         let call_errors = self.error_collector();
-        let (res, specialization_errors) = self.callable_infer(
+        let (res, specialization_errors, _expected_types) = self.callable_infer(
             callable.1.signature.clone(),
             Some(&metadata.kind),
             tparams,
