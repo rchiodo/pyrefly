@@ -412,7 +412,7 @@ impl Solver {
             Variable::PartialContained(_) => None,
             Variable::Unwrap(bounds) => {
                 *variable = Variable::Answer(
-                    self.solve_lower_bounds(mem::take(&mut bounds.lower))
+                    self.solve_bounds(mem::take(bounds))
                         .unwrap_or_else(Type::any_implicit),
                 );
                 None
@@ -493,10 +493,9 @@ impl Solver {
                     }
                     | Variable::Unwrap(bounds)
                         if expand_unfinished_variables
-                            && let Some(lower_bound) =
-                                self.solve_lower_bounds(bounds.lower.clone()) =>
+                            && let Some(bound) = self.solve_bounds(bounds.clone()) =>
                     {
-                        *t = lower_bound;
+                        *t = bound;
                         drop(variable);
                         drop(lock);
                         self.expand_with_limit(t, limit - 1, recurser, expand_unfinished_variables);
@@ -518,10 +517,8 @@ impl Solver {
         let variables = self.variables.lock();
         match &*variables.get(v) {
             Variable::Answer(t) => t.clone(),
-            Variable::Unwrap(bounds)
-                if let Some(lower_bound) = self.solve_lower_bounds(bounds.lower.clone()) =>
-            {
-                lower_bound
+            Variable::Unwrap(bounds) if let Some(bound) = self.solve_bounds(bounds.clone()) => {
+                bound
             }
             _ => v.to_type(&self.heap),
         }
@@ -547,11 +544,11 @@ impl Solver {
                         quantified: q,
                         bounds,
                     } => self
-                        .solve_lower_bounds(mem::take(&mut bounds.lower))
+                        .solve_bounds(mem::take(bounds))
                         .unwrap_or_else(|| q.as_gradual_type()),
                     Variable::PartialQuantified(q) => q.as_gradual_type(),
                     Variable::Unwrap(bounds) => self
-                        .solve_lower_bounds(mem::take(&mut bounds.lower))
+                        .solve_bounds(mem::take(bounds))
                         .unwrap_or_else(|| self.heap.mk_any_implicit()),
                     _ => self.heap.mk_any_implicit(),
                 };
@@ -1005,6 +1002,10 @@ impl Solver {
         Some(unions(lower_bounds, &self.heap))
     }
 
+    fn solve_bounds(&self, bounds: Bounds) -> Option<Type> {
+        self.solve_lower_bounds(bounds.lower)
+    }
+
     /// Called after a quantified function has been called. Given `def f[T](x: int): list[T]`,
     /// after the generic has completed.
     /// If `infer_with_first_use` is true, the variable `T` will be have like an
@@ -1034,10 +1035,8 @@ impl Solver {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
                     }
-                    *e = if let Some(lower_bound) =
-                        self.solve_lower_bounds(mem::take(&mut bounds.lower))
-                    {
-                        Variable::Answer(lower_bound)
+                    *e = if let Some(bound) = self.solve_bounds(mem::take(bounds)) {
+                        Variable::Answer(bound)
                     } else if infer_with_first_use {
                         Variable::finished(q)
                     } else {
