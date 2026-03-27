@@ -1682,6 +1682,62 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         Some(best)
     }
 
+    /// is_subset_eq_var(t1, Quantified)
+    fn is_subset_eq_quantified(
+        &mut self,
+        t1: &Type,
+        q: &Quantified,
+    ) -> (Type, Option<TypeVarSpecializationError>) {
+        let t1_p = t1
+            .clone()
+            .promote_implicit_literals(self.type_order.stdlib());
+        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
+        // For constrained TypeVars, promote to the matching constraint type.
+        if let Restriction::Constraints(ref constraints) = q.restriction {
+            // Try promoted type first, then fall back to original (for literal bounds).
+            if let Some(constraint) = self.find_matching_constraint(&t1_p, constraints) {
+                (constraint.clone(), None)
+            } else if let Some(constraint) = self.find_matching_constraint(t1, constraints) {
+                (constraint.clone(), None)
+            } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
+                // No individual constraint matched, but the type may still
+                // be assignable to the constraint union (e.g. an abstract
+                // `AnyStr` satisfies `str | bytes`). Fall back to bound
+                // checking, mirroring the non-constraint code path.
+                if self.is_subset_eq(t1, &bound).is_err() {
+                    let specialization_error = TypeVarSpecializationError {
+                        name: q.name().clone(),
+                        got: t1_p.clone(),
+                        want: bound,
+                        error: err_p,
+                    };
+                    (t1_p.clone(), Some(specialization_error))
+                } else {
+                    (t1.clone(), None)
+                }
+            } else {
+                (t1_p.clone(), None)
+            }
+        } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
+            // If the promoted type fails, try again with the original type, in case the bound itself is literal.
+            // This could be more optimized, but errors are rare, so this code path should not be hot.
+            if self.is_subset_eq(t1, &bound).is_err() {
+                // If the original type is also an error, use the promoted type.
+                let specialization_error = TypeVarSpecializationError {
+                    name: q.name().clone(),
+                    got: t1_p.clone(),
+                    want: bound,
+                    error: err_p,
+                };
+                (t1_p.clone(), Some(specialization_error))
+            } else {
+                (t1.clone(), None)
+            }
+        } else {
+            (t1_p.clone(), None)
+        }
+    }
+
     /// Implementation of Var subset cases, calling onward to solve non-Var cases.
     ///
     /// This function does two things: it checks that got <: want, and it solves free variables assuming that
@@ -1967,71 +2023,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     | Variable::PartialQuantified(q) => {
                         let is_partial = matches!(&*v2_ref, Variable::PartialQuantified(_));
-                        let t1_p = t1
-                            .clone()
-                            .promote_implicit_literals(self.type_order.stdlib());
-                        let name = q.name.clone();
-                        let kind = q.kind();
-                        let restriction = q.restriction().clone();
-                        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                        let q = q.clone();
                         drop(v2_ref);
                         drop(variables);
-
-                        // For constrained TypeVars, promote to the matching constraint type.
-                        let answer = if let Restriction::Constraints(ref constraints) = restriction
-                        {
-                            // Try promoted type first, then fall back to original (for literal bounds).
-                            if let Some(constraint) =
-                                self.find_matching_constraint(&t1_p, constraints)
-                            {
-                                constraint.clone()
-                            } else if let Some(constraint) =
-                                self.find_matching_constraint(t1, constraints)
-                            {
-                                constraint.clone()
-                            } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
-                                // No individual constraint matched, but the type may still
-                                // be assignable to the constraint union (e.g. an abstract
-                                // `AnyStr` satisfies `str | bytes`). Fall back to bound
-                                // checking, mirroring the non-constraint code path.
-                                if self.is_subset_eq(t1, &bound).is_err() {
-                                    self.solver.instantiation_errors.write().insert(
-                                        *v2,
-                                        TypeVarSpecializationError {
-                                            name,
-                                            got: t1_p.clone(),
-                                            want: bound,
-                                            error: err_p,
-                                        },
-                                    );
-                                    t1_p.clone()
-                                } else {
-                                    t1.clone()
-                                }
-                            } else {
-                                t1_p.clone()
-                            }
-                        } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
-                            // If the promoted type fails, try again with the original type, in case the bound itself is literal.
-                            // This could be more optimized, but errors are rare, so this code path should not be hot.
-                            if self.is_subset_eq(t1, &bound).is_err() {
-                                // If the original type is also an error, use the promoted type.
-                                self.solver.instantiation_errors.write().insert(
-                                    *v2,
-                                    TypeVarSpecializationError {
-                                        name,
-                                        got: t1_p.clone(),
-                                        want: bound,
-                                        error: err_p,
-                                    },
-                                );
-                                t1_p.clone()
-                            } else {
-                                t1.clone()
-                            }
-                        } else {
-                            t1_p.clone()
-                        };
+                        let (answer, specialization_error) = self.is_subset_eq_quantified(t1, &q);
+                        if let Some(specialization_error) = specialization_error {
+                            self.solver
+                                .instantiation_errors
+                                .write()
+                                .insert(*v2, specialization_error);
+                        }
                         // Widen None to None | Any for PartialQuantified, matching
                         // the PartialContained behavior (see comment there).
                         if is_partial {
@@ -2045,8 +2046,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             } else {
                                 variables.update(*v2, Variable::Answer(answer));
                             }
-                        } else if kind != QuantifiedKind::TypeVar
-                            || matches!(restriction, Restriction::Constraints(_))
+                        } else if q.kind() != QuantifiedKind::TypeVar
+                            || matches!(q.restriction(), Restriction::Constraints(_))
                         {
                             // If the TypeVar has constraints, we write the answer immediately to
                             // enforce that we always match the same constraint.
