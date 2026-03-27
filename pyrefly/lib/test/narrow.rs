@@ -728,6 +728,25 @@ def f(x: str | int | None):
 );
 
 testcase!(
+    test_isinstance_union_with_type,
+    r#"
+from typing import assert_type
+def f(x: object):
+    if isinstance(x, type | int):
+        assert_type(x, type | int)
+    isinstance(x, type | int)
+    "#,
+);
+
+testcase!(
+    test_issubclass_union_with_type,
+    r#"
+def f(cls: type):
+    issubclass(cls, type | int)
+    "#,
+);
+
+testcase!(
     test_isinstance_of_tuple,
     r#"
 from typing import assert_type
