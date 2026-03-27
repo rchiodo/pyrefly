@@ -91,7 +91,6 @@ impl<T: TspInterface> TspServer<T> {
     /// snapshot. Returns `Ok(())` on match or `Err(ResponseError)` on mismatch.
     pub fn validate_snapshot(&self, client_snapshot: i32) -> Result<(), ResponseError> {
         let current = self.get_snapshot();
-        eprintln!("TSP: validate_snapshot: client={}, server={}", client_snapshot, current);
         if client_snapshot != current {
             Err(snapshot_outdated_error(client_snapshot, current))
         } else {
@@ -101,20 +100,16 @@ impl<T: TspInterface> TspServer<T> {
 
     /// Send a successful JSON-RPC response for `id` with `result`.
     pub fn send_ok<R: Serialize>(&self, id: RequestId, result: R) {
-        eprintln!("TSP: send_ok id={:?}", id);
         self.inner.send_response(new_response(id, Ok(result)));
-        eprintln!("TSP: send_ok complete");
     }
 
     /// Send a JSON-RPC error response for `id`.
     pub fn send_err(&self, id: RequestId, error: ResponseError) {
-        eprintln!("TSP: send_err id={:?} code={} msg={}", id, error.code, error.message);
         self.inner.send_response(Response {
             id,
             result: None,
             error: Some(error),
         });
-        eprintln!("TSP: send_err complete");
     }
 }
 

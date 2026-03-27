@@ -25,21 +25,11 @@ impl<T: TspInterface> TspServer<T> {
         &self,
         params: GetTypeParams,
     ) -> Result<Option<Type>, ResponseError> {
-        eprintln!("TSP: handle_get_computed_type: uri={}, pos=({},{}), snapshot={}", params.uri(), params.position().line, params.position().character, params.snapshot);
         self.validate_snapshot(params.snapshot)?;
-        eprintln!("TSP: snapshot validated OK");
         let position = params.position();
-        eprintln!("TSP: calling get_type_at_position...");
         let ty = self
             .inner
             .get_type_at_position(params.uri(), position.line, position.character);
-        eprintln!("TSP: get_type_at_position returned: is_some={}", ty.is_some());
-        if let Some(ref t) = ty {
-            eprintln!("TSP: type = {}", t);
-            eprintln!("TSP: converting type...");
-        }
-        let result = ty.map(|t| convert_type(&t));
-        eprintln!("TSP: conversion done, returning");
-        Ok(result)
+        Ok(ty.map(|t| convert_type(&t)))
     }
 }

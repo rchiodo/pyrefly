@@ -5867,26 +5867,18 @@ impl TspInterface for Server {
         line: u32,
         character: u32,
     ) -> Option<pyrefly_types::types::Type> {
-        eprintln!("TSP: get_type_at_position: uri={}, line={}, char={}", uri, line, character);
         let url = Url::parse(uri)
             .ok()
             .or_else(|| Url::from_file_path(uri).ok())?;
         let path = url.to_file_path().ok()?;
-        eprintln!("TSP: parsed path={:?}", path);
 
         let handle = make_open_handle(&self.state, &path);
-        eprintln!("TSP: got handle, getting transaction...");
         let transaction = self.state.transaction();
-        eprintln!("TSP: got transaction, getting module_info...");
         let module_info = transaction.get_module_info(&handle)?;
-        eprintln!("TSP: got module_info, converting position...");
         let position = module_info.from_lsp_position(
             lsp_types::Position { line, character },
             /* notebook_cell */ None,
         );
-        eprintln!("TSP: calling get_type_at...");
-        let result = transaction.get_type_at(&handle, position);
-        eprintln!("TSP: get_type_at returned: is_some={}", result.is_some());
-        result
+        transaction.get_type_at(&handle, position)
     }
 }

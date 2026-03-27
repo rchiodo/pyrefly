@@ -137,7 +137,6 @@ impl<T: TspInterface> TspServer<T> {
         ide_transaction_manager: &mut TransactionManager<'a>,
         request: &Request,
     ) -> anyhow::Result<bool> {
-        eprintln!("TSP: handle_tsp_request method={} id={:?}", request.method, request.id);
         // Convert the request into a TSPRequests enum
         let wrapper = serde_json::json!({
             "method": request.method,
@@ -147,7 +146,6 @@ impl<T: TspInterface> TspServer<T> {
 
         let Ok(msg) = serde_json::from_value::<TSPRequests>(wrapper) else {
             // Not a TSP request
-            eprintln!("TSP: not a TSP request, skipping");
             return Ok(false);
         };
 
@@ -176,11 +174,9 @@ impl<T: TspInterface> TspServer<T> {
                 Ok(true)
             }
             TSPRequests::GetComputedTypeRequest { params, .. } => {
-                eprintln!("TSP: dispatching GetComputedType, params={}", serde_json::to_string(&params).unwrap_or_default());
                 self.dispatch_get_type_request(request.id.clone(), params, |s, p| {
                     s.handle_get_computed_type(p)
                 });
-                eprintln!("TSP: GetComputedType dispatch complete");
                 Ok(true)
             }
             TSPRequests::GetExpectedTypeRequest { params, .. } => {
@@ -204,14 +200,9 @@ impl<T: TspInterface> TspServer<T> {
             GetTypeParams,
         ) -> Result<Option<tsp_types::Type>, lsp_server::ResponseError>,
     ) {
-        eprintln!("TSP: dispatch_get_type_request id={:?} raw_params={}", id, serde_json::to_string(&raw_params).unwrap_or_default());
         let params: GetTypeParams = match serde_json::from_value::<GetTypeParams>(raw_params) {
-            Ok(p) => {
-                eprintln!("TSP: params deserialized OK: uri={}, pos=({},{}), snapshot={}", p.uri(), p.position().line, p.position().character, p.snapshot);
-                p
-            },
+            Ok(p) => p,
             Err(e) => {
-                eprintln!("TSP: params deserialization FAILED: {}", e);
                 self.send_err(
                     id,
                     crate::tsp::validation::invalid_params_error(&e.to_string()),
@@ -219,17 +210,13 @@ impl<T: TspInterface> TspServer<T> {
                 return;
             }
         };
-        eprintln!("TSP: calling handler...");
         match handler(self, params) {
             Ok(result) => {
-                eprintln!("TSP: handler returned Ok, result is_some={}", result.is_some());
                 self.send_ok(id, result);
-                eprintln!("TSP: response sent");
-            },
+            }
             Err(err) => {
-                eprintln!("TSP: handler returned Err: code={} msg={}", err.code, err.message);
                 self.send_err(id, err);
-            },
+            }
         }
     }
 }
@@ -240,7 +227,6 @@ pub fn tsp_loop(
     _initialization: InitializeInfo,
     telemetry: &impl Telemetry,
 ) -> anyhow::Result<()> {
-    eprintln!("Reading TSP messages");
     let server = TspServer::new(lsp_server);
 
     std::thread::scope(|scope| {
