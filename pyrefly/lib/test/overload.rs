@@ -1715,3 +1715,32 @@ def g(x: Any):
     assert_type(f(x, 'y'), int)  # E: Unknown
     "#,
 );
+
+testcase!(
+    test_nested_call_to_generic_overload,
+    r#"
+from typing import Literal, overload
+
+def check[T](actual: T) -> T: ...
+
+class Kitten: ...
+class Puppy: ...
+
+@overload
+def read_csv[S](
+    filepath_or_buffer: str,
+    *,
+    iterator: Literal[True],
+) -> Puppy: ...
+@overload
+def read_csv(
+    filepath_or_buffer: str,
+    *,
+    iterator: Literal[False],
+) -> Kitten: ...
+def read_csv(*args, **kwargs) -> Puppy | Kitten: ...
+
+def test_types_csv(path: str) -> None:
+    check(read_csv(path, iterator=False))
+    "#,
+);
