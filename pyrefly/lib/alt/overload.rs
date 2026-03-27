@@ -6,6 +6,7 @@
  */
 
 use std::cmp::max;
+use std::collections::HashMap;
 
 use itertools::Either;
 use itertools::Itertools;
@@ -49,6 +50,8 @@ struct CalledOverload {
     res: Type,
     ctor_targs: Option<TArgs>,
     call_errors: ErrorCollector,
+    /// Maps each argument's source range to the parameter type it was matched against.
+    expected_types: HashMap<TextRange, Type>,
 }
 
 /// Performs argument type expansion for arguments to an overloaded function.
@@ -262,6 +265,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     res: self.heap.mk_any_error(),
                     ctor_targs: None,
                     call_errors: self.error_collector(),
+                    expected_types: HashMap::new(),
                 },
                 false,
             ),
@@ -312,6 +316,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         closest_overload = CalledOverload {
                             func: first_overload.func.clone(),
                             ctor_targs: first_overload.ctor_targs.clone(),
+                            expected_types: first_overload.expected_types.clone(),
                             res: self.unions(matched_overloads.into_map(|o| o.res)),
                             call_errors: self.error_collector(),
                         };
@@ -653,7 +658,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let tparams = callable.0.as_deref();
 
         let call_errors = self.error_collector();
-        let (res, specialization_errors, _expected_types) = self.callable_infer(
+        let (res, specialization_errors, expected_types) = self.callable_infer(
             callable.1.signature.clone(),
             Some(&metadata.kind),
             tparams,
@@ -681,6 +686,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             res,
             ctor_targs: overload_ctor_targs,
             call_errors,
+            expected_types,
         }
     }
 }
