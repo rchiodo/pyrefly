@@ -1211,7 +1211,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 }
                 Ok(())
             }
-            (_, Type::Any(_)) => Ok(()),
+            (_, Type::Any(_)) => {
+                for var in got.collect_maybe_quantified_vars() {
+                    // Variables in `got` now have `Any` as an upper bound.
+                    self.solver.add_upper_bound(var, want.clone());
+                }
+                Ok(())
+            }
             (Type::Never(_), _) => Ok(()),
             (_, Type::ClassType(want)) if want.is_builtin("object") => {
                 Ok(()) // everything is an instance of `object`

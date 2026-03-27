@@ -979,6 +979,20 @@ impl Solver {
         }
     }
 
+    pub fn add_upper_bound(&self, v: Var, bound: Type) {
+        let lock = self.variables.lock();
+        match &mut *lock.get_mut(v) {
+            Variable::Quantified {
+                quantified: _,
+                bounds,
+            }
+            | Variable::Unwrap(bounds) => {
+                bounds.upper.push(bound);
+            }
+            _ => {}
+        }
+    }
+
     fn solve_lower_bounds(&self, mut lower_bounds: Vec<Type>) -> Option<Type> {
         if lower_bounds.is_empty() {
             return None;
