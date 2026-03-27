@@ -994,20 +994,21 @@ impl Solver {
         }
     }
 
-    fn solve_lower_bounds(&self, mut lower_bounds: Vec<Type>) -> Option<Type> {
-        if lower_bounds.is_empty() {
+    /// Solve one set of bounds (upper or lower)
+    fn solve_one_bounds(&self, mut bounds: Vec<Type>) -> Option<Type> {
+        if bounds.is_empty() {
             return None;
         }
         // Keeping `Any` bounds causes `Any` to propagate to too many places,
         // so we filter them out unless `Any` is the only solution.
-        if lower_bounds.iter().any(|t| !t.is_any()) {
-            lower_bounds.retain(|t| !t.is_any());
+        if bounds.iter().any(|t| !t.is_any()) {
+            bounds.retain(|t| !t.is_any());
         }
-        Some(unions(lower_bounds, &self.heap))
+        Some(unions(bounds, &self.heap))
     }
 
     fn solve_bounds(&self, bounds: Bounds) -> Option<Type> {
-        self.solve_lower_bounds(bounds.lower)
+        self.solve_one_bounds(bounds.lower)
     }
 
     /// Called after a quantified function has been called. Given `def f[T](x: int): list[T]`,
@@ -1945,7 +1946,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     | Variable::Unwrap(bounds)
                         if let Some(lower_bound) =
-                            self.solver.solve_lower_bounds(bounds.lower.clone()) =>
+                            self.solver.solve_one_bounds(bounds.lower.clone()) =>
                     {
                         drop(v1_ref);
                         drop(variables);
