@@ -1143,6 +1143,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 context,
                 hint,
                 ctor_targs,
+                callee_range,
             ),
             CallTarget::Callable(TargetWithTParams(tparams, callable)) => self.call_infer_inner(
                 callable,
@@ -1157,6 +1158,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 context,
                 hint,
                 ctor_targs,
+                callee_range,
             ),
             CallTarget::Function(TargetWithTParams(
                 tparams,
@@ -1177,6 +1179,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 context,
                 hint,
                 ctor_targs,
+                callee_range,
             ),
             CallTarget::FunctionOverload(overloads, metadata) => {
                 self.call_overloads(
@@ -1274,6 +1277,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
         ctor_targs: Option<&mut TArgs>,
+        callee_range: Option<TextRange>,
     ) -> Type {
         // First try the call without the hint to see if it succeeds.
         let mut ctor_targs_no_hint = ctor_targs.as_ref().map(|x| (**x).clone());
@@ -1291,6 +1295,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             context,
             None,
             ctor_targs_no_hint.as_mut(),
+            callee_range,
         );
         // If the call succeeds, attempt contextual typing with the hint.
         let (chosen_ctor_targs, chosen_call_errors, chosen_res) =
@@ -1310,6 +1315,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     context,
                     hint,
                     ctor_targs_with_hint.as_mut(),
+                    callee_range,
                 );
                 if call_errors_with_hint.is_empty() {
                     (ctor_targs_with_hint, call_errors_with_hint, res_with_hint)

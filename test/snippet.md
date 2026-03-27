@@ -91,7 +91,9 @@ ERROR Argument `Literal[42]` is not assignable to parameter `x` with type `str` 
  --> snippet:1:53
   |
 1 | def foo(x: str) -> int: return len(x); y: str = foo(42)
-  |                                                     ^^
+  |                                                 --- ^^
+  |                                                 |
+  |                                                 function defined here
   |
 [1]
 ```

@@ -162,6 +162,11 @@ impl TypeCheckContext {
             None => self,
         }
     }
+
+    /// Add a "function defined here" annotation pointing to the callee definition.
+    pub fn with_callee_annotation(self, callee_range: Option<TextRange>) -> Self {
+        self.with_annotation(callee_range, "function defined here".to_owned())
+    }
 }
 
 #[derive(Debug)]
