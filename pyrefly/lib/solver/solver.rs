@@ -77,6 +77,18 @@ const VAR_LEAK: &str = "Internal error: a variable has leaked from one module to
 /// due to large enums (Type) and lock guards.
 const INITIAL_GAS: Gas = Gas::new(200);
 
+/// Accumulated bounds for a solver variable.
+#[derive(Debug)]
+struct Bounds {
+    lower: Vec<Type>,
+}
+
+impl Bounds {
+    fn new() -> Self {
+        Self { lower: Vec::new() }
+    }
+}
+
 #[derive(Debug)]
 enum Variable {
     /// A "partial type" (terminology borrowed from mypy) for an empty container.
@@ -103,12 +115,12 @@ enum Variable {
         // collect lower bounds for typevars rather than eagerly pinning them. Currently, the only
         // thing it does is store `Any` lower bounds to avoid pinning to `Any` unless we have no
         // other solution.
-        lower_bounds: Vec<Type>,
+        bounds: Bounds,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
     Recursive,
     /// A variable that used to decompose a type, e.g. getting T from Awaitable[T]
-    Unwrap(Vec<Type>),
+    Unwrap(Bounds),
     /// A variable whose answer has been determined
     Answer(Type),
 }
@@ -130,7 +142,7 @@ impl Display for Variable {
             Variable::PartialQuantified(q)
             | Variable::Quantified {
                 quantified: q,
-                lower_bounds: _,
+                bounds: _,
             } => {
                 let label = if matches!(self, Variable::PartialQuantified(_)) {
                     "PartialQuantified"
@@ -367,7 +379,7 @@ impl Solver {
             }
             Variable::Quantified {
                 quantified: q,
-                lower_bounds: _,
+                bounds: _,
             } => {
                 // A Variable::Quantified should always be finished (see `finish_quantified`) by
                 // the code that creates it, because we need to know when we're done collecting
@@ -389,9 +401,9 @@ impl Solver {
                 Some(PinError::ImplicitPartialContained(range))
             }
             Variable::PartialContained(_) => None,
-            Variable::Unwrap(lower_bounds) => {
+            Variable::Unwrap(bounds) => {
                 *variable = Variable::Answer(
-                    self.solve_lower_bounds(mem::take(lower_bounds))
+                    self.solve_lower_bounds(mem::take(&mut bounds.lower))
                         .unwrap_or_else(Type::any_implicit),
                 );
                 None
@@ -468,12 +480,12 @@ impl Solver {
                     }
                     Variable::Quantified {
                         quantified: _,
-                        lower_bounds,
+                        bounds,
                     }
-                    | Variable::Unwrap(lower_bounds)
+                    | Variable::Unwrap(bounds)
                         if expand_unfinished_variables
                             && let Some(lower_bound) =
-                                self.solve_lower_bounds(lower_bounds.clone()) =>
+                                self.solve_lower_bounds(bounds.lower.clone()) =>
                     {
                         *t = lower_bound;
                         drop(variable);
@@ -497,8 +509,8 @@ impl Solver {
         let variables = self.variables.lock();
         match &*variables.get(v) {
             Variable::Answer(t) => t.clone(),
-            Variable::Unwrap(lower_bounds)
-                if let Some(lower_bound) = self.solve_lower_bounds(lower_bounds.clone()) =>
+            Variable::Unwrap(bounds)
+                if let Some(lower_bound) = self.solve_lower_bounds(bounds.lower.clone()) =>
             {
                 lower_bound
             }
@@ -524,13 +536,13 @@ impl Solver {
                 let ty = match &mut *e {
                     Variable::Quantified {
                         quantified: q,
-                        lower_bounds,
+                        bounds,
                     } => self
-                        .solve_lower_bounds(mem::take(lower_bounds))
+                        .solve_lower_bounds(mem::take(&mut bounds.lower))
                         .unwrap_or_else(|| q.as_gradual_type()),
                     Variable::PartialQuantified(q) => q.as_gradual_type(),
-                    Variable::Unwrap(lower_bounds) => self
-                        .solve_lower_bounds(mem::take(lower_bounds))
+                    Variable::Unwrap(bounds) => self
+                        .solve_lower_bounds(mem::take(&mut bounds.lower))
                         .unwrap_or_else(|| self.heap.mk_any_implicit()),
                     _ => self.heap.mk_any_implicit(),
                 };
@@ -788,7 +800,7 @@ impl Solver {
         let v = Var::new(uniques);
         self.variables
             .lock()
-            .insert_fresh(v, Variable::Unwrap(Vec::new()));
+            .insert_fresh(v, Variable::Unwrap(Bounds::new()));
         v
     }
 
@@ -804,7 +816,7 @@ impl Solver {
                 *v,
                 Variable::Quantified {
                     quantified: (*q).clone(),
-                    lower_bounds: Vec::new(),
+                    bounds: Bounds::new(),
                 },
             );
         }
@@ -909,10 +921,10 @@ impl Solver {
         match &*e {
             Variable::Quantified {
                 quantified: _,
-                lower_bounds,
+                bounds,
             }
-            | Variable::Unwrap(lower_bounds) => {
-                if let Some(first) = lower_bounds.first() {
+            | Variable::Unwrap(bounds) => {
+                if let Some(first) = bounds.lower.first() {
                     first_bound = Some(first.clone());
                 }
             }
@@ -943,15 +955,15 @@ impl Solver {
         match &mut *lock.get_mut(v) {
             Variable::Quantified {
                 quantified: _,
-                lower_bounds,
+                bounds,
             }
-            | Variable::Unwrap(lower_bounds) => {
+            | Variable::Unwrap(bounds) => {
                 if let Some(new_first) = new_first_bound
-                    && let Some(old_first) = lower_bounds.first_mut()
+                    && let Some(old_first) = bounds.lower.first_mut()
                 {
                     *old_first = new_first;
                 } else {
-                    lower_bounds.push(bound);
+                    bounds.lower.push(bound);
                 }
             }
             _ => {}
@@ -994,12 +1006,13 @@ impl Solver {
                 }
                 Variable::Quantified {
                     quantified: q,
-                    lower_bounds,
+                    bounds,
                 } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
                     }
-                    *e = if let Some(lower_bound) = self.solve_lower_bounds(mem::take(lower_bounds))
+                    *e = if let Some(lower_bound) =
+                        self.solve_lower_bounds(mem::take(&mut bounds.lower))
                     {
                         Variable::Answer(lower_bound)
                     } else if infer_with_first_use {
@@ -1043,7 +1056,7 @@ impl Solver {
                     v,
                     Variable::Quantified {
                         quantified: param.clone(),
-                        lower_bounds: Vec::new(),
+                        bounds: Bounds::new(),
                     },
                 );
             }
@@ -1065,10 +1078,10 @@ impl Solver {
             if let Type::Var(v) = t
                 && let Variable::Quantified {
                     quantified: q,
-                    lower_bounds,
+                    bounds,
                 } = &*lock.get(*v)
                 // If the variable has already been solved, do not generalize it.
-                && lower_bounds.is_empty()
+                && bounds.lower.is_empty()
                 && *q == *param
             {
                 *t = param.clone().to_type(&self.heap);
@@ -1764,17 +1777,17 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         (
                             Variable::Quantified {
                                 quantified: _,
-                                lower_bounds: v1_bounds,
+                                bounds: v1_bounds,
                             }
                             | Variable::Unwrap(v1_bounds),
                             Variable::Quantified {
                                 quantified: _,
-                                lower_bounds: v2_bounds,
+                                bounds: v2_bounds,
                             }
                             | Variable::Unwrap(v2_bounds),
                         ) => {
-                            v1_bounds.extend(mem::take(v2_bounds));
-                            *v2_bounds = v1_bounds.clone();
+                            v1_bounds.lower.extend(mem::take(&mut v2_bounds.lower));
+                            v2_bounds.lower = v1_bounds.lower.clone();
                         }
                         _ => {}
                     }
@@ -1813,11 +1826,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     (
                         Variable::Quantified {
                             quantified: q1,
-                            lower_bounds: _,
+                            bounds: _,
                         },
                         Variable::Quantified {
                             quantified: q2,
-                            lower_bounds: _,
+                            bounds: _,
                         },
                     )
                     | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
@@ -1871,7 +1884,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         _,
                         Variable::Quantified {
                             quantified: _,
-                            lower_bounds: _,
+                            bounds: _,
                         },
                     ) => {
                         drop(variable1);
@@ -1902,11 +1915,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Quantified {
                         quantified: _,
-                        lower_bounds,
+                        bounds,
                     }
-                    | Variable::Unwrap(lower_bounds)
+                    | Variable::Unwrap(bounds)
                         if let Some(lower_bound) =
-                            self.solver.solve_lower_bounds(lower_bounds.clone()) =>
+                            self.solver.solve_lower_bounds(bounds.lower.clone()) =>
                     {
                         drop(v1_ref);
                         drop(variables);
@@ -1914,7 +1927,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Quantified {
                         quantified: q,
-                        lower_bounds: _,
+                        bounds: _,
                     }
                     | Variable::PartialQuantified(q) => {
                         let is_partial = matches!(&*v1_ref, Variable::PartialQuantified(_));
@@ -2018,7 +2031,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                     Variable::Quantified {
                         quantified: q,
-                        lower_bounds: _,
+                        bounds: _,
                     } => {
                         let q = q.clone();
                         drop(v2_ref);
