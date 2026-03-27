@@ -1785,3 +1785,81 @@ class C(P):
 C(42)
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2923
+testcase!(
+    bug = "Should reject @dataclass applied to NamedTuple subclass",
+    test_dataclass_on_named_tuple,
+    r#"
+from dataclasses import dataclass
+from typing import NamedTuple
+
+class Coord(NamedTuple):
+    x: int
+    y: int
+
+dataclass(Coord)
+"#,
+);
+
+testcase!(
+    bug = "Should reject @dataclass applied to TypedDict subclass",
+    test_dataclass_on_typed_dict,
+    r#"
+from dataclasses import dataclass
+from typing import TypedDict
+
+class Config(TypedDict):
+    name: str
+
+@dataclass
+class BadConfig(TypedDict):
+    name: str
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2922
+testcase!(
+    bug = "Should reject @dataclass applied to Enum subclass",
+    test_dataclass_on_enum,
+    r#"
+from dataclasses import dataclass
+from enum import Enum
+
+class Color(Enum):
+    RED = 1
+
+dataclass(Color)
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2921
+testcase!(
+    bug = "Should reject @dataclass applied to Protocol subclass",
+    test_dataclass_on_protocol,
+    r#"
+from dataclasses import dataclass
+from typing import Protocol
+
+class Printable(Protocol):
+    def display(self) -> str: ...
+
+dataclass(Printable)
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2920
+testcase!(
+    bug = "Should reject overriding __setattr__ and __delattr__ in frozen dataclass",
+    test_frozen_dataclass_override_setattr_delattr,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Immutable:
+    value: int
+
+    def __setattr__(self, name: str, val: object) -> None: ...
+    def __delattr__(self, name: str) -> None: ...
+"#,
+);
