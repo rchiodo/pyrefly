@@ -229,6 +229,8 @@ impl Error {
         let code_description = Url::parse(&self.error_kind().docs_url())
             .ok()
             .map(|href| CodeDescription { href });
+        // TODO: Map secondary_annotations to DiagnosticRelatedInformation for LSP clients.
+        // This requires constructing a Url from the module path, which may not always succeed.
         Diagnostic {
             range: self.module.to_lsp_range(self.range()),
             severity: Some(match self.severity() {

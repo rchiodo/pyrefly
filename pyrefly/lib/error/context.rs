@@ -154,6 +154,14 @@ impl TypeCheckContext {
         self.annotations = annotations;
         self
     }
+
+    /// Add a single annotation at the given range, if present.
+    pub fn with_annotation(self, range: Option<TextRange>, label: String) -> Self {
+        match range {
+            Some(r) => self.with_annotations(vec![(r, label)]),
+            None => self,
+        }
+    }
 }
 
 #[derive(Debug)]
