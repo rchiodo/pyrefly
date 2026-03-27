@@ -863,10 +863,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let (ty, mut required, is_unannotated) = match self.bindings().get_function_param(name) {
             FunctionParameter::Annotated(idx) => {
                 let param_ty = self.get_idx(*idx).annotation.get_type().clone();
+                let annot_range = self.annotation_range(*idx);
                 let make_context = || {
                     TypeCheckContext::of_kind(TypeCheckKind::FunctionParameterDefault(
                         name.id.clone(),
                     ))
+                    .with_annotation(annot_range, "declared type".to_owned())
                 };
                 // When the parameter type is Dim[S] where S is a TypeVar with a
                 // Size(Literal(n)) default, and the default expression is the same
