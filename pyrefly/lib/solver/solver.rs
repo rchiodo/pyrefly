@@ -81,11 +81,16 @@ const INITIAL_GAS: Gas = Gas::new(200);
 #[derive(Debug)]
 struct Bounds {
     lower: Vec<Type>,
+    #[expect(dead_code)]
+    upper: Vec<Type>,
 }
 
 impl Bounds {
     fn new() -> Self {
-        Self { lower: Vec::new() }
+        Self {
+            lower: Vec::new(),
+            upper: Vec::new(),
+        }
     }
 }
 
