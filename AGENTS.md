@@ -76,6 +76,16 @@ Coding style: All code must be clean, documented and minimal. That means:
   not `crate::foo::Bar` inline). The only exception is when there is a name
   collision between two imports, which is rare.
 
+## Commit Messages
+
+Do not write a laundry list of implementation changes. Focus on:
+
+- **Why**: what problem or design gap motivated the change
+- **What** (high level): the approach or solution, not individual file edits
+- **Why it works**: how the code changes realize the solution
+
+A reader should be able to understand the intent and rationale from the commit message, without following all the code changes in details.
+
 ## Development environments
 
 There are three possible development environments:
