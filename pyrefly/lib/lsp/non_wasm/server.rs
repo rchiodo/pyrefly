@@ -1600,6 +1600,7 @@ impl Server {
                 self.publish_workspace_diagnostics_if_enabled();
             }
             LspEvent::CancelRequest(id) => {
+                telemetry_event.request_id = Some(id.to_string());
                 info!("We should cancel request {id:?}");
                 if let Some(cancellation_handle) = self.cancellation_handles.lock().remove(&id) {
                     cancellation_handle.cancel();
@@ -1740,6 +1741,7 @@ impl Server {
                 self.did_change_configuration(params);
             }
             LspEvent::LspResponse(x) => {
+                telemetry_event.request_id = Some(x.id.to_string());
                 if let Some(request) = self.outgoing_requests.lock().remove(&x.id) {
                     if let Some((request, response)) =
                         as_request_response_pair::<WorkspaceConfiguration>(&request, &x)
@@ -1752,6 +1754,19 @@ impl Server {
             }
             LspEvent::LspRequest(mut x) => {
                 telemetry_event.set_activity_key(std::mem::take(&mut x.activity_key));
+                telemetry_event.request_id = Some(x.id.to_string());
+
+                // Extract file stats from the raw JSON params so all requests
+                // (including canceled ones) carry file metadata for telemetry.
+                if let Some(uri) = x
+                    .params
+                    .get("textDocument")
+                    .and_then(|td| td.get("uri"))
+                    .and_then(|u| u.as_str())
+                    .and_then(|s| Url::parse(s).ok())
+                {
+                    self.set_file_stats(uri, telemetry_event);
+                }
 
                 // These are messages where VS Code will use results from previous document versions,
                 // we really don't want to implicitly cancel those.
@@ -1823,14 +1838,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.goto_definition(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -1846,14 +1853,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.goto_declaration(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -1869,14 +1868,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.goto_type_definition(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -1892,14 +1883,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         if let Err(reason) = self.async_go_to_implementations(
                             x.id.clone(),
                             &transaction,
@@ -1916,7 +1899,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let sub_task_telemetry = SubTaskTelemetry::new(telemetry, telemetry_event);
                         let response =
                             match self.code_action(&mut transaction, params, sub_task_telemetry) {
@@ -1932,10 +1914,6 @@ impl Server {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<Completion>(params, &x.id)
                     {
-                        self.set_file_stats(
-                            params.text_document_position.text_document.uri.clone(),
-                            telemetry_event,
-                        );
                         match self.completion(&transaction, params) {
                             Ok(response) => {
                                 self.send_response(new_response(x.id, Ok(response)));
@@ -1964,14 +1942,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.document_highlight(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -1985,10 +1955,6 @@ impl Server {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<References>(params, &x.id)
                     {
-                        self.set_file_stats(
-                            params.text_document_position.text_document.uri.clone(),
-                            telemetry_event,
-                        );
                         if let Err(reason) = self.references(
                             x.id.clone(),
                             &transaction,
@@ -2005,7 +1971,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let response = match self.prepare_rename(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2019,10 +1984,6 @@ impl Server {
                     if let Some(params) =
                         self.extract_request_params_or_send_err_response::<Rename>(params, &x.id)
                     {
-                        self.set_file_stats(
-                            params.text_document_position.text_document.uri.clone(),
-                            telemetry_event,
-                        );
                         // First check if rename is allowed via prepare_rename. If a rename is not allowed we
                         // send back an error. Otherwise we continue with the rename operation.
                         match self
@@ -2062,14 +2023,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.signature_help(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2083,14 +2036,6 @@ impl Server {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<HoverRequest>(params, &x.id)
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.hover(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2106,7 +2051,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let response = match self.inlay_hints(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2122,7 +2066,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let response = match self.semantic_tokens_full(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2138,7 +2081,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let response = match self.semantic_tokens_ranged(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2154,7 +2096,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let response =
                             match self.hierarchical_document_symbols(&transaction, params) {
                                 Ok(response) => response.map(DocumentSymbolResponse::Nested),
@@ -2187,7 +2128,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let mut result =
                             serde_json::to_value(self.document_diagnostics(&transaction, params))
                                 .unwrap();
@@ -2204,7 +2144,6 @@ impl Server {
                     if let Some(params) = self
                         .extract_request_params_or_send_err_response::<ProvideType>(params, &x.id)
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         self.send_response(new_response(
                             x.id,
                             Ok(self.provide_type(&mut transaction, params)),
@@ -2239,7 +2178,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.text_document.uri.clone(), telemetry_event);
                         let result = match self.folding_ranges(&transaction, params) {
                             Ok(response) => response.unwrap_or_default(),
                             Err(reason) => {
@@ -2255,14 +2193,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.prepare_call_hierarchy(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2278,7 +2208,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.item.uri.clone(), telemetry_event);
                         if let Err(reason) = self.async_call_hierarchy_incoming_calls(
                             x.id.clone(),
                             &transaction,
@@ -2295,7 +2224,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.item.uri.clone(), telemetry_event);
                         if let Err(reason) = self.async_call_hierarchy_outgoing_calls(
                             x.id.clone(),
                             &transaction,
@@ -2312,14 +2240,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(
-                            params
-                                .text_document_position_params
-                                .text_document
-                                .uri
-                                .clone(),
-                            telemetry_event,
-                        );
                         let response = match self.prepare_type_hierarchy(&transaction, params) {
                             Ok(response) => response,
                             Err(reason) => {
@@ -2335,7 +2255,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.item.uri.clone(), telemetry_event);
                         if let Err(reason) = self.async_type_hierarchy_supertypes(
                             x.id.clone(),
                             &transaction,
@@ -2352,7 +2271,6 @@ impl Server {
                             params, &x.id,
                         )
                     {
-                        self.set_file_stats(params.item.uri.clone(), telemetry_event);
                         if let Err(reason) = self.async_type_hierarchy_subtypes(
                             x.id.clone(),
                             &transaction,
@@ -2365,14 +2283,12 @@ impl Server {
                     }
                 } else if &x.method == "pyrefly/textDocument/docstringRanges" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
-                    self.set_file_stats(text_document.uri.clone(), telemetry_event);
                     let ranges = self
                         .docstring_ranges(&transaction, &text_document)
                         .unwrap_or_default();
                     self.send_response(new_response(x.id, Ok(ranges)));
                 } else if &x.method == "pyrefly/textDocument/typeErrorDisplayStatus" {
                     let text_document: TextDocumentIdentifier = serde_json::from_value(x.params)?;
-                    self.set_file_stats(text_document.uri.clone(), telemetry_event);
                     if let Some(path) = self.path_for_uri_or_notebook_cell(&text_document.uri) {
                         self.send_response(new_response(
                             x.id,

@@ -104,6 +104,9 @@ pub struct TelemetryEvent {
     pub activity_key: Option<ActivityKey>,
     pub canceled: bool,
     pub empty_response_reason: Option<EmptyResponseReason>,
+    /// The LSP request ID, used to correlate CancelRequest notifications with
+    /// the requests they cancel.
+    pub request_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -402,6 +405,7 @@ impl TelemetryEvent {
                 activity_key: None,
                 canceled: false,
                 empty_response_reason: None,
+                request_id: None,
             },
             queue,
         )
@@ -434,6 +438,7 @@ impl TelemetryEvent {
             activity_key: None,
             canceled: false,
             empty_response_reason: None,
+            request_id: None,
         }
     }
 
