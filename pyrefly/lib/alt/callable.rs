@@ -556,6 +556,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     // See comment on `callable_infer` about `arg_errors` and `call_errors`.
+    /// Match arguments against parameters, type-check each argument, and return
+    /// a map from each argument's source range to the parameter type it was
+    /// matched against.
     fn callable_infer_params(
         &self,
         callable_name: Option<&FunctionKind>,
@@ -574,12 +577,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // If Some, records parameter-name → argument-type bindings (for meta-shape inference).
         bound_args: &mut Option<HashMap<String, Type>>,
         callee_range: Option<TextRange>,
-    ) {
+    ) -> HashMap<TextRange, Type> {
         fn record(bound: &mut Option<HashMap<String, Type>>, name: &Name, ty: Type) {
             if let Some(map) = bound.as_mut() {
                 map.insert(name.to_string(), ty);
             }
         }
+        let mut expected_types: HashMap<TextRange, Type> = HashMap::new();
         // We want to work mostly with references, but some things are taken from elsewhere,
         // so have some owners to capture them.
         let param_list_owner = Owner::new();
@@ -671,7 +675,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 call_errors,
                                 context,
                             );
-                            return;
+                            return expected_types;
                         }
                     }
                     paramspec = None;
@@ -704,6 +708,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             // We ignore positional-only parameters because they can't be passed in by name.
                             seen_names.insert(name, ty);
                         }
+                        expected_types.insert(arg.range(), ty.clone());
                         let arg_ty = arg_pre.post_check(
                             self,
                             callable_name,
@@ -729,6 +734,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }) => {
                         // Store args that get matched to an unpacked *args param
                         // Matched args are typechecked separately later
+                        expected_types.insert(arg.range(), ty.clone());
                         unpacked_vararg = Some((name, ty));
                         unpacked_vararg_matched_args.push(arg_pre.clone());
                         arg_pre.post_skip();
@@ -738,6 +744,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         name,
                         kind: PosParamKind::Variadic,
                     }) => {
+                        expected_types.insert(arg.range(), ty.clone());
                         let arg_ty = arg_pre.post_check(
                             self,
                             callable_name,
@@ -906,7 +913,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 call_errors,
                                 context,
                             );
-                            return;
+                            return expected_types;
                         }
                     }
                     paramspec = None;
@@ -1076,6 +1083,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     } else if kwargs.is_none() {
                         unexpected_keyword_error(&id.id, id.range);
                     }
+                    if let Some(expected) = hint {
+                        expected_types.insert(kw.range, expected.clone());
+                    }
                     let tcc: &dyn Fn() -> TypeCheckContext = &|| {
                         TypeCheckContext::of_kind(if has_matching_param {
                             TypeCheckKind::CallArgument(Some(id.id.clone()), callable_name.cloned())
@@ -1194,6 +1204,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 format!("Expected {expected}, got {actual}"),
             );
         }
+        expected_types
     }
 
     // Call a function with the given arguments. The arguments are contextually typed, if possible.
@@ -1316,38 +1327,42 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Params::ParamSpec(concatenate, p) => {
                 let p = self.solver().expand_vars(p);
                 match p {
-                    Type::ParamSpecValue(params) => self.callable_infer_params(
-                        callable_name,
-                        &params.prepend_types(&concatenate),
-                        None,
-                        self_arg,
-                        self_qs,
-                        args,
-                        keywords,
-                        arguments_range,
-                        arg_errors,
-                        call_errors,
-                        context,
-                        &mut bound_args,
-                        callee_range,
-                    ),
+                    Type::ParamSpecValue(params) => {
+                        self.callable_infer_params(
+                            callable_name,
+                            &params.prepend_types(&concatenate),
+                            None,
+                            self_arg,
+                            self_qs,
+                            args,
+                            keywords,
+                            arguments_range,
+                            arg_errors,
+                            call_errors,
+                            context,
+                            &mut bound_args,
+                            callee_range,
+                        );
+                    }
                     // This can happen with a signature like `(f: Callable[P, None], *args: P.args, **kwargs: P.kwargs)`.
                     // Before we match an argument to `f`, we don't know what `P` is, so we don't have an answer for the Var yet.
-                    Type::Var(var) => self.callable_infer_params(
-                        callable_name,
-                        &ParamList::new_types(concatenate.into_vec()),
-                        Some(var),
-                        self_arg,
-                        self_qs,
-                        args,
-                        keywords,
-                        arguments_range,
-                        arg_errors,
-                        call_errors,
-                        context,
-                        &mut bound_args,
-                        callee_range,
-                    ),
+                    Type::Var(var) => {
+                        self.callable_infer_params(
+                            callable_name,
+                            &ParamList::new_types(concatenate.into_vec()),
+                            Some(var),
+                            self_arg,
+                            self_qs,
+                            args,
+                            keywords,
+                            arguments_range,
+                            arg_errors,
+                            call_errors,
+                            context,
+                            &mut bound_args,
+                            callee_range,
+                        );
+                    }
                     Type::Quantified(q) => {
                         if let Some((args, keywords)) = self.paramspec_forwarding(
                             &q,
