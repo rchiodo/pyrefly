@@ -2020,9 +2020,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         lower_bounds: _,
-                    }
-                    | Variable::PartialQuantified(q) => {
-                        let is_partial = matches!(&*v2_ref, Variable::PartialQuantified(_));
+                    } => {
                         let q = q.clone();
                         drop(v2_ref);
                         drop(variables);
@@ -2033,20 +2031,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                 .write()
                                 .insert(*v2, specialization_error);
                         }
-                        // Widen None to None | Any for PartialQuantified, matching
-                        // the PartialContained behavior (see comment there).
-                        if is_partial {
-                            let variables = self.solver.variables.lock();
-                            if answer.is_none() {
-                                let widened = self
-                                    .solver
-                                    .heap
-                                    .mk_union(vec![answer.clone(), Type::any_implicit()]);
-                                variables.update(*v2, Variable::Answer(widened));
-                            } else {
-                                variables.update(*v2, Variable::Answer(answer));
-                            }
-                        } else if q.kind() != QuantifiedKind::TypeVar
+                        if q.kind() != QuantifiedKind::TypeVar
                             || matches!(q.restriction(), Restriction::Constraints(_))
                         {
                             // If the TypeVar has constraints, we write the answer immediately to
@@ -2062,6 +2047,31 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             self.solver.add_lower_bound(*v2, answer, &mut |got, want| {
                                 self.is_subset_eq(got, want).is_ok()
                             });
+                        }
+                        Ok(())
+                    }
+                    Variable::PartialQuantified(q) => {
+                        let q = q.clone();
+                        drop(v2_ref);
+                        drop(variables);
+                        let (answer, specialization_error) = self.is_subset_eq_quantified(t1, &q);
+                        if let Some(specialization_error) = specialization_error {
+                            self.solver
+                                .instantiation_errors
+                                .write()
+                                .insert(*v2, specialization_error);
+                        }
+                        // Widen None to None | Any for PartialQuantified, matching
+                        // the PartialContained behavior (see comment there).
+                        let variables = self.solver.variables.lock();
+                        if answer.is_none() {
+                            let widened = self
+                                .solver
+                                .heap
+                                .mk_union(vec![answer.clone(), Type::any_implicit()]);
+                            variables.update(*v2, Variable::Answer(widened));
+                        } else {
+                            variables.update(*v2, Variable::Answer(answer));
                         }
                         Ok(())
                     }
