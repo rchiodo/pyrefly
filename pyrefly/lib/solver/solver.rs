@@ -78,10 +78,9 @@ const VAR_LEAK: &str = "Internal error: a variable has leaked from one module to
 const INITIAL_GAS: Gas = Gas::new(200);
 
 /// Accumulated bounds for a solver variable.
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 struct Bounds {
     lower: Vec<Type>,
-    #[expect(dead_code)]
     upper: Vec<Type>,
 }
 
@@ -91,6 +90,11 @@ impl Bounds {
             lower: Vec::new(),
             upper: Vec::new(),
         }
+    }
+
+    fn extend(&mut self, other: Bounds) {
+        self.lower.extend(other.lower);
+        self.upper.extend(other.upper);
     }
 }
 
@@ -1770,7 +1774,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             _ if got == want => Ok(()),
             (Type::Var(v1), Type::Var(v2)) => {
                 let variables = self.solver.variables.lock();
-                // Variable unification is destructive, so we have to copy lower bounds first.
+                // Variable unification is destructive, so we have to copy bounds first.
                 let root1 = variables.get_root(*v1);
                 let root2 = variables.get_root(*v2);
                 if root1 == root2 {
@@ -1791,8 +1795,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             }
                             | Variable::Unwrap(v2_bounds),
                         ) => {
-                            v1_bounds.lower.extend(mem::take(&mut v2_bounds.lower));
-                            v2_bounds.lower = v1_bounds.lower.clone();
+                            v1_bounds.extend(mem::take(v2_bounds));
+                            *v2_bounds = v1_bounds.clone();
                         }
                         _ => {}
                     }
