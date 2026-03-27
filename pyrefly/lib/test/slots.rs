@@ -277,3 +277,36 @@ c = C()
 c.x = 2  # OK: descriptor __set__ handles this, not instance storage
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2917
+testcase!(
+    bug = "Should detect instance layout conflict when multiple bases have __slots__",
+    test_slots_multiple_inheritance_layout_conflict,
+    r#"
+class Left:
+    __slots__ = ("a", "b")
+
+class Right:
+    __slots__ = ("c", "d")
+
+# Inheriting from two classes that both define non-empty __slots__
+# causes a TypeError at runtime.
+class Combined(Left, Right): ...
+"#,
+);
+
+// https://github.com/facebook/pyrefly/issues/2916
+testcase!(
+    bug = "Should detect instance layout conflict even with identical slot names",
+    test_slots_layout_conflict_same_names,
+    r#"
+class First:
+    __slots__ = ("x",)
+
+class Second:
+    __slots__ = ("x",)
+
+# Even though the slot names match, these are different C-level layouts.
+class Both(First, Second): ...
+"#,
+);
