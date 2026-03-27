@@ -142,37 +142,43 @@ impl Error {
     }
 
     fn get_source_snippet<'a>(&'a self, origin: &'a str) -> Message<'a> {
-        // Maximum number of lines to print in the snippet.
-        const MAX_LINES: u32 = 5;
+        // Maximum number of lines to show in a single snippet. Annotations further apart
+        // than this are shown as separate snippets rather than dumping all lines in between.
+        // The primary span is also capped to this many lines for very large multi-line spans.
+        const MAX_LINES: u32 = 10;
 
-        // Compute the line range that covers the primary span and all secondary annotations.
-        let mut start_line = self.display_range.start.line_within_file();
-        let mut end_line = self.display_range.end.line_within_file();
+        // Partition secondary annotations into nearby (shown inline with the primary span)
+        // and distant (shown as separate snippets to avoid printing excessive context).
+        let primary_start_line = self.display_range.start.line_within_file();
+        let primary_end_line = self.display_range.end.line_within_file();
+        let mut start_line = primary_start_line;
+        // Cap the primary span to MAX_LINES to avoid dumping huge multi-line spans.
+        let mut end_line = cmp::min(
+            LineNumber::from_zero_indexed(primary_start_line.to_zero_indexed() + MAX_LINES),
+            primary_end_line,
+        );
+        let mut nearby_annotations = Vec::new();
+        let mut distant_annotations = Vec::new();
         for ann in &self.secondary_annotations {
             let ann_display = self.module.display_range(ann.range);
-            start_line = cmp::min(start_line, ann_display.start.line_within_file());
-            end_line = cmp::max(end_line, ann_display.end.line_within_file());
+            let ann_start = ann_display.start.line_within_file();
+            let ann_end = ann_display.end.line_within_file();
+            let is_nearby = ann_start
+                .to_zero_indexed()
+                .abs_diff(primary_end_line.to_zero_indexed())
+                <= MAX_LINES
+                && ann_end
+                    .to_zero_indexed()
+                    .abs_diff(primary_start_line.to_zero_indexed())
+                    <= MAX_LINES;
+            if is_nearby {
+                start_line = cmp::min(start_line, ann_start);
+                end_line = cmp::max(end_line, ann_end);
+                nearby_annotations.push(ann);
+            } else {
+                distant_annotations.push((ann, ann_display));
+            }
         }
-        // Cap at MAX_LINES from the earliest start line.
-        end_line = cmp::min(
-            LineNumber::from_zero_indexed(start_line.to_zero_indexed() + MAX_LINES),
-            end_line,
-        );
-        // Always include the primary error span's end line, even if it's beyond the cap.
-        // This ensures the primary error is always visible when secondary annotations
-        // pull the start line earlier.
-        let primary_end_line = self.display_range.end.line_within_file();
-        if !self.secondary_annotations.is_empty() {
-            end_line = cmp::max(end_line, primary_end_line);
-        }
-
-        // Warning: The SourceRange is char indexed, while the snippet is byte indexed.
-        //          Be careful in the conversion.
-        let source = self
-            .module
-            .lined_buffer()
-            .content_in_line_range(start_line, end_line);
-        let line_start = self.module.lined_buffer().line_start(start_line);
 
         let level = match self.severity {
             Severity::Error => Level::Error,
@@ -180,37 +186,72 @@ impl Error {
             Severity::Info => Level::Info,
             Severity::Ignore => Level::None,
         };
-        let span_start = (self.range.start() - line_start).to_usize();
-        let span_end = cmp::min(span_start + self.range.len().to_usize(), source.len());
 
-        // Use the display_range of the earliest annotation for the line start in the cell.
-        let cell_line_start = self
+        // Primary snippet with nearby annotations inline.
+        let primary_snippet = self.make_snippet(
+            origin,
+            start_line,
+            end_line,
+            Some((self.range, level)),
+            &nearby_annotations,
+        );
+
+        // Distant annotations each get their own snippet covering their full span.
+        let mut message = Level::None.title("").snippet(primary_snippet);
+        for (ann, ann_display) in &distant_annotations {
+            let ann_start_line = ann_display.start.line_within_file();
+            let ann_end_line = ann_display.end.line_within_file();
+            message = message.snippet(self.make_snippet(
+                origin,
+                ann_start_line,
+                ann_end_line,
+                None,
+                &[ann],
+            ));
+        }
+        message
+    }
+
+    /// Build a source snippet for a line range with an optional primary annotation and
+    /// secondary annotations. Used for both the main error snippet and distant annotation snippets.
+    fn make_snippet<'a>(
+        &'a self,
+        origin: &'a str,
+        from_line: LineNumber,
+        to_line: LineNumber,
+        primary: Option<(TextRange, Level)>,
+        annotations: &[&'a SecondaryAnnotation],
+    ) -> Snippet<'a> {
+        // Warning: The SourceRange is char indexed, while the snippet is byte indexed.
+        let source = self
+            .module
+            .lined_buffer()
+            .content_in_line_range(from_line, to_line);
+        let line_start = self.module.lined_buffer().line_start(from_line);
+        let cell_line = self
             .module
             .display_range(TextRange::new(line_start, line_start))
             .start
             .line_within_cell()
             .get() as usize;
-
-        let mut snippet = Snippet::source(source)
-            .line_start(cell_line_start)
-            .origin(origin)
-            .annotation(level.span(span_start..span_end));
-
-        // Add secondary annotations as warning-level labeled spans.
-        for ann in &self.secondary_annotations {
-            let ann_start = ann
+        let mut snippet = Snippet::source(source).line_start(cell_line).origin(origin);
+        if let Some((range, lvl)) = primary {
+            let start = (range.start() - line_start).to_usize();
+            let end = cmp::min(start + range.len().to_usize(), source.len());
+            snippet = snippet.annotation(lvl.span(start..end));
+        }
+        for ann in annotations {
+            let start = ann
                 .range
                 .start()
                 .to_usize()
                 .saturating_sub(line_start.to_usize());
-            let ann_end = cmp::min(ann_start + ann.range.len().to_usize(), source.len());
-            if ann_start <= ann_end && ann_end <= source.len() {
-                snippet =
-                    snippet.annotation(Level::Warning.span(ann_start..ann_end).label(&ann.label));
+            let end = cmp::min(start + ann.range.len().to_usize(), source.len());
+            if start <= end && end <= source.len() {
+                snippet = snippet.annotation(Level::Warning.span(start..end).label(&ann.label));
             }
         }
-
-        Level::None.title("").snippet(snippet)
+        snippet
     }
 
     pub fn with_severity(&self, severity: Severity) -> Self {
@@ -451,16 +492,21 @@ mod tests {
         assert_eq!(
             str::from_utf8(&output).unwrap(),
             r#"ERROR oops [bad-return]
- --> test.py:1:1
-  |
-1 | / Start
-2 | | X
-3 | | X
-4 | | X
-5 | | X
-6 | | X
-  | |__^
-  |
+  --> test.py:1:1
+   |
+ 1 | / Start
+ 2 | | X
+ 3 | | X
+ 4 | | X
+ 5 | | X
+ 6 | | X
+ 7 | | X
+ 8 | | X
+ 9 | | X
+10 | | X
+11 | | X
+   | |__^
+   |
 "#,
         );
     }
