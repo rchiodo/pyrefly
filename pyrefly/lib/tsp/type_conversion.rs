@@ -266,7 +266,7 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
                     declaration: Declaration::Regular(RegularDeclaration {
                         kind: DeclarationKind::Regular,
                         category: DeclarationCategory::Class,
-                        name: Some(class_name.to_string()),
+                        name: Some(class_name.to_owned()),
                         node: dummy_node,
                     }),
                     flags: TypeFlags::INSTANCE.with_literal(),

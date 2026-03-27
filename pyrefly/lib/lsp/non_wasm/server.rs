@@ -243,7 +243,6 @@ use crate::commands::lsp::IndexingMode;
 use crate::config::config::ConfigFile;
 use crate::error::error::Error;
 use crate::lsp::module_helpers::to_real_path;
-use crate::module::bundled::BundledStub;
 use crate::lsp::non_wasm::build_system::should_requery_build_system;
 use crate::lsp::non_wasm::call_hierarchy::convert_external_references_to_incoming_calls;
 use crate::lsp::non_wasm::call_hierarchy::find_function_at_position_in_ast;
@@ -300,6 +299,7 @@ use crate::lsp::wasm::provide_type::ProvideType;
 use crate::lsp::wasm::provide_type::ProvideTypeParams;
 use crate::lsp::wasm::provide_type::ProvideTypeResponse;
 use crate::lsp::wasm::provide_type::provide_type;
+use crate::module::bundled::BundledStub;
 use crate::state::load::LspFile;
 use crate::state::lsp::DisplayTypeErrors;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
@@ -5847,14 +5847,13 @@ impl TspInterface for Server {
 
         // Include the materialized typeshed stdlib path so the client can
         // remap declaration URIs that reference our bundled typeshed.
-        if let Ok(ts) = crate::module::typeshed::typeshed() {
-            if let Ok(ts_path) = ts.materialized_path_on_disk() {
-                if let Ok(url) = Url::from_file_path(&ts_path) {
-                    let uri = url.to_string();
-                    if seen.insert(uri.clone()) {
-                        paths.push(uri);
-                    }
-                }
+        if let Ok(ts) = crate::module::typeshed::typeshed()
+            && let Ok(ts_path) = ts.materialized_path_on_disk()
+            && let Ok(url) = Url::from_file_path(&ts_path)
+        {
+            let uri = url.to_string();
+            if seen.insert(uri.clone()) {
+                paths.push(uri);
             }
         }
 
