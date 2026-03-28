@@ -186,6 +186,23 @@ impl ClassAttribute {
             _ => false,
         }
     }
+
+    /// Returns true if this attribute represents a data descriptor
+    /// (has both `__get__` and `__set__`), including properties with setters.
+    pub fn is_data_descriptor(&self) -> bool {
+        match self {
+            ClassAttribute::Property(_, Some(_), _)
+            | ClassAttribute::Descriptor(
+                Descriptor {
+                    getter: true,
+                    setter: true,
+                    ..
+                },
+                _,
+            ) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, TypeEq, PartialEq, Eq, VisitMut)]
