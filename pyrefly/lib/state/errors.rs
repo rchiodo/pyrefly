@@ -34,11 +34,11 @@ use crate::error::error::Error;
 use crate::error::expectation::Expectation;
 use crate::state::load::Load;
 
-/// Extracts `(start_line, end_line)` ranges for all multi-line string
-/// literals from the AST, including f-strings, t-strings, regular strings,
-/// and byte strings. Single-line literals (where start == end) are excluded.
-/// The returned list is sorted by start_line.
-pub fn sorted_multi_line_fstring_ranges(
+/// Extracts `(start_line, end_line)` ranges for all multi-line strings from
+/// the AST, including plain strings, byte strings, f-strings, and t-strings.
+/// Single-line strings (where start == end) are excluded. The returned list
+/// is sorted by start_line.
+pub fn sorted_multi_line_string_ranges(
     ast: &ModModule,
     module: &Module,
 ) -> Vec<(LineNumber, LineNumber)> {

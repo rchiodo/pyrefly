@@ -34,7 +34,7 @@ use tracing::info;
 
 use crate::error::error::Error;
 use crate::state::errors::find_containing_range;
-use crate::state::errors::sorted_multi_line_fstring_ranges;
+use crate::state::errors::sorted_multi_line_string_ranges;
 
 /// Regex to match pyrefly/type/pyre ignore comments with optional error codes and trailing text.
 /// Consumes all non-`#` characters after the ignore pattern, so trailing comment text is
@@ -276,7 +276,7 @@ fn add_suppressions(
             ModulePath::filesystem(path.clone()),
             Arc::from(file.clone()),
         );
-        let fstring_ranges = sorted_multi_line_fstring_ranges(&ast, &module);
+        let multiline_string_ranges = sorted_multi_line_string_ranges(&ast, &module);
 
         // Remap error lines inside multi-line string literals to the
         // string's start line so the suppression comment is placed
@@ -285,7 +285,7 @@ fn add_suppressions(
             .iter()
             .map(|e| {
                 let error_line = LineNumber::from_zero_indexed(e.line as u32);
-                let new_line = find_containing_range(&fstring_ranges, error_line)
+                let new_line = find_containing_range(&multiline_string_ranges, error_line)
                     .map_or(error_line, |(start, _)| start);
                 SerializedError {
                     path: e.path.clone(),
@@ -298,7 +298,7 @@ fn add_suppressions(
         // Collect start lines of multi-line string literals so we can avoid
         // placing same-line comments on them (which would end up inside
         // the string literal instead of being a Python comment).
-        let fstring_start_lines: HashSet<usize> = fstring_ranges
+        let fstring_start_lines: HashSet<usize> = multiline_string_ranges
             .iter()
             .map(|(start, _)| start.to_zero_indexed() as usize)
             .collect();

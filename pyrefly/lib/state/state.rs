@@ -114,7 +114,7 @@ use crate::module::typeshed::BundledTypeshedStdlib;
 use crate::solver::solver::VarRecurser;
 use crate::state::epoch::Epoch;
 use crate::state::errors::Errors;
-use crate::state::errors::sorted_multi_line_fstring_ranges;
+use crate::state::errors::sorted_multi_line_string_ranges;
 use crate::state::load::FileContents;
 use crate::state::load::Load;
 use crate::state::loader::FindingOrError;
@@ -653,7 +653,7 @@ impl<'a> Transaction<'a> {
                         let load = x.get_load()?;
                         let fstring_ranges = x
                             .get_ast()
-                            .map(|ast| sorted_multi_line_fstring_ranges(&ast, &load.module_info))
+                            .map(|ast| sorted_multi_line_string_ranges(&ast, &load.module_info))
                             .unwrap_or_default();
                         Some((load, config.dupe(), fstring_ranges))
                     })
@@ -663,14 +663,14 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn get_all_errors(&self) -> Errors {
-        /// Extract f-string ranges from the AST if available.
+        /// Extract multi-line string ranges from the AST if available.
         fn fstring_ranges_from(
             state: &dyn ModuleStateReader,
             load: &Load,
         ) -> Vec<(LineNumber, LineNumber)> {
             state
                 .get_ast()
-                .map(|ast| sorted_multi_line_fstring_ranges(&ast, &load.module_info))
+                .map(|ast| sorted_multi_line_string_ranges(&ast, &load.module_info))
                 .unwrap_or_default()
         }
 
