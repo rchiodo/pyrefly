@@ -1702,6 +1702,34 @@ def g(x):
     "#,
 );
 
+// In non-spec-compliant mode (see test_eliminate_variadic), step 4 eliminates overloads with
+// variadic parameters when a fixed number of args is supplied, so only the non-variadic overload
+// remains and the call returns `str`. In spec-compliant mode, step 4 does not do this, so both
+// overloads remain and the call is ambiguous.
+testcase!(
+    test_eliminate_variadic_spec_compliant,
+    TestEnv::new().enable_spec_compliant_overloads(),
+    r#"
+from typing import Any, assert_type, overload
+
+@overload
+def f1(x: str) -> str: ...
+@overload
+def f1(x: str, *args) -> int: ...
+def f1(x, *args) -> str | int: ...
+
+@overload
+def f2(x: str) -> str: ...
+@overload
+def f2(x: str, **kwargs) -> int: ...
+def f2(x, **kwargs) -> str | int: ...
+
+def g(x):
+    assert_type(f1(x), Any)
+    assert_type(f2(x), Any)
+    "#,
+);
+
 testcase!(
     test_eliminate_overload_using_argument_count_even_with_error,
     r#"
@@ -1738,6 +1766,29 @@ def f(x, y) -> int | str: ...
 
 def g(x: Any):
     assert_type(f(x, 'y'), int)
+    "#,
+);
+
+// In non-spec-compliant mode (see test_match_overload_using_literal_arg), step 5 skips
+// materializing arguments whose parameter type is the same across all candidate overloads, so `x`
+// would not be materialized, and the first overload would win. In spec-compliant mode, `x` is
+// materialized, and the call is ambiguous.
+testcase!(
+    test_match_overload_using_literal_arg_spec_compliant,
+    TestEnv::new().enable_spec_compliant_overloads(),
+    r#"
+from typing import Any, assert_type, Literal, overload
+
+@overload
+def f(x: int, y: Literal['y']) -> int: ...
+@overload
+def f(x: int, y: Literal['n']) -> str: ...
+@overload
+def f(x: int, y: str) -> int | str: ...
+def f(x, y) -> int | str: ...
+
+def g(x: Any):
+    assert_type(f(x, 'y'), Any)
     "#,
 );
 

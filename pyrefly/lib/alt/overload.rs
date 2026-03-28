@@ -524,6 +524,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             // If there are multiple overloads, use steps 4-6 here to select one:
             // https://typing.python.org/en/latest/spec/overload.html#overload-call-evaluation.
+            let spec_compliant = self.solver().spec_compliant_overloads;
             if matched_overloads.len() > 1 {
                 // Step 4:
                 // * (spec-compliant): if any arguments supply an unknown number of args and at least one overload
@@ -536,26 +537,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         !matches!(val.infer(self, errors), Type::Tuple(Tuple::Concrete(_)))
                     }
                 });
-                let varargs_compatible = |o: &CalledOverload| {
-                    matches!(
-                        &o.func.1.signature.params, Params::List(params)
-                        if params.items().iter().any(|p| matches!(p, Param::VarArg(..))))
-                        == nargs_unknown
-                };
-                if matched_overloads.iter().any(varargs_compatible) {
-                    matched_overloads.retain(varargs_compatible);
+                if nargs_unknown || !spec_compliant {
+                    let varargs_compatible = |o: &CalledOverload| {
+                        matches!(
+                            &o.func.1.signature.params, Params::List(params)
+                            if params.items().iter().any(|p| matches!(p, Param::VarArg(..))))
+                            == nargs_unknown
+                    };
+                    if matched_overloads.iter().any(varargs_compatible) {
+                        matched_overloads.retain(varargs_compatible);
+                    }
                 }
                 let nkeywords_unknown = keywords.iter().any(|kw| {
                     kw.arg.is_none() && !matches!(kw.value.infer(self, errors), Type::TypedDict(_))
                 });
-                let kwargs_compatible = |o: &CalledOverload| {
-                    matches!(
-                            &o.func.1.signature.params, Params::List(params)
-                            if params.items().iter().any(|p| matches!(p, Param::Kwargs(..))))
-                        == nkeywords_unknown
-                };
-                if matched_overloads.iter().any(kwargs_compatible) {
-                    matched_overloads.retain(kwargs_compatible);
+                if nkeywords_unknown || !spec_compliant {
+                    let kwargs_compatible = |o: &CalledOverload| {
+                        matches!(
+                                &o.func.1.signature.params, Params::List(params)
+                                if params.items().iter().any(|p| matches!(p, Param::Kwargs(..))))
+                            == nkeywords_unknown
+                    };
+                    if matched_overloads.iter().any(kwargs_compatible) {
+                        matched_overloads.retain(kwargs_compatible);
+                    }
                 }
             }
             if matched_overloads.len() > 1 {
@@ -569,7 +574,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // ambiguity in overload selection. This matches pyright, mypy, and ty.
                 let owner = Owner::new();
                 let mut changed = false;
-                let has_multiple_param_types = |arg_range| {
+                let should_materialize = |arg_range| {
+                    if spec_compliant {
+                        return true;
+                    }
                     let mut param_types = matched_overloads
                         .iter()
                         .filter_map(|o| o.expected_types.get(&arg_range));
@@ -585,7 +593,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     false
                 };
                 let materialized_args = args.map(|arg| {
-                    let (materialized_arg, arg_changed) = if has_multiple_param_types(arg.range()) {
+                    let (materialized_arg, arg_changed) = if should_materialize(arg.range()) {
                         arg.materialize(self, errors, &owner)
                     } else {
                         (arg.clone(), false)
@@ -594,7 +602,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     materialized_arg
                 });
                 let materialized_keywords = keywords.map(|kw| {
-                    let (materialized_kw, kw_changed) = if has_multiple_param_types(kw.range()) {
+                    let (materialized_kw, kw_changed) = if should_materialize(kw.range()) {
                         kw.materialize(self, errors, &owner)
                     } else {
                         (kw.clone(), false)
@@ -629,7 +637,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let _ = matched_overloads.split_off(split_point);
                 }
             }
-            let selected_overload = if self.solver().spec_compliant_overloads {
+            let selected_overload = if spec_compliant {
                 self.disambiguate_overloads_spec_compliant(&matched_overloads)
             } else {
                 self.disambiguate_overloads(&matched_overloads)
