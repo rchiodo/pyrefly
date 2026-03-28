@@ -769,8 +769,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             None,
             hint,
             overload_ctor_targs.as_mut(),
-            // Overload errors get a "No matching overloads" message, so callee annotation is not useful here.
-            None,
         );
         if let Ok(errors) = Vec1::try_from_vec(specialization_errors) {
             self.add_specialization_errors(errors, arguments_range, &call_errors, None);

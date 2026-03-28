@@ -79,9 +79,7 @@ ERROR Argument `float` is not assignable * (glob)
  --> */bad_call.py:2:3 (glob)
   |
 2 | f(0.0)
-  | - ^^^
-  | |
-  | function defined here
+  |   ^^^
   |
 [1]
 ```
@@ -95,9 +93,7 @@ ERROR Argument `Literal[0]` is not assignable * (glob)
  --> */bad_call.py:3:3 (glob)
   |
 3 | f(λ)
-  | - ^
-  | |
-  | function defined here
+  |   ^
   |
 [1]
 ```

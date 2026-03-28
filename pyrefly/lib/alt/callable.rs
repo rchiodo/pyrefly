@@ -353,7 +353,6 @@ impl CallArgPreEval<'_> {
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        callee_range: Option<TextRange>,
     ) -> Option<Type> {
         let tcc = &|| {
             TypeCheckContext::of_kind(if vararg {
@@ -362,7 +361,6 @@ impl CallArgPreEval<'_> {
                 TypeCheckKind::CallArgument(param_name.cloned(), callable_name.cloned())
             })
             .with_context(context.map(|ctx| ctx()))
-            .with_callee_annotation(callee_range)
         };
         match self {
             Self::Type(ty, done) => {
@@ -576,7 +574,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         // If Some, records parameter-name → argument-type bindings (for meta-shape inference).
         bound_args: &mut Option<HashMap<String, Type>>,
-        callee_range: Option<TextRange>,
     ) -> HashMap<TextRange, Type> {
         fn record(bound: &mut Option<HashMap<String, Type>>, name: &Name, ty: Type) {
             if let Some(map) = bound.as_mut() {
@@ -719,7 +716,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             arg_errors,
                             call_errors,
                             context,
-                            callee_range,
                         );
                         if let Some(name) = name
                             && let Some(ty) = arg_ty
@@ -755,7 +751,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             arg_errors,
                             call_errors,
                             context,
-                            callee_range,
                         );
                         if bound_args.is_some() {
                             if let Some(name) = name {
@@ -879,7 +874,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         callable_name.cloned(),
                     ))
                     .with_context(context.map(|ctx| ctx()))
-                    .with_callee_annotation(callee_range)
                 },
             );
         }
@@ -1007,7 +1001,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                         callable_name.cloned(),
                                     ))
                                     .with_context(context.map(|ctx| ctx()))
-                                    .with_callee_annotation(callee_range)
                                 });
                             }
                         }
@@ -1033,7 +1026,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                                     ),
                                                 )
                                                 .with_context(context.map(|ctx| ctx()))
-                                                .with_callee_annotation(callee_range)
                                             },
                                         );
                                     };
@@ -1097,7 +1089,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             )
                         })
                         .with_context(context.map(|ctx| ctx()))
-                        .with_callee_annotation(callee_range)
                     };
                     let arg_ty = match kw.value {
                         TypeOrExpr::Expr(x) => self.expr_with_separate_check_errors(
@@ -1175,7 +1166,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             callable_name.cloned(),
                         ))
                         .with_context(context.map(|ctx| ctx()))
-                        .with_callee_annotation(callee_range)
                     });
                 }
             }
@@ -1234,7 +1224,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
         mut ctor_targs: Option<&mut TArgs>,
-        callee_range: Option<TextRange>,
     ) -> (
         Type,
         Vec<TypeVarSpecializationError>,
@@ -1321,7 +1310,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 call_errors,
                 context,
                 &mut bound_args,
-                callee_range,
             ),
             Params::Ellipsis | Params::Materialization => {
                 // Deal with Callable[..., R]
@@ -1346,7 +1334,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         call_errors,
                         context,
                         &mut bound_args,
-                        callee_range,
                     ),
                     // This can happen with a signature like `(f: Callable[P, None], *args: P.args, **kwargs: P.kwargs)`.
                     // Before we match an argument to `f`, we don't know what `P` is, so we don't have an answer for the Var yet.
@@ -1363,7 +1350,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         call_errors,
                         context,
                         &mut bound_args,
-                        callee_range,
                     ),
                     Type::Quantified(q) => {
                         if let Some((args, keywords)) = self.paramspec_forwarding(
@@ -1389,7 +1375,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 call_errors,
                                 context,
                                 &mut bound_args,
-                                callee_range,
                             )
                         } else {
                             HashMap::new()
