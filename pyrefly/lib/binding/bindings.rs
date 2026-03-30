@@ -1876,6 +1876,21 @@ impl<'a> BindingsBuilder<'a> {
         result.as_name_lookup_result()
     }
 
+    /// Like `intercept_lookup`, but only resolves via an *existing* entry in the
+    /// legacy tparam collector. Does NOT add a new entry if one doesn't exist.
+    /// Used for `P.args`/`P.kwargs` so that `P` is resolved if already in scope
+    /// (e.g. from `Callable[P, ...]`) but not introduced as a new type parameter.
+    pub fn try_intercept_lookup(
+        &mut self,
+        legacy_tparams: &mut LegacyTParamCollector,
+        id: &LegacyTParamId,
+    ) -> Option<NameLookupResult> {
+        legacy_tparams
+            .legacy_tparams
+            .get(id.tvar_name().as_str())
+            .map(|result| result.as_name_lookup_result())
+    }
+
     /// Look up a name that might refer to a legacy tparam. This is used by `intercept_lookup`
     /// when in a setting where we have to check values currently in scope to see if they are
     /// legacy type parameters and need to be re-bound into quantified type variables.

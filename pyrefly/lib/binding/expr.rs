@@ -1090,6 +1090,30 @@ impl<'a> BindingsBuilder<'a> {
                     tparams_builder,
                 );
             }
+            Expr::Attribute(ExprAttribute { value, attr, .. })
+                if let Expr::Name(name_expr) = &**value
+                    && (attr.id == "args" || attr.id == "kwargs") =>
+            {
+                // P.args / P.kwargs: resolve P through the legacy tparam collector if P
+                // is already there (e.g. from `Callable[P, ...]`), but do NOT add P as
+                // a new legacy type parameter. This prevents P from being incorrectly
+                // introduced as a tparam when it is only referenced via P.args/P.kwargs
+                // without being bound by a Callable parameter.
+                let name = Ast::expr_name_identifier(name_expr.clone());
+                let id = LegacyTParamId::Name(name.clone());
+                let resolved = tparams_builder
+                    .as_mut()
+                    .and_then(|tb| self.try_intercept_lookup(tb, &id));
+                if resolved.is_some() {
+                    // P is already a legacy tparam (from Callable[P, ...]),
+                    // process normally so it resolves to QuantifiedValue.
+                    self.ensure_name(&name, usage, tparams_builder);
+                } else {
+                    // P is not yet in the collector. Process without tparam
+                    // interception so P resolves to its original binding.
+                    self.ensure_name(&name, usage, &mut None);
+                }
+            }
             Expr::BinOp(ExprBinOp {
                 left,
                 op: Operator::BitOr,

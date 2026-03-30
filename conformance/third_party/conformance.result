@@ -91,9 +91,7 @@
   "generics_defaults_referential.py": [],
   "generics_defaults_specialization.py": [],
   "generics_paramspec_basic.py": [],
-  "generics_paramspec_components.py": [
-    "Line 30: Expected 1 errors"
-  ],
+  "generics_paramspec_components.py": [],
   "generics_paramspec_semantics.py": [],
   "generics_paramspec_specialization.py": [],
   "generics_scoping.py": [
