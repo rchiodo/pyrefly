@@ -1681,7 +1681,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::TypeForm(l), Type::TypeForm(u)) => self.is_subset_eq(l, u),
             // type[T] <: TypeForm[T] — class objects are valid type forms
             (Type::Type(l), Type::TypeForm(u)) => self.is_subset_eq(l, u),
-            // ClassDef <: TypeForm[T] — bare class names are valid type forms
+            // The class representation of Any is compatible with any TypeForm.
+            (Type::ClassDef(got), Type::TypeForm(_)) if got.has_toplevel_qname("typing", "Any") => {
+                Ok(())
+            }
+            // ClassDef <: TypeForm[T] — bare class names are valid type forms.
             (Type::ClassDef(got), Type::TypeForm(want)) => {
                 self.is_subset_eq(&self.type_order.promote_silently(got), want)
             }

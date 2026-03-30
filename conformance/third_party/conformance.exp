@@ -12498,17 +12498,6 @@
     },
     {
       "code": -2,
-      "column": 29,
-      "concise_description": "`type[Any]` is not assignable to `TypeForm[str | None]`",
-      "description": "`type[Any]` is not assignable to `TypeForm[str | None]`",
-      "line": 21,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 32,
-      "stop_line": 21
-    },
-    {
-      "code": -2,
       "column": 30,
       "concise_description": "`type[int | str]` is not assignable to `TypeForm[str | None]`",
       "description": "`type[int | str]` is not assignable to `TypeForm[str | None]`",

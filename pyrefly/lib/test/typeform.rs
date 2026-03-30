@@ -77,6 +77,8 @@ ok2: TypeForm[str | None] = str
 ok3: TypeForm[str | None] = Optional[str]
 ok4: TypeForm[str | None] = None
 ok5: TypeForm[Any] = int
+ok6: TypeForm[str | None] = Any
+ok7: TypeForm[Any] = Any
 
 err1: TypeForm[str | None] = str | int  # E: is not assignable
     "#,
