@@ -82,6 +82,7 @@ pub enum TelemetryEventKind {
     FindFromDefinition,
     ExternalReferences,
     ExternalWorkspaceSymbols,
+    LspStartup,
 }
 
 pub struct TelemetryEvent {

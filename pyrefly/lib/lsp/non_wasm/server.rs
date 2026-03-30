@@ -1261,6 +1261,7 @@ pub fn lsp_loop(
     external_references: Arc<dyn ExternalProvider>,
     wrapper: Option<ConfigConfigurerWrapper>,
     thread_count: ThreadCount,
+    lsp_start_time: Instant,
 ) -> anyhow::Result<()> {
     info!("Reading messages");
     let lsp_queue = LspQueue::new();
@@ -1283,6 +1284,7 @@ pub fn lsp_loop(
         external_references,
         wrapper,
         thread_count,
+        lsp_start_time,
     );
     std::thread::scope(|scope| {
         // Spawn the event processing loop on a thread with a large stack
@@ -1296,7 +1298,16 @@ pub fn lsp_loop(
             .spawn_scoped(scope, || {
                 let mut ide_transaction_manager = TransactionManager::default();
                 let mut canceled_requests = HashSet::new();
-                let mut next_task_id = 0_usize;
+                // Start at 1 because task_id 0 is used by the startup event below.
+                let mut next_task_id = 1_usize;
+                TelemetryEvent::new_task(
+                    TelemetryEventKind::LspStartup,
+                    server.telemetry_state(),
+                    QueueName::LspQueue,
+                    0,
+                    lsp_start_time,
+                )
+                .finish_and_record(telemetry, None);
                 while let Ok((subsequent_mutation, event, enqueue_time)) = server.lsp_queue.recv() {
                     let task_id = next_task_id;
                     next_task_id += 1;
@@ -2335,6 +2346,7 @@ impl Server {
         external_references: Arc<dyn ExternalProvider>,
         wrapper: Option<ConfigConfigurerWrapper>,
         thread_count: ThreadCount,
+        lsp_start_time: Instant,
     ) -> Self {
         let folders = if let Some(capability) = &initialize_params.capabilities.workspace
             && let Some(true) = capability.workspace_folders
@@ -2411,7 +2423,7 @@ impl Server {
             pending_watched_file_changes: Mutex::new(Vec::new()),
             pending_invalidation_events: Arc::new(Mutex::new(CategorizedEvents::default())),
             external_references,
-            server_start_time: Instant::now(),
+            server_start_time: lsp_start_time,
         };
 
         if let Some(init_options) = &s.initialize_params.initialization_options {
