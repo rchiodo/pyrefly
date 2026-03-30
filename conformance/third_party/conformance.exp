@@ -10340,6 +10340,17 @@
     },
     {
       "code": -2,
+      "column": 5,
+      "concise_description": "`Final` may not be nested inside `ClassVar`",
+      "description": "`Final` may not be nested inside `ClassVar`",
+      "line": 107,
+      "name": "invalid-annotation",
+      "severity": "error",
+      "stop_column": 11,
+      "stop_line": 107
+    },
+    {
+      "code": -2,
       "column": 19,
       "concise_description": "`ClassVar` may not be nested inside `Final`",
       "description": "`ClassVar` may not be nested inside `Final`",

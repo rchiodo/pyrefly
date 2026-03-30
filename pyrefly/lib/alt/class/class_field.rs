@@ -1778,6 +1778,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
 
+        // ClassVar[Final] is invalid except in dataclasses, where it's the recommended
+        // way to declare a final class variable. Final[ClassVar] is already caught in expr_annotation.
+        if metadata.dataclass_metadata().is_none()
+            && let Some(annot) = direct_annotation.as_ref()
+            && annot.qualifiers.first() == Some(&Qualifier::ClassVar)
+            && annot.is_final()
+        {
+            self.error(
+                errors,
+                range,
+                ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
+                "`Final` may not be nested inside `ClassVar`".to_owned(),
+            );
+        }
+
         // Identify whether this is a descriptor
         let mut descriptor = None;
         // Descriptor semantics apply when:
