@@ -60,12 +60,76 @@ impl Include {
     }
 }
 
+/// Classifies a buck2 process exit code into a human-readable reason.
+///
+/// Based on the buck2 exit code documentation:
+/// <https://buck2.build/docs/users/commands_extra/exit_codes/>
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BuckExitReason {
+    Success,
+    UnknownFailure,
+    InfraError,
+    UserError,
+    DaemonIsBusy,
+    DaemonPreempted,
+    Timeout,
+    ConnectError,
+    FatalOom,
+    TestError,
+    TestNothing,
+    /// The process was killed by a signal. The signal number is `exit_code - 128`.
+    SignalInterruption(i32),
+    /// An exit code not covered by the buck2 documentation.
+    Other(i32),
+}
+
+impl BuckExitReason {
+    pub fn from_exit_code(code: i32) -> Self {
+        match code {
+            0 => Self::Success,
+            1 => Self::UnknownFailure,
+            2 => Self::InfraError,
+            3 => Self::UserError,
+            4 => Self::DaemonIsBusy,
+            5 => Self::DaemonPreempted,
+            6 => Self::Timeout,
+            11 => Self::ConnectError,
+            12 => Self::FatalOom,
+            32 => Self::TestError,
+            64 => Self::TestNothing,
+            129..=192 => Self::SignalInterruption(code - 128),
+            other => Self::Other(other),
+        }
+    }
+}
+
+impl fmt::Display for BuckExitReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Success => write!(f, "success"),
+            Self::UnknownFailure => write!(f, "unknown_failure"),
+            Self::InfraError => write!(f, "infra_error"),
+            Self::UserError => write!(f, "user_error"),
+            Self::DaemonIsBusy => write!(f, "daemon_is_busy"),
+            Self::DaemonPreempted => write!(f, "daemon_preempted"),
+            Self::Timeout => write!(f, "timeout"),
+            Self::ConnectError => write!(f, "connect_error"),
+            Self::FatalOom => write!(f, "fatal_oom"),
+            Self::TestError => write!(f, "test_error"),
+            Self::TestNothing => write!(f, "test_nothing"),
+            Self::SignalInterruption(signal) => write!(f, "signal_{signal}"),
+            Self::Other(code) => write!(f, "other_{code}"),
+        }
+    }
+}
+
 pub struct QueryResult {
     pub db: anyhow::Result<TargetManifestDatabase>,
     pub build_id: Option<String>,
     pub build_duration: Option<Duration>,
     pub parse_duration: Option<Duration>,
     pub stdout_size: Option<usize>,
+    pub exit_reason: Option<BuckExitReason>,
 }
 
 pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
@@ -84,6 +148,7 @@ pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
                 build_duration: None,
                 parse_duration: None,
                 stdout_size: None,
+                exit_reason: None,
             };
         }
 
@@ -94,6 +159,7 @@ pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
         let mut build_duration = None;
         let mut parse_duration = None;
         let mut stdout_size = None;
+        let mut exit_reason = None;
 
         let db = (|| {
             let mut argfile =
@@ -119,6 +185,7 @@ pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
             let result = cmd.output()?;
             let parse_start = Instant::now();
             build_duration = Some(parse_start - build_start);
+            exit_reason = result.status.code().map(BuckExitReason::from_exit_code);
             if !result.status.success() {
                 let stdout = String::from_utf8(result.stdout)
                     .unwrap_or_else(|_| "<Failed to parse stdout from source DB query>".to_owned());
@@ -192,6 +259,7 @@ pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
             build_duration,
             parse_duration,
             stdout_size,
+            exit_reason,
         }
     }
 
