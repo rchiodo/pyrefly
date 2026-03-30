@@ -267,6 +267,10 @@ struct OutputArgs {
     /// cross-referencing the JSON. Intended for debugging; mirrors view_types.py output.
     #[arg(long, hide = true)]
     cinderx_include_readable: bool,
+    /// Include all transitively-imported dependency modules in the CinderX report,
+    /// not just the explicitly type-checked project files.
+    #[arg(long, hide = true)]
+    cinderx_include_deps: bool,
     /// Count the number of each error kind. Prints the top N [default=5] errors, sorted by count, or all errors if N is 0.
     #[arg(
         long,
@@ -1138,9 +1142,17 @@ impl CheckArgs {
             report::pysa::write_project_file(&pysa_reporter, transaction, handles, &output_errors)?;
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
+            let cinderx_handles: Vec<_>;
+            let cinderx_handle_slice = if self.output.cinderx_include_deps {
+                cinderx_handles = transaction.handles();
+                cinderx_handles.as_slice()
+            } else {
+                handles
+            };
             report::cinderx::write_results(
                 cinderx_directory,
                 transaction,
+                cinderx_handle_slice,
                 self.output.cinderx_include_readable,
             )?;
         }

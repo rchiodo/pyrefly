@@ -198,10 +198,9 @@ fn has_protocol_ancestor(
 
 /// Write a CinderX type report to `output_dir`.
 ///
-/// Reports on all modules in the transaction (project files and dependencies
-/// alike), not just the explicitly-checked project modules. This gives the
-/// static compiler a complete view of the type information across the entire
-/// dependency graph.
+/// `handles` controls which modules appear in the report. Pass the
+/// explicitly-checked project handles for a project-only report, or
+/// `&transaction.handles()` to include all transitive dependencies.
 ///
 /// Writes:
 /// - `index.json` listing every module
@@ -216,17 +215,17 @@ fn has_protocol_ancestor(
 pub fn write_results(
     output_dir: &Path,
     transaction: &Transaction,
+    handles: &[Handle],
     readable: bool,
 ) -> anyhow::Result<()> {
     fs_anyhow::create_dir_all(output_dir)?;
     let types_dir = output_dir.join("types");
     fs_anyhow::create_dir_all(&types_dir)?;
 
-    let all_handles = transaction.handles();
-    let mut modules = Vec::with_capacity(all_handles.len());
+    let mut modules = Vec::with_capacity(handles.len());
     let mut all_classes: Vec<Class> = Vec::new();
 
-    for handle in &all_handles {
+    for handle in handles {
         // Some modules (e.g. namespace packages) may not have full type data;
         // skip them rather than failing the entire report.
         let Some(data) = collect_module_types(transaction, handle) else {
