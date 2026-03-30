@@ -29,7 +29,6 @@ use ruff_python_ast::StmtReturn;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
-use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
 
 use crate::binding::binding::AnnAssignHasValue;
@@ -53,7 +52,6 @@ use crate::binding::binding::TypeAliasBinding;
 use crate::binding::binding::TypeAliasParams;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::LegacyTParamCollector;
-use crate::binding::bindings::NameLookupResult;
 use crate::binding::expr::Usage;
 use crate::binding::narrow::NarrowOps;
 use crate::binding::scope::FlowStyle;
@@ -1029,26 +1027,7 @@ impl<'a> BindingsBuilder<'a> {
                 // This is done BEFORE finish_*_fork() so the binding exists in the right scope.
                 // Only do this when there's no else clause (not syntactically exhaustive).
                 let exhaustive_key = if !exhaustive {
-                    let mut narrow_entries = Vec::new();
-                    for (name, (op, range)) in negated_prev_ops.0.iter() {
-                        // Use the fork's base flow (the incoming flow at the start of this
-                        // if/elif, before any branches ran) to find the subject idx. This
-                        // preserves any narrowing applied by enclosing if statements — a regular
-                        // lookup here would fall back to the un-narrowed static binding because
-                        // we are no longer in a branch flow after finish_branch(). For variables
-                        // not present in the fork base (e.g. non-locals), fall back to a regular
-                        // lookup.
-                        let idx = if let Some(idx) = self.scopes.current_fork_base_idx(name) {
-                            idx
-                        } else if let NameLookupResult::Found { idx, .. } =
-                            self.lookup_name(Hashed::new(name), &mut Usage::Narrowing(None))
-                        {
-                            idx
-                        } else {
-                            continue;
-                        };
-                        narrow_entries.push((idx, Box::new(op.clone()), *range));
-                    }
+                    let narrow_entries = self.build_narrow_entries(&negated_prev_ops);
                     Some(self.insert_binding(
                         Key::Exhaustive(ExhaustivenessKind::IfElif, if_range),
                         Binding::Exhaustive(Box::new(ExhaustiveBinding {

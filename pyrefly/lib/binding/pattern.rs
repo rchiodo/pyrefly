@@ -515,6 +515,17 @@ impl<'a> BindingsBuilder<'a> {
                 );
                 new_narrow_ops.and_all(guard_narrow_ops)
             }
+            // Only accumulate narrows for the match subject. Alias names
+            // from MatchAs were already copied to the subject via
+            // and_for_subject and would create spurious entries if they
+            // shadow outer variables. When there is no narrowing subject
+            // (e.g. `match make_color():`), drop all narrows so that alias
+            // names don't resolve against unrelated outer variables.
+            new_narrow_ops.0.retain(|name, _| {
+                match_narrowing_subject
+                    .as_ref()
+                    .is_some_and(|s| name == s.name())
+            });
             negated_prev_ops.and_all(new_narrow_ops.negate());
             self.stmts(body, parent);
             self.finish_branch();
@@ -522,13 +533,7 @@ impl<'a> BindingsBuilder<'a> {
         if exhaustive {
             self.finish_exhaustive_fork();
         } else {
-            // Build narrow_entries from negated_prev_ops.
-            // For match, all entries use the same subject_idx since there's one subject.
-            let narrow_entries: Vec<_> = negated_prev_ops
-                .0
-                .iter()
-                .map(|(_name, (op, range))| (subject_idx, Box::new(op.clone()), *range))
-                .collect();
+            let narrow_entries = self.build_narrow_entries(&negated_prev_ops);
             // Create BindingExpect only if we have a narrowing subject (for exhaustiveness warnings)
             if let Some(narrowing_subject) = &match_narrowing_subject
                 && let Some((op, range)) = negated_prev_ops.0.get(narrowing_subject.name())

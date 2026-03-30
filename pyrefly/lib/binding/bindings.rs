@@ -78,6 +78,7 @@ use crate::binding::binding::TypeAliasRefBinding;
 use crate::binding::binding::TypeParameter;
 use crate::binding::expr::Usage;
 use crate::binding::metadata::BindingsMetadata;
+use crate::binding::narrow::NarrowOp;
 use crate::binding::narrow::NarrowOps;
 use crate::binding::scope::Exportable;
 use crate::binding::scope::FlowStyle;
@@ -1293,6 +1294,30 @@ impl<'a> BindingsBuilder<'a> {
             }
             NameReadInfo::NotFound => NameLookupResult::NotFound,
         }
+    }
+
+    /// Build narrow entries for exhaustiveness checking by resolving each
+    /// narrowed name to its variable binding at the fork base. Using the
+    /// fork base preserves narrowing from enclosing scopes; a regular
+    /// lookup would fall back to the un-narrowed static binding.
+    pub fn build_narrow_entries(
+        &mut self,
+        negated_prev_ops: &NarrowOps,
+    ) -> Vec<(Idx<Key>, Box<NarrowOp>, TextRange)> {
+        let mut narrow_entries = Vec::new();
+        for (name, (op, range)) in negated_prev_ops.0.iter() {
+            let idx = if let Some(idx) = self.scopes.current_fork_base_idx(name) {
+                idx
+            } else if let NameLookupResult::Found { idx, .. } =
+                self.lookup_name(Hashed::new(name), &mut Usage::Narrowing(None))
+            {
+                idx
+            } else {
+                continue;
+            };
+            narrow_entries.push((idx, Box::new(op.clone()), *range));
+        }
+        narrow_entries
     }
 
     /// Defer creation of a BoundName binding until after AST traversal.
