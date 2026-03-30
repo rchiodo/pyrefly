@@ -189,7 +189,6 @@
   "typeforms_typeform.py": [
     "Line 73: Expected 1 errors",
     "Line 74: Expected 1 errors",
-    "Line 17: Unexpected errors ['`None` is not assignable to `TypeForm[str | None]`']",
     "Line 20: Unexpected errors [\"`Literal['str | None']` is not assignable to `TypeForm[str | None]`\"]",
     "Line 21: Unexpected errors ['`type[Any]` is not assignable to `TypeForm[str | None]`']",
     "Line 46: Unexpected errors ['`type[str | None]` is not assignable to `UnionType`']",

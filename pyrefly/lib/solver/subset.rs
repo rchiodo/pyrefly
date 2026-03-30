@@ -1687,6 +1687,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             // Annotated[T, meta] <: TypeForm[T]
             (Type::Annotated(inner, _), Type::TypeForm(u)) => self.is_subset_eq(inner, u),
+            // None <: TypeForm[T] when None <: T — None is a valid type form (represents NoneType)
+            (Type::None, Type::TypeForm(u)) => self.is_subset_eq(&Type::None, u),
             // TypeForm[T] is not a subtype of type[U]
             (Type::TypeForm(_), Type::Type(_)) => Err(SubsetError::Other),
             // TypeForm falls back to object for other subtype checks

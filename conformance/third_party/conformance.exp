@@ -12488,17 +12488,6 @@
     {
       "code": -2,
       "column": 29,
-      "concise_description": "`None` is not assignable to `TypeForm[str | None]`",
-      "description": "`None` is not assignable to `TypeForm[str | None]`",
-      "line": 17,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 33,
-      "stop_line": 17
-    },
-    {
-      "code": -2,
-      "column": 29,
       "concise_description": "`Literal['str | None']` is not assignable to `TypeForm[str | None]`",
       "description": "`Literal['str | None']` is not assignable to `TypeForm[str | None]`",
       "line": 20,

@@ -5130,6 +5130,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ty @ (Type::TypeVar(_)
             | Type::ParamSpec(_)
             | Type::TypeVarTuple(_)
+            | Type::TypeForm(_)
             | Type::Args(_)
             | Type::Kwargs(_)) => Some(ty),
             Type::Type(t) => {
@@ -5161,7 +5162,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 Some(*t)
             }
-            Type::TypeForm(t) => Some(*t),
             Type::None => Some(self.heap.mk_none()), // Both a value and a type
             Type::Ellipsis => Some(self.heap.mk_ellipsis()), // A bit weird because of tuples, so just promote it
             Type::Any(style) => Some(style.propagate()),
