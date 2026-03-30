@@ -12,8 +12,6 @@ testcase!(
     r#"
 from typing_extensions import TypeForm
 
-# TypeForm should be recognized as a valid special form.
-# TypeForm[T] in annotation context should not produce "unknown" errors.
 x: TypeForm[int]
 y: TypeForm[str | None]
     "#,
@@ -25,5 +23,59 @@ testcase!(
 from typing_extensions import TypeForm
 
 x: TypeForm[int, str]  # E: `TypeForm` requires exactly one argument but got 2
+    "#,
+);
+
+testcase!(
+    test_typeform_covariance,
+    r#"
+from typing_extensions import TypeForm
+
+def get_int_form() -> TypeForm[int]:
+    return int
+
+x: TypeForm[int | str] = get_int_form()
+y: TypeForm[str] = get_int_form()  # E: `TypeForm[int]` is not assignable
+    "#,
+);
+
+testcase!(
+    test_typeform_type_subtype,
+    r#"
+from typing_extensions import TypeForm
+
+def get_type() -> type[int]:
+    return int
+
+x: TypeForm[int | str] = get_type()
+y: TypeForm[str] = get_type()  # E: is not assignable
+    "#,
+);
+
+testcase!(
+    test_typeform_bare,
+    r#"
+from typing import Any, assert_type
+from typing_extensions import TypeForm
+
+def f(x: TypeForm) -> None:
+    assert_type(x, TypeForm[Any])
+
+f(int)
+f(str)
+    "#,
+);
+
+testcase!(
+    test_typeform_assignment,
+    r#"
+from typing import Optional
+from typing_extensions import TypeForm
+
+ok1: TypeForm[str | None] = str | None
+ok2: TypeForm[str | None] = str
+ok3: TypeForm[str | None] = Optional[str]
+
+err1: TypeForm[str | None] = str | int  # E: is not assignable
     "#,
 );

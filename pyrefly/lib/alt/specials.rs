@@ -560,14 +560,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ),
             ),
             SpecialForm::TypeForm if arguments.len() == 1 => {
-                // TODO: Produce Type::TypeForm once the variant exists
-                // For now, treat TypeForm[T] like Type[T]
-                self.heap
-                    .mk_type_form(self.heap.mk_type_form(self.expr_untype(
-                        &arguments[0],
-                        TypeFormContext::TypeArgument,
-                        errors,
-                    )))
+                let inner = self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors);
+                self.heap.mk_type_form(self.heap.mk_typeform(inner))
             }
             SpecialForm::TypeForm => self.error(
                 errors,

@@ -187,23 +187,18 @@
   "typeddicts_type_consistency.py": [],
   "typeddicts_usage.py": [],
   "typeforms_typeform.py": [
-    "Line 17: Unexpected errors ['`None` is not assignable to `type[str | None]`']",
-    "Line 20: Unexpected errors [\"`Literal['str | None']` is not assignable to `type[str | None]`\"]",
-    "Line 21: Unexpected errors ['`type[Any]` is not assignable to `type[str | None]`']",
-    "Line 40: Unexpected errors ['Expected a type argument for `TypeForm`']",
-    "Line 41: Unexpected errors ['assert_type(TypeForm, type[Any]) failed']",
+    "Line 73: Expected 1 errors",
+    "Line 74: Expected 1 errors",
+    "Line 17: Unexpected errors ['`None` is not assignable to `TypeForm[str | None]`']",
+    "Line 20: Unexpected errors [\"`Literal['str | None']` is not assignable to `TypeForm[str | None]`\"]",
+    "Line 21: Unexpected errors ['`type[Any]` is not assignable to `TypeForm[str | None]`']",
     "Line 46: Unexpected errors ['`type[str | None]` is not assignable to `UnionType`']",
     "Line 49: Unexpected errors ['`type[list[int]]` is not assignable to `GenericAlias`', 'Expected `v2_actual` to be a type alias, got `GenericAlias`']",
-    "Line 50: Unexpected errors ['Expected a type argument for `TypeForm`', '`type[list[int]]` is not assignable to `TypeForm`', 'Expected `v2_type_form` to be a type alias, got `TypeForm`']",
-    "Line 52: Unexpected errors ['`Annotated[int | str]` is not assignable to `type[int | str]`']",
-    "Line 53: Unexpected errors [\"`Literal['set[str]']` is not assignable to `type[set[str]]`\"]",
-    "Line 55: Unexpected errors ['Argument `type[int | str]` is not assignable to parameter `x` with type `TypeForm` in function `func1`']",
-    "Line 56: Unexpected errors ['Argument `type[set[str]]` is not assignable to parameter `x` with type `TypeForm` in function `func1`']",
-    "Line 57: Unexpected errors ['Argument `type[int]` is not assignable to parameter `x` with type `TypeForm` in function `func1`']",
-    "Line 58: Unexpected errors [\"Argument `Literal['int']` is not assignable to parameter `x` with type `TypeForm` in function `func1`\"]",
+    "Line 53: Unexpected errors [\"`Literal['set[str]']` is not assignable to `TypeForm[set[str]]`\"]",
+    "Line 58: Unexpected errors [\"Argument `Literal['int']` is not assignable to parameter `x` with type `TypeForm[Any]` in function `func1`\"]",
     "Line 80: Unexpected errors ['Expected a callable, got `type[TypeForm]`']",
-    "Line 81: Unexpected errors ['assert_type(Unknown, type[str | None]) failed']",
+    "Line 81: Unexpected errors ['assert_type(Unknown, TypeForm[str | None]) failed']",
     "Line 83: Unexpected errors ['Expected a callable, got `type[TypeForm]`']",
-    "Line 84: Unexpected errors ['assert_type(Unknown, type[list[int]]) failed']"
+    "Line 84: Unexpected errors ['assert_type(Unknown, TypeForm[list[int]]) failed']"
   ]
 }
