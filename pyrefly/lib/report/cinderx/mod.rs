@@ -35,14 +35,17 @@ use pyrefly_build::handle::Handle;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::class::Class;
-use pyrefly_util::display::Fmt;
+use pyrefly_types::class::ClassDefIndex;
 use pyrefly_util::fs_anyhow;
 use serde::Serialize;
 
-use crate::alt::types::class_metadata::ClassMetadata;
-use crate::alt::types::class_metadata::ClassMro;
+use crate::alt::answers::Answers;
+use crate::alt::answers::LookupAnswer;
+use crate::alt::answers_solver::AnswersSolver;
+use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
+use crate::binding::bindings::Bindings;
 use crate::report::cinderx::collect::ModuleTypeData;
 use crate::report::cinderx::collect::collect_module_types;
 use crate::report::cinderx::convert::canonicalize_class_qname;
@@ -104,6 +107,117 @@ struct ClassMetadataTable {
     entries: Vec<ClassMetadataEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CinderxClassRef {
+    module_name: ModuleName,
+    module_path: ModulePath,
+    class_def_index: ClassDefIndex,
+}
+
+impl CinderxClassRef {
+    fn from_class(class: &Class) -> Self {
+        Self {
+            module_name: class.module_name(),
+            module_path: class.module_path().dupe(),
+            class_def_index: class.index(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CinderxClassInfo {
+    qname: String,
+    ancestors: Vec<CinderxClassRef>,
+    is_protocol: bool,
+}
+
+#[derive(Debug)]
+pub struct CinderxSolutions {
+    classes: HashMap<CinderxClassRef, CinderxClassInfo>,
+}
+
+impl CinderxSolutions {
+    fn build_class_info(
+        class: &Class,
+        metadata_is_protocol: bool,
+        ancestor_classes: &[Class],
+    ) -> CinderxClassInfo {
+        CinderxClassInfo {
+            qname: canonicalize_class_qname(&qname_to_full_string(class.qname())),
+            ancestors: ancestor_classes
+                .iter()
+                .map(CinderxClassRef::from_class)
+                .collect(),
+            is_protocol: metadata_is_protocol,
+        }
+    }
+
+    pub fn build<Ans: LookupAnswer>(
+        bindings: &Bindings,
+        answers: &AnswersSolver<Ans>,
+    ) -> Arc<Self> {
+        let classes = bindings
+            .keys::<KeyClass>()
+            .map(|idx| {
+                let class = answers
+                    .get_idx(idx)
+                    .0
+                    .dupe()
+                    .expect("class binding must resolve to a class");
+                let class_ref = CinderxClassRef::from_class(&class);
+                let metadata =
+                    answers.get_idx(bindings.key_to_idx(&KeyClassMetadata(class.index())));
+                let mro = answers.get_idx(bindings.key_to_idx(&KeyClassMro(class.index())));
+                let ancestors: Vec<Class> = mro
+                    .ancestors_no_object()
+                    .iter()
+                    .map(|ancestor| ancestor.class_object().clone())
+                    .collect();
+                (
+                    class_ref,
+                    Self::build_class_info(&class, metadata.is_protocol(), &ancestors),
+                )
+            })
+            .collect();
+        Arc::new(Self { classes })
+    }
+
+    pub fn build_from_answers(bindings: &Bindings, answers: &Answers) -> Arc<Self> {
+        let classes = bindings
+            .keys::<KeyClass>()
+            .map(|idx| {
+                let class = answers
+                    .get_idx(idx)
+                    .expect("class answers must be available for cinderx")
+                    .0
+                    .dupe()
+                    .expect("class binding must resolve to a class");
+                let class_ref = CinderxClassRef::from_class(&class);
+                let metadata = answers
+                    .get_idx(bindings.key_to_idx(&KeyClassMetadata(class.index())))
+                    .expect("class metadata answers must be available for cinderx");
+                let mro = answers
+                    .get_idx(bindings.key_to_idx(&KeyClassMro(class.index())))
+                    .expect("class MRO answers must be available for cinderx");
+                let ancestors: Vec<Class> = mro
+                    .ancestors_no_object()
+                    .iter()
+                    .map(|ancestor| ancestor.class_object().clone())
+                    .collect();
+                (
+                    class_ref,
+                    Self::build_class_info(&class, metadata.is_protocol(), &ancestors),
+                )
+            })
+            .collect();
+        Arc::new(Self { classes })
+    }
+
+    pub fn get_class_info(&self, class_ref: &CinderxClassRef) -> Option<&CinderxClassInfo> {
+        self.classes.get(class_ref)
+    }
+}
+
 /// Inline writer for CinderX report output during type checking.
 pub struct CinderxReporter {
     output_dir: PathBuf,
@@ -111,7 +225,7 @@ pub struct CinderxReporter {
     readable: bool,
     report_handles: Option<HashSet<(ModuleName, ModulePath)>>,
     modules: Mutex<HashMap<(ModuleName, ModulePath), ModuleEntry>>,
-    classes: Mutex<HashMap<(ModuleName, ModulePath), Vec<Class>>>,
+    classes: Mutex<HashMap<(ModuleName, ModulePath), Vec<CinderxClassRef>>>,
 }
 
 impl CinderxReporter {
@@ -155,7 +269,13 @@ impl CinderxReporter {
                 path: handle.path().as_path().display().to_string(),
             },
         );
-        self.classes.lock().unwrap().insert(key, data.classes);
+        self.classes.lock().unwrap().insert(
+            key,
+            data.classes
+                .iter()
+                .map(CinderxClassRef::from_class)
+                .collect(),
+        );
 
         let report = ModuleReport {
             type_table: data.entries,
@@ -211,13 +331,20 @@ impl CinderxReporter {
     }
 }
 
+fn get_class_info(
+    class_ref: &CinderxClassRef,
+    handle_by_module: &HashMap<(ModuleName, ModulePath), Handle>,
+    transaction: &Transaction,
+) -> Option<CinderxClassInfo> {
+    let key = (class_ref.module_name, class_ref.module_path.dupe());
+    let handle = handle_by_module.get(&key)?;
+    let solutions = transaction.resolve_cinderx_solutions(handle);
+    solutions.get_class_info(class_ref).cloned()
+}
+
 /// Collect class metadata entries for all classes, deduplicated by qname.
-///
-/// For each unique class, looks up its MRO and metadata via `KeyClassMro`
-/// and `KeyClassMetadata` from the defining module's solutions. Classes
-/// whose defining module is not available are silently skipped.
 fn collect_class_metadata(
-    classes: Vec<Class>,
+    classes: Vec<CinderxClassRef>,
     transaction: &Transaction,
 ) -> Vec<ClassMetadataEntry> {
     // Build a handle lookup by (module name, module path) for cross-module
@@ -231,40 +358,31 @@ fn collect_class_metadata(
         .collect();
 
     // Deduplicate classes by canonicalized qname, keeping the first seen.
-    let mut seen_qnames: HashMap<String, Class> = HashMap::new();
-    for cls in classes {
-        let raw = format!("{}", Fmt(|f| cls.qname().fmt_with_module(f)));
-        let qname = canonicalize_class_qname(&raw);
-        seen_qnames.entry(qname).or_insert(cls);
+    let mut seen_qnames: HashMap<String, CinderxClassRef> = HashMap::new();
+    for class_ref in classes {
+        let Some(class_info) = get_class_info(&class_ref, &handle_by_module, transaction) else {
+            continue;
+        };
+        seen_qnames.entry(class_info.qname).or_insert(class_ref);
     }
 
     let mut entries: Vec<ClassMetadataEntry> = Vec::with_capacity(seen_qnames.len());
-    for (qname, cls) in &seen_qnames {
-        let key = (cls.module_name(), cls.module_path().dupe());
-        let Some(defining_handle) = handle_by_module.get(&key) else {
+    for (qname, class_ref) in &seen_qnames {
+        let Some(class_info) = get_class_info(class_ref, &handle_by_module, transaction) else {
             continue;
         };
-        let Some(solutions) = transaction.get_solutions(defining_handle) else {
-            continue;
-        };
-
-        // Look up MRO.
-        let mro: &Arc<ClassMro> = solutions.get(&KeyClassMro(cls.index()));
-        let ancestors: Vec<String> = mro
-            .ancestors_no_object()
+        let ancestors: Vec<String> = class_info
+            .ancestors
             .iter()
-            .map(|ancestor| {
-                let raw = qname_to_full_string(ancestor.qname());
-                canonicalize_class_qname(&raw)
+            .filter_map(|ancestor| {
+                get_class_info(ancestor, &handle_by_module, transaction).map(|info| info.qname)
             })
             .collect();
 
-        // Look up class metadata for semantic tags.
-        let metadata: &Arc<ClassMetadata> = solutions.get(&KeyClassMetadata(cls.index()));
         let mut tags = Vec::new();
-        if metadata.is_protocol() {
+        if class_info.is_protocol {
             tags.push("protocol".to_owned());
-        } else if has_protocol_ancestor(mro, &handle_by_module, transaction) {
+        } else if has_protocol_ancestor(&class_info.ancestors, &handle_by_module, transaction) {
             tags.push("inherits_protocol".to_owned());
         }
 
@@ -287,21 +405,15 @@ fn collect_class_metadata(
 /// Protocol). Pyrefly excludes `Protocol` from the MRO, but at runtime it is
 /// present in `__mro__`.
 fn has_protocol_ancestor(
-    mro: &ClassMro,
+    ancestors: &[CinderxClassRef],
     handle_by_module: &HashMap<(ModuleName, ModulePath), Handle>,
     transaction: &Transaction,
 ) -> bool {
-    for ancestor in mro.ancestors_no_object() {
-        let cls = ancestor.class_object();
-        let key = (cls.module_name(), cls.module_path().dupe());
-        let Some(handle) = handle_by_module.get(&key) else {
+    for ancestor in ancestors {
+        let Some(class_info) = get_class_info(ancestor, handle_by_module, transaction) else {
             continue;
         };
-        let Some(solutions) = transaction.get_solutions(handle) else {
-            continue;
-        };
-        let metadata: &Arc<ClassMetadata> = solutions.get(&KeyClassMetadata(cls.index()));
-        if metadata.is_protocol() {
+        if class_info.is_protocol {
             return true;
         }
     }

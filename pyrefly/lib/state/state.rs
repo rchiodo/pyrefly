@@ -2197,6 +2197,29 @@ impl<'a> Transaction<'a> {
             .expect("pysa_solutions must exist when pysa reporting is enabled")
             .clone()
     }
+
+    /// Demand that a module reaches Solutions and return its CinderXSolutions.
+    pub fn resolve_cinderx_solutions(
+        &self,
+        handle: &Handle,
+    ) -> Arc<crate::report::cinderx::CinderxSolutions> {
+        let module_data = self.get_module(handle);
+        self.demand(module_data, Step::last());
+        let solutions = module_data
+            .state
+            .get_solutions()
+            .expect("solutions must exist after demand");
+        if let Some(cinderx_solutions) = solutions.cinderx_solutions() {
+            return cinderx_solutions.clone();
+        }
+        let bindings = self
+            .get_bindings(handle)
+            .expect("bindings must be available to build cinderx_solutions");
+        let answers = self
+            .get_answers(handle)
+            .expect("answers must be available to build cinderx_solutions");
+        crate::report::cinderx::CinderxSolutions::build_from_answers(&bindings, &answers)
+    }
 }
 
 pub(crate) struct TransactionHandle<'a> {
