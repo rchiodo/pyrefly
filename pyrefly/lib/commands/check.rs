@@ -924,6 +924,22 @@ impl CheckArgs {
             let reporter = report::pysa::PysaReporter::new(pysa_directory, handles)?;
             transaction.set_pysa_reporter(Some(reporter));
         }
+        if let Some(cinderx_directory) = &self.output.report_cinderx {
+            let cinderx_reporter = if self.output.cinderx_include_deps {
+                report::cinderx::CinderxReporter::new(
+                    cinderx_directory,
+                    None,
+                    self.output.cinderx_include_readable,
+                )?
+            } else {
+                report::cinderx::CinderxReporter::new(
+                    cinderx_directory,
+                    Some(handles),
+                    self.output.cinderx_include_readable,
+                )?
+            };
+            transaction.set_cinderx_reporter(Some(cinderx_reporter));
+        }
 
         let type_check_start = Instant::now();
         let show_progress_bar =
@@ -1141,20 +1157,8 @@ impl CheckArgs {
         if let Some(pysa_reporter) = transaction.take_pysa_reporter() {
             report::pysa::write_project_file(&pysa_reporter, transaction, handles, &output_errors)?;
         }
-        if let Some(cinderx_directory) = &self.output.report_cinderx {
-            let cinderx_handles: Vec<_>;
-            let cinderx_handle_slice = if self.output.cinderx_include_deps {
-                cinderx_handles = transaction.handles();
-                cinderx_handles.as_slice()
-            } else {
-                handles
-            };
-            report::cinderx::write_results(
-                cinderx_directory,
-                transaction,
-                cinderx_handle_slice,
-                self.output.cinderx_include_readable,
-            )?;
+        if let Some(cinderx_reporter) = transaction.take_cinderx_reporter() {
+            cinderx_reporter.write_project_files(transaction)?;
         }
         if let Some(path) = &self.output.report_binding_memory {
             fs_anyhow::write(path, report::binding_memory::binding_memory(transaction))?;

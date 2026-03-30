@@ -24,8 +24,11 @@ pub(crate) mod display;
 pub mod types;
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use dupe::Dupe;
 use pyrefly_build::handle::Handle;
@@ -40,6 +43,7 @@ use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
+use crate::report::cinderx::collect::ModuleTypeData;
 use crate::report::cinderx::collect::collect_module_types;
 use crate::report::cinderx::convert::canonicalize_class_qname;
 use crate::report::cinderx::convert::qname_to_full_string;
@@ -49,6 +53,7 @@ use crate::state::state::Transaction;
 
 /// A module entry in the cinderx index.
 #[derive(Debug, Serialize)]
+#[derive(Clone)]
 struct ModuleEntry {
     /// Fully-qualified module name.
     module_name: String,
@@ -97,6 +102,113 @@ struct ClassMetadataEntry {
 struct ClassMetadataTable {
     /// One entry per unique class encountered in the type report.
     entries: Vec<ClassMetadataEntry>,
+}
+
+/// Inline writer for CinderX report output during type checking.
+pub struct CinderxReporter {
+    output_dir: PathBuf,
+    types_dir: PathBuf,
+    readable: bool,
+    report_handles: Option<HashSet<(ModuleName, ModulePath)>>,
+    modules: Mutex<HashMap<(ModuleName, ModulePath), ModuleEntry>>,
+    classes: Mutex<HashMap<(ModuleName, ModulePath), Vec<Class>>>,
+}
+
+impl CinderxReporter {
+    pub fn new(
+        output_dir: &Path,
+        handles: Option<&[Handle]>,
+        readable: bool,
+    ) -> anyhow::Result<Box<Self>> {
+        fs_anyhow::create_dir_all(output_dir)?;
+        let types_dir = output_dir.join("types");
+        fs_anyhow::create_dir_all(&types_dir)?;
+        let report_handles = handles.map(|handles| {
+            handles
+                .iter()
+                .map(|handle| (handle.module(), handle.path().dupe()))
+                .collect()
+        });
+        let capacity = handles.map_or(0, |handles| handles.len());
+        Ok(Box::new(Self {
+            output_dir: output_dir.to_path_buf(),
+            types_dir,
+            readable,
+            report_handles,
+            modules: Mutex::new(HashMap::with_capacity(capacity)),
+            classes: Mutex::new(HashMap::with_capacity(capacity)),
+        }))
+    }
+
+    fn should_report(&self, handle: &Handle) -> bool {
+        self.report_handles.as_ref().is_none_or(|report_handles| {
+            report_handles.contains(&(handle.module(), handle.path().dupe()))
+        })
+    }
+
+    fn report_collected_module(&self, handle: &Handle, data: ModuleTypeData) -> anyhow::Result<()> {
+        let key = (handle.module(), handle.path().dupe());
+        self.modules.lock().unwrap().insert(
+            key.clone(),
+            ModuleEntry {
+                module_name: handle.module().to_string(),
+                path: handle.path().as_path().display().to_string(),
+            },
+        );
+        self.classes.lock().unwrap().insert(key, data.classes);
+
+        let report = ModuleReport {
+            type_table: data.entries,
+            locations: data.locations,
+        };
+        let module_json = serde_json::to_string_pretty(&report)?;
+        let stem = handle.module().to_string();
+        fs_anyhow::write(&self.types_dir.join(format!("{}.json", stem)), module_json)?;
+        if self.readable {
+            let txt = display::format_module_types(&report.type_table, &report.locations);
+            fs_anyhow::write(&self.types_dir.join(format!("{}.txt", stem)), txt)?;
+        }
+        Ok(())
+    }
+
+    /// Write the per-module type report for the given handle, if it is selected.
+    pub fn report_module(&self, handle: &Handle, transaction: &Transaction) -> anyhow::Result<()> {
+        if !self.should_report(handle) {
+            return Ok(());
+        }
+        let Some(data) = collect_module_types(transaction, handle) else {
+            return Ok(());
+        };
+        self.report_collected_module(handle, data)
+    }
+
+    /// Write final project-level CinderX files after all module reports are done.
+    pub fn write_project_files(&self, transaction: &Transaction) -> anyhow::Result<()> {
+        let mut modules: Vec<_> = self.modules.lock().unwrap().values().cloned().collect();
+        modules.sort_by(|a, b| a.module_name.cmp(&b.module_name).then(a.path.cmp(&b.path)));
+        let index = CinderxIndex {
+            version: "0.1".to_owned(),
+            modules,
+        };
+        let json = serde_json::to_string_pretty(&index)?;
+        fs_anyhow::write(&self.output_dir.join("index.json"), json)?;
+
+        let class_metadata = ClassMetadataTable {
+            entries: collect_class_metadata(
+                self.classes
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .flatten()
+                    .cloned()
+                    .collect(),
+                transaction,
+            ),
+        };
+        let metadata_json = serde_json::to_string_pretty(&class_metadata)?;
+        fs_anyhow::write(&self.output_dir.join("class_metadata.json"), metadata_json)?;
+        Ok(())
+    }
 }
 
 /// Collect class metadata entries for all classes, deduplicated by qname.
@@ -212,59 +324,16 @@ fn has_protocol_ancestor(
 /// expression location is followed by its fully-resolved type string (no
 /// index cross-referencing required). Intended for human debugging; mirrors
 /// the output of the `view_types.py` script.
+#[cfg(test)]
 pub fn write_results(
     output_dir: &Path,
     transaction: &Transaction,
     handles: &[Handle],
     readable: bool,
 ) -> anyhow::Result<()> {
-    fs_anyhow::create_dir_all(output_dir)?;
-    let types_dir = output_dir.join("types");
-    fs_anyhow::create_dir_all(&types_dir)?;
-
-    let mut modules = Vec::with_capacity(handles.len());
-    let mut all_classes: Vec<Class> = Vec::new();
-
+    let reporter = CinderxReporter::new(output_dir, Some(handles), readable)?;
     for handle in handles {
-        // Some modules (e.g. namespace packages) may not have full type data;
-        // skip them rather than failing the entire report.
-        let Some(data) = collect_module_types(transaction, handle) else {
-            continue;
-        };
-
-        modules.push(ModuleEntry {
-            module_name: handle.module().to_string(),
-            path: handle.path().as_path().display().to_string(),
-        });
-
-        all_classes.extend(data.classes);
-
-        let report = ModuleReport {
-            type_table: data.entries,
-            locations: data.locations,
-        };
-        let module_json = serde_json::to_string_pretty(&report)?;
-        let stem = handle.module().to_string();
-        fs_anyhow::write(&types_dir.join(format!("{}.json", stem)), module_json)?;
-        if readable {
-            let txt = display::format_module_types(&report.type_table, &report.locations);
-            fs_anyhow::write(&types_dir.join(format!("{}.txt", stem)), txt)?;
-        }
+        reporter.report_module(handle, transaction)?;
     }
-
-    let index = CinderxIndex {
-        version: "0.1".to_owned(),
-        modules,
-    };
-    let json = serde_json::to_string_pretty(&index)?;
-    fs_anyhow::write(&output_dir.join("index.json"), json)?;
-
-    // Write global class metadata.
-    let class_metadata = ClassMetadataTable {
-        entries: collect_class_metadata(all_classes, transaction),
-    };
-    let metadata_json = serde_json::to_string_pretty(&class_metadata)?;
-    fs_anyhow::write(&output_dir.join("class_metadata.json"), metadata_json)?;
-
-    Ok(())
+    reporter.write_project_files(transaction)
 }

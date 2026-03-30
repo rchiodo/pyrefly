@@ -62,6 +62,8 @@ pub struct Context<'a, Lookup> {
     pub recursion_limit_config: Option<RecursionLimitConfig>,
     /// Pysa context for building PysaSolutions during the Solutions step.
     pub pysa_context: Option<PysaContext<'a>>,
+    /// Enable answer tracing required for inline CinderX reporting.
+    pub cinderx_enabled: bool,
 }
 
 #[derive(Debug, Default, Dupe, Clone)]
@@ -418,7 +420,8 @@ impl Step {
             ctx.spec_compliant_overloads,
         );
         let enable_index = ctx.require.keep_index();
-        let enable_trace = ctx.require.keep_answers_trace() || ctx.pysa_context.is_some();
+        let enable_trace =
+            ctx.require.keep_answers_trace() || ctx.pysa_context.is_some() || ctx.cinderx_enabled;
         let bindings = Bindings::new(
             Arc::unwrap_or_clone(ast),
             load.module_info.dupe(),

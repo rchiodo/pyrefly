@@ -508,6 +508,8 @@ pub(crate) struct TransactionData<'a> {
     subscriber: Option<Box<dyn Subscriber + 'a>>,
     /// When set, pysa reporting is done during answer solving and before memory eviction.
     pysa_reporter: Option<Box<crate::report::pysa::PysaReporter>>,
+    /// When set, CinderX reporting writes per-module output during answer solving.
+    cinderx_reporter: Option<Box<crate::report::cinderx::CinderxReporter>>,
 }
 
 impl<'a> TransactionData<'a> {
@@ -574,6 +576,21 @@ impl<'a> Transaction<'a> {
     /// Take the pysa reporter out of the transaction, consuming ownership.
     pub fn take_pysa_reporter(&mut self) -> Option<Box<crate::report::pysa::PysaReporter>> {
         self.data.pysa_reporter.take()
+    }
+
+    /// Set the cinderx reporter for inline extraction during type checking.
+    pub fn set_cinderx_reporter(
+        &mut self,
+        reporter: Option<Box<crate::report::cinderx::CinderxReporter>>,
+    ) {
+        self.data.cinderx_reporter = reporter;
+    }
+
+    /// Take the cinderx reporter out of the transaction, consuming ownership.
+    pub fn take_cinderx_reporter(
+        &mut self,
+    ) -> Option<Box<crate::report::cinderx::CinderxReporter>> {
+        self.data.cinderx_reporter.take()
     }
 
     /// Mark this transaction as freshly created (not restored from saved state).
@@ -1144,6 +1161,7 @@ impl<'a> Transaction<'a> {
                     .spec_compliant_overloads(module_data.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
                 pysa_context,
+                cinderx_enabled: self.data.cinderx_reporter.is_some(),
             };
 
             // Compute the step. This stores the result and advances current_step,
@@ -1193,15 +1211,27 @@ impl<'a> Transaction<'a> {
                     changed
                 );
             }
-            if todo == Step::Answers && !require.keep_ast() && self.data.pysa_reporter.is_none() {
-                // We have captured the Ast, and must have already built Exports (we do it serially),
-                // so won't need the Ast again.
-                post.evict_ast();
+            if todo == Step::Answers {
+                if !require.keep_ast()
+                    && self.data.pysa_reporter.is_none()
+                    && self.data.cinderx_reporter.is_none()
+                {
+                    // We have captured the Ast, and must have already built Exports (we do it serially),
+                    // so won't need the Ast again.
+                    post.evict_ast();
+                }
             } else if todo == Step::Solutions {
+                if let Some(cinderx_reporter) = self.data.cinderx_reporter.as_ref() {
+                    cinderx_reporter
+                        .report_module(&module_data.handle, self)
+                        .expect("Failed to write CinderX module report");
+                }
                 if let Some(pysa_reporter) = self.data.pysa_reporter.as_ref() {
                     pysa_reporter.report_module(&module_data.handle, self);
-                    // With pysa, we delayed AST eviction past Answers (needed for
-                    // report_module). Evict it now that report_module has completed.
+                }
+                if self.data.pysa_reporter.is_some() || self.data.cinderx_reporter.is_some() {
+                    // With inline report writers, we delay AST eviction past Answers because
+                    // reporting needs the AST. Evict it now that reporting has completed.
                     post.evict_ast();
                 }
                 if !require.keep_bindings() && !require.keep_answers() {
@@ -2064,6 +2094,7 @@ impl<'a> Transaction<'a> {
                     .spec_compliant_overloads(m.handle.path().as_path()),
                 recursion_limit_config: config.recursion_limit_config(),
                 pysa_context: None,
+                cinderx_enabled: false,
             };
             while let Some(step) = alt.next_step() {
                 let start = Instant::now();
@@ -2848,6 +2879,7 @@ impl State {
                 dirty: Default::default(),
                 subscriber,
                 pysa_reporter: None,
+                cinderx_reporter: None,
             },
         }
     }
@@ -2918,6 +2950,7 @@ impl State {
                             dirty,
                             subscriber: _,
                             pysa_reporter: _,
+                            cinderx_reporter: _,
                         },
                 },
             committing_transaction_guard,
