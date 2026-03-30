@@ -304,6 +304,7 @@ use crate::lsp::wasm::provide_type::ProvideType;
 use crate::lsp::wasm::provide_type::ProvideTypeParams;
 use crate::lsp::wasm::provide_type::ProvideTypeResponse;
 use crate::lsp::wasm::provide_type::provide_type;
+use crate::module::bundled::BundledStub;
 use crate::state::load::LspFile;
 use crate::state::lsp::DisplayTypeErrors;
 use crate::state::lsp::FindDefinitionItemWithDocstring;
@@ -5951,7 +5952,7 @@ impl TspInterface for Server {
         // internal heuristics, not stable directories the client should depend
         // on.
         let mut seen = std::collections::HashSet::new();
-        let paths: Vec<String> = config
+        let mut paths: Vec<String> = config
             .search_path()
             .chain(config.site_package_path())
             .filter_map(|p| {
@@ -5961,6 +5962,19 @@ impl TspInterface for Server {
             })
             .filter(|uri| seen.insert(uri.clone()))
             .collect();
+
+        // Include the materialized typeshed stdlib path so the client can
+        // remap declaration URIs that reference our bundled typeshed.
+        if let Ok(ts) = crate::module::typeshed::typeshed()
+            && let Ok(ts_path) = ts.materialized_path_on_disk()
+            && let Ok(url) = Url::from_file_path(&ts_path)
+        {
+            let uri = url.to_string();
+            if seen.insert(uri.clone()) {
+                paths.push(uri);
+            }
+        }
+
         Ok(paths)
     }
 
