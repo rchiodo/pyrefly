@@ -171,6 +171,11 @@ impl TypeHeap {
         Type::Type(Box::new(inner))
     }
 
+    /// Create a `Type::TypeForm` wrapping an inner type (PEP 747).
+    pub fn mk_typeform(&self, inner: Type) -> Type {
+        Type::TypeForm(Box::new(inner))
+    }
+
     /// Create a `Type::Quantified` from a Quantified.
     pub fn mk_quantified(&self, quantified: Quantified) -> Type {
         Type::Quantified(Box::new(quantified))

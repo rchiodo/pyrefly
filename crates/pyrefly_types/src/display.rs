@@ -857,6 +857,12 @@ impl<'a> TypeDisplayContext<'a> {
                 self.fmt_helper_generic(ty, false, output)?;
                 output.write_str("]")
             }
+            Type::TypeForm(box Type::Any(_)) => output.write_str("TypeForm[Any]"),
+            Type::TypeForm(ty) => {
+                output.write_str("TypeForm[")?;
+                self.fmt_helper_generic(ty, false, output)?;
+                output.write_str("]")
+            }
             Type::TypeGuard(ty) => {
                 if self.always_display_module_name {
                     output.write_str("typing.")?;

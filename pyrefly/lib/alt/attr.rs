@@ -2503,6 +2503,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // TODO: check to see which ones should have class representations
             Type::SpecialForm(_)
             | Type::Type(_)
+            | Type::TypeForm(_)
             | Type::Unpack(_)
             | Type::Concatenate(_, _)
             | Type::ParamSpecValue(_)

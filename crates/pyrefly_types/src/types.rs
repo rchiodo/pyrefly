@@ -818,6 +818,8 @@ pub enum Type {
     KwargsValue(Box<Quantified>),
     /// Used to represent a type that has a value representation, e.g. a class
     Type(Box<Type>),
+    /// TypeForm[T] — a type form object (PEP 747).
+    TypeForm(Box<Type>),
     Ellipsis,
     Any(AnyStyle),
     Never(NeverStyle),
@@ -897,6 +899,7 @@ impl Visit for Type {
             Type::ArgsValue(x) => x.visit(f),
             Type::KwargsValue(x) => x.visit(f),
             Type::Type(x) => x.visit(f),
+            Type::TypeForm(x) => x.visit(f),
             Type::Ellipsis => {}
             Type::Any(x) => x.visit(f),
             Type::Never(x) => x.visit(f),
@@ -951,6 +954,7 @@ impl VisitMut for Type {
             Type::ArgsValue(x) => x.visit_mut(f),
             Type::KwargsValue(x) => x.visit_mut(f),
             Type::Type(x) => x.visit_mut(f),
+            Type::TypeForm(x) => x.visit_mut(f),
             Type::Ellipsis => {}
             Type::Any(x) => x.visit_mut(f),
             Type::Never(x) => x.visit_mut(f),
