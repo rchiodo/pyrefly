@@ -657,6 +657,30 @@ assert_type(C(False), C[B])
 );
 
 testcase!(
+    bug = "Should error when __init__ self type is not a superclass of the defining class",
+    test_init_bad_receiver_annotation,
+    r#"
+from typing import Literal, assert_type, overload
+
+class A: ...
+class B: ...
+class D:
+    def __init__(self: A): pass
+class E(A):
+    def __init__(self: A): pass
+
+class C[T]:
+    @overload
+    def __init__(self: A, x: Literal[True]) -> None: ...  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: A, x: Literal[True]) -> None` accepts
+    @overload
+    def __init__(self: B, x: Literal[False]) -> None: ...  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: B, x: Literal[False]) -> None` accepts
+    def __init__(self, x):
+        pass
+
+    "#,
+);
+
+testcase!(
     test_new_bad_receiver_annotation,
     r#"
 from typing import Literal, assert_type, overload, Self, Any
