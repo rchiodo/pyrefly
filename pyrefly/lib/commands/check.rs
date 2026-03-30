@@ -889,8 +889,7 @@ impl CheckArgs {
         let retain = self.output.report_binding_memory.is_some()
             || self.output.debug_info.is_some()
             || self.output.report_trace.is_some()
-            || self.output.report_glean.is_some()
-            || self.output.report_cinderx.is_some();
+            || self.output.report_glean.is_some();
         RequireLevels {
             specified: if retain {
                 Require::Everything
@@ -902,6 +901,7 @@ impl CheckArgs {
             } else if self.behavior.check_all
                 || stdlib_search_path().is_some()
                 || self.output.report_pysa.is_some()
+                || self.output.report_cinderx.is_some()
             {
                 Require::Errors
             } else {
