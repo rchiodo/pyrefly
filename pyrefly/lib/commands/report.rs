@@ -14,6 +14,8 @@ use clap::Parser;
 use pyrefly_build::handle::Handle;
 use pyrefly_config::args::ConfigOverrideArgs;
 use pyrefly_config::finder::ConfigFinder;
+use pyrefly_python::ignore::Ignore;
+use pyrefly_python::ignore::Tool;
 use pyrefly_python::module::Module;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::nesting_context::NestingContext;
@@ -23,7 +25,6 @@ use pyrefly_types::types::Type;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::includes::Includes;
 use pyrefly_util::thread_pool::ThreadCount;
-use regex::Regex;
 use ruff_python_ast::Parameters;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
@@ -70,10 +71,11 @@ struct Parameter {
     location: Location,
 }
 
-/// Suppression information
+/// Renamed from `Suppression` to avoid collision with `pyrefly_python::ignore::Suppression`.
 #[derive(Debug, Serialize)]
-struct Suppression {
-    kind: String,
+struct ReportSuppression {
+    /// The suppression tool (e.g. pyrefly, mypy, pyre).
+    kind: Tool,
     codes: Vec<String>,
     location: Location,
 }
@@ -122,7 +124,7 @@ struct FileReport {
     line_count: usize,
     functions: Vec<Function>,
     classes: Vec<ReportClass>,
-    suppressions: Vec<Suppression>,
+    suppressions: Vec<ReportSuppression>,
     /// Percentage of functions that are fully annotated (0.0 to 100.0).
     /// A function is fully annotated if it has return and parameter annotations present.
     annotation_completeness: f64,
@@ -212,40 +214,34 @@ impl ReportArgs {
         }
     }
 
-    /// Helper to parse suppression comments from source code
-    fn parse_suppressions(module: &Module) -> Vec<Suppression> {
-        let regex = Regex::new(r"#\s*pyrefly:\s*ignore\s*\[([^\]]*)\]").unwrap();
+    /// Parse type-ignore suppressions from source using the multi-tool parser from `ignore.rs`.
+    fn parse_suppressions(module: &Module) -> Vec<ReportSuppression> {
         let source = module.lined_buffer().contents();
+        let ignore = Ignore::new(source);
+
         let lines: Vec<&str> = source.lines().collect();
         let mut suppressions = Vec::new();
 
-        for (line_idx, line) in lines.iter().enumerate() {
-            if let Some(caps) = regex.captures(line) {
-                let codes: Vec<String> = caps
-                    .get(1)
-                    .map(|m| {
-                        m.as_str()
-                            .split(',')
-                            .map(|s| s.trim().to_owned())
-                            .filter(|s| !s.is_empty())
-                            .collect()
-                    })
-                    .unwrap_or_default();
+        for (_line_number, supps) in ignore.iter() {
+            for supp in supps {
+                let comment_line_num = supp.comment_line().get() as usize;
+                let column = comment_line_num
+                    .checked_sub(1)
+                    .and_then(|idx| lines.get(idx))
+                    .and_then(|line| line.find('#'))
+                    .map(|c| c + 1);
+                let Some(column) = column else {
+                    continue;
+                };
 
-                // Find the position of the comment in the line
-                if let Some(comment_start) = line.find('#') {
-                    let line_number = line_idx + 1; // 1-indexed
-                    let start_col = comment_start + 1; // 1-indexed column
-
-                    suppressions.push(Suppression {
-                        kind: "ignore".to_owned(),
-                        codes,
-                        location: Location {
-                            line: line_number,
-                            column: start_col,
-                        },
-                    });
-                }
+                suppressions.push(ReportSuppression {
+                    kind: supp.tool(),
+                    codes: supp.error_codes().to_vec(),
+                    location: Location {
+                        line: comment_line_num,
+                        column,
+                    },
+                });
             }
         }
 

@@ -30,7 +30,7 @@
   "classes": [],
   "suppressions": [
     {
-      "kind": "ignore",
+      "kind": "pyrefly",
       "codes": [
         "error-code"
       ],
@@ -40,7 +40,7 @@
       }
     },
     {
-      "kind": "ignore",
+      "kind": "pyrefly",
       "codes": [
         "code1",
         "code2"
