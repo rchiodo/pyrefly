@@ -275,54 +275,13 @@ pub struct Ignore {
     /// The line number here represents the line that the suppression applies to,
     /// not the line of the suppression comment.
     ignores: SmallMap<LineNumber, Vec<Suppression>>,
-    /// All the tools with an ignore-all directive, with the line number that the directive is on.
-    ignore_all: SmallMap<Tool, LineNumber>,
 }
 
 impl Ignore {
     pub fn new(code: &str) -> Self {
         Self {
             ignores: Self::parse_ignores(code),
-            ignore_all: Self::parse_ignore_all(code),
         }
-    }
-
-    /// All the errors that were ignored, and the line number that ignore happened.
-    fn parse_ignore_all(code: &str) -> SmallMap<Tool, LineNumber> {
-        // process top level comments
-        let mut res = SmallMap::new();
-        let mut prev_ignore = None;
-        for (line, x) in code
-            .lines()
-            .map(|x| x.trim())
-            .take_while(|x| x.is_empty() || x.starts_with('#'))
-            .enumerate()
-        {
-            let line = LineNumber::from_zero_indexed(line as u32);
-            if let Some((tool, line)) = prev_ignore {
-                // We consider any `# type: ignore` followed by a line with code to be a
-                // normal suppression, not an ignore-all directive.
-                res.entry(tool).or_insert(line);
-                prev_ignore = None;
-            }
-
-            let mut lex = Lexer(x);
-            if !lex.starts_with("#") {
-                continue;
-            }
-            lex.trim_start();
-            if lex.starts_with("pyre-ignore-all-errors") {
-                res.entry(Tool::Pyre).or_insert(line);
-            } else if let Some(tool) = lex.starts_with_tool() {
-                lex.trim_start();
-                if lex.starts_with("ignore-errors") && lex.blank() {
-                    res.entry(tool).or_insert(line);
-                } else if lex.starts_with("ignore") && lex.blank() {
-                    prev_ignore = Some((tool, line));
-                }
-            }
-        }
-        res
     }
 
     fn parse_ignores(code: &str) -> SmallMap<LineNumber, Vec<Suppression>> {
@@ -408,12 +367,6 @@ impl Ignore {
         kind: &str,
         enabled_ignores: &SmallSet<Tool>,
     ) -> bool {
-        if enabled_ignores
-            .iter()
-            .any(|tool| self.ignore_all.contains_key(tool))
-        {
-            return true;
-        }
         if let Some(suppressions) = self.ignores.get(&start_line)
             && suppressions.iter().any(|supp| {
                 enabled_ignores.contains(&supp.tool)
@@ -490,8 +443,56 @@ impl Ignore {
 
     /// Returns true if there are no suppressions.
     pub fn is_empty(&self) -> bool {
-        self.ignores.is_empty() && self.ignore_all.is_empty()
+        self.ignores.is_empty()
     }
+}
+
+/// Parse top-level `ignore-errors` / `ignore-all-errors` / `type: ignore` directives.
+///
+/// Scans the beginning of the file for comment-only lines (including blank lines).
+/// Returns the map of tools with ignore-all directives and the line number where
+/// each directive appears.
+///
+/// The `_multiline_string_ranges` parameter is accepted for future use (e.g.
+/// allowing directives after module docstrings) but is not yet consulted.
+pub fn parse_ignore_all(
+    code: &str,
+    _multiline_string_ranges: &[(LineNumber, LineNumber)],
+) -> SmallMap<Tool, LineNumber> {
+    // Process top-level comments.
+    let mut res = SmallMap::new();
+    let mut prev_ignore = None;
+    for (line, x) in code
+        .lines()
+        .map(|x| x.trim())
+        .take_while(|x| x.is_empty() || x.starts_with('#'))
+        .enumerate()
+    {
+        let line = LineNumber::from_zero_indexed(line as u32);
+        if let Some((tool, line)) = prev_ignore {
+            // We consider any `# type: ignore` followed by a line with code to be a
+            // normal suppression, not an ignore-all directive.
+            res.entry(tool).or_insert(line);
+            prev_ignore = None;
+        }
+
+        let mut lex = Lexer(x);
+        if !lex.starts_with("#") {
+            continue;
+        }
+        lex.trim_start();
+        if lex.starts_with("pyre-ignore-all-errors") {
+            res.entry(Tool::Pyre).or_insert(line);
+        } else if let Some(tool) = lex.starts_with_tool() {
+            lex.trim_start();
+            if lex.starts_with("ignore-errors") && lex.blank() {
+                res.entry(tool).or_insert(line);
+            } else if lex.starts_with("ignore") && lex.blank() {
+                prev_ignore = Some((tool, line));
+            }
+        }
+    }
+    res
 }
 
 #[cfg(test)]
@@ -666,7 +667,7 @@ x = """
     fn test_parse_ignore_all() {
         fn f(x: &str, ignores: &[(Tool, u32)]) {
             assert_eq!(
-                Ignore::parse_ignore_all(x),
+                parse_ignore_all(x, &[]),
                 ignores
                     .iter()
                     .map(|x| (x.0, LineNumber::new(x.1).unwrap()))

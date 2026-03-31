@@ -33,6 +33,7 @@ use enum_iterator::Sequence;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use pyrefly_build::handle::Handle;
+use pyrefly_python::ignore::parse_ignore_all;
 use pyrefly_python::module::Module;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
@@ -42,7 +43,6 @@ use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::fs_anyhow;
-use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::lock::RwLock;
 use pyrefly_util::locked_map::LockedMap;
@@ -114,6 +114,7 @@ use crate::module::typeshed::BundledTypeshedStdlib;
 use crate::solver::solver::VarRecurser;
 use crate::state::epoch::Epoch;
 use crate::state::errors::Errors;
+use crate::state::errors::ModuleRanges;
 use crate::state::errors::sorted_backslash_continuation_ranges;
 use crate::state::errors::sorted_multi_line_string_ranges;
 use crate::state::load::FileContents;
@@ -669,14 +670,23 @@ impl<'a> Transaction<'a> {
                 .filter_map(|handle| {
                     self.with_module_config_inner(handle, |config, x| {
                         let load = x.get_load()?;
-                        let mut ranges = x
+                        let mut multi_line = x
                             .get_ast()
                             .map(|ast| sorted_multi_line_string_ranges(&ast, &load.module_info))
                             .unwrap_or_default();
                         let lines: Vec<&str> = load.module_info.contents().lines().collect();
-                        ranges.extend(sorted_backslash_continuation_ranges(&lines, &ranges));
-                        ranges.sort();
-                        Some((load, config.dupe(), ranges))
+                        multi_line
+                            .extend(sorted_backslash_continuation_ranges(&lines, &multi_line));
+                        multi_line.sort();
+                        let ignore_all = parse_ignore_all(load.module_info.contents(), &multi_line);
+                        Some((
+                            load,
+                            config.dupe(),
+                            ModuleRanges {
+                                multi_line,
+                                ignore_all,
+                            },
+                        ))
                     })
                 })
                 .collect(),
@@ -684,20 +694,21 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn get_all_errors(&self) -> Errors {
-        /// Extract multi-line ranges (f-strings and backslash continuations)
-        /// from the AST and source text.
-        fn multi_line_ranges_from(
-            state: &dyn ModuleStateReader,
-            load: &Load,
-        ) -> Vec<(LineNumber, LineNumber)> {
-            let mut ranges = state
+        /// Extract multi-line ranges and ignore-all directives from the AST
+        /// and source text.
+        fn module_ranges_from(state: &dyn ModuleStateReader, load: &Load) -> ModuleRanges {
+            let mut multi_line = state
                 .get_ast()
                 .map(|ast| sorted_multi_line_string_ranges(&ast, &load.module_info))
                 .unwrap_or_default();
             let lines: Vec<&str> = load.module_info.contents().lines().collect();
-            ranges.extend(sorted_backslash_continuation_ranges(&lines, &ranges));
-            ranges.sort();
-            ranges
+            multi_line.extend(sorted_backslash_continuation_ranges(&lines, &multi_line));
+            multi_line.sort();
+            let ignore_all = parse_ignore_all(load.module_info.contents(), &multi_line);
+            ModuleRanges {
+                multi_line,
+                ignore_all,
+            }
         }
 
         if self.data.updated_modules.is_empty() {
@@ -708,7 +719,7 @@ impl<'a> Transaction<'a> {
                     .values()
                     .filter_map(|x| {
                         let load = x.state.get_load()?;
-                        let ranges = multi_line_ranges_from(&x.state, &load);
+                        let ranges = module_ranges_from(&x.state, &load);
                         Some((load, x.config.dupe(), ranges))
                     })
                     .collect(),
@@ -720,7 +731,7 @@ impl<'a> Transaction<'a> {
             .iter_unordered()
             .filter_map(|x| {
                 let load = x.1.state.get_load()?;
-                let ranges = multi_line_ranges_from(&x.1.state, &load);
+                let ranges = module_ranges_from(&x.1.state, &load);
                 Some((load, x.1.config.read().dupe(), ranges))
             })
             .collect::<Vec<_>>();
@@ -728,7 +739,7 @@ impl<'a> Transaction<'a> {
             if self.data.updated_modules.get(k).is_none()
                 && let Some(load) = v.state.get_load()
             {
-                let ranges = multi_line_ranges_from(&v.state, &load);
+                let ranges = module_ranges_from(&v.state, &load);
                 res.push((load, v.config.dupe(), ranges));
             }
         }

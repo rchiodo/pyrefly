@@ -139,27 +139,38 @@ pub fn find_containing_range(
     }
 }
 
+/// Per-module multi-line ranges and ignore-all directives, computed after parsing.
+#[derive(Debug)]
+pub struct ModuleRanges {
+    /// Multi-line string and backslash-continuation ranges.
+    pub multi_line: Vec<(LineNumber, LineNumber)>,
+    /// Top-level ignore-all directives (e.g. `# pyrefly: ignore-errors`).
+    pub ignore_all: SmallMap<Tool, LineNumber>,
+}
+
 /// The errors from a collection of modules.
 #[derive(Debug)]
 pub struct Errors {
     // Sorted by module name and path (so deterministic display order)
-    loads: Vec<(Arc<Load>, ArcId<ConfigFile>, Vec<(LineNumber, LineNumber)>)>,
+    loads: Vec<(Arc<Load>, ArcId<ConfigFile>, ModuleRanges)>,
 }
 
 impl Errors {
-    pub fn new(
-        mut loads: Vec<(Arc<Load>, ArcId<ConfigFile>, Vec<(LineNumber, LineNumber)>)>,
-    ) -> Self {
+    pub fn new(mut loads: Vec<(Arc<Load>, ArcId<ConfigFile>, ModuleRanges)>) -> Self {
         loads.sort_by_key(|x| (x.0.module_info.name(), x.0.module_info.path().dupe()));
         Self { loads }
     }
 
     pub fn collect_errors(&self) -> CollectedErrors {
         let mut errors = CollectedErrors::default();
-        for (load, config, fstring_ranges) in &self.loads {
+        for (load, config, ranges) in &self.loads {
             let error_config = config.get_error_config(load.module_info.path().as_path());
-            load.errors
-                .collect_into(&error_config, fstring_ranges, &mut errors);
+            load.errors.collect_into(
+                &error_config,
+                &ranges.multi_line,
+                &ranges.ignore_all,
+                &mut errors,
+            );
         }
         errors
     }
@@ -216,7 +227,7 @@ impl Errors {
         let fstring_ranges_by_module: SmallMap<&ModulePath, &[(LineNumber, LineNumber)]> = self
             .loads
             .iter()
-            .map(|(load, _, ranges)| (load.module_info.path(), ranges.as_slice()))
+            .map(|(load, _, ranges)| (load.module_info.path(), ranges.multi_line.as_slice()))
             .collect();
 
         let enabled_ignores_by_module: SmallMap<&ModulePath, SmallSet<Tool>> = self
@@ -411,11 +422,15 @@ impl Errors {
     }
 
     pub fn check_against_expectations(&self) -> anyhow::Result<()> {
-        for (load, config, fstring_ranges) in &self.loads {
+        for (load, config, ranges) in &self.loads {
             let error_config = config.get_error_config(load.module_info.path().as_path());
             let mut result = CollectedErrors::default();
-            load.errors
-                .collect_into(&error_config, fstring_ranges, &mut result);
+            load.errors.collect_into(
+                &error_config,
+                &ranges.multi_line,
+                &ranges.ignore_all,
+                &mut result,
+            );
             let mut output_errors = result.ordinary;
             output_errors.extend(result.directives);
             output_errors.sort_by_key(|e| (e.range().start(), e.range().end()));
