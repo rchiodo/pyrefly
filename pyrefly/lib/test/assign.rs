@@ -976,3 +976,17 @@ items = [1, 2, 3, 4]
 bad = items[::0]
 "#,
 );
+
+testcase!(
+    bug = "Annotated variable should preserve declared type after assignment of Any (github #2227)",
+    test_annotated_var_preserves_type_after_any_assign,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+x: int
+x = f()
+assert_type(x, int)  # E: assert_type(Any, int) failed
+"#,
+);
