@@ -1686,6 +1686,12 @@ impl Type {
 
     pub fn promote_implicit_literals(mut self, stdlib: &Stdlib) -> Type {
         fn g(ty: &mut Type, f: &mut dyn FnMut(&mut Type)) {
+            // Don't recurse into NNModule fields — they carry captured constructor
+            // args (e.g., padding=Literal[1]) that DSL forward functions need as
+            // concrete literals to compute output shapes.
+            if matches!(ty, Type::NNModule(_)) {
+                return;
+            }
             ty.recurse_mut(&mut |ty| g(ty, f));
             f(ty);
         }
