@@ -292,3 +292,25 @@ x: int = \
     2
 "#,
 );
+
+testcase!(
+    test_pyrefly_top_level_ignore_after_docstring,
+    r#"
+"""Module docstring."""
+# pyrefly: ignore-errors
+3 + "3"
+3 + "3"
+"#,
+);
+
+testcase!(
+    test_pyrefly_top_level_ignore_after_multiline_docstring,
+    r#"
+"""
+Module docstring.
+"""
+# pyrefly: ignore-errors
+3 + "3"
+3 + "3"
+"#,
+);

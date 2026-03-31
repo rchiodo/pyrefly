@@ -447,36 +447,68 @@ impl Ignore {
     }
 }
 
+/// Returns true if `line` falls inside one of the sorted multiline string ranges.
+fn is_in_multiline_string(
+    multiline_string_ranges: &[(LineNumber, LineNumber)],
+    line: LineNumber,
+) -> bool {
+    let idx = multiline_string_ranges.partition_point(|(start, _)| *start <= line);
+    idx > 0 && {
+        let (start, end) = multiline_string_ranges[idx - 1];
+        line >= start && line <= end
+    }
+}
+
 /// Parse top-level `ignore-errors` / `ignore-all-errors` / `type: ignore` directives.
 ///
-/// Scans the beginning of the file for comment-only lines (including blank lines).
-/// Returns the map of tools with ignore-all directives and the line number where
-/// each directive appears.
+/// Scans the beginning of the file for comment-only lines (including blank lines
+/// and lines inside multiline strings like docstrings). Returns the map of tools
+/// with ignore-all directives and the line number where each directive appears.
 ///
-/// The `_multiline_string_ranges` parameter is accepted for future use (e.g.
-/// allowing directives after module docstrings) but is not yet consulted.
+/// After a docstring, only `ignore-errors` directives are recognized — bare
+/// `# type: ignore` is not, since it could plausibly be meant as a per-line
+/// suppression for code that follows.
 pub fn parse_ignore_all(
     code: &str,
-    _multiline_string_ranges: &[(LineNumber, LineNumber)],
+    multiline_string_ranges: &[(LineNumber, LineNumber)],
 ) -> SmallMap<Tool, LineNumber> {
-    // Process top-level comments.
     let mut res = SmallMap::new();
     let mut prev_ignore = None;
-    for (line, x) in code
-        .lines()
-        .map(|x| x.trim())
-        .take_while(|x| x.is_empty() || x.starts_with('#'))
-        .enumerate()
-    {
-        let line = LineNumber::from_zero_indexed(line as u32);
-        if let Some((tool, line)) = prev_ignore {
-            // We consider any `# type: ignore` followed by a line with code to be a
-            // normal suppression, not an ignore-all directive.
-            res.entry(tool).or_insert(line);
+    let mut seen_docstring = false;
+
+    for (idx, raw_line) in code.lines().enumerate() {
+        let line = LineNumber::from_zero_indexed(idx as u32);
+        let trimmed = raw_line.trim();
+
+        // Lines inside a multiline string (e.g. a module docstring) are not
+        // code — skip them but record that we've passed through a docstring.
+        if is_in_multiline_string(multiline_string_ranges, line) {
+            seen_docstring = true;
+            continue;
+        }
+
+        // Lines that open/close a triple-quoted string are also part of the
+        // preamble — skip them.
+        if trimmed.starts_with("\"\"\"") || trimmed.starts_with("'''") {
+            seen_docstring = true;
+            continue;
+        }
+
+        // Stop at the first non-empty, non-comment line (i.e. actual code).
+        // A pending `# type: ignore` followed directly by code is a per-line
+        // suppression, not an ignore-all directive, so we discard it.
+        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+            break;
+        }
+
+        if let Some((tool, prev_line)) = prev_ignore {
+            // The previous `# type: ignore` was followed by another comment or
+            // blank line, so it is a whole-file suppression.
+            res.entry(tool).or_insert(prev_line);
             prev_ignore = None;
         }
 
-        let mut lex = Lexer(x);
+        let mut lex = Lexer(trimmed);
         if !lex.starts_with("#") {
             continue;
         }
@@ -487,7 +519,9 @@ pub fn parse_ignore_all(
             lex.trim_start();
             if lex.starts_with("ignore-errors") && lex.blank() {
                 res.entry(tool).or_insert(line);
-            } else if lex.starts_with("ignore") && lex.blank() {
+            } else if !seen_docstring && lex.starts_with("ignore") && lex.blank() {
+                // After a docstring, bare `# type: ignore` is not recognized
+                // as an ignore-all directive.
                 prev_ignore = Some((tool, line));
             }
         }
@@ -702,5 +736,49 @@ x = """
         f("# pyrefly: ignore-errors because I want to\nx = 5", &[]);
         f("# pyrefly: ignore-errors # because I want to\nx = 5", &[]);
         f("# pyrefly: ignore-errors \nx = 5", &[(Tool::Pyrefly, 1)]);
+    }
+
+    #[test]
+    fn test_parse_ignore_all_with_docstring() {
+        fn f(x: &str, ranges: &[(LineNumber, LineNumber)], ignores: &[(Tool, u32)]) {
+            assert_eq!(
+                parse_ignore_all(x, ranges),
+                ignores
+                    .iter()
+                    .map(|x| (x.0, LineNumber::new(x.1).unwrap()))
+                    .collect(),
+                "{x:?}"
+            );
+        }
+
+        // ignore-errors after a docstring should work
+        f(
+            "\"\"\"\nmodule docstring\n\"\"\"\n# pyrefly: ignore-errors\nx = 5",
+            &[(
+                LineNumber::from_zero_indexed(0),
+                LineNumber::from_zero_indexed(2),
+            )],
+            &[(Tool::Pyrefly, 4)],
+        );
+
+        // bare `# type: ignore` after docstring should NOT be recognized
+        f(
+            "\"\"\"\nmodule docstring\n\"\"\"\n# type: ignore\n\nx = 5",
+            &[(
+                LineNumber::from_zero_indexed(0),
+                LineNumber::from_zero_indexed(2),
+            )],
+            &[],
+        );
+
+        // ignore-errors before a docstring should still work
+        f(
+            "# pyrefly: ignore-errors\n\"\"\"\nmodule docstring\n\"\"\"\nx = 5",
+            &[(
+                LineNumber::from_zero_indexed(1),
+                LineNumber::from_zero_indexed(3),
+            )],
+            &[(Tool::Pyrefly, 1)],
+        );
     }
 }
