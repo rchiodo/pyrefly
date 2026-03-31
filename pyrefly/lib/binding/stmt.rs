@@ -663,6 +663,38 @@ impl<'a> BindingsBuilder<'a> {
             }
             Stmt::AnnAssign(mut x) => match *x.target {
                 Expr::Name(name) => {
+                    // Handle annotated legacy TypeVar creation T: TypeVar = TypeVar("T")
+                    if let Some(ref mut value) = x.value
+                        && let Expr::Call(call) = value.as_mut()
+                        && let Some(special) = self.as_special_export(&call.func)
+                    {
+                        match special {
+                            SpecialExport::TypeVar
+                            | SpecialExport::ParamSpec
+                            | SpecialExport::TypeVarTuple => {
+                                let ident = Ast::expr_name_identifier(name.clone());
+                                self.bind_annotation(
+                                    &ident,
+                                    &mut x.annotation,
+                                    AnnAssignHasValue::Yes,
+                                );
+                                match special {
+                                    SpecialExport::TypeVar => {
+                                        self.assign_type_var(&name, call);
+                                    }
+                                    SpecialExport::ParamSpec => {
+                                        self.assign_param_spec(&name, call);
+                                    }
+                                    SpecialExport::TypeVarTuple => {
+                                        self.assign_type_var_tuple(&name, call);
+                                    }
+                                    _ => unreachable!("filtered by outer match"),
+                                }
+                                return;
+                            }
+                            _ => {}
+                        }
+                    }
                     let name = Ast::expr_name_identifier(name);
                     // We have to handle the value carefully because the annotation, class field, and
                     // binding do not all treat `...` exactly the same:
