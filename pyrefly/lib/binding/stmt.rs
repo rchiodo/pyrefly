@@ -154,7 +154,7 @@ impl<'a> BindingsBuilder<'a> {
         let style = if as_error {
             AnyStyle::Error
         } else {
-            AnyStyle::Explicit
+            AnyStyle::Implicit
         };
         for x in &x.names {
             if &x.name != "*" {
@@ -1439,7 +1439,7 @@ impl<'a> BindingsBuilder<'a> {
                         }
                         Binding::Any(AnyStyle::Error)
                     } else {
-                        Binding::Any(AnyStyle::Explicit)
+                        Binding::Any(AnyStyle::Implicit)
                     }
                 };
                 // __future__ imports have side effects even if not explicitly used,

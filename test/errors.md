@@ -107,7 +107,7 @@ $ mkdir $TMPDIR/compiled && touch $TMPDIR/compiled/a.pyc && \
 > $PYREFLY check $TMPDIR/compiled_import.py
 *ERROR `reveal_type` must be imported from `typing` for runtime usage* (glob)
 * (glob+)
-*INFO revealed type: tuple[Any, Module[compiled.b], Module[c], Any]* (glob)
+*INFO revealed type: tuple[Unknown, Module[compiled.b], Module[c], Unknown]* (glob)
 * (glob+)
 [1]
 ```
