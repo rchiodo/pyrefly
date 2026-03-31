@@ -611,3 +611,20 @@ def g():
   yield from f()
 "#,
 );
+
+testcase!(
+    bug = "Union of Iterator ignored when reporting invalid-yield",
+    test_yield_from_with_union_return_annotation,
+    r#"
+from typing import Any, Iterator
+
+def foo() -> list[tuple[Any, ...]]:
+    ...
+
+def bar1() -> Iterator[tuple[Any, ...]] | Iterator[dict[str, Any]]:
+    yield from foo()  # E: Cannot yield from `Generator[tuple[Any, ...]]`, which is not assignable to declared return type
+
+def bar2() -> Iterator[tuple[Any, ...]]:
+    yield from foo()
+"#,
+);
