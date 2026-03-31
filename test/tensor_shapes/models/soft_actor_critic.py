@@ -61,19 +61,19 @@ class TanhTransform(pyd.transforms.Transform):
         self.clamp = clamp
 
     @staticmethod
-    def atanh(x: Tensor) -> Tensor:
+    def atanh[*S](x: Tensor[*S]) -> Tensor[*S]:
         return 0.5 * (x.log1p() - (-x).log1p())
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, TanhTransform)
 
-    def _call(self, x: Tensor) -> Tensor:
+    def _call[*S](self, x: Tensor[*S]) -> Tensor[*S]:
         return x.tanh()
 
-    def _inverse(self, y: Tensor) -> Tensor:
+    def _inverse[*S](self, y: Tensor[*S]) -> Tensor[*S]:
         return self.atanh(y if self.clamp is None else y.clamp(*self.clamp))
 
-    def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
+    def log_abs_det_jacobian[*S](self, x: Tensor[*S], y: Tensor[*S]) -> Tensor[*S]:
         return 2.0 * (math.log(2.0) - x - F.softplus(-2.0 * x))
 
 
@@ -116,14 +116,15 @@ class BetaDist(pyd.transformed_distribution.TransformedDistribution):
         def __eq__(self, other: object) -> bool:
             return isinstance(other, BetaDist._BetaDistTransform)
 
-        def _inverse(self, y: Tensor) -> Tensor:
+        def _inverse[*S](self, y: Tensor[*S]) -> Tensor[*S]:
             return (y.clamp(-0.99, 0.99) + 1.0) / 2.0
 
-        def _call(self, x: Tensor) -> Tensor:
+        def _call[*S](self, x: Tensor[*S]) -> Tensor[*S]:
             return (2.0 * x) - 1.0
 
-        def log_abs_det_jacobian(self, x: Tensor, y: Tensor) -> Tensor:
-            return torch.tensor(math.log(2.0)).unsqueeze(0)
+        def log_abs_det_jacobian[*S](self, x: Tensor[*S], y: Tensor[*S]) -> Tensor[*S]:
+            # Constant Jacobian — scalar broadcasts to match input shape
+            return torch.tensor(math.log(2.0)).unsqueeze(0)  # type: ignore[bad-return]
 
     def __init__(self, alpha: Tensor, beta: Tensor) -> None:
         self.base_dist = pyd.beta.Beta(alpha, beta)

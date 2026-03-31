@@ -133,13 +133,12 @@ class BLSTM[Ch](nn.Module):
     Output: Tensor[B, Ch, T]
 
     Internally: permute → BiLSTM → Linear(2*Ch, Ch) → permute back.
-    Uses num_directions=2 (temporary workaround for bidirectional=True
-    not flowing through inject_module_attrs as literal bool).
+    Uses bidirectional=True: output is 2*dim, projected back to dim via Linear.
     """
 
     def __init__(self, dim: Dim[Ch]) -> None:
         super().__init__()
-        self.lstm = nn.LSTM(dim, dim, num_directions=2, batch_first=True)
+        self.lstm = nn.LSTM(dim, dim, bidirectional=True, batch_first=True)
         self.linear = nn.Linear(2 * dim, dim)
 
     def forward[B, T](self, x: Tensor[B, Ch, T]) -> Tensor[B, Ch, T]:
