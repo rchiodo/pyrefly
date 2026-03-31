@@ -862,9 +862,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     )
                 }
             };
+            // The args side (unpacked_args_ty) is always a tuple built from call
+            // arguments, e.g., tuple[*Cs] or tuple[int, str]. The param side
+            // (unpacked_param_ty) is the raw Ts from stripping * off the type
+            // annotation *Ts. Wrap it in a tuple so both sides have the same
+            // structure: tuple[*Cs] ⊆ tuple[*Ts] or tuple[int, str] ⊆ tuple[*Ts].
+            let unpacked_param_tuple =
+                self.heap
+                    .mk_unpacked_tuple(Vec::new(), unpacked_param_ty.clone(), Vec::new());
             self.check_type(
                 &unpacked_args_ty,
-                unpacked_param_ty,
+                &unpacked_param_tuple,
                 arguments_range,
                 arg_errors,
                 &|| {

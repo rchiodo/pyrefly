@@ -674,21 +674,33 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 l_after.reverse();
                 u_after.reverse();
 
-                self.is_subset_eq(
-                    &self
-                        .solver
-                        .heap
-                        .mk_unpacked_tuple(l_before, l_middle.clone(), l_after),
-                    u_middle,
-                )?;
-                self.is_subset_eq(
-                    l_middle,
-                    &self
-                        .solver
-                        .heap
-                        .mk_unpacked_tuple(u_before, u_middle.clone(), u_after),
-                )?;
-                Ok(())
+                let has_l_extras = !l_before.is_empty() || !l_after.is_empty();
+                let has_u_extras = !u_before.is_empty() || !u_after.is_empty();
+
+                match (has_l_extras, has_u_extras) {
+                    // No extras: just compare middles directly.
+                    (false, false) => self.is_subset_eq(l_middle, u_middle),
+                    // Got has extras: fold into got side, bind want middle.
+                    // tuple[A, *Bs, C] <: tuple[*Qs] → tuple[A, *Bs, C] <: Qs
+                    (true, false) => self.is_subset_eq(
+                        &self
+                            .solver
+                            .heap
+                            .mk_unpacked_tuple(l_before, l_middle.clone(), l_after),
+                        u_middle,
+                    ),
+                    // Want has extras: fold into want side, bind got middle.
+                    // tuple[*Bs] <: tuple[P, *Qs, R] → Bs <: tuple[P, *Qs, R]
+                    (false, true) => self.is_subset_eq(
+                        l_middle,
+                        &self
+                            .solver
+                            .heap
+                            .mk_unpacked_tuple(u_before, u_middle.clone(), u_after),
+                    ),
+                    // Both have extras: cross-structural, can't reason about it.
+                    (true, true) => Err(SubsetError::Other),
+                }
             }
             // Resolve Vars inside Unbounded tuples and re-dispatch.
             (Tuple::Unbounded(box Type::Var(v)), Tuple::Concrete(_)) => {
