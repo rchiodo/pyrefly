@@ -1676,11 +1676,10 @@ def foo(func: None | Callable[..., R] = None) -> None | Callable[..., R]:
     "#,
 );
 
-// The spec only says to eliminate overloads without variadic parameters if an indeterminate number
-// of parameters is supplied, but mypy, pyright, and ty appear to do the opposite as well:
-// if a fixed number of parameters is supplied, overloads with variadic parameters are eliminated.
+// Even though argument `x` has an unknown type, `f1(x)` and `f2(x)` are not considered ambiguous
+// because parameter `x` has the same type in all candidate overloads.
 testcase!(
-    test_eliminate_variadic,
+    test_eliminate_non_ambiguous,
     r#"
 from typing import assert_type, overload
 
@@ -1702,12 +1701,11 @@ def g(x):
     "#,
 );
 
-// In non-spec-compliant mode (see test_eliminate_variadic), step 4 eliminates overloads with
-// variadic parameters when a fixed number of args is supplied, so only the non-variadic overload
-// remains and the call returns `str`. In spec-compliant mode, step 4 does not do this, so both
-// overloads remain and the call is ambiguous.
+// In spec-compliant mode, because argument `x` has unknown type in `f1(x)` and `f2(x)`, the calls
+// are considered ambiguous and both overloads match, so we fall back to `Any` for the return type.
+// See test_eliminate_non_ambiguous for the non-spec-compliant behavior.
 testcase!(
-    test_eliminate_variadic_spec_compliant,
+    test_eliminate_non_ambiguous_spec_compliant,
     TestEnv::new().enable_spec_compliant_overloads(),
     r#"
 from typing import Any, assert_type, overload
@@ -1727,6 +1725,23 @@ def f2(x, **kwargs) -> str | int: ...
 def g(x):
     assert_type(f1(x), Any)
     assert_type(f2(x), Any)
+    "#,
+);
+
+testcase!(
+    test_do_not_eliminate_variadic,
+    r#"
+from typing import Any, assert_type, overload
+
+@overload
+def f(x: str) -> str: ...
+@overload
+def f(x: str | bytes, *args: int) -> int: ...
+def f(x: str | bytes, *args: int) -> str | int:
+    return 0
+
+def g(x):
+    assert_type(f(x), Any)
     "#,
 );
 
