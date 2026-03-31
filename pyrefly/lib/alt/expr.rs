@@ -2430,6 +2430,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if matches!(&idx_ty, Type::None) {
                 return Some(IndexOp::NewAxis);
             }
+            if let Type::Tensor(ref idx_tensor) = idx_ty {
+                if let TensorShape::Concrete(dims) = &idx_tensor.shape {
+                    return Some(IndexOp::TensorIndex(dims.clone()));
+                }
+                return None; // shapeless index tensor → bail
+            }
             if let Type::Tuple(ref tuple) = idx_ty {
                 return match tuple {
                     Tuple::Concrete(elems) => Some(IndexOp::Fancy(Some(elems.len() as i64))),
