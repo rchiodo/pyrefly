@@ -273,3 +273,22 @@ result: {1 + "a"}  # E: is not supported
 """
 "#,
 );
+
+testcase!(
+    test_pyrefly_suppression_backslash_continuation_above,
+    r#"
+# pyrefly: ignore
+x: str = 1 + \
+    "a"
+"#,
+);
+
+testcase!(
+    test_pyrefly_suppression_backslash_continuation_middle_line,
+    r#"
+# pyrefly: ignore
+x: int = \
+    "a" + \
+    2
+"#,
+);
