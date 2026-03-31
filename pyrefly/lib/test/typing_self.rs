@@ -261,6 +261,39 @@ class C:
 );
 
 testcase!(
+    test_self_with_explicit_typevar_self,
+    r#"
+from typing import Self, TypeVar
+
+TFoo = TypeVar("TFoo", bound="Foo")
+
+class Foo:
+    def ok_method(self) -> Self:
+        raise NotImplementedError
+
+    def bad_method(self: TFoo) -> Self:  # E: `Self` cannot be used when `self` has an explicit TypeVar annotation
+        raise NotImplementedError
+
+    def also_ok(self: TFoo) -> TFoo:
+        raise NotImplementedError
+
+    def bad_param(self: TFoo, other: Self) -> TFoo:  # E: `Self` cannot be used when `self` has an explicit TypeVar annotation
+        raise NotImplementedError
+
+TCls = TypeVar("TCls", bound=type["Foo"])
+
+class Bar:
+    @classmethod
+    def bad_classmethod(cls: TCls) -> Self:  # E: `Self` cannot be used when `cls` has an explicit TypeVar annotation
+        raise NotImplementedError
+
+    @classmethod
+    def ok_classmethod(cls) -> Self:
+        raise NotImplementedError
+    "#,
+);
+
+testcase!(
     test_self_inside_metaclass,
     r#"
 from typing import Self

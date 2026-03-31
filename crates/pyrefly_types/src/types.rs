@@ -1914,6 +1914,16 @@ impl Type {
             display_name: None,
         }))
     }
+
+    /// Returns `true` if this type is an explicit type variable — i.e., a `Quantified` or
+    /// legacy `TypeVar` that a user wrote in an annotation.
+    pub fn is_explicit_type_variable(&self) -> bool {
+        match self {
+            Type::Quantified(q) => q.is_type_var(),
+            Type::TypeVar(_) => true,
+            _ => false,
+        }
+    }
 }
 
 /// Various type-variable-like things

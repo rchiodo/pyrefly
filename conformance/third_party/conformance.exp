@@ -6474,6 +6474,17 @@
     },
     {
       "code": -2,
+      "column": 9,
+      "concise_description": "`Self` cannot be used when `self` has an explicit TypeVar annotation",
+      "description": "`Self` cannot be used when `self` has an explicit TypeVar annotation",
+      "line": 82,
+      "name": "invalid-annotation",
+      "severity": "error",
+      "stop_column": 37,
+      "stop_line": 82
+    },
+    {
+      "code": -2,
       "column": 15,
       "concise_description": "`Self` must appear within a class",
       "description": "`Self` must appear within a class",
