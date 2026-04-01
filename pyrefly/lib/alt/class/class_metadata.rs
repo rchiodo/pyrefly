@@ -378,6 +378,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             dataclass_from_dataclass_transform,
             pydantic_config.as_ref(),
             is_attrs_class,
+            protocol_metadata.is_some(),
+            errors,
         );
         if let Some(dm) = dataclass_metadata.as_ref()
             && pydantic_config.is_none()
@@ -877,6 +879,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         dataclass_from_dataclass_transform: Option<(DataclassKeywords, Vec<CalleeKind>)>,
         pydantic_config: Option<&PydanticConfig>,
         is_attrs_class: bool,
+        is_protocol: bool,
+        errors: &ErrorCollector,
     ) -> Option<DataclassMetadata> {
         // If we inherit from a dataclass, inherit its metadata. Note that if this class is
         // itself decorated with @dataclass, we'll compute new metadata and overwrite this.
@@ -899,10 +903,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if pydantic_config.is_some() {
             alias_keyword = VALIDATION_ALIAS;
         }
+        let mut has_dataclass_decorator = false;
         for (decorator, _) in decorators {
             match decorator.ty.callee_kind() {
                 // `@dataclass`
                 Some(CalleeKind::Function(FunctionKind::Dataclass)) => {
+                    has_dataclass_decorator = true;
                     let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
@@ -920,6 +926,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ if let Type::KwCall(call) = &decorator.ty
                     && call.has_function_kind(FunctionKind::Dataclass) =>
                 {
+                    has_dataclass_decorator = true;
                     let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
@@ -939,6 +946,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 _ => {}
             }
+        }
+        // @dataclass cannot be applied to Protocol classes. Emit the error and
+        // return None so the class is not treated as a dataclass.
+        if is_protocol && has_dataclass_decorator {
+            self.error(
+                errors,
+                cls.range(),
+                ErrorInfo::Kind(ErrorKind::InvalidDecorator),
+                format!(
+                    "`@dataclass` cannot be applied to Protocol `{}`",
+                    cls.name()
+                ),
+            );
+            return None;
         }
         if let Some((kws, field_specifiers)) = dataclass_from_dataclass_transform {
             dataclass_metadata = Some(DataclassMetadata {
