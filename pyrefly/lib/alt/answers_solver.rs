@@ -287,7 +287,7 @@ impl CalcStack {
                     merged.segment_size = calc_stack_vec.len() - merged.anchor_pos;
 
                     // Add free-floating CalcStack nodes (between merged SCCs)
-                    // to node_state and iterative.node_states, mirroring merge_sccs.
+                    // to node_state, mirroring merge_sccs.
                     merged.absorb_calc_stack_members(&calc_stack_vec, merged.anchor_pos);
 
                     scc_stack.push(merged);
@@ -532,7 +532,7 @@ impl CalcStack {
                     ProposalResult::CycleDetected => BindingAction::Calculate,
                     ProposalResult::Calculated(v) => {
                         // Participant already computed: no data to store.
-                        self.on_calculation_finished(&current, None);
+                        self.on_calculation_finished(&current, None, None, None);
                         BindingAction::Calculated(v)
                     }
                 }
@@ -815,11 +815,13 @@ impl CalcStack {
         &self,
         current: &CalcId,
         answer: Option<Arc<dyn Any + Send + Sync>>,
+        errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         let stack_len = self.stack.borrow().len();
         let mut scc_stack = self.scc_stack.borrow_mut();
         let canonical = if let Some(top_scc) = scc_stack.last_mut() {
-            let canonical = top_scc.on_calculation_finished(current, answer);
+            let canonical = top_scc.on_calculation_finished(current, answer, errors, traces);
             // Debug-only check: verify the node isn't in any other SCC.
             debug_assert!(
                 scc_stack
@@ -967,51 +969,45 @@ impl CalcStack {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
         let iter_state = top_scc.iterative.as_ref()?;
-        let node_state = iter_state.node_states.get(target)?;
+        let node_state = top_scc.node_state.get(target)?;
         let has_previous_answer = iter_state.previous_answers.contains_key(target);
         Some(node_state.kind(has_previous_answer))
     }
 
-    /// Mark a target node as `InProgress` in the top SCC's iteration state.
+    /// Mark a target node as `InProgress` in the top SCC's `node_state`.
     ///
     /// Panics if the top SCC is not iterating, the target is not a member,
     /// or the target is not `Fresh`.
     fn set_iteration_node_in_progress(&self, target: &CalcId) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_mut()
-            .expect("top SCC is not iterating");
-        let node_state = iter_state
-            .node_states
+        assert!(top_scc.iterative.is_some(), "top SCC is not iterating");
+        let node_state = top_scc
+            .node_state
             .get_mut(target)
             .expect("target is not a member of the iterating SCC");
         assert!(
-            matches!(node_state, IterationNodeState::Fresh),
+            matches!(node_state, NodeState::Fresh),
             "set_iteration_node_in_progress called on non-Fresh node: {target:?}"
         );
-        *node_state = IterationNodeState::InProgress;
+        *node_state = NodeState::InProgress;
     }
 
     /// Set the placeholder variable on an existing `InProgress` iteration
-    /// node state for the target.
+    /// node state for the target, writing to `node_state`.
     ///
     /// Panics if the target is not found or is not `InProgress`.
     fn set_iteration_placeholder(&self, target: &CalcId, var: Var) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_mut()
-            .expect("top SCC is not iterating");
-        let node_state = iter_state
-            .node_states
+        assert!(top_scc.iterative.is_some(), "top SCC is not iterating");
+        let node_state = top_scc
+            .node_state
             .get_mut(target)
             .expect("target is not a member of the iterating SCC");
         match node_state {
-            IterationNodeState::InProgress => {
-                *node_state = IterationNodeState::HasPlaceholder(var);
+            NodeState::InProgress => {
+                *node_state = NodeState::HasPlaceholder(var);
             }
             _ => panic!(
                 "set_iteration_placeholder called on a node that is not InProgress: {:?}",
@@ -1028,14 +1024,14 @@ impl CalcStack {
     fn get_iteration_placeholder(&self, target: &CalcId) -> Option<Var> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        let iter_state = top_scc.iterative.as_ref()?;
-        match iter_state.node_states.get(target)? {
-            IterationNodeState::HasPlaceholder(var) => Some(*var),
+        top_scc.iterative.as_ref()?; // Only return if iterating
+        match top_scc.node_state.get(target)? {
+            NodeState::HasPlaceholder(var) => Some(*var),
             _ => None,
         }
     }
 
-    /// Mark a target node as `Done` in the top SCC's iteration state.
+    /// Mark a target node as `Done` in the top SCC's `node_state`.
     ///
     /// Silently does nothing if the top SCC is not iterating, which has never
     /// been observed but seems to occur in the LSP (possibly related to indexing).
@@ -1060,12 +1056,12 @@ impl CalcStack {
         let Some(top_scc) = scc_stack.last_mut() else {
             return;
         };
-        let Some(iter_state) = top_scc.iterative.as_mut() else {
+        if top_scc.iterative.is_none() {
             return;
-        };
-        iter_state.node_states.insert(
+        }
+        top_scc.node_state.insert(
             target.dupe(),
-            IterationNodeState::Done {
+            NodeState::Done {
                 answer: Some(answer),
                 errors,
                 traces,
@@ -1123,17 +1119,17 @@ impl CalcStack {
         iter_state.previous_answers.get(target).cloned()
     }
 
-    /// Retrieve the type-erased answer from `IterationNodeState::Done` in the
-    /// top SCC's iteration state.
+    /// Retrieve the type-erased answer from `NodeState::Done` in the
+    /// top SCC's `node_state` (when iterating).
     ///
     /// Returns `None` if the top SCC is not iterating, the target is not
     /// found, or the target is not `Done`.
     fn get_iteration_done_answer(&self, target: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        let iter_state = top_scc.iterative.as_ref()?;
-        match iter_state.node_states.get(target)? {
-            IterationNodeState::Done { answer, .. } => answer.clone(),
+        top_scc.iterative.as_ref()?; // Only return if iterating
+        match top_scc.node_state.get(target)? {
+            NodeState::Done { answer, .. } => answer.clone(),
             _ => None,
         }
     }
@@ -1145,9 +1141,9 @@ impl CalcStack {
     fn next_fresh_member(&self) -> Option<CalcId> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        let iter_state = top_scc.iterative.as_ref()?;
-        for (calc_id, state) in &iter_state.node_states {
-            if matches!(state, IterationNodeState::Fresh) {
+        top_scc.iterative.as_ref()?; // Only return if iterating
+        for (calc_id, state) in &top_scc.node_state {
+            if matches!(state, NodeState::Fresh) {
                 return Some(calc_id.dupe());
             }
         }
@@ -1260,24 +1256,23 @@ impl CalcStack {
         }
     }
 
-    /// Removes a CalcId from the top SCC's `iterative.node_states`.
+    /// Removes a CalcId from the top SCC's `node_state`.
     ///
     /// Used when `drive_member` was a no-op (e.g., the target module's
     /// Answers were evicted by another thread). Removing the member from
-    /// iteration state prevents `next_fresh_member` from returning it
+    /// node state prevents `next_fresh_member` from returning it
     /// again, breaking what would otherwise be an infinite loop.
     ///
-    /// The member remains in `node_state` (legacy SCC membership). If a
-    /// merge or iteration restart rebuilds `iterative.node_states` from
-    /// `node_state.keys()`, the member is re-added as Fresh and
-    /// re-detected on the next drive loop (which is harmless — the
-    /// eviction is persistent, so the member is immediately removed again).
+    /// If a merge or iteration restart rebuilds node states, the member
+    /// may be re-added as Fresh and re-detected on the next drive loop
+    /// (which is harmless — the eviction is persistent, so the member
+    /// is immediately removed again).
     fn remove_from_iteration_state(&self, calc_id: &CalcId) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         if let Some(scc) = scc_stack.last_mut()
-            && let Some(ref mut iter_state) = scc.iterative
+            && scc.iterative.is_some()
         {
-            iter_state.node_states.remove(calc_id);
+            scc.node_state.remove(calc_id);
         }
     }
 }
@@ -1416,8 +1411,6 @@ enum BindingAction<T> {
 pub struct SccIterationState {
     /// Current iteration number (starts at 1).
     pub iteration: u32,
-    /// Per-node iteration tracking. Membership is `node_states.keys()`.
-    pub node_states: BTreeMap<CalcId, IterationNodeState>,
     /// Answers from the prior iteration, used for warm-start on back-edges.
     /// Empty on iteration 1 (cold start).
     pub previous_answers: BTreeMap<CalcId, Arc<dyn Any + Send + Sync>>,
@@ -1611,6 +1604,8 @@ impl Scc {
         &mut self,
         current: &CalcId,
         answer: Option<Arc<dyn Any + Send + Sync>>,
+        errors: Option<Arc<ErrorCollector>>,
+        traces: Option<TraceSideEffects>,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         if let Some(state) = self.node_state.get_mut(current) {
             if let NodeState::Done {
@@ -1623,8 +1618,8 @@ impl Scc {
             } else {
                 *state = NodeState::Done {
                     answer: answer.clone(),
-                    errors: None,
-                    traces: None,
+                    errors,
+                    traces,
                 };
                 answer
             }
@@ -1654,15 +1649,12 @@ impl Scc {
     /// Merge two SCCs into one, taking the most advanced state for each
     /// participant.
     ///
-    /// If either SCC has iteration state (`iterative: Some(...)`), the merged
-    /// SCC preserves existing iteration node states (Done/InProgress) from both
-    /// sources and adds new members as Fresh. The `merge_happened` flag is set
-    /// so that `drive_all_iteration_members` can defer demotion until after the
+    /// Node states are merged via `node_state` (keeping the more advanced
+    /// state). If either SCC has iteration state (`iterative: Some(...)`),
+    /// the merged SCC preserves iteration metadata (iteration number,
+    /// previous answers). The `merge_happened` flag is set so that
+    /// `drive_all_iteration_members` can defer demotion until after the
     /// current drive loop completes (bounding per-iteration work to O(N)).
-    /// The members of the merged iteration state come from the already-merged
-    /// `node_state.keys()` (the legacy SCC membership), which is the union of
-    /// both SCCs' members. This is important because a non-iterating SCC has
-    /// `iterative: None` but still has members in `node_state`.
     #[allow(clippy::mutable_key_type)]
     fn merge(mut self, other: Scc) -> Self {
         // Union node_state maps (keep the more advanced state)
@@ -1684,43 +1676,16 @@ impl Scc {
         // the merged anchor to the current stack top is part of this single SCC.
         // The caller must recompute segment_size = stack.len() - anchor_pos.
 
-        // Merge iteration state: if either SCC is iterating, preserve existing
-        // iteration node states (Done/InProgress) and only add new members as
-        // Fresh. Set merge_happened so the drive loop defers demotion until
+        // Merge iteration state: if either SCC is iterating, build merged
+        // iteration state. Node states are already merged via `node_state`
+        // above; the iteration state only carries metadata (iteration number,
+        // previous answers, flags).
+        // Set merge_happened so the drive loop defers demotion until
         // after the current iteration completes, bounding per-iteration work
         // to O(N) regardless of how many merges occur.
         self.iterative = match (self.iterative.take(), other.iterative) {
             (None, None) => None,
             (self_iter, other_iter) => {
-                // At least one SCC is iterating. Build merged iteration state
-                // preserving existing node states from both sources.
-                let mut merged_node_states: BTreeMap<CalcId, IterationNodeState> = BTreeMap::new();
-
-                // Collect existing iteration states from both SCCs.
-                if let Some(ref si) = self_iter {
-                    for (k, v) in &si.node_states {
-                        merged_node_states.insert(k.dupe(), v.clone());
-                    }
-                }
-                if let Some(ref oi) = other_iter {
-                    for (k, v) in &oi.node_states {
-                        // If already present from self, keep self's state (it
-                        // may be more advanced). Only insert if absent.
-                        merged_node_states
-                            .entry(k.dupe())
-                            .or_insert_with(|| v.clone());
-                    }
-                }
-
-                // Add any members from the merged node_state map that aren't
-                // yet in the iteration states (e.g. nodes from a non-iterating
-                // SCC or free-floating nodes). These are new → Fresh.
-                for key in self.node_state.keys() {
-                    merged_node_states
-                        .entry(key.dupe())
-                        .or_insert(IterationNodeState::Fresh);
-                }
-
                 // Use the max iteration from either SCC: if one has progressed
                 // further, we should not regress to iteration 1.
                 let iteration = [self_iter.as_ref(), other_iter.as_ref()]
@@ -1740,7 +1705,6 @@ impl Scc {
                 }
                 Some(SccIterationState {
                     iteration,
-                    node_states: merged_node_states,
                     previous_answers,
                     demoted: false,
                     has_changed: false,
@@ -1770,9 +1734,8 @@ impl Scc {
     /// Absorb CalcStack members from `calc_stack[from_pos..]` into this SCC.
     ///
     /// Adds each CalcId as `NodeState::InProgress` to `node_state` (if not already
-    /// present) and as `IterationNodeState::Fresh` to `iterative.node_states` (if
-    /// iterating and not already present). Sets `merge_happened = true` on the
-    /// iteration state if any new entries are added to the iterative map.
+    /// present). Sets `merge_happened = true` on the iteration state if any new
+    /// entries are added.
     ///
     /// This is used for free-floating nodes: CalcIds that are on the call stack
     /// (their frames are active) but were not previously tracked by any SCC.
@@ -1781,42 +1744,31 @@ impl Scc {
     /// the `Participant → InProgress` transition again.
     #[allow(clippy::mutable_key_type)]
     fn absorb_calc_stack_members(&mut self, calc_stack: &[CalcId], from_pos: usize) {
+        let mut added_new = false;
         for calc_id in calc_stack.iter().skip(from_pos) {
-            self.node_state
-                .entry(calc_id.dupe())
-                .or_insert(NodeState::InProgress);
+            self.node_state.entry(calc_id.dupe()).or_insert_with(|| {
+                added_new = true;
+                NodeState::InProgress
+            });
         }
-        if let Some(ref mut iter_state) = self.iterative {
-            let mut added_new = false;
-            for calc_id in calc_stack.iter().skip(from_pos) {
-                iter_state
-                    .node_states
-                    .entry(calc_id.dupe())
-                    .or_insert_with(|| {
-                        added_new = true;
-                        IterationNodeState::Fresh
-                    });
-            }
-            if added_new {
-                iter_state.merge_happened = true;
-            }
+        if added_new && let Some(ref mut iter_state) = self.iterative {
+            iter_state.merge_happened = true;
         }
     }
 
-    /// Extract done answers from the current iteration state.
+    /// Extract done answers from `node_state`.
     ///
-    /// Iterates over the iteration `node_states`, collecting answers from
-    /// `Done` variants into a `BTreeMap`. Used to build `previous_answers`
-    /// for the next iteration. Returns an empty map if the SCC has no
-    /// iteration state.
+    /// Iterates over `node_state`, collecting answers from `Done` variants
+    /// into a `BTreeMap`. Used to build `previous_answers` for the next
+    /// iteration. Returns an empty map if the SCC has no iteration state.
     #[allow(clippy::mutable_key_type)]
     fn extract_done_answers(&self) -> BTreeMap<CalcId, Arc<dyn Any + Send + Sync>> {
-        let Some(iter_state) = self.iterative.as_ref() else {
+        if self.iterative.is_none() {
             return BTreeMap::new();
-        };
+        }
         let mut answers = BTreeMap::new();
-        for (calc_id, state) in &iter_state.node_states {
-            if let IterationNodeState::Done { answer, .. } = state
+        for (calc_id, state) in &self.node_state {
+            if let NodeState::Done { answer, .. } = state
                 && let Some(answer) = answer
             {
                 answers.insert(calc_id.dupe(), answer.clone());
@@ -1827,24 +1779,20 @@ impl Scc {
 
     /// Set up fresh iteration state for the next iteration.
     ///
-    /// All members from the legacy `node_state` map are reset to `Fresh`
-    /// in the iteration `node_states` map. This is called between iterations
-    /// in the pop-mutate-push cycle.
+    /// All values in `node_state` are reset to `Fresh`. This is called
+    /// between iterations in the pop-mutate-push cycle.
     #[allow(clippy::mutable_key_type)]
     fn set_fresh_iteration_state(
         &mut self,
         iteration: u32,
         previous_answers: BTreeMap<CalcId, Arc<dyn Any + Send + Sync>>,
     ) {
-        let all_members: BTreeMap<CalcId, IterationNodeState> = self
-            .node_state
-            .keys()
-            .duped()
-            .map(|k| (k, IterationNodeState::Fresh))
-            .collect();
+        // Reset all node states to Fresh for the new iteration.
+        for state in self.node_state.values_mut() {
+            *state = NodeState::Fresh;
+        }
         self.iterative = Some(SccIterationState {
             iteration,
-            node_states: all_members,
             previous_answers,
             demoted: false,
             has_changed: false,
@@ -2427,9 +2375,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Also store in NodeState::Done for SCC-local isolation (the SCC
             // uses these answers via SccLocalAnswer without touching Calculation).
             let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
-            let canonical_erased = self
-                .stack()
-                .on_calculation_finished(&current, Some(answer_erased));
+            let canonical_erased =
+                self.stack()
+                    .on_calculation_finished(&current, Some(answer_erased), None, None);
             // Use the canonical answer from thread-local state, mirroring how
             // Calculation::record_value returns the first-written answer.
             match canonical_erased {
@@ -2452,7 +2400,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.current().merge_trace_side_effects(traces);
                 }
             }
-            self.stack().on_calculation_finished(&current, None);
+            self.stack()
+                .on_calculation_finished(&current, None, None, None);
             answer
         }
     }
@@ -2740,21 +2689,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Called after the fixpoint iteration converges (or max iterations are
     /// reached).
     fn commit_final_answers(&self, scc: Scc) -> bool {
-        let iter_state = scc
-            .iterative
-            .expect("commit_final_answers: SCC has no iteration state");
+        assert!(
+            scc.iterative.is_some(),
+            "commit_final_answers: SCC has no iteration state"
+        );
 
-        // Collect Done members. BTreeMap iteration is already sorted by CalcId.
+        // Collect Done members from node_state. BTreeMap iteration is already sorted by CalcId.
         let members: Vec<(
             CalcId,
             Arc<dyn Any + Send + Sync>,
             Option<Arc<ErrorCollector>>,
             Option<TraceSideEffects>,
-        )> = iter_state
-            .node_states
+        )> = scc
+            .node_state
             .into_iter()
             .map(|(calc_id, node_state)| match node_state {
-                IterationNodeState::Done {
+                NodeState::Done {
                     answer,
                     errors,
                     traces,
@@ -2764,9 +2714,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     errors,
                     traces,
                 ),
-                IterationNodeState::Fresh
-                | IterationNodeState::InProgress
-                | IterationNodeState::HasPlaceholder(_) => {
+                NodeState::Fresh | NodeState::InProgress | NodeState::HasPlaceholder(_) => {
                     panic!(
                         "commit_final_answers: node {} is {:?} at commit time",
                         calc_id, node_state,
@@ -3007,11 +2955,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let iter_state = scc.iterative.as_ref().expect(
                 "iterative_resolve_scc: SCC lost iteration state before non-convergence extraction",
             );
-            iter_state
-                .node_states
+            scc.node_state
                 .iter()
                 .filter_map(|(calc_id, node_state)| match node_state {
-                    IterationNodeState::Done { answer, .. }
+                    NodeState::Done { answer, .. }
                         if iter_state.recursion_breaks.contains(calc_id) =>
                     {
                         let answer = answer.as_ref().expect(
@@ -4014,12 +3961,6 @@ mod scc_tests {
             let mut node_state = BTreeMap::new();
             node_state.insert(a.dupe(), NodeState::Fresh);
             node_state.insert(b.dupe(), NodeState::Fresh);
-            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
-                (a.dupe(), IterationNodeState::Fresh),
-                (b.dupe(), IterationNodeState::Fresh),
-            ]
-            .into_iter()
-            .collect();
             Scc {
                 node_state,
                 detected_at: a.dupe(),
@@ -4027,7 +3968,6 @@ mod scc_tests {
                 segment_size: 2,
                 iterative: Some(SccIterationState {
                     iteration: 2,
-                    node_states: iter_nodes,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
@@ -4042,12 +3982,6 @@ mod scc_tests {
             let mut node_state = BTreeMap::new();
             node_state.insert(d.dupe(), NodeState::Fresh);
             node_state.insert(e.dupe(), NodeState::Fresh);
-            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
-                (d.dupe(), IterationNodeState::Fresh),
-                (e.dupe(), IterationNodeState::Fresh),
-            ]
-            .into_iter()
-            .collect();
             Scc {
                 node_state,
                 detected_at: d.dupe(),
@@ -4055,7 +3989,6 @@ mod scc_tests {
                 segment_size: 2,
                 iterative: Some(SccIterationState {
                     iteration: 1,
-                    node_states: iter_nodes,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
@@ -4130,24 +4063,6 @@ mod scc_tests {
             "E should be in merged SCC"
         );
 
-        // All members should also be in the iteration node_states.
-        assert!(
-            iter_state.node_states.contains_key(&a),
-            "A should be in iteration node_states"
-        );
-        assert!(
-            iter_state.node_states.contains_key(&b),
-            "B should be in iteration node_states"
-        );
-        assert!(
-            iter_state.node_states.contains_key(&d),
-            "D should be in iteration node_states"
-        );
-        assert!(
-            iter_state.node_states.contains_key(&e),
-            "E should be in iteration node_states"
-        );
-
         // The push should return Calculate because after demotion all nodes
         // are Fresh, and A (the pushed target) transitions to Calculate.
         assert!(
@@ -4198,12 +4113,6 @@ mod scc_tests {
             let mut node_state = BTreeMap::new();
             node_state.insert(a.dupe(), NodeState::Fresh);
             node_state.insert(b.dupe(), NodeState::Fresh);
-            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
-                (a.dupe(), IterationNodeState::Fresh),
-                (b.dupe(), IterationNodeState::Fresh),
-            ]
-            .into_iter()
-            .collect();
             Scc {
                 node_state,
                 detected_at: a.dupe(),
@@ -4211,7 +4120,6 @@ mod scc_tests {
                 segment_size: 2,
                 iterative: Some(SccIterationState {
                     iteration: 2,
-                    node_states: iter_nodes,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
@@ -4226,12 +4134,6 @@ mod scc_tests {
             let mut node_state = BTreeMap::new();
             node_state.insert(d.dupe(), NodeState::Fresh);
             node_state.insert(e.dupe(), NodeState::Fresh);
-            let iter_nodes: BTreeMap<CalcId, IterationNodeState> = [
-                (d.dupe(), IterationNodeState::Fresh),
-                (e.dupe(), IterationNodeState::Fresh),
-            ]
-            .into_iter()
-            .collect();
             Scc {
                 node_state,
                 detected_at: d.dupe(),
@@ -4239,7 +4141,6 @@ mod scc_tests {
                 segment_size: 2,
                 iterative: Some(SccIterationState {
                     iteration: 1,
-                    node_states: iter_nodes,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
