@@ -180,9 +180,10 @@ pub struct CalcStack {
     scc_stack: RefCell<Vec<Scc>>,
     /// Reverse lookup of `stack`, to enable O(1) access for a given CalcId.
     position_of: RefCell<FxHashMap<CalcId, Vec1<usize>>>,
-    /// SCCs that completed during `on_calculation_finished` but haven't been
-    /// batch-committed yet. Drained by `get_idx` after each frame completes.
-    pending_completed_sccs: RefCell<Vec<Scc>>,
+    /// The SCC (if any) that completed during `on_calculation_finished` but
+    /// hasn't been committed yet. Taken by `get_idx` after each frame completes.
+    /// At most one SCC can complete per completion point.
+    pending_completed_scc: RefCell<Option<Scc>>,
 }
 
 impl CalcStack {
@@ -191,20 +192,20 @@ impl CalcStack {
             stack: RefCell::new(Vec::new()),
             scc_stack: RefCell::new(Vec::new()),
             position_of: RefCell::new(FxHashMap::default()),
-            pending_completed_sccs: RefCell::new(Vec::new()),
+            pending_completed_scc: RefCell::new(None),
         }
     }
 
-    /// Pop the current frame and drain any SCCs that completed during it.
+    /// Pop the current frame and take the completed SCC (if any).
     ///
     /// These two operations are always paired: every `pop` must be followed by
-    /// draining and committing completed SCCs.
+    /// taking and committing the completed SCC.
     ///
-    /// We pop before draining (not after) for two reasons:
+    /// We pop before taking (not after) for two reasons:
     /// - Lifecycle correctness: committed answers should correspond to fully
     ///   unwound computations. Popping first ensures the stack no longer
     ///   contains the completing frame when results are written to Calculation.
-    /// - `pop()` decrements `segment_size` on the top SCC. If we drained first,
+    /// - `pop()` decrements `segment_size` on the top SCC. If we took first,
     ///   the completed SCC would already be gone from `scc_stack`, and `pop()`
     ///   could incorrectly decrement a parent SCC's segment_size instead.
     ///
@@ -212,20 +213,9 @@ impl CalcStack {
     /// (`stack_len <= anchor_pos + 1`) is unrelated to this ordering — it
     /// exists because completion is detected during calculation, while the
     /// frame is still on the stack, well before we reach this method.
-    ///
-    /// Safety: `drain_completed_sccs` uses `std::mem::take` which drops the
-    /// `RefCell` borrow before returning the owned `Vec<Scc>`. By the time the
-    /// caller iterates the returned SCCs, no borrow on `self` is live.
-    fn pop_and_drain_completed_sccs(&self) -> Vec<Scc> {
+    fn pop_and_take_completed_scc(&self) -> Option<Scc> {
         self.pop();
-        self.drain_completed_sccs()
-    }
-
-    /// Drain and return all completed SCCs that were collected during
-    /// `on_calculation_finished`. Used by `pop_and_drain_completed_sccs`
-    /// to batch-commit answers after a frame completes.
-    fn drain_completed_sccs(&self) -> Vec<Scc> {
-        std::mem::take(&mut *self.pending_completed_sccs.borrow_mut())
+        self.pending_completed_scc.borrow_mut().take()
     }
 
     /// Push a CalcId onto the stack and compute the binding action.
@@ -798,8 +788,8 @@ impl CalcStack {
     }
 
     /// Handle the completion of a calculation. Mark the node as Done in the
-    /// top SCC (if it's a participant), then push any completed SCCs to the
-    /// `pending_completed_sccs` buffer for later batch-commit by `get_idx`.
+    /// top SCC (if it's a participant), then store the completed SCC (if any)
+    /// in `pending_completed_scc` for later commit by `get_idx`.
     ///
     /// Only the top SCC is checked because each node appears in at most one
     /// SCC, and active calculations are always in the top SCC.
@@ -829,27 +819,28 @@ impl CalcStack {
             // No active SCC; return the provided answer unchanged.
             answer
         };
-        // Pop all SCCs whose anchor position indicates completion.
-        // An SCC is complete when the stack has unwound to (or past) its
-        // anchor: at that point all participants' frames have been popped
-        // and their answers recorded. Push them to the pending buffer
-        // so that `get_idx` can batch-commit them after the frame completes.
-        let mut sccs_completed = 0usize;
-        while let Some(scc) = scc_stack.last() {
-            if stack_len <= scc.anchor_pos + 1 {
-                self.pending_completed_sccs
-                    .borrow_mut()
-                    .push(scc_stack.pop().unwrap());
-                sccs_completed += 1;
-            } else {
-                break;
-            }
+        // Check if the top SCC has completed. An SCC is complete when the
+        // stack has unwound to (or past) its anchor: at that point all
+        // participants' frames have been popped and their answers recorded.
+        if let Some(scc) = scc_stack.last()
+            && stack_len <= scc.anchor_pos + 1
+        {
+            let completed = scc_stack.pop().unwrap();
+            // At most one SCC can complete per completion point: verify
+            // the next SCC (if any) is not also complete.
+            debug_assert!(
+                scc_stack
+                    .last()
+                    .is_none_or(|next| stack_len > next.anchor_pos + 1),
+                "Multiple SCCs completed at stack_len={stack_len}",
+            );
+            let mut slot = self.pending_completed_scc.borrow_mut();
+            assert!(
+                slot.is_none(),
+                "pending_completed_scc was not taken before a new SCC completed",
+            );
+            *slot = Some(completed);
         }
-        debug_assert!(
-            sccs_completed <= 1,
-            "Expected at most 1 SCC to complete per on_calculation_finished call, \
-             but {sccs_completed} completed (stack_len={stack_len})",
-        );
         canonical
     }
 
@@ -2322,7 +2313,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Arc::new(K::promote_recursive(self.heap, var))
             }
         };
-        for scc in self.stack().pop_and_drain_completed_sccs() {
+        if let Some(scc) = self.stack().pop_and_take_completed_scc() {
             self.iterative_resolve_scc(scc);
         }
         // After SCC iteration, the Calculation cell may hold a newer answer
@@ -2358,9 +2349,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// - Stores the answer in SCC-local iteration state (not in Calculation)
     ///   until the final commit.
     ///
-    /// Completed SCCs are pushed to the `pending_completed_sccs` buffer
-    /// inside `on_calculation_finished`; `get_idx` drains them after the
-    /// frame completes.
+    /// A completed SCC is stored in `pending_completed_scc` by
+    /// `on_calculation_finished`; `get_idx` takes it after the frame
+    /// completes.
     fn calculate_and_record_answer<K: Solve<Ans>>(
         &self,
         current: CalcId,
