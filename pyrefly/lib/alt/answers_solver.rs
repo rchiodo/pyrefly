@@ -520,22 +520,16 @@ impl CalcStack {
                 }
             }
             SccState::Participant => {
-                if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
-                    top_scc.segment_size += 1;
-                }
-                match calculation.propose_calculation() {
-                    ProposalResult::Calculatable => {
-                        unreachable!(
-                            "Participant nodes must have Calculating state, not NotCalculated"
-                        )
-                    }
-                    ProposalResult::CycleDetected => BindingAction::Calculate,
-                    ProposalResult::Calculated(v) => {
-                        // Participant already computed: no data to store.
-                        self.on_calculation_finished(&current, None, None, None);
-                        BindingAction::Calculated(v)
-                    }
-                }
+                // Participant means pre_calculate_state found the node as Fresh
+                // in the top SCC and transitioned it to InProgress. The top SCC
+                // must exist since we just accessed it in pre_calculate_state,
+                // and all state is thread-local (no data races).
+                self.scc_stack
+                    .borrow_mut()
+                    .last_mut()
+                    .expect("SccState::Participant but no SCC on the stack")
+                    .segment_size += 1;
+                BindingAction::Calculate
             }
         }
     }
