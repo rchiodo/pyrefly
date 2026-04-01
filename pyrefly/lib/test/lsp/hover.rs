@@ -1204,7 +1204,7 @@ Test()
      ^
 ```python
 (method) __init__: def __init__(
-    cls: type[Test],
+    _cls: type[Test],
     a: str,
     b: int
 ) -> Test: ...

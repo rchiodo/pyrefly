@@ -1495,7 +1495,7 @@ MyTuple = collections.namedtuple("MyTuple", "x y")
                 vec![create_simple_signature(
                     vec![
                         FunctionParameter::Pos {
-                            name: "cls".into(),
+                            name: "_cls".into(),
                             annotation: PysaType::new(
                                 "type[test.MyTuple]".to_owned(),
                                 ClassNamesFromType::from_class(

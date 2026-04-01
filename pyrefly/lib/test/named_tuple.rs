@@ -881,3 +881,30 @@ class Record(NamedTuple):
         return cls("", 0)
 "#,
 );
+
+// https://github.com/facebook/pyrefly/issues/2980
+testcase!(
+    test_named_tuple_cls_field_name,
+    r#"
+from typing import NamedTuple, assert_type, Any
+from collections import namedtuple
+
+# Class syntax
+class WithCls(NamedTuple):
+    cls: int
+    value: str
+
+w = WithCls(cls=1, value="hello")
+assert_type(w.cls, int)
+
+# Functional typing.NamedTuple syntax
+WithCls2 = NamedTuple("WithCls2", [("cls", int), ("value", str)])
+w2 = WithCls2(cls=2, value="world")
+assert_type(w2.cls, int)
+
+# Functional collections.namedtuple syntax
+WithCls3 = namedtuple("WithCls3", ["cls", "value"])
+w3 = WithCls3(cls=3, value="test")
+assert_type(w3.cls, Any)
+"#,
+);
