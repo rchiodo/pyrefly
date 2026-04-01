@@ -1,0 +1,179 @@
+{
+  "variables": [],
+  "line_count": 32,
+  "functions": [
+    {
+      "name": "test.Untyped.__init__",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 11,
+            "column": 18
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
+      "location": {
+        "line": 11,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.Typed.__init__",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 16,
+            "column": 18
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
+      "location": {
+        "line": 16,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.ClassBodyWins.__init__",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 23,
+            "column": 18
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
+      "location": {
+        "line": 23,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.MultipleAttrs.__init__",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 28,
+            "column": 18
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
+      "location": {
+        "line": 28,
+        "column": 5
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "test.ClassBodyWins",
+      "incomplete_attributes": [
+        {
+          "name": "__init__",
+          "declared_in": "test.ClassBodyWins"
+        }
+      ],
+      "location": {
+        "line": 20,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.MultipleAttrs",
+      "incomplete_attributes": [
+        {
+          "name": "__init__",
+          "declared_in": "test.MultipleAttrs"
+        }
+      ],
+      "location": {
+        "line": 27,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.Typed",
+      "incomplete_attributes": [
+        {
+          "name": "__init__",
+          "declared_in": "test.Typed"
+        }
+      ],
+      "location": {
+        "line": 15,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.Untyped",
+      "incomplete_attributes": [
+        {
+          "name": "__init__",
+          "declared_in": "test.Untyped"
+        }
+      ],
+      "location": {
+        "line": 10,
+        "column": 1
+      }
+    }
+  ],
+  "suppressions": [],
+  "n_typable": 4,
+  "n_typed": 0,
+  "n_any": 0,
+  "n_untyped": 4,
+  "coverage": 0.0,
+  "strict_coverage": 0.0
+}

@@ -1,0 +1,60 @@
+{
+  "variables": [],
+  "line_count": 15,
+  "functions": [
+    {
+      "name": "test.Simple.__and__",
+      "return_annotation": "bool",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 11,
+            "column": 17
+          }
+        },
+        {
+          "name": "other",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 11,
+            "column": 23
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 11,
+        "column": 5
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "test.Simple",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 10,
+        "column": 1
+      }
+    }
+  ],
+  "suppressions": [],
+  "n_typable": 2,
+  "n_typed": 2,
+  "n_any": 0,
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 100.0
+}

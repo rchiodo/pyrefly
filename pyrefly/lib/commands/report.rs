@@ -127,6 +127,18 @@ impl SlotCounts {
             (self.n_typed as f64 / self.n_typable as f64) * 100.0
         }
     }
+
+    /// Aggregate slot counts across all functions and variables.
+    fn total(functions: &[Function], variables: &[Variable]) -> SlotCounts {
+        let mut total = SlotCounts::default();
+        for func in functions {
+            total = total.merge(func.slots);
+        }
+        for var in variables {
+            total = total.merge(var.slots);
+        }
+        total
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -162,6 +174,7 @@ struct Function {
     is_return_type_known: bool,
     parameters: Vec<Parameter>,
     is_type_known: bool,
+    is_property: bool,
     slots: SlotCounts,
     location: Location,
 }
@@ -531,6 +544,9 @@ impl ReportArgs {
                         .all(|(i, p)| Self::is_self_or_cls(i, &p.name) || p.annotation.is_some());
                 let is_type_known =
                     is_fully_annotated && is_return_type_known && all_params_type_known;
+                let is_property = answers
+                    .get_type_at(idx)
+                    .is_some_and(|t| t.property_metadata().is_some());
 
                 functions.push(Function {
                     name: func_name,
@@ -538,6 +554,7 @@ impl ReportArgs {
                     is_return_type_known,
                     parameters,
                     is_type_known,
+                    is_property,
                     slots: func_slots,
                     location,
                 });
@@ -885,17 +902,10 @@ impl ReportArgs {
                     );
                 }
 
-                // Compute aggregate slot counts
-                let mut total_slots = SlotCounts::default();
-                for func in &functions {
-                    total_slots = total_slots.merge(func.slots);
-                }
-                for var in &variables {
-                    total_slots = total_slots.merge(var.slots);
-                }
+                let total_slots = SlotCounts::total(&functions, &variables);
 
                 report.insert(
-                    handle.path().as_path().display().to_string(),
+                    handle.module().to_string(),
                     FileReport {
                         variables,
                         line_count,
@@ -993,13 +1003,7 @@ mod tests {
         );
         let suppressions = ReportArgs::parse_suppressions(&module);
 
-        let mut total_slots = SlotCounts::default();
-        for func in &functions {
-            total_slots = total_slots.merge(func.slots);
-        }
-        for var in &variables {
-            total_slots = total_slots.merge(var.slots);
-        }
+        let total_slots = SlotCounts::total(&functions, &variables);
 
         FileReport {
             variables,
@@ -1075,13 +1079,7 @@ mod tests {
             py_classes,
         );
 
-        let mut total_slots = SlotCounts::default();
-        for func in &functions {
-            total_slots = total_slots.merge(func.slots);
-        }
-        for var in &variables {
-            total_slots = total_slots.merge(var.slots);
-        }
+        let total_slots = SlotCounts::total(&functions, &variables);
 
         FileReport {
             variables,
@@ -1240,6 +1238,7 @@ mod tests {
                     })
                     .collect(),
                 is_type_known: false,
+                is_property: false,
                 slots: SlotCounts::default(),
                 location: Location { line: 1, column: 1 },
             }
@@ -1297,5 +1296,79 @@ mod tests {
             true,
             vec![("x", true), ("cls", false)]
         )));
+    }
+
+    // ──── Phase 1: Tests that validate existing pyrefly behaviour ────
+
+    /// Any-typed annotations: typed for coverage, untyped for strict_coverage.
+    #[test]
+    fn test_report_any_annotations() {
+        let report = build_file_report("any_annotations.py");
+        compare_snapshot("any_annotations.expected.json", &report);
+    }
+
+    /// String annotations ("int") and Annotated unwrapping.
+    #[test]
+    fn test_report_string_annotations() {
+        let report = build_file_report("string_annotations.py");
+        compare_snapshot("string_annotations.expected.json", &report);
+    }
+
+    // ──── Phase 2: TDD baseline tests (ported from typestats) ────
+    //
+    // These tests capture pyrefly's CURRENT behaviour for scenarios from typestats.
+    // Snapshots may need updating when later diffs improve property/overload/schema handling.
+
+    /// @property getter/setter/deleter reporting.
+    /// Current: each accessor is a separate Function with is_property=true.
+    /// Typestats: single PropertyReport with fget/fset/fdel slot counts.
+    #[test]
+    fn test_report_property_basic() {
+        let report = build_file_report("property_basic.py");
+        compare_snapshot("property_basic.expected.json", &report);
+    }
+
+    /// @overload decorated functions and methods.
+    /// Current: each @overload is a separate Function entry (not deduplicated).
+    /// Typestats: overloads are merged with worst-wins annotation logic.
+    #[test]
+    fn test_report_overloads() {
+        let report = build_file_report("overloads.py");
+        compare_snapshot("overloads.expected.json", &report);
+    }
+
+    /// @dataclass, Enum, TypedDict, NamedTuple: schema class fields.
+    /// Current: schema class fields are reported as regular variables.
+    /// Typestats: schema fields are IMPLICIT (0 typable).
+    #[test]
+    fn test_report_schema_classes() {
+        let report = build_file_report("schema_classes.py");
+        compare_snapshot("schema_classes.expected.json", &report);
+    }
+
+    /// Instance attributes: self.x in __init__.
+    /// Current: instance attrs are not reported (only class-body and top-level).
+    /// Typestats: self.x in __init__ is collected as a class member.
+    #[test]
+    fn test_report_instance_attrs() {
+        let report = build_file_report("instance_attrs.py");
+        compare_snapshot("instance_attrs.expected.json", &report);
+    }
+
+    /// @staticmethod, @classmethod decorator handling.
+    /// Current: decorators are reported as regular methods.
+    #[test]
+    fn test_report_decorators() {
+        let report = build_file_report("decorators.py");
+        compare_snapshot("decorators.expected.json", &report);
+    }
+
+    /// Class method aliases: __rand__ = __and__.
+    /// Current: aliases are not reported (only the original method def).
+    /// Typestats: method aliases are copied as Function symbols.
+    #[test]
+    fn test_report_method_aliases() {
+        let report = build_file_report("method_aliases.py");
+        compare_snapshot("method_aliases.expected.json", &report);
     }
 }

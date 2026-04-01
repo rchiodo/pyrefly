@@ -65,6 +65,7 @@
       "is_return_type_known": true,
       "parameters": [],
       "is_type_known": true,
+      "is_property": false,
       "slots": {
         "n_typable": 1,
         "n_typed": 1,

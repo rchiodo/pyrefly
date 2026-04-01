@@ -1,0 +1,221 @@
+{
+  "variables": [],
+  "line_count": 34,
+  "functions": [],
+  "classes": [
+    {
+      "name": "test.Color",
+      "incomplete_attributes": [
+        {
+          "name": "__copy__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__deepcopy__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__dir__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__format__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__hash__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__new__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__reduce_ex__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "__signature__",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "_add_alias_",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "_add_value_alias_",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "_generate_next_value_",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "_missing_",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "name",
+          "declared_in": "enum.Enum"
+        },
+        {
+          "name": "value",
+          "declared_in": "enum.Enum"
+        }
+      ],
+      "location": {
+        "line": 21,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.Config",
+      "incomplete_attributes": [
+        {
+          "name": "__contains__",
+          "declared_in": "typing.Mapping"
+        },
+        {
+          "name": "__delitem__",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "__eq__",
+          "declared_in": "typing.Mapping"
+        },
+        {
+          "name": "__getitem__",
+          "declared_in": "typing.Mapping"
+        },
+        {
+          "name": "__ior__",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "__iter__",
+          "declared_in": "typing.Iterable"
+        },
+        {
+          "name": "__len__",
+          "declared_in": "typing.Collection"
+        },
+        {
+          "name": "__or__",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "__ror__",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "copy",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "get",
+          "declared_in": "typing.Mapping"
+        },
+        {
+          "name": "items",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "keys",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "pop",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "setdefault",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "update",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        },
+        {
+          "name": "values",
+          "declared_in": "_typeshed._type_checker_internals.TypedDictFallback"
+        }
+      ],
+      "location": {
+        "line": 26,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.Coord",
+      "incomplete_attributes": [
+        {
+          "name": "__contains__",
+          "declared_in": "typing.Sequence"
+        },
+        {
+          "name": "__getitem__",
+          "declared_in": "typing.Sequence"
+        },
+        {
+          "name": "__init__",
+          "declared_in": "_typeshed._type_checker_internals.NamedTupleFallback"
+        },
+        {
+          "name": "__iter__",
+          "declared_in": "typing.Sequence"
+        },
+        {
+          "name": "__len__",
+          "declared_in": "typing.Collection"
+        },
+        {
+          "name": "__replace__",
+          "declared_in": "_typeshed._type_checker_internals.NamedTupleFallback"
+        },
+        {
+          "name": "__reversed__",
+          "declared_in": "typing.Sequence"
+        },
+        {
+          "name": "_asdict",
+          "declared_in": "_typeshed._type_checker_internals.NamedTupleFallback"
+        },
+        {
+          "name": "_make",
+          "declared_in": "_typeshed._type_checker_internals.NamedTupleFallback"
+        },
+        {
+          "name": "_replace",
+          "declared_in": "_typeshed._type_checker_internals.NamedTupleFallback"
+        },
+        {
+          "name": "count",
+          "declared_in": "typing.Sequence"
+        },
+        {
+          "name": "index",
+          "declared_in": "typing.Sequence"
+        }
+      ],
+      "location": {
+        "line": 31,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.Point",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 15,
+        "column": 1
+      }
+    }
+  ],
+  "suppressions": [],
+  "n_typable": 0,
+  "n_typed": 0,
+  "n_any": 0,
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 100.0
+}

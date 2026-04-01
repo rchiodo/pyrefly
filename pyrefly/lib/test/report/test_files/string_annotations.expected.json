@@ -1,0 +1,80 @@
+{
+  "variables": [
+    {
+      "name": "test.x",
+      "annotation": "int",
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 9,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.y",
+      "annotation": "Annotated[int, \"metadata\"]",
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 1,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 18,
+        "column": 1
+      }
+    }
+  ],
+  "line_count": 19,
+  "functions": [
+    {
+      "name": "test.func_str_ann",
+      "return_annotation": "bool",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "a",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 13,
+            "column": 18
+          }
+        },
+        {
+          "name": "b",
+          "annotation": "str",
+          "is_type_known": true,
+          "location": {
+            "line": 13,
+            "column": 28
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 3,
+        "n_typed": 3,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 13,
+        "column": 1
+      }
+    }
+  ],
+  "classes": [],
+  "suppressions": [],
+  "n_typable": 5,
+  "n_typed": 4,
+  "n_any": 1,
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 80.0
+}

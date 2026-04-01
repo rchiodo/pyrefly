@@ -27,6 +27,7 @@
         }
       ],
       "is_type_known": true,
+      "is_property": false,
       "slots": {
         "n_typable": 3,
         "n_typed": 3,
@@ -63,6 +64,7 @@
         }
       ],
       "is_type_known": false,
+      "is_property": false,
       "slots": {
         "n_typable": 3,
         "n_typed": 0,
@@ -108,6 +110,7 @@
         }
       ],
       "is_type_known": true,
+      "is_property": false,
       "slots": {
         "n_typable": 3,
         "n_typed": 3,
@@ -153,6 +156,7 @@
         }
       ],
       "is_type_known": true,
+      "is_property": false,
       "slots": {
         "n_typable": 3,
         "n_typed": 3,

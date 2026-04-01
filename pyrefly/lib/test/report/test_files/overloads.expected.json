@@ -1,0 +1,223 @@
+{
+  "variables": [],
+  "line_count": 33,
+  "functions": [
+    {
+      "name": "test.f",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "x",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 13,
+            "column": 7
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 12,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.f",
+      "return_annotation": "str",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "x",
+          "annotation": "str",
+          "is_type_known": true,
+          "location": {
+            "line": 17,
+            "column": 7
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 16,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.f",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "x",
+          "annotation": null,
+          "is_type_known": false,
+          "location": {
+            "line": 20,
+            "column": 7
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 2
+      },
+      "location": {
+        "line": 20,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.WithOverloads.method",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 26,
+            "column": 16
+          }
+        },
+        {
+          "name": "x",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 26,
+            "column": 22
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 25,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.WithOverloads.method",
+      "return_annotation": "str",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 29,
+            "column": 16
+          }
+        },
+        {
+          "name": "x",
+          "annotation": "str",
+          "is_type_known": true,
+          "location": {
+            "line": 29,
+            "column": 22
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 28,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.WithOverloads.method",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 31,
+            "column": 16
+          }
+        },
+        {
+          "name": "x",
+          "annotation": null,
+          "is_type_known": false,
+          "location": {
+            "line": 31,
+            "column": 22
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": false,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 2
+      },
+      "location": {
+        "line": 31,
+        "column": 5
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "test.WithOverloads",
+      "incomplete_attributes": [
+        {
+          "name": "method",
+          "declared_in": "test.WithOverloads"
+        }
+      ],
+      "location": {
+        "line": 24,
+        "column": 1
+      }
+    }
+  ],
+  "suppressions": [],
+  "n_typable": 12,
+  "n_typed": 8,
+  "n_any": 0,
+  "n_untyped": 4,
+  "coverage": 66.66666666666666,
+  "strict_coverage": 66.66666666666666
+}

@@ -1,0 +1,330 @@
+{
+  "variables": [],
+  "line_count": 54,
+  "functions": [
+    {
+      "name": "test.Getter.x",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 12,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 11,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterUntyped.x",
+      "return_annotation": null,
+      "is_return_type_known": false,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 18,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": false,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
+      "location": {
+        "line": 17,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterSetter.x",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 24,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 23,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterSetter.x",
+      "return_annotation": "None",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 28,
+            "column": 11
+          }
+        },
+        {
+          "name": "value",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 28,
+            "column": 17
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 27,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterSetterDeleter.x",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 34,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 33,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterSetterDeleter.x",
+      "return_annotation": "None",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 38,
+            "column": 11
+          }
+        },
+        {
+          "name": "value",
+          "annotation": "int",
+          "is_type_known": true,
+          "location": {
+            "line": 38,
+            "column": 17
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 37,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.GetterSetterDeleter.x",
+      "return_annotation": "None",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 42,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 41,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.MultipleProperties.a",
+      "return_annotation": "int",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 48,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 47,
+        "column": 5
+      }
+    },
+    {
+      "name": "test.MultipleProperties.b",
+      "return_annotation": "str",
+      "is_return_type_known": true,
+      "parameters": [
+        {
+          "name": "self",
+          "annotation": null,
+          "is_type_known": true,
+          "location": {
+            "line": 52,
+            "column": 11
+          }
+        }
+      ],
+      "is_type_known": true,
+      "is_property": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
+      "location": {
+        "line": 51,
+        "column": 5
+      }
+    }
+  ],
+  "classes": [
+    {
+      "name": "test.Getter",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 10,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.GetterSetter",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 22,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.GetterSetterDeleter",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 32,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.GetterUntyped",
+      "incomplete_attributes": [
+        {
+          "name": "x",
+          "declared_in": "test.GetterUntyped"
+        }
+      ],
+      "location": {
+        "line": 16,
+        "column": 1
+      }
+    },
+    {
+      "name": "test.MultipleProperties",
+      "incomplete_attributes": [],
+      "location": {
+        "line": 46,
+        "column": 1
+      }
+    }
+  ],
+  "suppressions": [],
+  "n_typable": 11,
+  "n_typed": 10,
+  "n_any": 0,
+  "n_untyped": 1,
+  "coverage": 90.9090909090909,
+  "strict_coverage": 90.9090909090909
+}
