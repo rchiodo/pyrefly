@@ -236,6 +236,7 @@ use starlark_map::small_set::SmallSet;
 use tracing::debug;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 use uuid::Uuid;
 use vec1::Vec1;
 
@@ -3316,9 +3317,12 @@ impl Server {
         let version_info = self.version_info.lock();
         let old_version = version_info.get(&file_path).unwrap_or(&0);
         if version < *old_version {
-            return Err(anyhow::anyhow!(
-                "new_version < old_version in `textDocument/didChange` notification: new_version={version:?} old_version={old_version:?} text_document.uri={uri:?}"
-            ));
+            // Log a warning but proceed — some clients reset version numbers
+            // between editing sessions, and silently dropping the edit causes
+            // worse bugs than accepting an out-of-order version.
+            warn!(
+                "textDocument/didChange: version went backwards (new={version:?} < old={old_version:?}) for {uri}, applying anyway"
+            );
         }
         drop(version_info);
         let mut lock = self.open_files.write();
