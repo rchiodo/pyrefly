@@ -2400,8 +2400,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.current().merge_trace_side_effects(traces);
                 }
             }
-            self.stack()
-                .on_calculation_finished(&current, None, None, None);
             answer
         }
     }
