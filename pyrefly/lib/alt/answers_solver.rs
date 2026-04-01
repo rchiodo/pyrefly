@@ -583,14 +583,14 @@ impl CalcStack {
     }
 
     /// Retrieve the type-erased answer from NodeState::Done in the top SCC.
-    /// Returns `Some(answer)` if the node is Done with data, `None` otherwise
-    /// (node not in SCC, not Done, or Done with answer: None).
+    /// Returns `Some(answer)` if the node is Done, `None` otherwise
+    /// (node not in SCC or not Done).
     fn get_scc_done_answer(&self, current: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
         let scc_stack = self.scc_stack.borrow();
         scc_stack
             .last()
             .and_then(|top_scc| match top_scc.node_state.get(current)? {
-                NodeState::Done { answer, .. } => answer.clone(),
+                NodeState::Done { answer, .. } => Some(answer.dupe()),
                 _ => None,
             })
     }
@@ -808,10 +808,10 @@ impl CalcStack {
     fn on_calculation_finished(
         &self,
         current: &CalcId,
-        answer: Option<Arc<dyn Any + Send + Sync>>,
+        answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
         traces: Option<TraceSideEffects>,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
+    ) -> Arc<dyn Any + Send + Sync> {
         let stack_len = self.stack.borrow().len();
         let mut scc_stack = self.scc_stack.borrow_mut();
         let canonical = if let Some(top_scc) = scc_stack.last_mut() {
@@ -1056,7 +1056,7 @@ impl CalcStack {
         top_scc.node_state.insert(
             target.dupe(),
             NodeState::Done {
-                answer: Some(answer),
+                answer,
                 errors,
                 traces,
             },
@@ -1123,7 +1123,7 @@ impl CalcStack {
         let top_scc = scc_stack.last()?;
         top_scc.iterative.as_ref()?; // Only return if iterating
         match top_scc.node_state.get(target)? {
-            NodeState::Done { answer, .. } => answer.clone(),
+            NodeState::Done { answer, .. } => Some(answer.dupe()),
             _ => None,
         }
     }
@@ -1297,12 +1297,8 @@ pub enum NodeState {
     /// For SCC participants, the answer is stored here until the entire SCC
     /// completes, at which point answers are committed to their respective
     /// Calculation cells.
-    ///
-    /// The `answer` is `None` when the node was already computed by another
-    /// path (e.g. a Participant revisit) and only the state transition
-    /// to Done matters.
     Done {
-        answer: Option<Arc<dyn Any + Send + Sync>>,
+        answer: Arc<dyn Any + Send + Sync>,
         /// Errors collected during solving. None during Phase 0 (cold start).
         errors: Option<Arc<ErrorCollector>>,
         /// Trace side effects collected during solving. None during Phase 0.
@@ -1591,16 +1587,13 @@ impl Scc {
     /// answer without overwriting. If the node was not yet Done, stores the
     /// provided answer and returns a clone of it. If the node is not tracked
     /// by this SCC at all, returns the provided answer unchanged.
-    ///
-    /// The data is `None` when the node was already computed by another
-    /// path and only the state transition matters.
     fn on_calculation_finished(
         &mut self,
         current: &CalcId,
-        answer: Option<Arc<dyn Any + Send + Sync>>,
+        answer: Arc<dyn Any + Send + Sync>,
         errors: Option<Arc<ErrorCollector>>,
         traces: Option<TraceSideEffects>,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
+    ) -> Arc<dyn Any + Send + Sync> {
         if let Some(state) = self.node_state.get_mut(current) {
             if let NodeState::Done {
                 answer: existing_answer,
@@ -1608,10 +1601,10 @@ impl Scc {
             } = state
             {
                 // Already Done: return the canonical (first-written) answer.
-                existing_answer.clone()
+                existing_answer.dupe()
             } else {
                 *state = NodeState::Done {
-                    answer: answer.clone(),
+                    answer: answer.dupe(),
                     errors,
                     traces,
                 };
@@ -1762,10 +1755,8 @@ impl Scc {
         }
         let mut answers = BTreeMap::new();
         for (calc_id, state) in &self.node_state {
-            if let NodeState::Done { answer, .. } = state
-                && let Some(answer) = answer
-            {
-                answers.insert(calc_id.dupe(), answer.clone());
+            if let NodeState::Done { answer, .. } = state {
+                answers.insert(calc_id.dupe(), answer.dupe());
             }
         }
         answers
@@ -2371,17 +2362,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let answer_erased: Arc<dyn Any + Send + Sync> = Arc::new(answer.dupe());
             let canonical_erased =
                 self.stack()
-                    .on_calculation_finished(&current, Some(answer_erased), None, None);
+                    .on_calculation_finished(&current, answer_erased, None, None);
             // Use the canonical answer from thread-local state, mirroring how
             // Calculation::record_value returns the first-written answer.
-            match canonical_erased {
-                Some(erased) => Arc::unwrap_or_clone(
-                    erased
-                        .downcast::<Arc<K::Answer>>()
-                        .expect("on_calculation_finished canonical answer downcast failed"),
-                ),
-                None => answer,
-            }
+            Arc::unwrap_or_clone(
+                canonical_erased
+                    .downcast::<Arc<K::Answer>>()
+                    .expect("on_calculation_finished canonical answer downcast failed"),
+            )
         } else {
             // Non-SCC path: write directly to Calculation as before.
             // No recursive placeholder can exist in the Calculation cell because
@@ -2700,12 +2688,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     answer,
                     errors,
                     traces,
-                } => (
-                    calc_id,
-                    answer.expect("commit_final_answers: iteration node Done but answer is None"),
-                    errors,
-                    traces,
-                ),
+                } => (calc_id, answer, errors, traces),
                 NodeState::Fresh | NodeState::InProgress | NodeState::HasPlaceholder(_) => {
                     panic!(
                         "commit_final_answers: node {} is {:?} at commit time",
@@ -2953,9 +2936,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     NodeState::Done { answer, .. }
                         if iter_state.recursion_breaks.contains(calc_id) =>
                     {
-                        let answer = answer.as_ref().expect(
-                            "non-convergence extraction: iteration node Done but answer is None",
-                        );
                         Some((
                             calc_id.dupe(),
                             answer.dupe(),
@@ -3560,7 +3540,7 @@ mod scc_tests {
     /// Create a dummy `NodeState::Done` for testing.
     fn done_for_test() -> NodeState {
         NodeState::Done {
-            answer: None,
+            answer: Arc::new(()) as Arc<dyn Any + Send + Sync>,
             errors: None,
             traces: None,
         }
