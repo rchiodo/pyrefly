@@ -10688,7 +10688,7 @@
       "description": "Decorator `@final` can only be used on methods.",
       "line": 125,
       "name": "invalid-decorator",
-      "severity": "error",
+      "severity": "warn",
       "stop_column": 7,
       "stop_line": 125
     }

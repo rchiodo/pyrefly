@@ -337,6 +337,7 @@ impl ErrorKind {
             ErrorKind::ImplicitAny => Severity::Ignore,
             ErrorKind::ImplicitImport => Severity::Warn,
             ErrorKind::ImplicitlyDefinedAttribute => Severity::Ignore,
+            ErrorKind::InvalidDecorator => Severity::Warn,
             ErrorKind::MissingOverrideDecorator => Severity::Ignore,
             ErrorKind::MissingSource => Severity::Ignore,
             ErrorKind::NonExhaustiveMatch => Severity::Warn,
