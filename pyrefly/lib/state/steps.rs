@@ -433,6 +433,7 @@ impl Step {
             ctx.uniques,
             enable_trace,
             ctx.check_unannotated_defs,
+            ctx.require.keep_index(),
             ctx.infer_return_types,
         );
         let answers = Answers::new(&bindings, solver, enable_index, enable_trace);

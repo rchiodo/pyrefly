@@ -4850,28 +4850,6 @@
     },
     {
       "code": -2,
-      "column": 7,
-      "concise_description": "Argument `Literal[b'invalid']` is not assignable to parameter `a` with type `int` in function `func1`",
-      "description": "Argument `Literal[b'invalid']` is not assignable to parameter `a` with type `int` in function `func1`",
-      "line": 29,
-      "name": "bad-argument-type",
-      "severity": "error",
-      "stop_column": 17,
-      "stop_line": 29
-    },
-    {
-      "code": -2,
-      "column": 19,
-      "concise_description": "Argument `Literal[b'arguments']` is not assignable to parameter `b` with type `str` in function `func1`",
-      "description": "Argument `Literal[b'arguments']` is not assignable to parameter `b` with type `str` in function `func1`",
-      "line": 29,
-      "name": "bad-argument-type",
-      "severity": "error",
-      "stop_column": 31,
-      "stop_line": 29
-    },
-    {
-      "code": -2,
       "column": 6,
       "concise_description": "Missing argument `a` in function `func1`",
       "description": "Missing argument `a` in function `func1`",

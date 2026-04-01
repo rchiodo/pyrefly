@@ -252,6 +252,11 @@ pub struct BindingsBuilder<'a> {
     pub scopes: Scopes,
     table: BindingTable,
     pub check_unannotated_defs: bool,
+    /// When true, unannotated function bodies are still analyzed (creating
+    /// bindings for the solver) even when `check_unannotated_defs` is false,
+    /// so that IDE features like hover and goto-def work inside them.
+    /// In CLI batch-check mode this is false to avoid wasted work.
+    pub analyze_unannotated_for_ide: bool,
     pub infer_return_types: InferReturnTypes,
     unused_parameters: Vec<UnusedParameter>,
     unused_imports: Vec<UnusedImport>,
@@ -511,6 +516,7 @@ impl Bindings {
         uniques: &UniqueFactory,
         enable_trace: bool,
         check_unannotated_defs: bool,
+        analyze_unannotated_for_ide: bool,
         infer_return_types: InferReturnTypes,
     ) -> Self {
         let mut builder = BindingsBuilder {
@@ -528,6 +534,7 @@ impl Bindings {
             scopes: Scopes::module(x.range, enable_trace),
             table: Default::default(),
             check_unannotated_defs,
+            analyze_unannotated_for_ide,
             infer_return_types,
             unused_parameters: Vec::new(),
             unused_imports: Vec::new(),
@@ -1713,17 +1720,22 @@ impl<'a> BindingsBuilder<'a> {
         undecorated_idx: Idx<KeyUndecoratedFunction>,
         class_key: Option<Idx<KeyClass>>,
         is_variadic: bool,
+        ignore_annotation: bool,
     ) {
         let name = x.name();
         let allow_unused = name.id.as_str().starts_with('_')
             || matches!(name.id.as_str(), "self" | "cls")
             || is_variadic;
-        let annot = x.annotation().map(|x| {
-            self.insert_binding(
-                KeyAnnotation::Annotation(ShortIdentifier::new(name)),
-                BindingAnnotation::AnnotateExpr(target.clone(), x.clone(), class_key),
-            )
-        });
+        let annot = if ignore_annotation {
+            None
+        } else {
+            x.annotation().map(|x| {
+                self.insert_binding(
+                    KeyAnnotation::Annotation(ShortIdentifier::new(name)),
+                    BindingAnnotation::AnnotateExpr(target.clone(), x.clone(), class_key),
+                )
+            })
+        };
         let key = self.insert_binding(
             Key::Definition(ShortIdentifier::new(name)),
             Binding::FunctionParameter(Box::new(match annot {
