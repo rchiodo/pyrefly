@@ -1760,28 +1760,57 @@ impl Scc {
         answers
     }
 
-    /// Set up fresh iteration state for the next iteration.
+    /// Reset the SCC for a cold start at iteration 1.
     ///
-    /// All values in `node_state` are reset to `Fresh`. This is called
-    /// between iterations in the pop-mutate-push cycle.
-    #[allow(clippy::mutable_key_type)]
-    fn set_fresh_iteration_state(
-        &mut self,
-        iteration: u32,
-        previous_answers: BTreeMap<CalcId, Arc<dyn Any + Send + Sync>>,
-    ) {
-        // Reset all node states to Fresh for the new iteration.
+    /// Used for Phase 0 → iteration 1 and for demotion restarts. Clears all
+    /// iteration metadata (previous answers, recursion breaks, flags) and
+    /// resets every member state to Fresh.
+    fn reset_for_cold_start(&mut self) {
         for state in self.node_state.values_mut() {
             *state = SccNodeState::Fresh;
         }
         self.iterative = Some(SccIterationState {
-            iteration,
+            iteration: 1,
+            previous_answers: BTreeMap::new(),
+            demoted: false,
+            has_changed: false,
+            merge_happened: false,
+            recursion_breaks: BTreeSet::new(),
+        });
+    }
+
+    /// Advance to the next warm iteration during fixpoint progression.
+    ///
+    /// Moves current Done answers into `previous_answers` (via
+    /// `extract_done_answers`), resets all member states to Fresh, increments
+    /// the iteration counter, and clears flags.
+    #[allow(clippy::mutable_key_type)]
+    fn advance_to_next_warm_iteration(&mut self) {
+        let previous_answers = self.extract_done_answers();
+        let current_iteration = self
+            .iterative
+            .as_ref()
+            .expect("advance_to_next_warm_iteration: SCC has no iteration state")
+            .iteration;
+        for state in self.node_state.values_mut() {
+            *state = SccNodeState::Fresh;
+        }
+        self.iterative = Some(SccIterationState {
+            iteration: current_iteration + 1,
             previous_answers,
             demoted: false,
             has_changed: false,
             merge_happened: false,
             recursion_breaks: BTreeSet::new(),
         });
+    }
+
+    /// Returns the current iteration number. Panics if the SCC is not iterating.
+    fn iteration(&self) -> u32 {
+        self.iterative
+            .as_ref()
+            .expect("iteration: SCC has no iteration state")
+            .iteration
     }
 }
 
@@ -2826,26 +2855,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     #[allow(clippy::mutable_key_type)]
     fn iterative_resolve_scc(&self, mut scc: Scc) {
         let mut scc_identity = scc.detected_at.dupe();
-        let mut iteration: u32 = 1;
         let mut demotions: u32 = 0;
         let mut exceeded_max_iterations = false;
 
+        // Initial cold start at iteration 1.
+        scc.reset_for_cold_start();
+
         loop {
-            if iteration > MAX_ITERATIONS {
-                exceeded_max_iterations = true;
-                break;
-            }
-
-            // Extract previous answers from the prior iteration (if any).
-            let previous_answers = if iteration > 1 {
-                scc.extract_done_answers()
-            } else {
-                BTreeMap::new()
-            };
-
-            // Set up fresh iteration state for this iteration.
-            scc.set_fresh_iteration_state(iteration, previous_answers);
-
             // Push the SCC back onto the stack for this iteration.
             self.stack().push_scc(scc);
 
@@ -2904,17 +2920,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if demoted {
                 demotions += 1;
                 check_demotion_limit(demotions, &scc_identity);
-                iteration = 1;
+                scc.reset_for_cold_start();
                 continue;
+            }
+
+            // Max iterations check: must happen after pop (so nodes are still
+            // Done) but before advance (which resets nodes to Fresh).
+            if scc.iteration() >= MAX_ITERATIONS {
+                exceeded_max_iterations = true;
+                break;
             }
 
             // Convergence check: if this is iteration >= 2 and no answers
             // changed, the fixpoint has converged.
-            if iteration >= 2 && !has_changed {
+            if scc.iteration() >= 2 && !has_changed {
                 break;
             }
 
-            iteration += 1;
+            scc.advance_to_next_warm_iteration();
         }
 
         // Report non-convergence errors only at the recursion break points —
