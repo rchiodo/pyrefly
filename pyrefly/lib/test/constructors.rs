@@ -655,7 +655,6 @@ assert_type(C(False), C[B])
 );
 
 testcase!(
-    bug = "Should error when __init__ self type is not a superclass of the defining class",
     test_init_bad_receiver_annotation,
     r#"
 from typing import Literal, assert_type, overload
@@ -663,18 +662,44 @@ from typing import Literal, assert_type, overload
 class A: ...
 class B: ...
 class D:
-    def __init__(self: A): pass
+    def __init__(self: A): pass  # E: `__init__` method self type `A` is not a superclass of class `D`
 class E(A):
     def __init__(self: A): pass
 
 class C[T]:
     @overload
-    def __init__(self: A, x: Literal[True]) -> None: ...  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: A, x: Literal[True]) -> None` accepts
+    def __init__(self: A, x: Literal[True]) -> None: ...  # E: `__init__` method self type `A` is not a superclass of class `C`  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: A, x: Literal[True]) -> None` accepts
     @overload
-    def __init__(self: B, x: Literal[False]) -> None: ...  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: B, x: Literal[False]) -> None` accepts
+    def __init__(self: B, x: Literal[False]) -> None: ...  # E: `__init__` method self type `B` is not a superclass of class `C`  # E: Implementation signature `(self: Self@C, x: Unknown) -> None` does not accept all arguments that overload signature `(self: B, x: Literal[False]) -> None` accepts
     def __init__(self, x):
         pass
 
+    "#,
+);
+
+testcase!(
+    test_init_transitive_superclass_annotation,
+    r#"
+class A: ...
+class B(A): ...
+class C(B):
+    def __init__(self: A): pass
+
+class D(B):
+    def __init__(self: B): pass
+    "#,
+);
+
+testcase!(
+    test_init_non_classtype_self_annotation,
+    r#"
+from typing import Self, Any
+
+class E:
+    def __init__(self: Self): pass
+
+class F:
+    def __init__(self: Any): pass
     "#,
 );
 
