@@ -225,15 +225,30 @@ impl TParams {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[derive(Visit, VisitMut, TypeEq)]
-pub struct TArgs(Box<(Arc<TParams>, Box<[Type]>)>);
+#[derive(TypeEq)]
+pub struct TArgs(Arc<(Arc<TParams>, Box<[Type]>)>);
+
+impl Visit<Type> for TArgs {
+    fn recurse<'a>(&'a self, f: &mut dyn FnMut(&'a Type)) {
+        self.0.0.visit(f);
+        self.0.1.visit(f);
+    }
+}
+
+impl VisitMut<Type> for TArgs {
+    fn recurse_mut(&mut self, f: &mut dyn FnMut(&mut Type)) {
+        // Arc<TParams> has a no-op VisitMut, so we only need to visit the types.
+        let inner = Arc::make_mut(&mut self.0);
+        inner.1.visit_mut(f);
+    }
+}
 
 impl TArgs {
     pub fn new(tparams: Arc<TParams>, targs: Vec<Type>) -> Self {
         if tparams.len() != targs.len() {
             panic!("TParams and TArgs must have the same length");
         }
-        Self(Box::new((tparams, targs.into_boxed_slice())))
+        Self(Arc::new((tparams, targs.into_boxed_slice())))
     }
 
     pub fn tparams(&self) -> &TParams {
@@ -245,7 +260,8 @@ impl TArgs {
     }
 
     pub fn iter_paired_mut(&mut self) -> impl ExactSizeIterator<Item = (&Quantified, &mut Type)> {
-        self.0.0.iter().zip(self.0.1.iter_mut())
+        let inner = Arc::make_mut(&mut self.0);
+        inner.0.iter().zip(inner.1.iter_mut())
     }
 
     pub fn len(&self) -> usize {
@@ -257,7 +273,7 @@ impl TArgs {
     }
 
     pub fn as_mut(&mut self) -> &mut [Type] {
-        &mut self.0.1
+        &mut Arc::make_mut(&mut self.0).1
     }
 
     pub fn is_empty(&self) -> bool {
