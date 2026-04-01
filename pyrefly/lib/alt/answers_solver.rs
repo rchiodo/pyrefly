@@ -1045,12 +1045,16 @@ impl CalcStack {
         traces: Option<TraceSideEffects>,
     ) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let Some(top_scc) = scc_stack.last_mut() else {
+        let Some(top_scc) = scc_stack.last_mut().filter(|scc| scc.iterative.is_some()) else {
+            // TODO(stroxler): Consider panicking here once we're confident this
+            // path is unreachable in the LSP. The silent no-op may mask bugs.
+            debug_assert!(
+                false,
+                "set_iteration_node_done: no iterating SCC on the stack for {:?}",
+                target
+            );
             return;
         };
-        if top_scc.iterative.is_none() {
-            return;
-        }
         top_scc.node_state.insert(
             target.dupe(),
             SccNodeState::Done {
@@ -1073,10 +1077,13 @@ impl CalcStack {
     /// there is no iteration state left to update and skipping is safe.
     fn mark_iteration_changed(&self) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let Some(top_scc) = scc_stack.last_mut() else {
-            return;
-        };
-        let Some(iter_state) = top_scc.iterative.as_mut() else {
+        let Some(iter_state) = scc_stack.last_mut().and_then(|scc| scc.iterative.as_mut()) else {
+            // TODO(stroxler): Consider panicking here once we're confident this
+            // path is unreachable in the LSP. The silent no-op may mask bugs.
+            debug_assert!(
+                false,
+                "mark_iteration_changed: no iterating SCC on the stack"
+            );
             return;
         };
         iter_state.has_changed = true;
@@ -1265,6 +1272,14 @@ impl CalcStack {
             && scc.iterative.is_some()
         {
             scc.node_state.remove(calc_id);
+        } else {
+            // TODO(stroxler): Consider panicking here once we're confident this
+            // path is unreachable in the LSP. The silent no-op may mask bugs.
+            debug_assert!(
+                false,
+                "remove_from_iteration_state: no iterating SCC on the stack for {:?}",
+                calc_id
+            );
         }
     }
 }
