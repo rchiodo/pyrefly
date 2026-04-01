@@ -1001,7 +1001,7 @@ impl CheckArgs {
         } else {
             (errors.directives, errors.ordinary)
         };
-        let mut ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
+        let ordinary_errors: Vec<_> = if let Some(only) = &self.output.only {
             let only = only.iter().collect::<SmallSet<_>>();
             let filtered: Vec<_> = unused_ignore_errors
                 .ordinary
@@ -1037,7 +1037,9 @@ impl CheckArgs {
         // Filter by minimum severity. Directives are not subject to this
         // filter — they are merged separately in the output step below.
         let min_severity = self.output.min_severity.unwrap_or(Severity::Error);
-        ordinary_errors.retain(|e| e.severity() >= min_severity);
+        let (ordinary_errors, hidden_errors): (Vec<_>, Vec<_>) = ordinary_errors
+            .into_iter()
+            .partition(|e| e.severity() >= min_severity);
 
         // We update the baseline file if requested, after reporting any new
         // errors using the old baseline. Directives are structurally excluded
@@ -1103,15 +1105,35 @@ impl CheckArgs {
 
         if self.output.summary != Summary::None {
             let suppress_count = errors.suppressed.len();
-            if suppress_count == 0 {
-                info!("{}", count(ordinary_errors_count, "error"))
+            let mut parts = vec![count(ordinary_errors_count, "error")];
+            if suppress_count > 0 {
+                parts.push(format!("{} suppressed", number_thousands(suppress_count)));
+            }
+            if !hidden_errors.is_empty() {
+                let mut hidden_warnings = 0;
+                let mut hidden_info = 0;
+                for e in hidden_errors {
+                    match e.severity() {
+                        Severity::Error => panic!("Error-level findings can never be hidden"),
+                        Severity::Warn => hidden_warnings += 1,
+                        Severity::Info => hidden_info += 1,
+                        Severity::Ignore => {}
+                    }
+                }
+                let mut hidden_parts = Vec::new();
+                if hidden_warnings > 0 {
+                    hidden_parts.push(count(hidden_warnings, "warning"));
+                }
+                if hidden_info > 0 {
+                    hidden_parts.push(count(hidden_info, "info message"));
+                }
+                parts.push(format!("{} not shown", hidden_parts.join(" and ")));
+            }
+            if parts.len() == 1 {
+                info!("{}", parts[0]);
             } else {
-                info!(
-                    "{} ({} suppressed)",
-                    count(ordinary_errors_count, "error"),
-                    number_thousands(suppress_count)
-                )
-            };
+                info!("{} ({})", parts[0], parts[1..].join(", "));
+            }
         }
         if self.output.summary == Summary::Full {
             let user_handles: HashSet<&Handle> = handles.iter().collect();
