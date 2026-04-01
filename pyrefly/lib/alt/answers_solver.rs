@@ -991,7 +991,7 @@ impl CalcStack {
             matches!(node_state, IterationNodeState::Fresh),
             "set_iteration_node_in_progress called on non-Fresh node: {target:?}"
         );
-        *node_state = IterationNodeState::InProgress { placeholder: None };
+        *node_state = IterationNodeState::InProgress;
     }
 
     /// Set the placeholder variable on an existing `InProgress` iteration
@@ -1010,8 +1010,8 @@ impl CalcStack {
             .get_mut(target)
             .expect("target is not a member of the iterating SCC");
         match node_state {
-            IterationNodeState::InProgress { placeholder } => {
-                *placeholder = Some(var);
+            IterationNodeState::InProgress => {
+                *node_state = IterationNodeState::HasPlaceholder(var);
             }
             _ => panic!(
                 "set_iteration_placeholder called on a node that is not InProgress: {:?}",
@@ -1030,9 +1030,7 @@ impl CalcStack {
         let top_scc = scc_stack.last()?;
         let iter_state = top_scc.iterative.as_ref()?;
         match iter_state.node_states.get(target)? {
-            IterationNodeState::InProgress {
-                placeholder: Some(var),
-            } => Some(*var),
+            IterationNodeState::HasPlaceholder(var) => Some(*var),
             _ => None,
         }
     }
@@ -1443,20 +1441,16 @@ pub struct SccIterationState {
 /// This is separate from the legacy `NodeState` used during Phase 0 discovery.
 /// State transitions within one iteration:
 /// - `Fresh` -> `InProgress` (when we start solving this node)
-/// - `InProgress` -> `Done` (when the node's calculation completes)
-///
-/// The `placeholder` in `InProgress` is set when a cold-start back-edge
-/// allocates a recursive variable for cycle breaking.
+/// - `InProgress` -> `HasPlaceholder(Var)` (when a back-edge allocates a placeholder)
+/// - `InProgress` or `HasPlaceholder` -> `Done` (when the node's calculation completes)
 #[derive(Debug, Clone)]
 pub enum IterationNodeState {
     /// Not yet processed in this iteration.
     Fresh,
-    /// Currently being solved; may have a placeholder for cycle breaking.
-    InProgress {
-        /// Placeholder variable allocated for cold-start cycle breaking.
-        /// `None` until a back-edge triggers `NeedsColdPlaceholder`.
-        placeholder: Option<Var>,
-    },
+    /// Currently being solved; no placeholder yet.
+    InProgress,
+    /// A placeholder variable has been allocated for cold-start cycle breaking.
+    HasPlaceholder(Var),
     /// Solved in this iteration. Stores the type-erased answer and errors.
     Done {
         /// The computed answer for this node in this iteration.
@@ -1496,10 +1490,10 @@ impl IterationNodeState {
     pub fn kind(&self, has_previous_answer: bool) -> IterationNodeStateKind {
         match self {
             IterationNodeState::Fresh => IterationNodeStateKind::Fresh,
-            IterationNodeState::InProgress {
-                placeholder: Some(_),
-            } => IterationNodeStateKind::InProgressWithPlaceholder,
-            IterationNodeState::InProgress { placeholder: None } => {
+            IterationNodeState::HasPlaceholder(_) => {
+                IterationNodeStateKind::InProgressWithPlaceholder
+            }
+            IterationNodeState::InProgress => {
                 if has_previous_answer {
                     IterationNodeStateKind::InProgressWithPreviousAnswer
                 } else {
@@ -2781,7 +2775,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     errors,
                     traces,
                 } => (calc_id, answer, errors, traces),
-                IterationNodeState::Fresh | IterationNodeState::InProgress { .. } => {
+                IterationNodeState::Fresh
+                | IterationNodeState::InProgress
+                | IterationNodeState::HasPlaceholder(_) => {
                     panic!(
                         "commit_final_answers: node {} is {:?} at commit time",
                         calc_id, node_state,
