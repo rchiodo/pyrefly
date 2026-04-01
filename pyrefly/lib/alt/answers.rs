@@ -913,7 +913,7 @@ impl Answers {
         // Get the calculation cell from the answer table
         if let Some(calculation) = self.table.get::<K>().get(idx) {
             // No recursive placeholder can exist in the Calculation cell because
-            // placeholders are stored only in SCC-local NodeState::HasPlaceholder.
+            // placeholders are stored only in SCC-local SccNodeState::HasPlaceholder.
             let (_answer, did_write) = calculation.record_value(typed_answer);
             did_write
         } else {

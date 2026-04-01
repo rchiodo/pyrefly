@@ -2662,7 +2662,7 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
                 // Only extend errors if this write won the first-write-wins race.
                 if did_write && let (Some(errors), Some(target_load)) = (errors, load) {
                     // The errors Arc should have refcount 1 here: batch_commit_scc
-                    // consumes the Scc (moved into the method), and each NodeState::Done
+                    // consumes the Scc (moved into the method), and each SccNodeState::Done
                     // is destructured by the for loop, so no other references remain.
                     // If this invariant is violated, something is holding an unexpected
                     // reference to the error collector, which could cause silent error
