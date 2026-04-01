@@ -141,14 +141,14 @@ impl SlotCounts {
     }
 }
 
-#[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct Location {
     line: usize,
     column: usize,
 }
 
-/// Parameter information
 #[derive(Debug, Serialize)]
+/// Information about a single function parameter.
 struct Parameter {
     name: String,
     annotation: Option<String>,
@@ -179,14 +179,12 @@ struct Function {
     location: Location,
 }
 
-/// An incomplete attribute within a class (method with missing annotations)
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct IncompleteAttribute {
     name: String,
     declared_in: String,
 }
 
-/// Information about a class with incomplete annotations
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct ReportClass {
     name: String,
@@ -202,13 +200,49 @@ struct Variable {
     location: Location,
 }
 
+/// Per-symbol report with kind discriminator matching typestats' model.
 #[derive(Debug, Serialize)]
-struct FileReport {
-    variables: Vec<Variable>,
+#[serde(tag = "kind")]
+enum SymbolReport {
+    #[serde(rename = "attr")]
+    Attr {
+        name: String,
+        #[serde(flatten)]
+        slots: SlotCounts,
+        location: Location,
+    },
+    #[serde(rename = "function")]
+    Function {
+        name: String,
+        #[serde(flatten)]
+        slots: SlotCounts,
+        location: Location,
+    },
+    #[serde(rename = "class")]
+    Class {
+        name: String,
+        #[serde(flatten)]
+        slots: SlotCounts,
+        location: Location,
+    },
+    #[serde(rename = "property")]
+    Property {
+        name: String,
+        #[serde(flatten)]
+        slots: SlotCounts,
+        location: Location,
+    },
+}
+
+#[derive(Debug, Serialize)]
+struct ModuleReport {
+    /// Fully-qualified module name (e.g. "mypackage.submodule").
+    name: String,
+    /// Names of symbols defined in this module.
+    names: Vec<String>,
     line_count: usize,
-    functions: Vec<Function>,
-    classes: Vec<ReportClass>,
-    suppressions: Vec<ReportSuppression>,
+    symbol_reports: Vec<SymbolReport>,
+    type_ignores: Vec<ReportSuppression>,
     #[serde(flatten)]
     slots: SlotCounts,
     coverage: f64,
@@ -217,16 +251,24 @@ struct FileReport {
 
 #[derive(Debug, Serialize)]
 struct ReportSummary {
-    total_files: usize,
+    n_modules: usize,
     #[serde(flatten)]
     slots: SlotCounts,
     coverage: f64,
     strict_coverage: f64,
+    n_functions: usize,
+    n_methods: usize,
+    n_function_params: usize,
+    n_method_params: usize,
+    n_classes: usize,
+    n_attrs: usize,
+    n_properties: usize,
+    n_type_ignores: usize,
 }
 
 #[derive(Debug, Serialize)]
 struct FullReport {
-    files: HashMap<String, FileReport>,
+    module_reports: Vec<ModuleReport>,
     summary: ReportSummary,
 }
 
@@ -289,9 +331,8 @@ impl ReportArgs {
     fn parse_suppressions(module: &Module) -> Vec<ReportSuppression> {
         let source = module.lined_buffer().contents();
         let ignore = Ignore::new(source);
-
-        let lines: Vec<&str> = source.lines().collect();
         let mut suppressions = Vec::new();
+        let lines: Vec<&str> = source.lines().collect();
 
         for (_line_number, supps) in ignore.iter() {
             for supp in supps {
@@ -600,20 +641,68 @@ impl ReportArgs {
         !ty.any(|t| t.is_any())
     }
 
-    /// Calculate the aggregate summary for all file reports.
-    fn calculate_summary(files: &HashMap<String, FileReport>) -> ReportSummary {
-        let total_files = files.len();
-        let mut total_slots = SlotCounts::default();
+    /// Determine whether a function name represents a method (contains '.', i.e. `Cls.method`).
+    fn is_method(name: &str, module_prefix: &str) -> bool {
+        let without_prefix = name.strip_prefix(module_prefix).unwrap_or(name);
+        without_prefix.contains('.')
+    }
 
-        for file in files.values() {
-            total_slots = total_slots.merge(file.slots);
+    /// Calculate the aggregate summary for all module reports.
+    fn calculate_summary(module_reports: &[ModuleReport]) -> ReportSummary {
+        let n_modules = module_reports.len();
+        let mut total_slots = SlotCounts::default();
+        let mut n_functions = 0usize;
+        let mut n_methods = 0usize;
+        let mut n_function_params = 0usize;
+        let mut n_method_params = 0usize;
+        let mut n_classes = 0usize;
+        let mut n_attrs = 0usize;
+        let mut n_properties = 0usize;
+        let mut n_type_ignores = 0usize;
+
+        for module in module_reports {
+            total_slots = total_slots.merge(module.slots);
+            n_type_ignores += module.type_ignores.len();
+
+            let module_prefix = format!("{}.", module.name);
+            for sym in &module.symbol_reports {
+                match sym {
+                    SymbolReport::Function { name, slots, .. } => {
+                        let params = slots.n_typable.saturating_sub(1);
+                        if Self::is_method(name, &module_prefix) {
+                            n_methods += 1;
+                            n_method_params += params;
+                        } else {
+                            n_functions += 1;
+                            n_function_params += params;
+                        }
+                    }
+                    SymbolReport::Property { .. } => {
+                        n_properties += 1;
+                    }
+                    SymbolReport::Attr { .. } => {
+                        n_attrs += 1;
+                    }
+                    SymbolReport::Class { .. } => {
+                        n_classes += 1;
+                    }
+                }
+            }
         }
 
         ReportSummary {
-            total_files,
+            n_modules,
             slots: total_slots,
             coverage: total_slots.coverage(),
             strict_coverage: total_slots.strict_coverage(),
+            n_functions,
+            n_methods,
+            n_function_params,
+            n_method_params,
+            n_classes,
+            n_attrs,
+            n_properties,
+            n_type_ignores,
         }
     }
 
@@ -716,7 +805,8 @@ impl ReportArgs {
                     };
                     for field_name in ancestor_class_fields.names() {
                         let field_name_str = field_name.to_string();
-                        // Skip if we already have this attribute listed (it has been overridden by the current class or another class in the MRO)
+                        // Skip if we already have this attribute listed (it has been overridden
+                        // by the current class or another class in the MRO)
                         if incomplete_attributes
                             .iter()
                             .any(|a| a.name == field_name_str)
@@ -790,6 +880,67 @@ impl ReportArgs {
         }
     }
 
+    fn build_module_report(
+        name: String,
+        line_count: usize,
+        functions: &[Function],
+        variables: &[Variable],
+        classes: &[ReportClass],
+        suppressions: Vec<ReportSuppression>,
+    ) -> ModuleReport {
+        let mut symbol_reports = Vec::new();
+        let mut total_slots = SlotCounts::default();
+        let mut names = Vec::new();
+
+        for var in variables {
+            total_slots = total_slots.merge(var.slots);
+            names.push(var.name.clone());
+            symbol_reports.push(SymbolReport::Attr {
+                name: var.name.clone(),
+                slots: var.slots,
+                location: var.location,
+            });
+        }
+
+        for func in functions {
+            total_slots = total_slots.merge(func.slots);
+            names.push(func.name.clone());
+            if func.is_property {
+                symbol_reports.push(SymbolReport::Property {
+                    name: func.name.clone(),
+                    slots: func.slots,
+                    location: func.location,
+                });
+            } else {
+                symbol_reports.push(SymbolReport::Function {
+                    name: func.name.clone(),
+                    slots: func.slots,
+                    location: func.location,
+                });
+            }
+        }
+
+        for cls in classes {
+            names.push(cls.name.clone());
+            symbol_reports.push(SymbolReport::Class {
+                name: cls.name.clone(),
+                slots: SlotCounts::default(),
+                location: cls.location,
+            });
+        }
+
+        ModuleReport {
+            name,
+            names,
+            line_count,
+            symbol_reports,
+            type_ignores: suppressions,
+            coverage: total_slots.coverage(),
+            strict_coverage: total_slots.strict_coverage(),
+            slots: total_slots,
+        }
+    }
+
     fn run_inner(
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
@@ -815,7 +966,7 @@ impl ReportArgs {
             return Err(anyhow::anyhow!("Failed to query sourcedb."));
         }
 
-        let mut report: HashMap<String, FileReport> = HashMap::new();
+        let mut module_reports: Vec<ModuleReport> = Vec::new();
         transaction.run(handles.as_slice(), Require::Everything, None);
 
         let shadowed = if prefer_stubs {
@@ -825,8 +976,7 @@ impl ReportArgs {
         };
 
         // When prefer_stubs is true, build a mapping from .pyi paths to their
-        // corresponding .py handles. This allows us to cross-reference exports
-        // and include uncovered .py symbols in the completeness calculations.
+        // corresponding .py handles.
         let pyi_to_py: HashMap<PathBuf, &Handle> = if prefer_stubs {
             let py_by_path: HashMap<PathBuf, &Handle> = handles
                 .iter()
@@ -865,10 +1015,7 @@ impl ReportArgs {
                 );
                 let suppressions = Self::parse_suppressions(&module);
 
-                // When a .pyi stub shadows a .py file, the stub may only cover
-                // a subset of the .py's public symbols. Include uncovered .py
-                // symbols so that the completeness denominator reflects the full
-                // module interface.
+                // When a .pyi stub shadows a .py file, include uncovered .py symbols.
                 if let Some(py_handle) = pyi_to_py.get(&handle.path().as_path().to_path_buf())
                     && let Some(py_bindings) = transaction.get_bindings(py_handle)
                     && let Some(py_module) = transaction.get_module_info(py_handle)
@@ -902,28 +1049,22 @@ impl ReportArgs {
                     );
                 }
 
-                let total_slots = SlotCounts::total(&functions, &variables);
-
-                report.insert(
-                    handle.module().to_string(),
-                    FileReport {
-                        variables,
-                        line_count,
-                        functions,
-                        classes,
-                        suppressions,
-                        slots: total_slots,
-                        coverage: total_slots.coverage(),
-                        strict_coverage: total_slots.strict_coverage(),
-                    },
+                let name = handle.module().to_string();
+                let module_report = Self::build_module_report(
+                    name,
+                    line_count,
+                    &functions,
+                    &variables,
+                    &classes,
+                    suppressions,
                 );
+                module_reports.push(module_report);
             }
         }
 
-        // Output JSON
-        let summary = Self::calculate_summary(&report);
+        let summary = Self::calculate_summary(&module_reports);
         let full_report = FullReport {
-            files: report,
+            module_reports,
             summary,
         };
         let json = serde_json::to_string_pretty(&full_report)?;
@@ -979,9 +1120,9 @@ mod tests {
         );
     }
 
-    /// Build a full `FileReport` from a checked-in Python test file,
+    /// Build a `ModuleReport` from a checked-in Python test file,
     /// mirroring the production pipeline in `run_inner`.
-    fn build_file_report(py_file: &str) -> FileReport {
+    fn build_module_report_for_test(py_file: &str) -> ModuleReport {
         let code = load_test_file(py_file);
         let (state, handle_fn) = TestEnv::one("test", &code)
             .with_default_require_level(Require::Everything)
@@ -1003,24 +1144,20 @@ mod tests {
         );
         let suppressions = ReportArgs::parse_suppressions(&module);
 
-        let total_slots = SlotCounts::total(&functions, &variables);
-
-        FileReport {
-            variables,
+        ReportArgs::build_module_report(
+            "test".to_owned(),
             line_count,
-            functions,
-            classes,
+            &functions,
+            &variables,
+            &classes,
             suppressions,
-            slots: total_slots,
-            coverage: total_slots.coverage(),
-            strict_coverage: total_slots.strict_coverage(),
-        }
+        )
     }
 
-    /// Build a `FileReport` that merges a `.pyi` stub with its `.py` source,
+    /// Build a `ModuleReport` that merges a `.pyi` stub with its `.py` source,
     /// mirroring the production pipeline in `run_inner` when `prefer_stubs` is
     /// true and both files exist for the same module.
-    fn build_stub_report(pyi_file: &str, py_file: &str) -> FileReport {
+    fn build_stub_module_report(pyi_file: &str, py_file: &str) -> ModuleReport {
         // Parse the stub
         let pyi_code = load_test_file(pyi_file);
         let (pyi_state, pyi_handle_fn) = TestEnv::one_with_path("test", "test.pyi", &pyi_code)
@@ -1079,59 +1216,55 @@ mod tests {
             py_classes,
         );
 
-        let total_slots = SlotCounts::total(&functions, &variables);
-
-        FileReport {
-            variables,
+        ReportArgs::build_module_report(
+            "test".to_owned(),
             line_count,
-            functions,
-            classes,
+            &functions,
+            &variables,
+            &classes,
             suppressions,
-            slots: total_slots,
-            coverage: total_slots.coverage(),
-            strict_coverage: total_slots.strict_coverage(),
-        }
+        )
     }
 
     #[test]
     fn test_report_suppressions() {
-        let report = build_file_report("suppressions.py");
+        let report = build_module_report_for_test("suppressions.py");
         compare_snapshot("suppressions.expected.json", &report);
     }
 
     #[test]
     fn test_report_variables() {
-        let report = build_file_report("variables.py");
+        let report = build_module_report_for_test("variables.py");
         compare_snapshot("variables.expected.json", &report);
     }
 
     #[test]
     fn test_report_functions() {
-        let report = build_file_report("functions.py");
+        let report = build_module_report_for_test("functions.py");
         compare_snapshot("functions.expected.json", &report);
     }
 
     #[test]
     fn test_report_incomplete_methods() {
-        let report = build_file_report("incomplete_methods.py");
+        let report = build_module_report_for_test("incomplete_methods.py");
         compare_snapshot("incomplete_methods.expected.json", &report);
     }
 
     #[test]
     fn test_report_nested_classes() {
-        let report = build_file_report("nested_classes.py");
+        let report = build_module_report_for_test("nested_classes.py");
         compare_snapshot("nested_classes.expected.json", &report);
     }
 
     #[test]
     fn test_report_inheritance() {
-        let report = build_file_report("inheritance.py");
+        let report = build_module_report_for_test("inheritance.py");
         compare_snapshot("inheritance.expected.json", &report);
     }
 
     #[test]
     fn test_report_nested_exclusions() {
-        let report = build_file_report("nested_exclusions.py");
+        let report = build_module_report_for_test("nested_exclusions.py");
         compare_snapshot("nested_exclusions.expected.json", &report);
     }
 
@@ -1139,7 +1272,7 @@ mod tests {
     /// the uncovered symbols appear as unannotated and reduce completeness.
     #[test]
     fn test_report_partial_stub() {
-        let report = build_stub_report("partial_stub.pyi", "partial_stub.py");
+        let report = build_stub_module_report("partial_stub.pyi", "partial_stub.py");
         compare_snapshot("partial_stub.expected.json", &report);
     }
 
@@ -1181,6 +1314,7 @@ mod tests {
 
     #[test]
     fn test_slot_counts() {
+        // Verify slot classification
         let typed = SlotCounts::typed();
         assert_eq!(typed.n_typable, 1);
         assert_eq!(typed.n_typed, 1);
@@ -1199,15 +1333,18 @@ mod tests {
         assert_eq!(untyped.n_any, 0);
         assert_eq!(untyped.n_untyped, 1);
 
+        // Merge
         let merged = typed.merge(any).merge(untyped);
         assert_eq!(merged.n_typable, 3);
         assert_eq!(merged.n_typed, 1);
         assert_eq!(merged.n_any, 1);
         assert_eq!(merged.n_untyped, 1);
 
+        // Coverage
         assert!((merged.coverage() - 66.66666666666667).abs() < 0.001);
         assert!((merged.strict_coverage() - 33.33333333333333).abs() < 0.001);
 
+        // Empty → 100%
         let empty = SlotCounts::default();
         assert_eq!(empty.coverage(), 100.0);
         assert_eq!(empty.strict_coverage(), 100.0);
@@ -1215,6 +1352,7 @@ mod tests {
 
     #[test]
     fn test_is_fully_annotated() {
+        /// Helper to create a Function for testing annotation completeness.
         fn make_function(name: &str, has_return: bool, params: Vec<(&str, bool)>) -> Function {
             Function {
                 name: name.to_owned(),
@@ -1237,13 +1375,16 @@ mod tests {
                         location: Location { line: 1, column: 1 },
                     })
                     .collect(),
-                is_type_known: false,
+                is_type_known: false, // Not relevant for annotation-only tests
                 is_property: false,
                 slots: SlotCounts::default(),
                 location: Location { line: 1, column: 1 },
             }
         }
 
+        /// Check if a function is fully annotated. A function is fully annotated if
+        /// it has a return annotation and all parameters have annotations. Only the
+        /// first parameter named `self`/`cls` is exempt.
         fn is_fully_annotated(function: &Function) -> bool {
             if function.return_annotation.is_none() {
                 return false;
@@ -1255,42 +1396,49 @@ mod tests {
                 .all(|(i, p)| ReportArgs::is_self_or_cls(i, &p.name) || p.annotation.is_some())
         }
 
+        // Fully annotated function
         assert!(is_fully_annotated(&make_function(
             "foo",
             true,
             vec![("x", true)]
         )));
 
+        // self as first param is exempt
         assert!(is_fully_annotated(&make_function(
             "bar",
             true,
             vec![("self", false), ("y", true)]
         )));
 
+        // cls as first param is exempt
         assert!(is_fully_annotated(&make_function(
             "cls_method",
             true,
             vec![("cls", false)]
         )));
 
+        // Missing return annotation
         assert!(!is_fully_annotated(&make_function(
             "no_return",
             false,
             vec![]
         )));
 
+        // Missing parameter annotation
         assert!(!is_fully_annotated(&make_function(
             "missing_param",
             true,
             vec![("x", false)]
         )));
 
+        // "self" as a non-first parameter should NOT be exempt
         assert!(!is_fully_annotated(&make_function(
             "bad_self",
             true,
             vec![("x", true), ("self", false)]
         )));
 
+        // "cls" as a non-first parameter should NOT be exempt
         assert!(!is_fully_annotated(&make_function(
             "bad_cls",
             true,
@@ -1303,14 +1451,14 @@ mod tests {
     /// Any-typed annotations: typed for coverage, untyped for strict_coverage.
     #[test]
     fn test_report_any_annotations() {
-        let report = build_file_report("any_annotations.py");
+        let report = build_module_report_for_test("any_annotations.py");
         compare_snapshot("any_annotations.expected.json", &report);
     }
 
     /// String annotations ("int") and Annotated unwrapping.
     #[test]
     fn test_report_string_annotations() {
-        let report = build_file_report("string_annotations.py");
+        let report = build_module_report_for_test("string_annotations.py");
         compare_snapshot("string_annotations.expected.json", &report);
     }
 
@@ -1324,7 +1472,7 @@ mod tests {
     /// Typestats: single PropertyReport with fget/fset/fdel slot counts.
     #[test]
     fn test_report_property_basic() {
-        let report = build_file_report("property_basic.py");
+        let report = build_module_report_for_test("property_basic.py");
         compare_snapshot("property_basic.expected.json", &report);
     }
 
@@ -1333,7 +1481,7 @@ mod tests {
     /// Typestats: overloads are merged with worst-wins annotation logic.
     #[test]
     fn test_report_overloads() {
-        let report = build_file_report("overloads.py");
+        let report = build_module_report_for_test("overloads.py");
         compare_snapshot("overloads.expected.json", &report);
     }
 
@@ -1342,7 +1490,7 @@ mod tests {
     /// Typestats: schema fields are IMPLICIT (0 typable).
     #[test]
     fn test_report_schema_classes() {
-        let report = build_file_report("schema_classes.py");
+        let report = build_module_report_for_test("schema_classes.py");
         compare_snapshot("schema_classes.expected.json", &report);
     }
 
@@ -1351,7 +1499,7 @@ mod tests {
     /// Typestats: self.x in __init__ is collected as a class member.
     #[test]
     fn test_report_instance_attrs() {
-        let report = build_file_report("instance_attrs.py");
+        let report = build_module_report_for_test("instance_attrs.py");
         compare_snapshot("instance_attrs.expected.json", &report);
     }
 
@@ -1359,7 +1507,7 @@ mod tests {
     /// Current: decorators are reported as regular methods.
     #[test]
     fn test_report_decorators() {
-        let report = build_file_report("decorators.py");
+        let report = build_module_report_for_test("decorators.py");
         compare_snapshot("decorators.expected.json", &report);
     }
 
@@ -1368,7 +1516,7 @@ mod tests {
     /// Typestats: method aliases are copied as Function symbols.
     #[test]
     fn test_report_method_aliases() {
-        let report = build_file_report("method_aliases.py");
+        let report = build_module_report_for_test("method_aliases.py");
         compare_snapshot("method_aliases.expected.json", &report);
     }
 }

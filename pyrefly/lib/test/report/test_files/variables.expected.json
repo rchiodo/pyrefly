@@ -1,94 +1,89 @@
 {
-  "variables": [
+  "name": "test",
+  "names": [
+    "test.T",
+    "test.x",
+    "test.y",
+    "test.z",
+    "test.some_func",
+    "test.SomeClass"
+  ],
+  "line_count": 20,
+  "symbol_reports": [
     {
+      "kind": "attr",
       "name": "test.T",
-      "annotation": null,
-      "slots": {
-        "n_typable": 1,
-        "n_typed": 0,
-        "n_any": 0,
-        "n_untyped": 1
-      },
+      "n_typable": 1,
+      "n_typed": 0,
+      "n_any": 0,
+      "n_untyped": 1,
       "location": {
         "line": 8,
         "column": 1
       }
     },
     {
+      "kind": "attr",
       "name": "test.x",
-      "annotation": null,
-      "slots": {
-        "n_typable": 1,
-        "n_typed": 0,
-        "n_any": 0,
-        "n_untyped": 1
-      },
+      "n_typable": 1,
+      "n_typed": 0,
+      "n_any": 0,
+      "n_untyped": 1,
       "location": {
         "line": 9,
         "column": 1
       }
     },
     {
+      "kind": "attr",
       "name": "test.y",
-      "annotation": "Callable[[int], int]",
-      "slots": {
-        "n_typable": 1,
-        "n_typed": 1,
-        "n_any": 0,
-        "n_untyped": 0
-      },
+      "n_typable": 1,
+      "n_typed": 1,
+      "n_any": 0,
+      "n_untyped": 0,
       "location": {
         "line": 10,
         "column": 1
       }
     },
     {
+      "kind": "attr",
       "name": "test.z",
-      "annotation": "str",
-      "slots": {
-        "n_typable": 1,
-        "n_typed": 1,
-        "n_any": 0,
-        "n_untyped": 0
-      },
+      "n_typable": 1,
+      "n_typed": 1,
+      "n_any": 0,
+      "n_untyped": 0,
       "location": {
         "line": 11,
         "column": 1
       }
-    }
-  ],
-  "line_count": 20,
-  "functions": [
+    },
     {
+      "kind": "function",
       "name": "test.some_func",
-      "return_annotation": "None",
-      "is_return_type_known": true,
-      "parameters": [],
-      "is_type_known": true,
-      "is_property": false,
-      "slots": {
-        "n_typable": 1,
-        "n_typed": 1,
-        "n_any": 0,
-        "n_untyped": 0
-      },
+      "n_typable": 1,
+      "n_typed": 1,
+      "n_any": 0,
+      "n_untyped": 0,
       "location": {
         "line": 14,
         "column": 1
       }
-    }
-  ],
-  "classes": [
+    },
     {
+      "kind": "class",
       "name": "test.SomeClass",
-      "incomplete_attributes": [],
+      "n_typable": 0,
+      "n_typed": 0,
+      "n_any": 0,
+      "n_untyped": 0,
       "location": {
         "line": 18,
         "column": 1
       }
     }
   ],
-  "suppressions": [],
+  "type_ignores": [],
   "n_typable": 5,
   "n_typed": 3,
   "n_any": 0,
