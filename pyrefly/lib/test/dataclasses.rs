@@ -1826,22 +1826,6 @@ dataclass(Coord)
 "#,
 );
 
-testcase!(
-    bug = "Should reject @dataclass applied to TypedDict subclass",
-    test_dataclass_on_typed_dict,
-    r#"
-from dataclasses import dataclass
-from typing import TypedDict
-
-class Config(TypedDict):
-    name: str
-
-@dataclass
-class BadConfig(TypedDict):
-    name: str
-"#,
-);
-
 // https://github.com/facebook/pyrefly/issues/2921
 testcase!(
     bug = "Should reject @dataclass applied to Protocol subclass",

@@ -380,6 +380,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_attrs_class,
             protocol_metadata.is_some(),
             enum_metadata.is_some(),
+            is_typed_dict,
             errors,
         );
         if let Some(dm) = dataclass_metadata.as_ref()
@@ -882,6 +883,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         is_attrs_class: bool,
         is_protocol: bool,
         is_enum: bool,
+        is_typed_dict: bool,
         errors: &ErrorCollector,
     ) -> Option<DataclassMetadata> {
         // If we inherit from a dataclass, inherit its metadata. Note that if this class is
@@ -949,7 +951,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ => {}
             }
         }
-        // @dataclass cannot be applied to Protocol or Enum classes.
+        // @dataclass cannot be applied to Protocol, Enum, or TypedDict classes.
         // Emit the error and return None so the class is not treated as a dataclass.
         if has_dataclass_decorator {
             if is_protocol {
@@ -970,6 +972,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     cls.range(),
                     ErrorInfo::Kind(ErrorKind::BadClassDefinition),
                     format!("Cannot apply `@dataclass` to Enum `{}`", cls.name()),
+                );
+                return None;
+            }
+            if is_typed_dict {
+                self.error(
+                    errors,
+                    cls.range(),
+                    ErrorInfo::Kind(ErrorKind::BadClassDefinition),
+                    format!("Cannot apply `@dataclass` to TypedDict `{}`", cls.name()),
                 );
                 return None;
             }
