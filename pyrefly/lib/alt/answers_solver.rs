@@ -299,27 +299,25 @@ impl CalcStack {
                 // will typically be Fresh or InProgress. Handle all cases.
                 if let Some(kind) = self.get_iteration_node_state(&current) {
                     return match kind {
-                        IterationNodeStateKind::Fresh => {
+                        SccNodeStateKind::Fresh => {
                             self.set_iteration_node_in_progress(&current);
                             BindingAction::Calculate
                         }
-                        IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                        SccNodeStateKind::InProgressWithPreviousAnswer => {
                             self.mark_recursion_break(&current);
                             let answer = self.get_previous_answer(&current).expect(
                                 "InProgressWithPreviousAnswer but no previous answer found",
                             );
                             BindingAction::SccLocalAnswer(answer)
                         }
-                        IterationNodeStateKind::InProgressWithPlaceholder => {
+                        SccNodeStateKind::InProgressWithPlaceholder => {
                             let var = self
                                 .get_iteration_placeholder(&current)
                                 .expect("InProgressWithPlaceholder but no placeholder found");
                             BindingAction::CycleBroken(var)
                         }
-                        IterationNodeStateKind::InProgressCold => {
-                            BindingAction::NeedsColdPlaceholder
-                        }
-                        IterationNodeStateKind::Done => {
+                        SccNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
+                        SccNodeStateKind::Done => {
                             let answer = self
                                 .get_iteration_done_answer(&current)
                                 .expect("Done iteration node state but no answer found");
@@ -346,25 +344,25 @@ impl CalcStack {
             }
             if let Some(kind) = self.get_iteration_node_state(&current) {
                 return match kind {
-                    IterationNodeStateKind::Fresh => {
+                    SccNodeStateKind::Fresh => {
                         self.set_iteration_node_in_progress(&current);
                         BindingAction::Calculate
                     }
-                    IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                    SccNodeStateKind::InProgressWithPreviousAnswer => {
                         self.mark_recursion_break(&current);
                         let answer = self
                             .get_previous_answer(&current)
                             .expect("InProgressWithPreviousAnswer but no previous answer found");
                         BindingAction::SccLocalAnswer(answer)
                     }
-                    IterationNodeStateKind::InProgressWithPlaceholder => {
+                    SccNodeStateKind::InProgressWithPlaceholder => {
                         let var = self
                             .get_iteration_placeholder(&current)
                             .expect("InProgressWithPlaceholder but no placeholder found");
                         BindingAction::CycleBroken(var)
                     }
-                    IterationNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
-                    IterationNodeStateKind::Done => {
+                    SccNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
+                    SccNodeStateKind::Done => {
                         let answer = self
                             .get_iteration_done_answer(&current)
                             .expect("Done iteration node state but no answer found");
@@ -387,7 +385,7 @@ impl CalcStack {
         // instead of falling through to the legacy SCC logic.
         //
         // Borrow safety: `get_iteration_node_state` returns an owned
-        // `IterationNodeStateKind`, so the shared borrow on `scc_stack` is
+        // `SccNodeStateKind`, so the shared borrow on `scc_stack` is
         // released before any exclusive borrow for mutation.
         if let Some(kind) = self.get_iteration_node_state(&current) {
             // The node was unconditionally pushed onto the raw CalcStack
@@ -400,13 +398,13 @@ impl CalcStack {
                 top_scc.segment_size += 1;
             }
             return match kind {
-                IterationNodeStateKind::Fresh => {
+                SccNodeStateKind::Fresh => {
                     // First encounter in this iteration: mark InProgress
                     // and proceed to calculate.
                     self.set_iteration_node_in_progress(&current);
                     BindingAction::Calculate
                 }
-                IterationNodeStateKind::InProgressWithPreviousAnswer => {
+                SccNodeStateKind::InProgressWithPreviousAnswer => {
                     // Back-edge with a warm-start answer from prior iteration.
                     self.mark_recursion_break(&current);
                     let answer = self
@@ -414,20 +412,20 @@ impl CalcStack {
                         .expect("InProgressWithPreviousAnswer but no previous answer found");
                     BindingAction::SccLocalAnswer(answer)
                 }
-                IterationNodeStateKind::InProgressWithPlaceholder => {
+                SccNodeStateKind::InProgressWithPlaceholder => {
                     // Back-edge with a placeholder already allocated.
                     let var = self
                         .get_iteration_placeholder(&current)
                         .expect("InProgressWithPlaceholder but no placeholder found");
                     BindingAction::CycleBroken(var)
                 }
-                IterationNodeStateKind::InProgressCold => {
+                SccNodeStateKind::InProgressCold => {
                     // Cold-start back-edge: no placeholder, no previous answer.
                     // Return NeedsColdPlaceholder so the caller (get_idx) can
                     // allocate via K::create_recursive.
                     BindingAction::NeedsColdPlaceholder
                 }
-                IterationNodeStateKind::Done => {
+                SccNodeStateKind::Done => {
                     // Already solved in this iteration; return the answer.
                     let answer = self
                         .get_iteration_done_answer(&current)
@@ -959,7 +957,7 @@ impl CalcStack {
     /// Returns `None` if the top SCC is not iterating or the target is not
     /// found in the iteration node states. The summary is safe to use for
     /// read-then-act patterns because it does not borrow the SCC.
-    fn get_iteration_node_state(&self, target: &CalcId) -> Option<IterationNodeStateKind> {
+    fn get_iteration_node_state(&self, target: &CalcId) -> Option<SccNodeStateKind> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
         let iter_state = top_scc.iterative.as_ref()?;
@@ -1432,7 +1430,7 @@ pub struct SccIterationState {
 /// often need to drop that borrow before mutating. This enum captures just
 /// enough information to decide what action to take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IterationNodeStateKind {
+pub enum SccNodeStateKind {
     /// Node has not been processed yet in this iteration.
     Fresh,
     /// Node is in progress and a previous answer is available for warm-start.
@@ -1449,18 +1447,18 @@ pub enum IterationNodeStateKind {
 impl SccNodeState {
     /// Compute the lightweight summary kind from this state plus whether a
     /// previous answer exists for the same node.
-    pub fn kind(&self, has_previous_answer: bool) -> IterationNodeStateKind {
+    pub fn kind(&self, has_previous_answer: bool) -> SccNodeStateKind {
         match self {
-            SccNodeState::Fresh => IterationNodeStateKind::Fresh,
-            SccNodeState::HasPlaceholder(_) => IterationNodeStateKind::InProgressWithPlaceholder,
+            SccNodeState::Fresh => SccNodeStateKind::Fresh,
+            SccNodeState::HasPlaceholder(_) => SccNodeStateKind::InProgressWithPlaceholder,
             SccNodeState::InProgress => {
                 if has_previous_answer {
-                    IterationNodeStateKind::InProgressWithPreviousAnswer
+                    SccNodeStateKind::InProgressWithPreviousAnswer
                 } else {
-                    IterationNodeStateKind::InProgressCold
+                    SccNodeStateKind::InProgressCold
                 }
             }
-            SccNodeState::Done { .. } => IterationNodeStateKind::Done,
+            SccNodeState::Done { .. } => SccNodeStateKind::Done,
         }
     }
 }
@@ -2794,7 +2792,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // so remove it from iteration state to prevent infinite looping.
             if matches!(
                 self.stack().get_iteration_node_state(&id),
-                Some(IterationNodeStateKind::Fresh)
+                Some(SccNodeStateKind::Fresh)
             ) {
                 self.stack().remove_from_iteration_state(&id);
             }
