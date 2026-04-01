@@ -1351,6 +1351,18 @@ mod tests {
     }
 
     #[test]
+    fn test_report_any_detection() {
+        let report = build_module_report_for_test("any_detection.py");
+        compare_snapshot("any_detection.expected.json", &report);
+    }
+
+    #[test]
+    fn test_report_multi_tool_suppressions() {
+        let report = build_module_report_for_test("multi_tool_suppressions.py");
+        compare_snapshot("multi_tool_suppressions.expected.json", &report);
+    }
+
+    #[test]
     fn test_is_fully_annotated() {
         /// Helper to create a Function for testing annotation completeness.
         fn make_function(name: &str, has_return: bool, params: Vec<(&str, bool)>) -> Function {
