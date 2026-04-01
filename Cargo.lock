@@ -359,6 +359,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnp"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c982cc37b8f646c753f3b0a24d4d40ca2eac8a9c2b9ea6fff524be67ddc184cb"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
 name = "castaway"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -830,6 +839,12 @@ name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
+
+[[package]]
+name = "embedded-io"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
 
 [[package]]
 name = "encode_unicode"
@@ -2212,6 +2227,7 @@ dependencies = [
  "arc-swap",
  "backtrace-on-stack-overflow",
  "blake3",
+ "capnp",
  "clap",
  "crossbeam-channel",
  "dashmap",

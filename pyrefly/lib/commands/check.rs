@@ -259,6 +259,9 @@ struct OutputArgs {
     /// Generate a Pysa-compatible JSON file for each module
     #[arg(long, value_name = "OUTPUT_FILE")]
     report_pysa: Option<PathBuf>,
+    /// Format for pysa report output (json or capnp)
+    #[arg(long, value_enum, default_value_t = report::pysa::PysaFormat::Json)]
+    report_pysa_format: report::pysa::PysaFormat,
     /// Generate a CinderX-format type report (experimental, internal-only).
     #[arg(long, value_name = "OUTPUT_DIR", hide = true)]
     report_cinderx: Option<PathBuf>,
@@ -921,7 +924,11 @@ impl CheckArgs {
         let mut memory_trace = MemoryUsageTrace::start(Duration::from_secs_f32(0.1));
 
         if let Some(pysa_directory) = &self.output.report_pysa {
-            let reporter = report::pysa::PysaReporter::new(pysa_directory, handles)?;
+            let reporter = report::pysa::PysaReporter::new(
+                pysa_directory,
+                handles,
+                self.output.report_pysa_format,
+            )?;
             transaction.set_pysa_reporter(Some(reporter));
         }
         if let Some(cinderx_directory) = &self.output.report_cinderx {
