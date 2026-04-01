@@ -3107,7 +3107,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let tcc: &dyn Fn() -> TypeCheckContext = &|| {
                     TypeCheckContext::of_kind(match style {
                         AnnotationStyle::Direct => TypeCheckKind::AnnAssign,
-                        AnnotationStyle::Forwarded => TypeCheckKind::AnnotatedName(name.clone()),
+                        AnnotationStyle::ForwardedInitial | AnnotationStyle::Forwarded => {
+                            TypeCheckKind::AnnotatedName(name.clone())
+                        }
                     })
                     .with_annotation(annot_range, "declared type".to_owned())
                 };
@@ -3118,9 +3120,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // For direct assignments, user-provided annotation takes
                     // precedence over inferred expr type.
                     annot_ty.unwrap_or(expr_ty)
+                } else if style == &AnnotationStyle::ForwardedInitial
+                    && matches!(expr_ty, Type::Any(_))
+                    && annot_ty.is_some()
+                {
+                    // First assignment after a bare annotation: if the expression
+                    // is Any, preserve the declared type since Any provides no
+                    // useful narrowing information.
+                    annot_ty.unwrap()
                 } else {
-                    // For forwarded assignment, user-provided annotation is treated
-                    // as just an upper-bound hint.
+                    // For reassignment or non-Any expressions, the expression
+                    // type takes precedence (narrowing behavior).
                     expr_ty
                 };
                 (Some(annot), ty)

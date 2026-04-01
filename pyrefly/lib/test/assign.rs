@@ -978,7 +978,6 @@ bad = items[::0]
 );
 
 testcase!(
-    bug = "Annotated variable should preserve declared type after assignment of Any (github #2227)",
     test_annotated_var_preserves_type_after_any_assign,
     r#"
 from typing import Any, assert_type
@@ -987,6 +986,19 @@ def f() -> Any: ...
 
 x: int
 x = f()
-assert_type(x, int)  # E: assert_type(Any, int) failed
+assert_type(x, int)
+"#,
+);
+
+testcase!(
+    test_reassigned_var_does_not_preserve_annotation_over_any,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+x: str = "hello"
+x = f()
+assert_type(x, Any)
 "#,
 );

@@ -1888,9 +1888,13 @@ pub enum SuperStyle {
 
 #[derive(Clone, Debug, Copy, Dupe, PartialEq, Eq)]
 pub enum AnnotationStyle {
-    /// Annotated assignment, x: MyType = my_value
+    /// Annotated assignment: `x: MyType = my_value`
     Direct,
-    /// Forwarded annotation, x: MyType; x = my_value
+    /// First assignment after a bare annotation: `x: MyType` then `x = value`.
+    /// Annotation takes precedence (the variable had no prior value).
+    ForwardedInitial,
+    /// Reassignment of an already-initialized annotated variable.
+    /// Expression type takes precedence; annotation is an upper-bound hint.
     Forwarded,
 }
 
