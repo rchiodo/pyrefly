@@ -834,15 +834,22 @@ impl CalcStack {
         // anchor: at that point all participants' frames have been popped
         // and their answers recorded. Push them to the pending buffer
         // so that `get_idx` can batch-commit them after the frame completes.
+        let mut sccs_completed = 0usize;
         while let Some(scc) = scc_stack.last() {
             if stack_len <= scc.anchor_pos + 1 {
                 self.pending_completed_sccs
                     .borrow_mut()
                     .push(scc_stack.pop().unwrap());
+                sccs_completed += 1;
             } else {
                 break;
             }
         }
+        debug_assert!(
+            sccs_completed <= 1,
+            "Expected at most 1 SCC to complete per on_calculation_finished call, \
+             but {sccs_completed} completed (stack_len={stack_len})",
+        );
         canonical
     }
 
