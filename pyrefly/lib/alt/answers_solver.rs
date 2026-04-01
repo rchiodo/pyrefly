@@ -1066,7 +1066,7 @@ impl CalcStack {
         iter_state.node_states.insert(
             target.dupe(),
             IterationNodeState::Done {
-                answer,
+                answer: Some(answer),
                 errors,
                 traces,
             },
@@ -1133,7 +1133,7 @@ impl CalcStack {
         let top_scc = scc_stack.last()?;
         let iter_state = top_scc.iterative.as_ref()?;
         match iter_state.node_states.get(target)? {
-            IterationNodeState::Done { answer, .. } => Some(answer.clone()),
+            IterationNodeState::Done { answer, .. } => answer.clone(),
             _ => None,
         }
     }
@@ -1293,7 +1293,7 @@ impl CalcStack {
 /// The variants are ordered by "advancement" (Fresh < InProgress < HasPlaceholder < Done).
 /// The `advancement_rank()` method encodes this ordering for use during SCC merge.
 #[derive(Debug, Clone)]
-enum NodeState {
+pub enum NodeState {
     /// Node hasn't been processed yet as part of SCC handling.
     Fresh,
     /// Node is currently being processed (on the Rust call stack).
@@ -1315,12 +1315,8 @@ enum NodeState {
     Done {
         answer: Option<Arc<dyn Any + Send + Sync>>,
         /// Errors collected during solving. None during Phase 0 (cold start).
-        /// Will be used when NodeState and IterationNodeState are unified.
-        #[expect(dead_code)]
         errors: Option<Arc<ErrorCollector>>,
         /// Trace side effects collected during solving. None during Phase 0.
-        /// Will be used when NodeState and IterationNodeState are unified.
-        #[expect(dead_code)]
         traces: Option<TraceSideEffects>,
     },
 }
@@ -1444,32 +1440,10 @@ pub struct SccIterationState {
     pub recursion_breaks: BTreeSet<CalcId>,
 }
 
-/// Tracks the state of a node within a single iteration of iterative SCC solving.
+/// `IterationNodeState` is now unified with `NodeState`.
 ///
-/// This is separate from the legacy `NodeState` used during Phase 0 discovery.
-/// State transitions within one iteration:
-/// - `Fresh` -> `InProgress` (when we start solving this node)
-/// - `InProgress` -> `HasPlaceholder(Var)` (when a back-edge allocates a placeholder)
-/// - `InProgress` or `HasPlaceholder` -> `Done` (when the node's calculation completes)
-#[derive(Debug, Clone)]
-pub enum IterationNodeState {
-    /// Not yet processed in this iteration.
-    Fresh,
-    /// Currently being solved; no placeholder yet.
-    InProgress,
-    /// A placeholder variable has been allocated for cold-start cycle breaking.
-    HasPlaceholder(Var),
-    /// Solved in this iteration. Stores the type-erased answer and errors.
-    Done {
-        /// The computed answer for this node in this iteration.
-        answer: Arc<dyn Any + Send + Sync>,
-        /// Errors collected during this iteration. None for cold-start.
-        errors: Option<Arc<ErrorCollector>>,
-        /// Trace side effects collected during this iteration.
-        /// None for cold-start iteration (traces are swallowed).
-        traces: Option<TraceSideEffects>,
-    },
-}
+/// Both Phase 0 discovery and iterative fixpoint solving use the same enum.
+pub type IterationNodeState = NodeState;
 
 /// Lightweight summary of an `IterationNodeState` for borrow-safe read-then-act
 /// patterns.
@@ -1492,23 +1466,21 @@ pub enum IterationNodeStateKind {
     Done,
 }
 
-impl IterationNodeState {
+impl NodeState {
     /// Compute the lightweight summary kind from this state plus whether a
     /// previous answer exists for the same node.
     pub fn kind(&self, has_previous_answer: bool) -> IterationNodeStateKind {
         match self {
-            IterationNodeState::Fresh => IterationNodeStateKind::Fresh,
-            IterationNodeState::HasPlaceholder(_) => {
-                IterationNodeStateKind::InProgressWithPlaceholder
-            }
-            IterationNodeState::InProgress => {
+            NodeState::Fresh => IterationNodeStateKind::Fresh,
+            NodeState::HasPlaceholder(_) => IterationNodeStateKind::InProgressWithPlaceholder,
+            NodeState::InProgress => {
                 if has_previous_answer {
                     IterationNodeStateKind::InProgressWithPreviousAnswer
                 } else {
                     IterationNodeStateKind::InProgressCold
                 }
             }
-            IterationNodeState::Done { .. } => IterationNodeStateKind::Done,
+            NodeState::Done { .. } => IterationNodeStateKind::Done,
         }
     }
 }
@@ -1844,7 +1816,9 @@ impl Scc {
         };
         let mut answers = BTreeMap::new();
         for (calc_id, state) in &iter_state.node_states {
-            if let IterationNodeState::Done { answer, .. } = state {
+            if let IterationNodeState::Done { answer, .. } = state
+                && let Some(answer) = answer
+            {
                 answers.insert(calc_id.dupe(), answer.clone());
             }
         }
@@ -2784,7 +2758,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     answer,
                     errors,
                     traces,
-                } => (calc_id, answer, errors, traces),
+                } => (
+                    calc_id,
+                    answer.expect("commit_final_answers: iteration node Done but answer is None"),
+                    errors,
+                    traces,
+                ),
                 IterationNodeState::Fresh
                 | IterationNodeState::InProgress
                 | IterationNodeState::HasPlaceholder(_) => {
@@ -3035,6 +3014,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     IterationNodeState::Done { answer, .. }
                         if iter_state.recursion_breaks.contains(calc_id) =>
                     {
+                        let answer = answer.as_ref().expect(
+                            "non-convergence extraction: iteration node Done but answer is None",
+                        );
                         Some((
                             calc_id.dupe(),
                             answer.dupe(),
