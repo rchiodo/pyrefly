@@ -1309,11 +1309,19 @@ enum NodeState {
     /// completes, at which point answers are committed to their respective
     /// Calculation cells.
     ///
-    /// The data is `None` when the node was already computed by another
+    /// The `answer` is `None` when the node was already computed by another
     /// path (e.g. a Participant revisit) and only the state transition
     /// to Done matters.
     Done {
         answer: Option<Arc<dyn Any + Send + Sync>>,
+        /// Errors collected during solving. None during Phase 0 (cold start).
+        /// Will be used when NodeState and IterationNodeState are unified.
+        #[expect(dead_code)]
+        errors: Option<Arc<ErrorCollector>>,
+        /// Trace side effects collected during solving. None during Phase 0.
+        /// Will be used when NodeState and IterationNodeState are unified.
+        #[expect(dead_code)]
+        traces: Option<TraceSideEffects>,
     },
 }
 
@@ -1643,6 +1651,8 @@ impl Scc {
             } else {
                 *state = NodeState::Done {
                     answer: answer.clone(),
+                    errors: None,
+                    traces: None,
                 };
                 answer
             }
@@ -3628,7 +3638,11 @@ mod scc_tests {
 
     /// Create a dummy `NodeState::Done` for testing.
     fn done_for_test() -> NodeState {
-        NodeState::Done { answer: None }
+        NodeState::Done {
+            answer: None,
+            errors: None,
+            traces: None,
+        }
     }
 
     /// Helper to create a test Scc with given parameters.
