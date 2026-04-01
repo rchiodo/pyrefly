@@ -3932,6 +3932,28 @@ mod scc_tests {
     }
 
     #[test]
+    #[should_panic(expected = "pending_completed_scc was not taken before a new SCC completed")]
+    fn test_pending_completed_scc_must_be_taken_before_overwrite() {
+        let a = CalcId::for_test("m", 0);
+        let b = CalcId::for_test("m", 1);
+
+        // Stack has one live frame; this makes an SCC with anchor_pos=0
+        // eligible for completion in on_calculation_finished.
+        let calc_stack = make_calc_stack(&[a.dupe()]);
+
+        // Active top SCC that will complete.
+        let active_scc = make_test_scc(fresh_nodes(&[a.dupe()]), a.dupe(), 0);
+        calc_stack.scc_stack.borrow_mut().push(active_scc);
+
+        // Simulate a bug where a previous completed SCC wasn't taken yet.
+        let already_pending = make_test_scc(fresh_nodes(&[b.dupe()]), b.dupe(), 0);
+        *calc_stack.pending_completed_scc.borrow_mut() = Some(already_pending);
+
+        let answer: Arc<dyn Any + Send + Sync> = Arc::new(Arc::new(42usize));
+        let _ = calc_stack.on_calculation_finished(&a, answer, None, None);
+    }
+
+    #[test]
     fn test_stale_calculation_panic() {
         // Reproduces the panic where Calculation has stale state but CalcStack is fresh.
         let calc_id = CalcId::for_test("m", 0);
