@@ -1777,6 +1777,16 @@ impl Scc {
             merge_happened: false,
             recursion_breaks: BTreeSet::new(),
         });
+        debug_assert!(
+            self.node_state
+                .values()
+                .all(|s| matches!(s, SccNodeState::Fresh)),
+            "reset_for_cold_start: not all nodes are Fresh after reset"
+        );
+        debug_assert!(
+            self.iteration() == 1,
+            "reset_for_cold_start: iteration should be 1 after cold start"
+        );
     }
 
     /// Advance to the next warm iteration during fixpoint progression.
@@ -1803,6 +1813,16 @@ impl Scc {
             merge_happened: false,
             recursion_breaks: BTreeSet::new(),
         });
+        debug_assert!(
+            self.node_state
+                .values()
+                .all(|s| matches!(s, SccNodeState::Fresh)),
+            "advance_to_next_warm_iteration: not all nodes are Fresh after advance"
+        );
+        debug_assert!(
+            self.iteration() >= 2,
+            "advance_to_next_warm_iteration: iteration should be >= 2 after warm advance"
+        );
     }
 
     /// Returns the current iteration number. Panics if the SCC is not iterating.
