@@ -8,6 +8,12 @@
       "is_return_type_known": true,
       "parameters": [],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 7,
         "column": 1
@@ -29,6 +35,12 @@
         }
       ],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 2,
+        "n_typed": 2,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 19,
         "column": 1
@@ -50,6 +62,12 @@
         }
       ],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 24,
         "column": 5
@@ -67,6 +85,10 @@
     }
   ],
   "suppressions": [],
-  "annotation_completeness": 100.0,
-  "type_completeness": 100.0
+  "n_typable": 4,
+  "n_typed": 4,
+  "n_any": 0,
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 100.0
 }

@@ -3,6 +3,12 @@
     {
       "name": "test.T",
       "annotation": null,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
       "location": {
         "line": 8,
         "column": 1
@@ -11,6 +17,12 @@
     {
       "name": "test.x",
       "annotation": null,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
       "location": {
         "line": 9,
         "column": 1
@@ -19,6 +31,12 @@
     {
       "name": "test.y",
       "annotation": "Callable[[int], int]",
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 10,
         "column": 1
@@ -27,6 +45,12 @@
     {
       "name": "test.z",
       "annotation": "str",
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 11,
         "column": 1
@@ -41,6 +65,12 @@
       "is_return_type_known": true,
       "parameters": [],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 1,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 14,
         "column": 1
@@ -58,6 +88,10 @@
     }
   ],
   "suppressions": [],
-  "annotation_completeness": 100.0,
-  "type_completeness": 100.0
+  "n_typable": 5,
+  "n_typed": 3,
+  "n_any": 0,
+  "n_untyped": 2,
+  "coverage": 60.0,
+  "strict_coverage": 60.0
 }

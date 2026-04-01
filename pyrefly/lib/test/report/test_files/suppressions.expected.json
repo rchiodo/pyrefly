@@ -3,6 +3,12 @@
     {
       "name": "test.x",
       "annotation": null,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
       "location": {
         "line": 6,
         "column": 1
@@ -11,6 +17,12 @@
     {
       "name": "test.y",
       "annotation": null,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
       "location": {
         "line": 7,
         "column": 1
@@ -19,6 +31,12 @@
     {
       "name": "test.z",
       "annotation": null,
+      "slots": {
+        "n_typable": 1,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 1
+      },
       "location": {
         "line": 8,
         "column": 1
@@ -51,6 +69,10 @@
       }
     }
   ],
-  "annotation_completeness": 100.0,
-  "type_completeness": 100.0
+  "n_typable": 3,
+  "n_typed": 0,
+  "n_any": 0,
+  "n_untyped": 3,
+  "coverage": 0.0,
+  "strict_coverage": 0.0
 }

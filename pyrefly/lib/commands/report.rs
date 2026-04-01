@@ -54,7 +54,81 @@ use crate::state::require::Require;
 use crate::state::state::State;
 use crate::state::state::Transaction;
 
-/// Location of a code element (start of its declaration)
+/// Slot-level annotation counts for a symbol.
+///
+/// A "slot" is a single annotation site: a function return type, a function
+/// parameter, or a module-level variable. Each slot falls into exactly one of
+/// three buckets: typed (concrete annotation with no `Any`), any (annotation
+/// that resolves to or contains `Any`), or untyped (no annotation at all).
+/// `n_typable` is always the sum of the other three.
+#[derive(Debug, Serialize, Default, Clone, Copy)]
+struct SlotCounts {
+    /// Total number of annotation sites.
+    n_typable: usize,
+    /// Sites with a concrete annotation containing no `Any`.
+    n_typed: usize,
+    /// Sites annotated but whose resolved type contains `Any`.
+    n_any: usize,
+    /// Sites with no annotation at all.
+    n_untyped: usize,
+}
+
+impl SlotCounts {
+    fn merge(self, other: SlotCounts) -> SlotCounts {
+        SlotCounts {
+            n_typable: self.n_typable + other.n_typable,
+            n_typed: self.n_typed + other.n_typed,
+            n_any: self.n_any + other.n_any,
+            n_untyped: self.n_untyped + other.n_untyped,
+        }
+    }
+
+    fn typed() -> SlotCounts {
+        SlotCounts {
+            n_typable: 1,
+            n_typed: 1,
+            n_any: 0,
+            n_untyped: 0,
+        }
+    }
+
+    fn any() -> SlotCounts {
+        SlotCounts {
+            n_typable: 1,
+            n_typed: 0,
+            n_any: 1,
+            n_untyped: 0,
+        }
+    }
+
+    fn untyped() -> SlotCounts {
+        SlotCounts {
+            n_typable: 1,
+            n_typed: 0,
+            n_any: 0,
+            n_untyped: 1,
+        }
+    }
+
+    /// Coverage: (n_typed + n_any) / n_typable. Treats Any-annotated slots as covered.
+    fn coverage(&self) -> f64 {
+        if self.n_typable == 0 {
+            100.0
+        } else {
+            ((self.n_typed + self.n_any) as f64 / self.n_typable as f64) * 100.0
+        }
+    }
+
+    /// Strict coverage: n_typed / n_typable. Only concrete types count.
+    fn strict_coverage(&self) -> f64 {
+        if self.n_typable == 0 {
+            100.0
+        } else {
+            (self.n_typed as f64 / self.n_typable as f64) * 100.0
+        }
+    }
+}
+
 #[derive(Debug, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct Location {
     line: usize,
@@ -66,7 +140,7 @@ struct Location {
 struct Parameter {
     name: String,
     annotation: Option<String>,
-    /// Whether the parameter's resolved type is fully known (contains no `Any`).
+    /// Whether the resolved type contains no `Any`.
     is_type_known: bool,
     location: Location,
 }
@@ -80,17 +154,15 @@ struct ReportSuppression {
     location: Location,
 }
 
-/// Function information
 #[derive(Debug, Serialize)]
 struct Function {
     name: String,
     return_annotation: Option<String>,
-    /// Whether the return type is fully known (contains no `Any`).
+    /// Whether the return type contains no `Any`.
     is_return_type_known: bool,
     parameters: Vec<Parameter>,
-    /// Whether the function is completely type-known (return + all params known).
-    /// This is only true for functions that are also fully annotated.
     is_type_known: bool,
+    slots: SlotCounts,
     location: Location,
 }
 
@@ -109,15 +181,14 @@ struct ReportClass {
     location: Location,
 }
 
-/// A top-level exported variable.
 #[derive(Debug, Serialize)]
 struct Variable {
     name: String,
     annotation: Option<String>,
+    slots: SlotCounts,
     location: Location,
 }
 
-/// File report
 #[derive(Debug, Serialize)]
 struct FileReport {
     variables: Vec<Variable>,
@@ -125,32 +196,21 @@ struct FileReport {
     functions: Vec<Function>,
     classes: Vec<ReportClass>,
     suppressions: Vec<ReportSuppression>,
-    /// Percentage of functions that are fully annotated (0.0 to 100.0).
-    /// A function is fully annotated if it has return and parameter annotations present.
-    annotation_completeness: f64,
-    /// Percentage of fully-annotated functions whose resolved types contain no `Any` (0.0 to 100.0).
-    type_completeness: f64,
+    #[serde(flatten)]
+    slots: SlotCounts,
+    coverage: f64,
+    strict_coverage: f64,
 }
 
-/// Summary statistics for the entire report.
 #[derive(Debug, Serialize)]
 struct ReportSummary {
-    /// Total number of files analyzed.
     total_files: usize,
-    /// Total number of functions across all files.
-    total_functions: usize,
-    /// Number of functions that are fully annotated (have annotation text).
-    fully_annotated_functions: usize,
-    /// Number of fully-annotated functions whose resolved types contain no `Any`.
-    type_complete_functions: usize,
-    /// Aggregate annotation completeness score across all files (0.0 to 100.0).
-    aggregate_annotation_completeness: f64,
-    /// Aggregate type completeness across all files (0.0 to 100.0).
-    /// Denominator is fully_annotated_functions, not total_functions.
-    aggregate_type_completeness: f64,
+    #[serde(flatten)]
+    slots: SlotCounts,
+    coverage: f64,
+    strict_coverage: f64,
 }
 
-/// Full report including per-file reports and aggregate summary.
 #[derive(Debug, Serialize)]
 struct FullReport {
     files: HashMap<String, FileReport>,
@@ -165,7 +225,6 @@ pub struct ReportArgs {
     #[command(flatten)]
     files: FilesArgs,
 
-    /// Configuration override options
     #[command(flatten)]
     config_override: ConfigOverrideArgs,
 
@@ -191,7 +250,6 @@ impl ReportArgs {
         )
     }
 
-    /// Helper to extract all parameters from Parameters struct
     fn extract_parameters(params: &Parameters) -> Vec<&ruff_python_ast::Parameter> {
         let mut all_params = Vec::new();
         all_params.extend(params.posonlyargs.iter().map(|p| &p.parameter));
@@ -248,7 +306,6 @@ impl ReportArgs {
         suppressions
     }
 
-    /// Check if any ancestor in a `NestingContext` chain is a function.
     fn has_function_ancestor(parent: &NestingContext) -> bool {
         let mut current = parent;
         loop {
@@ -262,9 +319,26 @@ impl ReportArgs {
         }
     }
 
+    /// Classify a single annotation slot: is it typed, any, or untyped?
+    fn classify_slot(has_annotation: bool, is_type_known: bool) -> SlotCounts {
+        if !has_annotation {
+            SlotCounts::untyped()
+        } else if is_type_known {
+            SlotCounts::typed()
+        } else {
+            SlotCounts::any()
+        }
+    }
+
+    /// Returns true if the first parameter is self/cls (implicit, excluded from slot counting).
+    fn is_self_or_cls(index: usize, name: &str) -> bool {
+        index == 0 && (name == "self" || name == "cls")
+    }
+
     fn parse_variables(
         module: &Module,
         bindings: &Bindings,
+        answers: &Answers,
         exports: &SmallMap<Name, ExportLocation>,
         functions: &[Function],
         classes: &[ReportClass],
@@ -297,15 +371,24 @@ impl ReportArgs {
             };
             match binding {
                 BindingExport::AnnotatedForward(annot_idx, _) => {
-                    let annotation_text = match bindings.get(*annot_idx) {
-                        BindingAnnotation::AnnotateExpr(_, expr, _) => {
-                            Some(module.code_at(expr.range()).to_owned())
-                        }
-                        _ => None,
+                    let (annotation_text, annotation_range) = match bindings.get(*annot_idx) {
+                        BindingAnnotation::AnnotateExpr(_, expr, _) => (
+                            Some(module.code_at(expr.range()).to_owned()),
+                            Some(expr.range()),
+                        ),
+                        _ => (None, None),
                     };
+                    let is_type_known = annotation_text.is_some()
+                        && annotation_range.is_some_and(|range| {
+                            answers
+                                .get_type_trace(range)
+                                .is_some_and(|t| Self::is_type_fully_known(&t))
+                        });
+                    let slots = Self::classify_slot(annotation_text.is_some(), is_type_known);
                     variables.push(Variable {
                         name: qualified_name,
                         annotation: annotation_text,
+                        slots,
                         location,
                     });
                 }
@@ -316,6 +399,7 @@ impl ReportArgs {
                         variables.push(Variable {
                             name: qualified_name,
                             annotation: None,
+                            slots: SlotCounts::untyped(),
                             location,
                         });
                     }
@@ -391,17 +475,19 @@ impl ReportArgs {
                     None
                 };
 
-                // Return type is known only if an annotation is present and the resolved
-                // type contains no Any.
                 let is_return_type_known = return_annotation.is_some()
                     && answers
                         .get_type_at(return_idx)
                         .is_some_and(|t| Self::is_type_fully_known(&t));
 
-                // Get parameters with their annotation and type-known status
                 let mut parameters = Vec::new();
                 let all_params = Self::extract_parameters(&fun.def.parameters);
                 let mut all_params_type_known = true;
+
+                // Compute slot counts: return + non-self/cls params
+                let return_slot =
+                    Self::classify_slot(return_annotation.is_some(), is_return_type_known);
+                let mut func_slots = return_slot;
 
                 for (i, param) in all_params.iter().enumerate() {
                     let param_name = param.name.as_str();
@@ -410,22 +496,24 @@ impl ReportArgs {
                         .as_ref()
                         .map(|ann| module.code_at(ann.range()).to_owned());
 
-                    // First parameter named self/cls is always considered type-known
-                    let is_param_type_known =
-                        if i == 0 && (param_name == "self" || param_name == "cls") {
-                            true
-                        } else if let Some(ann) = &param.annotation {
-                            answers
-                                .get_type_trace(ann.range())
-                                .is_some_and(|t| Self::is_type_fully_known(&t))
-                        } else {
-                            false // No annotation means not type-known
-                        };
+                    let is_param_type_known = if Self::is_self_or_cls(i, param_name) {
+                        true
+                    } else if let Some(ann) = &param.annotation {
+                        answers
+                            .get_type_trace(ann.range())
+                            .is_some_and(|t| Self::is_type_fully_known(&t))
+                    } else {
+                        false
+                    };
 
-                    if !is_param_type_known
-                        && !(i == 0 && (param_name == "self" || param_name == "cls"))
-                    {
+                    if !is_param_type_known && !Self::is_self_or_cls(i, param_name) {
                         all_params_type_known = false;
+                    }
+
+                    if !Self::is_self_or_cls(i, param_name) {
+                        let param_slot =
+                            Self::classify_slot(param_annotation.is_some(), is_param_type_known);
+                        func_slots = func_slots.merge(param_slot);
                     }
 
                     parameters.push(Parameter {
@@ -436,12 +524,11 @@ impl ReportArgs {
                     });
                 }
 
-                // A function is type-known only if it is fully annotated AND
-                // its return type and all param types contain no Any.
                 let is_fully_annotated = return_annotation.is_some()
-                    && parameters.iter().enumerate().all(|(i, p)| {
-                        (i == 0 && (p.name == "self" || p.name == "cls")) || p.annotation.is_some()
-                    });
+                    && parameters
+                        .iter()
+                        .enumerate()
+                        .all(|(i, p)| Self::is_self_or_cls(i, &p.name) || p.annotation.is_some());
                 let is_type_known =
                     is_fully_annotated && is_return_type_known && all_params_type_known;
 
@@ -451,6 +538,7 @@ impl ReportArgs {
                     is_return_type_known,
                     parameters,
                     is_type_known,
+                    slots: func_slots,
                     location,
                 });
             }
@@ -458,10 +546,8 @@ impl ReportArgs {
         functions
     }
 
-    /// Check if a function is completely annotated (has return annotation and all params annotated).
-    /// Only the first parameter is allowed to be unannotated if it is named `self` or `cls`.
+    /// Only the first parameter (`self`/`cls`) is allowed to be unannotated.
     fn is_function_completely_annotated(bindings: &Bindings, func_def: &FunctionDefData) -> bool {
-        // Check return annotation
         let return_key = Key::ReturnType(ShortIdentifier::new(&func_def.name));
         let return_idx = bindings.key_to_idx(&return_key);
         let has_return_annotation = if let Binding::ReturnType(ret) = bindings.get(return_idx) {
@@ -481,7 +567,7 @@ impl ReportArgs {
         // Check all parameters. Only the first parameter named self/cls may be unannotated.
         let all_params = Self::extract_parameters(&func_def.parameters);
         for (i, param) in all_params.iter().enumerate() {
-            if i == 0 && (param.name.as_str() == "self" || param.name.as_str() == "cls") {
+            if Self::is_self_or_cls(i, param.name.as_str()) {
                 continue;
             }
             if param.annotation.is_none() {
@@ -492,18 +578,6 @@ impl ReportArgs {
         true
     }
 
-    /// Check if a function is fully annotated based on its parsed representation.
-    /// A function is fully annotated if it has a return annotation and all parameters
-    /// have annotations. Only the first parameter named `self`/`cls` is exempt.
-    fn is_fully_annotated(function: &Function) -> bool {
-        if function.return_annotation.is_none() {
-            return false;
-        }
-        function.parameters.iter().enumerate().all(|(i, p)| {
-            (i == 0 && (p.name == "self" || p.name == "cls")) || p.annotation.is_some()
-        })
-    }
-
     /// Returns true if the type contains no `Any` anywhere in its structure.
     fn is_type_fully_known(ty: &Type) -> bool {
         !ty.any(|t| t.is_any())
@@ -512,34 +586,17 @@ impl ReportArgs {
     /// Calculate the aggregate summary for all file reports.
     fn calculate_summary(files: &HashMap<String, FileReport>) -> ReportSummary {
         let total_files = files.len();
-        let all_functions: Vec<&Function> = files.values().flat_map(|f| &f.functions).collect();
-        let total_functions = all_functions.len();
-        let fully_annotated_functions = all_functions
-            .iter()
-            .filter(|f| Self::is_fully_annotated(f))
-            .count();
-        // Type-complete functions are a subset of fully-annotated functions.
-        let type_complete_functions = all_functions.iter().filter(|f| f.is_type_known).count();
+        let mut total_slots = SlotCounts::default();
 
-        let aggregate_annotation_completeness = if total_functions == 0 {
-            100.0
-        } else {
-            (fully_annotated_functions as f64 / total_functions as f64) * 100.0
-        };
-
-        let aggregate_type_completeness = if fully_annotated_functions == 0 {
-            100.0
-        } else {
-            (type_complete_functions as f64 / fully_annotated_functions as f64) * 100.0
-        };
+        for file in files.values() {
+            total_slots = total_slots.merge(file.slots);
+        }
 
         ReportSummary {
             total_files,
-            total_functions,
-            fully_annotated_functions,
-            type_complete_functions,
-            aggregate_annotation_completeness,
-            aggregate_type_completeness,
+            slots: total_slots,
+            coverage: total_slots.coverage(),
+            strict_coverage: total_slots.strict_coverage(),
         }
     }
 
@@ -786,8 +843,9 @@ impl ReportArgs {
                 let mut functions = Self::parse_functions(&module, &bindings, &answers, &exports);
                 let mut classes =
                     Self::parse_classes(&module, &bindings, &answers, transaction, handle);
-                let mut variables =
-                    Self::parse_variables(&module, &bindings, &exports, &functions, &classes);
+                let mut variables = Self::parse_variables(
+                    &module, &bindings, &answers, &exports, &functions, &classes,
+                );
                 let suppressions = Self::parse_suppressions(&module);
 
                 // When a .pyi stub shadows a .py file, the stub may only cover
@@ -812,6 +870,7 @@ impl ReportArgs {
                     let py_variables = Self::parse_variables(
                         &py_module,
                         &py_bindings,
+                        &py_answers,
                         &py_exports,
                         &py_functions,
                         &py_classes,
@@ -826,21 +885,14 @@ impl ReportArgs {
                     );
                 }
 
-                let annotated_count = functions
-                    .iter()
-                    .filter(|f| Self::is_fully_annotated(f))
-                    .count();
-                let annotation_completeness = if functions.is_empty() {
-                    100.0
-                } else {
-                    (annotated_count as f64 / functions.len() as f64) * 100.0
-                };
-                let type_completeness = if annotated_count == 0 {
-                    100.0
-                } else {
-                    let type_complete = functions.iter().filter(|f| f.is_type_known).count();
-                    (type_complete as f64 / annotated_count as f64) * 100.0
-                };
+                // Compute aggregate slot counts
+                let mut total_slots = SlotCounts::default();
+                for func in &functions {
+                    total_slots = total_slots.merge(func.slots);
+                }
+                for var in &variables {
+                    total_slots = total_slots.merge(var.slots);
+                }
 
                 report.insert(
                     handle.path().as_path().display().to_string(),
@@ -850,8 +902,9 @@ impl ReportArgs {
                         functions,
                         classes,
                         suppressions,
-                        annotation_completeness,
-                        type_completeness,
+                        slots: total_slots,
+                        coverage: total_slots.coverage(),
+                        strict_coverage: total_slots.strict_coverage(),
                     },
                 );
             }
@@ -935,25 +988,18 @@ mod tests {
         let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
         let classes =
             ReportArgs::parse_classes(&module, &bindings, &answers, &transaction, &handle);
-        let variables =
-            ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
+        let variables = ReportArgs::parse_variables(
+            &module, &bindings, &answers, &exports, &functions, &classes,
+        );
         let suppressions = ReportArgs::parse_suppressions(&module);
 
-        let annotated_count = functions
-            .iter()
-            .filter(|f| ReportArgs::is_fully_annotated(f))
-            .count();
-        let annotation_completeness = if functions.is_empty() {
-            100.0
-        } else {
-            (annotated_count as f64 / functions.len() as f64) * 100.0
-        };
-        let type_completeness = if annotated_count == 0 {
-            100.0
-        } else {
-            let type_complete = functions.iter().filter(|f| f.is_type_known).count();
-            (type_complete as f64 / annotated_count as f64) * 100.0
-        };
+        let mut total_slots = SlotCounts::default();
+        for func in &functions {
+            total_slots = total_slots.merge(func.slots);
+        }
+        for var in &variables {
+            total_slots = total_slots.merge(var.slots);
+        }
 
         FileReport {
             variables,
@@ -961,8 +1007,9 @@ mod tests {
             functions,
             classes,
             suppressions,
-            annotation_completeness,
-            type_completeness,
+            slots: total_slots,
+            coverage: total_slots.coverage(),
+            strict_coverage: total_slots.strict_coverage(),
         }
     }
 
@@ -987,8 +1034,9 @@ mod tests {
         let mut functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
         let mut classes =
             ReportArgs::parse_classes(&module, &bindings, &answers, &pyi_txn, &pyi_handle);
-        let mut variables =
-            ReportArgs::parse_variables(&module, &bindings, &exports, &functions, &classes);
+        let mut variables = ReportArgs::parse_variables(
+            &module, &bindings, &answers, &exports, &functions, &classes,
+        );
         let suppressions = ReportArgs::parse_suppressions(&module);
 
         // Parse the .py source
@@ -1011,6 +1059,7 @@ mod tests {
         let py_variables = ReportArgs::parse_variables(
             &py_module,
             &py_bindings,
+            &py_answers,
             &py_exports,
             &py_functions,
             &py_classes,
@@ -1026,21 +1075,13 @@ mod tests {
             py_classes,
         );
 
-        let annotated_count = functions
-            .iter()
-            .filter(|f| ReportArgs::is_fully_annotated(f))
-            .count();
-        let annotation_completeness = if functions.is_empty() {
-            100.0
-        } else {
-            (annotated_count as f64 / functions.len() as f64) * 100.0
-        };
-        let type_completeness = if annotated_count == 0 {
-            100.0
-        } else {
-            let type_complete = functions.iter().filter(|f| f.is_type_known).count();
-            (type_complete as f64 / annotated_count as f64) * 100.0
-        };
+        let mut total_slots = SlotCounts::default();
+        for func in &functions {
+            total_slots = total_slots.merge(func.slots);
+        }
+        for var in &variables {
+            total_slots = total_slots.merge(var.slots);
+        }
 
         FileReport {
             variables,
@@ -1048,8 +1089,9 @@ mod tests {
             functions,
             classes,
             suppressions,
-            annotation_completeness,
-            type_completeness,
+            slots: total_slots,
+            coverage: total_slots.coverage(),
+            strict_coverage: total_slots.strict_coverage(),
         }
     }
 
@@ -1140,8 +1182,41 @@ mod tests {
     }
 
     #[test]
+    fn test_slot_counts() {
+        let typed = SlotCounts::typed();
+        assert_eq!(typed.n_typable, 1);
+        assert_eq!(typed.n_typed, 1);
+        assert_eq!(typed.n_any, 0);
+        assert_eq!(typed.n_untyped, 0);
+
+        let any = SlotCounts::any();
+        assert_eq!(any.n_typable, 1);
+        assert_eq!(any.n_typed, 0);
+        assert_eq!(any.n_any, 1);
+        assert_eq!(any.n_untyped, 0);
+
+        let untyped = SlotCounts::untyped();
+        assert_eq!(untyped.n_typable, 1);
+        assert_eq!(untyped.n_typed, 0);
+        assert_eq!(untyped.n_any, 0);
+        assert_eq!(untyped.n_untyped, 1);
+
+        let merged = typed.merge(any).merge(untyped);
+        assert_eq!(merged.n_typable, 3);
+        assert_eq!(merged.n_typed, 1);
+        assert_eq!(merged.n_any, 1);
+        assert_eq!(merged.n_untyped, 1);
+
+        assert!((merged.coverage() - 66.66666666666667).abs() < 0.001);
+        assert!((merged.strict_coverage() - 33.33333333333333).abs() < 0.001);
+
+        let empty = SlotCounts::default();
+        assert_eq!(empty.coverage(), 100.0);
+        assert_eq!(empty.strict_coverage(), 100.0);
+    }
+
+    #[test]
     fn test_is_fully_annotated() {
-        /// Helper to create a Function for testing annotation completeness.
         fn make_function(name: &str, has_return: bool, params: Vec<(&str, bool)>) -> Function {
             Function {
                 name: name.to_owned(),
@@ -1164,217 +1239,63 @@ mod tests {
                         location: Location { line: 1, column: 1 },
                     })
                     .collect(),
-                is_type_known: false, // Not relevant for annotation-only tests
+                is_type_known: false,
+                slots: SlotCounts::default(),
                 location: Location { line: 1, column: 1 },
             }
         }
 
-        // Fully annotated function
-        assert!(ReportArgs::is_fully_annotated(&make_function(
+        fn is_fully_annotated(function: &Function) -> bool {
+            if function.return_annotation.is_none() {
+                return false;
+            }
+            function
+                .parameters
+                .iter()
+                .enumerate()
+                .all(|(i, p)| ReportArgs::is_self_or_cls(i, &p.name) || p.annotation.is_some())
+        }
+
+        assert!(is_fully_annotated(&make_function(
             "foo",
             true,
             vec![("x", true)]
         )));
 
-        // self as first param is exempt
-        assert!(ReportArgs::is_fully_annotated(&make_function(
+        assert!(is_fully_annotated(&make_function(
             "bar",
             true,
             vec![("self", false), ("y", true)]
         )));
 
-        // cls as first param is exempt
-        assert!(ReportArgs::is_fully_annotated(&make_function(
+        assert!(is_fully_annotated(&make_function(
             "cls_method",
             true,
             vec![("cls", false)]
         )));
 
-        // Missing return annotation
-        assert!(!ReportArgs::is_fully_annotated(&make_function(
+        assert!(!is_fully_annotated(&make_function(
             "no_return",
             false,
             vec![]
         )));
 
-        // Missing parameter annotation
-        assert!(!ReportArgs::is_fully_annotated(&make_function(
+        assert!(!is_fully_annotated(&make_function(
             "missing_param",
             true,
             vec![("x", false)]
         )));
 
-        // "self" as a non-first parameter should NOT be exempt
-        assert!(!ReportArgs::is_fully_annotated(&make_function(
+        assert!(!is_fully_annotated(&make_function(
             "bad_self",
             true,
             vec![("x", true), ("self", false)]
         )));
 
-        // "cls" as a non-first parameter should NOT be exempt
-        assert!(!ReportArgs::is_fully_annotated(&make_function(
+        assert!(!is_fully_annotated(&make_function(
             "bad_cls",
             true,
             vec![("x", true), ("cls", false)]
         )));
-
-        // No functions means 100% complete
-        let empty: Vec<Function> = vec![];
-        let summary = ReportArgs::calculate_summary(&HashMap::new());
-        assert_eq!(summary.aggregate_annotation_completeness, 100.0);
-        assert_eq!(summary.total_functions, 0);
-        assert!(empty.is_empty()); // suppress unused warning
-    }
-
-    #[test]
-    fn test_calculate_summary() {
-        /// Helper to create a Function for summary testing.
-        fn make_function(
-            name: &str,
-            has_return: bool,
-            is_type_known: bool,
-            params: Vec<(&str, bool)>,
-        ) -> Function {
-            Function {
-                name: name.to_owned(),
-                return_annotation: if has_return {
-                    Some("int".to_owned())
-                } else {
-                    None
-                },
-                is_return_type_known: is_type_known,
-                parameters: params
-                    .into_iter()
-                    .map(|(param_name, annotated)| Parameter {
-                        name: param_name.to_owned(),
-                        annotation: if annotated {
-                            Some("str".to_owned())
-                        } else {
-                            None
-                        },
-                        is_type_known: annotated,
-                        location: Location { line: 1, column: 1 },
-                    })
-                    .collect(),
-                is_type_known,
-                location: Location { line: 1, column: 1 },
-            }
-        }
-
-        // Single file with mixed annotation status
-        let mut single_file: HashMap<String, FileReport> = HashMap::new();
-        single_file.insert(
-            "file1.py".to_owned(),
-            FileReport {
-                variables: vec![],
-                line_count: 10,
-                functions: vec![
-                    make_function("foo", true, true, vec![("x", true)]),
-                    make_function("bar", false, false, vec![("y", true)]),
-                ],
-                classes: vec![],
-                suppressions: vec![],
-                annotation_completeness: 50.0,
-                type_completeness: 100.0,
-            },
-        );
-        let summary = ReportArgs::calculate_summary(&single_file);
-        assert_eq!(summary.total_files, 1);
-        assert_eq!(summary.total_functions, 2);
-        assert_eq!(summary.fully_annotated_functions, 1);
-        assert_eq!(summary.type_complete_functions, 1);
-        assert_eq!(summary.aggregate_annotation_completeness, 50.0);
-        assert_eq!(summary.aggregate_type_completeness, 100.0);
-
-        // Multiple files — aggregate is weighted by function count, not averaged per file
-        let mut multi_file: HashMap<String, FileReport> = HashMap::new();
-        multi_file.insert(
-            "file1.py".to_owned(),
-            FileReport {
-                variables: vec![],
-                line_count: 10,
-                functions: vec![
-                    make_function("foo", true, true, vec![("x", true)]),
-                    make_function("bar", true, true, vec![("y", true)]),
-                ],
-                classes: vec![],
-                suppressions: vec![],
-                annotation_completeness: 100.0,
-                type_completeness: 100.0,
-            },
-        );
-        multi_file.insert(
-            "file2.py".to_owned(),
-            FileReport {
-                variables: vec![],
-                line_count: 20,
-                functions: vec![
-                    make_function("baz", true, true, vec![("z", true)]),
-                    make_function("qux", false, false, vec![("w", false)]),
-                ],
-                classes: vec![],
-                suppressions: vec![],
-                annotation_completeness: 50.0,
-                type_completeness: 100.0,
-            },
-        );
-        let summary = ReportArgs::calculate_summary(&multi_file);
-        assert_eq!(summary.total_files, 2);
-        assert_eq!(summary.total_functions, 4);
-        assert_eq!(summary.fully_annotated_functions, 3);
-        assert_eq!(summary.type_complete_functions, 3);
-        assert_eq!(summary.aggregate_annotation_completeness, 75.0);
-        assert_eq!(summary.aggregate_type_completeness, 100.0);
-
-        // self/cls exemption only applies to first parameter
-        let mut with_self: HashMap<String, FileReport> = HashMap::new();
-        with_self.insert(
-            "file.py".to_owned(),
-            FileReport {
-                variables: vec![],
-                line_count: 5,
-                functions: vec![make_function(
-                    "method",
-                    true,
-                    true,
-                    vec![("self", false), ("x", true)],
-                )],
-                classes: vec![],
-                suppressions: vec![],
-                annotation_completeness: 100.0,
-                type_completeness: 100.0,
-            },
-        );
-        let summary = ReportArgs::calculate_summary(&with_self);
-        assert_eq!(summary.fully_annotated_functions, 1);
-        assert_eq!(summary.type_complete_functions, 1);
-        assert_eq!(summary.aggregate_annotation_completeness, 100.0);
-        assert_eq!(summary.aggregate_type_completeness, 100.0);
-
-        // Annotated but not type-complete (contains Any)
-        let mut with_any: HashMap<String, FileReport> = HashMap::new();
-        with_any.insert(
-            "file.py".to_owned(),
-            FileReport {
-                variables: vec![],
-                line_count: 5,
-                functions: vec![
-                    // Annotated and type-complete
-                    make_function("good", true, true, vec![("x", true)]),
-                    // Annotated but return type contains Any (not type-complete)
-                    make_function("has_any", true, false, vec![("x", true)]),
-                ],
-                classes: vec![],
-                suppressions: vec![],
-                annotation_completeness: 100.0,
-                type_completeness: 50.0,
-            },
-        );
-        let summary = ReportArgs::calculate_summary(&with_any);
-        assert_eq!(summary.fully_annotated_functions, 2);
-        assert_eq!(summary.type_complete_functions, 1);
-        assert_eq!(summary.aggregate_annotation_completeness, 100.0);
-        // Type completeness denominator is fully_annotated_functions (2), not total_functions
-        assert_eq!(summary.aggregate_type_completeness, 50.0);
     }
 }

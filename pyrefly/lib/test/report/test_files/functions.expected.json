@@ -27,6 +27,12 @@
         }
       ],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 3,
+        "n_typed": 3,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 7,
         "column": 1
@@ -57,6 +63,12 @@
         }
       ],
       "is_type_known": false,
+      "slots": {
+        "n_typable": 3,
+        "n_typed": 0,
+        "n_any": 0,
+        "n_untyped": 3
+      },
       "location": {
         "line": 11,
         "column": 1
@@ -96,6 +108,12 @@
         }
       ],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 3,
+        "n_typed": 3,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 16,
         "column": 5
@@ -135,6 +153,12 @@
         }
       ],
       "is_type_known": true,
+      "slots": {
+        "n_typable": 3,
+        "n_typed": 3,
+        "n_any": 0,
+        "n_untyped": 0
+      },
       "location": {
         "line": 20,
         "column": 9
@@ -160,6 +184,10 @@
     }
   ],
   "suppressions": [],
-  "annotation_completeness": 75.0,
-  "type_completeness": 100.0
+  "n_typable": 12,
+  "n_typed": 9,
+  "n_any": 0,
+  "n_untyped": 3,
+  "coverage": 75.0,
+  "strict_coverage": 75.0
 }
