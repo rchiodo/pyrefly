@@ -934,3 +934,61 @@ def test_multi_match_mapping2(o1: dict[str, Any], o2: object) -> None:
         case {"c": 1}, _: pass
 "#,
 );
+
+testcase!(
+    test_match_tuple_subject_narrowing,
+    r#"
+from dataclasses import dataclass
+from typing import assert_type
+
+@dataclass
+class A: ...
+@dataclass
+class B: ...
+
+def test(x: A | B, y: A | B):
+    match x, y:
+        case A(), B():
+            assert_type(x, A)
+            assert_type(y, B)
+    "#,
+);
+
+testcase!(
+    test_match_tuple_subject_narrowing_with_literal,
+    r#"
+from dataclasses import dataclass
+from typing import assert_type
+
+@dataclass
+class A: ...
+@dataclass
+class B: ...
+
+def test(x: A | B, y: A | B):
+    match x, 1, y:
+        case A(), 1, B():
+            assert_type(x, A)
+            assert_type(y, B)
+    "#,
+);
+
+testcase!(
+    test_match_tuple_subject_narrowing_with_star,
+    r#"
+from dataclasses import dataclass
+from typing import assert_type
+
+@dataclass
+class A: ...
+@dataclass
+class B: ...
+
+def test(w: A | B, x: A | B, y: A | B, z: A | B):
+    match w, x, y, z:
+        case A(), *rest, B():
+            assert_type(w, A)
+            assert_type(rest, list[A | B])
+            assert_type(z, B)
+    "#,
+);
