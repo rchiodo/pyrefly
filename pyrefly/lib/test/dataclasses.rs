@@ -24,6 +24,30 @@ assert_type(Data, type[Data])
 );
 
 testcase!(
+    test_enum_dataclass_rejected,
+    r#"
+from dataclasses import dataclass
+import dataclasses
+from enum import Enum
+
+class Good(Enum):
+    RED = 1
+
+@dataclass
+class Bad1(Enum):  # E: Cannot apply `@dataclass` to Enum `Bad1`
+    RED = 1
+
+@dataclasses.dataclass
+class Bad2(Enum):  # E: Cannot apply `@dataclass` to Enum `Bad2`
+    RED = 1
+
+@dataclass()
+class Bad3(Enum):  # E: Cannot apply `@dataclass` to Enum `Bad3`
+    RED = 1
+    "#,
+);
+
+testcase!(
     test_kw_only_sentinel_deep_inheritance,
     r#"
 from dataclasses import dataclass, KW_ONLY
@@ -1815,21 +1839,6 @@ class Config(TypedDict):
 @dataclass
 class BadConfig(TypedDict):
     name: str
-"#,
-);
-
-// https://github.com/facebook/pyrefly/issues/2922
-testcase!(
-    bug = "Should reject @dataclass applied to Enum subclass",
-    test_dataclass_on_enum,
-    r#"
-from dataclasses import dataclass
-from enum import Enum
-
-class Color(Enum):
-    RED = 1
-
-dataclass(Color)
 "#,
 );
 

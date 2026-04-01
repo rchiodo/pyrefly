@@ -379,6 +379,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             pydantic_config.as_ref(),
             is_attrs_class,
             protocol_metadata.is_some(),
+            enum_metadata.is_some(),
             errors,
         );
         if let Some(dm) = dataclass_metadata.as_ref()
@@ -880,6 +881,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         pydantic_config: Option<&PydanticConfig>,
         is_attrs_class: bool,
         is_protocol: bool,
+        is_enum: bool,
         errors: &ErrorCollector,
     ) -> Option<DataclassMetadata> {
         // If we inherit from a dataclass, inherit its metadata. Note that if this class is
@@ -947,19 +949,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ => {}
             }
         }
-        // @dataclass cannot be applied to Protocol classes. Emit the error and
-        // return None so the class is not treated as a dataclass.
-        if is_protocol && has_dataclass_decorator {
-            self.error(
-                errors,
-                cls.range(),
-                ErrorInfo::Kind(ErrorKind::InvalidDecorator),
-                format!(
-                    "`@dataclass` cannot be applied to Protocol `{}`",
-                    cls.name()
-                ),
-            );
-            return None;
+        // @dataclass cannot be applied to Protocol or Enum classes.
+        // Emit the error and return None so the class is not treated as a dataclass.
+        if has_dataclass_decorator {
+            if is_protocol {
+                self.error(
+                    errors,
+                    cls.range(),
+                    ErrorInfo::Kind(ErrorKind::InvalidDecorator),
+                    format!(
+                        "`@dataclass` cannot be applied to Protocol `{}`",
+                        cls.name()
+                    ),
+                );
+                return None;
+            }
+            if is_enum {
+                self.error(
+                    errors,
+                    cls.range(),
+                    ErrorInfo::Kind(ErrorKind::BadClassDefinition),
+                    format!("Cannot apply `@dataclass` to Enum `{}`", cls.name()),
+                );
+                return None;
+            }
         }
         if let Some((kws, field_specifiers)) = dataclass_from_dataclass_transform {
             dataclass_metadata = Some(DataclassMetadata {
