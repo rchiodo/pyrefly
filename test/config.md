@@ -204,3 +204,14 @@ $ echo "disable-project-excludes-heuristics = true" > $TMPDIR/disable_excludes_h
 ERROR *main.py* ?bad-assignment? (glob)
 [1]
 ```
+
+## Project inside hidden directory ancestor still reports errors
+
+```scrut {output_stream: stdout}
+$ mkdir -p $TMPDIR/.hidden_workspace/project && \
+> echo "x: str = 1" > $TMPDIR/.hidden_workspace/project/main.py && \
+> touch $TMPDIR/.hidden_workspace/project/pyrefly.toml && \
+> $PYREFLY check --output-format=min-text $TMPDIR/.hidden_workspace/project
+ERROR *main.py* ?bad-assignment? (glob)
+[1]
+```

@@ -17,6 +17,7 @@ use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::args::clap_env;
 use pyrefly_util::globs::FilteredGlobs;
 use pyrefly_util::globs::Globs;
+use pyrefly_util::globs::HiddenDirFilter;
 use pyrefly_util::includes::Includes;
 use tracing::debug;
 use tracing::info;
@@ -183,22 +184,23 @@ fn get_globs_and_config_for_files(
 ) -> anyhow::Result<(Box<dyn Includes>, ConfigFinder)> {
     let files_to_check = absolutize(files_to_check);
     let args_disable_excludes_heuristics = args.disable_project_excludes_heuristics();
-    let get_project_excludes = move |config: Option<&ConfigFile>| {
+    let get_project_excludes_and_heuristics = move |config: Option<&ConfigFile>| {
         let mut project_excludes = project_excludes.unwrap_or_default();
-        if !args_disable_excludes_heuristics
+        let disable = args_disable_excludes_heuristics
             .or_else(|| Some(config?.disable_project_excludes_heuristics))
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        if !disable {
             project_excludes.append(ConfigFile::required_project_excludes().globs());
         }
-        project_excludes
+        (project_excludes, !disable)
     };
-    let (config_finder, errors, project_excludes) = match config {
+    let (config_finder, errors, project_excludes, use_heuristics) = match config {
         Some(explicit) => {
             let (config, errors) = get_explicit_config(&explicit, args);
-            let project_excludes = get_project_excludes(Some(&config));
+            let (project_excludes, use_heuristics) =
+                get_project_excludes_and_heuristics(Some(&config));
             let config_finder = ConfigFinder::new_constant(config);
-            (config_finder, errors, project_excludes)
+            (config_finder, errors, project_excludes, use_heuristics)
         }
         None => {
             let config_finder = default_config_finder_with_overrides(args, false, wrapper);
@@ -210,22 +212,30 @@ fn get_globs_and_config_for_files(
             } else {
                 None
             };
-            let project_excludes = get_project_excludes(None);
+            let (project_excludes, use_heuristics) = get_project_excludes_and_heuristics(None);
             if let Some(root) = solo_root {
                 // We don't care about the contents of the config, only if we generated any errors while parsing it.
                 config_finder.directory(&root);
                 let errors = config_finder.errors();
-                (config_finder, errors, project_excludes)
+                (config_finder, errors, project_excludes, use_heuristics)
             } else {
-                (config_finder, Vec::new(), project_excludes)
+                (config_finder, Vec::new(), project_excludes, use_heuristics)
             }
         }
     };
     add_config_errors(&config_finder, errors)?;
-    Ok((
-        Box::new(FilteredGlobs::new(files_to_check, project_excludes, None)),
-        config_finder,
-    ))
+    let hidden_dir_filter = if use_heuristics {
+        let roots = files_to_check.roots();
+        if roots.is_empty() {
+            HiddenDirFilter::All
+        } else {
+            HiddenDirFilter::RelativeTo(roots)
+        }
+    } else {
+        HiddenDirFilter::Disabled
+    };
+    let globs = FilteredGlobs::new(files_to_check, project_excludes, None, hidden_dir_filter);
+    Ok((Box::new(globs), config_finder))
 }
 
 impl FilesArgs {

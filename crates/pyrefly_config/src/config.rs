@@ -42,6 +42,7 @@ use pyrefly_util::fs_anyhow;
 use pyrefly_util::globs::FilteredGlobs;
 use pyrefly_util::globs::Glob;
 use pyrefly_util::globs::Globs;
+use pyrefly_util::globs::HiddenDirFilter;
 use pyrefly_util::interned_path::InternedPath;
 use pyrefly_util::lock::RwLock;
 use pyrefly_util::prelude::VecExt;
@@ -662,7 +663,20 @@ impl ConfigFile {
         } else {
             None
         };
-        FilteredGlobs::new(self.project_includes.clone(), project_excludes, root)
+        let hidden_dir_filter = if self.disable_project_excludes_heuristics {
+            HiddenDirFilter::Disabled
+        } else {
+            match root {
+                Some(r) => HiddenDirFilter::RelativeTo(vec![r.to_path_buf()]),
+                None => HiddenDirFilter::All,
+            }
+        };
+        FilteredGlobs::new(
+            self.project_includes.clone(),
+            project_excludes,
+            root,
+            hidden_dir_filter,
+        )
     }
 }
 
@@ -700,8 +714,6 @@ impl ConfigFile {
             "**/__pycache__".to_owned(),
             // match any `venv` directory
             "**/venv/**".to_owned(),
-            // Dot directories aside from `.` and `..` (will include .venv and .env)
-            "**/.[!/.]*/**".to_owned(),
         ])
         .unwrap_or_else(|_| Globs::empty())
     }
@@ -2182,20 +2194,19 @@ output-format = "omit-errors"
                         "**/node_modules".to_owned(),
                         "**/__pycache__".to_owned(),
                         "**/venv/**".to_owned(),
-                        "**/.[!/.]*/**".to_owned(),
                     ]
                     .into_iter()
                     .chain(vec![
                         "**/node_modules".to_owned(),
                         "**/__pycache__".to_owned(),
                         "**/venv/**".to_owned(),
-                        "**/.[!/.]*/**".to_owned(),
                     ])
                     .chain(expected_site_package_path.clone())
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
                 )
                 .unwrap(),
                 None,
+                HiddenDirFilter::All,
             )
         );
         assert_eq!(
@@ -2211,13 +2222,13 @@ output-format = "omit-errors"
                             "**/node_modules".to_owned(),
                             "**/__pycache__".to_owned(),
                             "**/venv/**".to_owned(),
-                            "**/.[!/.]*/**".to_owned(),
                         ])
                         .chain(expected_site_package_path)
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>(),
                 )
                 .unwrap(),
                 None,
+                HiddenDirFilter::All,
             )
         );
     }
