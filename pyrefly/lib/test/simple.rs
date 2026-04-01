@@ -2302,6 +2302,15 @@ def f(x: Sequence[str], idx):
 );
 
 testcase!(
+    test_subscript_with_union_type,
+    r#"
+d: dict[type[bool] | type[float] | type[int], bool | float | int] = {}
+k: type[bool | float | int] = bool
+d[k]
+    "#,
+);
+
+testcase!(
     test_bool_and_unknown,
     r#"
 from typing import Any, assert_type

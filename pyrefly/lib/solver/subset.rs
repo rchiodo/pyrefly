@@ -1893,6 +1893,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 SubsetError::TypeCannotAcceptSpecialForms(SpecialForm::Callable),
             ),
             (Type::Type(l), Type::Type(u)) => self.is_subset_eq(l, u),
+            // type[A | B] <: X if type[A] <: X and type[B] <: X.
+            (Type::Type(box Type::Union(box Union { members, .. })), _) => {
+                all(members.iter(), |m| {
+                    self.is_subset_eq(&Type::type_form(m.clone()), want)
+                })
+            }
             (Type::Type(_), _) => self.is_subset_eq(
                 &self
                     .solver
