@@ -83,3 +83,17 @@ ok7: TypeForm[Any] = Any
 err1: TypeForm[str | None] = str | int  # E: is not assignable
     "#,
 );
+
+testcase!(
+    bug = "conformance: Unpack[Ts] should not be assignable to TypeForm",
+    test_typeform_reject_unpack,
+    r#"
+from typing import TypeVarTuple, Unpack
+from typing_extensions import TypeForm
+
+Ts = TypeVarTuple("Ts")
+
+# Expressions that are not valid type expressions should not evaluate to a TypeForm type.
+bad: TypeForm = Unpack[Ts]
+    "#,
+);
