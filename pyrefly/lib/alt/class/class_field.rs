@@ -224,6 +224,9 @@ pub struct Descriptor {
 #[derive(Clone, Debug)]
 pub enum DescriptorBase {
     Instance(ClassType),
+    /// Descriptor accessed on a `Self` instance. The `ClassType` is the bounding class,
+    /// but the `obj` and `objtype` arguments to `__get__`/`__set__` should use `SelfType`.
+    SelfInstance(ClassType),
     ClassDef(ClassBase),
 }
 
@@ -1262,8 +1265,11 @@ impl<'a> Instance<'a> {
             // There's no situation in which you can stick a usable descriptor in a TypedDict.
             // TODO(rechen): a descriptor in a TypedDict should be an error at class creation time.
             InstanceKind::TypedDict => None,
+            InstanceKind::SelfType => Some(DescriptorBase::SelfInstance(ClassType::new(
+                self.class.dupe(),
+                self.targs.clone(),
+            ))),
             InstanceKind::ClassType
-            | InstanceKind::SelfType
             | InstanceKind::Protocol(..)
             | InstanceKind::Metaclass(..)
             | InstanceKind::TypeVar(..)
@@ -4239,16 +4245,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             ClassAttribute::Descriptor(x, base) => {
                 match base {
-                    DescriptorBase::Instance(class_type)
+                    DescriptorBase::Instance(_) | DescriptorBase::SelfInstance(_)
                         if let Some(setter) =
                             self.resolve_descriptor_setter(attr_name, &x, errors) =>
                     {
                         let got = CallArg::arg(got);
-                        self.call_descriptor_setter(
-                            setter, class_type, got, range, errors, context,
-                        );
+                        self.call_descriptor_setter(setter, base, got, range, errors, context);
                     }
-                    DescriptorBase::Instance(class_type) => {
+                    DescriptorBase::Instance(class_type)
+                    | DescriptorBase::SelfInstance(class_type) => {
                         let e = NoAccessReason::SettingReadOnlyDescriptor(
                             class_type.class_object().dupe(),
                         );

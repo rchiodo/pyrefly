@@ -1410,6 +1410,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap.mk_class_def(classtype.class_object().dupe()),
                 self.heap.mk_class_type(classtype),
             ),
+            DescriptorBase::SelfInstance(classtype) => (
+                self.heap
+                    .mk_type_form(self.heap.mk_self_type(classtype.clone())),
+                self.heap.mk_self_type(classtype),
+            ),
             DescriptorBase::ClassDef(class_base) => {
                 (class_base.to_type(self.heap), self.heap.mk_none())
             }
@@ -1429,16 +1434,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn call_descriptor_setter(
         &self,
         setter_method: Type,
-        class_type: ClassType,
+        base: DescriptorBase,
         got: CallArg,
         range: TextRange,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
     ) -> Type {
-        // When a descriptor is set on an instance, it gets the instance `class_type` and the value `got` as arguments.
+        // When a descriptor is set on an instance, it gets the instance and the value `got` as arguments.
         // Descriptor setters cannot be called on a class (an attempt to assign will overwrite the
         // descriptor itself rather than call the setter).
-        let instance = self.heap.mk_class_type(class_type);
+        let instance = match base {
+            DescriptorBase::Instance(ct) => self.heap.mk_class_type(ct),
+            DescriptorBase::SelfInstance(ct) => self.heap.mk_self_type(ct),
+            DescriptorBase::ClassDef(_) => {
+                unreachable!("descriptor setter is never called on a class")
+            }
+        };
         let args = [CallArg::ty(&instance, range), got];
         let call_target = self.as_call_target_or_error(
             setter_method,
