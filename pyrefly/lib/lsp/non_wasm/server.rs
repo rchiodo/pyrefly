@@ -282,6 +282,7 @@ use crate::lsp::non_wasm::queue::LspEvent;
 use crate::lsp::non_wasm::queue::LspQueue;
 use crate::lsp::non_wasm::safe_delete_file::safe_delete_file_code_action;
 use crate::lsp::non_wasm::stdlib::is_python_stdlib_file;
+use crate::lsp::non_wasm::stdlib::no_config_severity_override;
 use crate::lsp::non_wasm::stdlib::should_show_error_for_display_mode;
 use crate::lsp::non_wasm::stdlib::should_show_stdlib_error;
 use crate::lsp::non_wasm::transaction_manager::TransactionManager;
@@ -2565,6 +2566,17 @@ impl Server {
             if !should_show_error_for_display_mode(e, display_type_errors_mode, type_error_status) {
                 return None;
             }
+
+            // In NoConfigFile mode, downgrade certain error kinds to Warn severity
+            // so users without a config file see critical issues as warnings.
+            let overridden;
+            let e = match no_config_severity_override(e, type_error_status) {
+                Some(severity) => {
+                    overridden = e.with_severity(severity);
+                    &overridden
+                }
+                None => e,
+            };
 
             if let Some(lsp_file) = open_files.get(&path)
                 && config.project_includes.covers(&path)
