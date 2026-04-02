@@ -205,9 +205,9 @@ impl CalcStack {
     /// - Lifecycle correctness: committed answers should correspond to fully
     ///   unwound computations. Popping first ensures the stack no longer
     ///   contains the completing frame when results are written to Calculation.
-    /// - `pop()` decrements `segment_size` on the top SCC. If we took first,
+    /// - `pop()` decrements `top_pos_exclusive` on the top SCC. If we took first,
     ///   the completed SCC would already be gone from `scc_stack`, and `pop()`
-    ///   could incorrectly decrement a parent SCC's segment_size instead.
+    ///   could incorrectly decrement a parent SCC's top_pos_exclusive instead.
     ///
     /// Note that the `+ 1` in `on_calculation_finished`'s completion check
     /// (`stack_len <= bottom_pos_inclusive + 1`) is unrelated to this ordering — it
@@ -273,8 +273,8 @@ impl CalcStack {
                     // takes min across all SCCs regardless of which we pass here.
                     let detected_at = sccs_to_merge.first().detected_at.dupe();
                     let mut merged = Scc::merge_many(sccs_to_merge, detected_at);
-                    // Recompute segment_size after merge.
-                    merged.segment_size = calc_stack_vec.len() - merged.bottom_pos_inclusive;
+                    // Recompute top_pos_exclusive after merge.
+                    merged.top_pos_exclusive = calc_stack_vec.len();
 
                     // Add free-floating CalcStack nodes (between merged SCCs)
                     // to node_state, mirroring merge_sccs.
@@ -325,12 +325,12 @@ impl CalcStack {
             }
             // The target is in the top SCC's iteration state (not a cross-SCC
             // back-edge). This path is an early-return that bypasses the
-            // iterative bypass below — we must increment segment_size here for
+            // iterative bypass below — we must increment top_pos_exclusive here for
             // the same reason the iterative bypass does (Contract P4): pop()
-            // will decrement segment_size for any node in node_state, so push
+            // will decrement top_pos_exclusive for any node in node_state, so push
             // must balance it with an increment.
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
-                top_scc.segment_size += 1;
+                top_scc.top_pos_exclusive += 1;
             }
             if let Some(kind) = self.get_iteration_node_state(&current) {
                 return match kind {
@@ -379,13 +379,13 @@ impl CalcStack {
         // released before any exclusive borrow for mutation.
         if let Some(kind) = self.get_iteration_node_state(&current) {
             // The node was unconditionally pushed onto the raw CalcStack
-            // above, and pop() will decrement segment_size for any node
+            // above, and pop() will decrement top_pos_exclusive for any node
             // in the top SCC's node_state. We must increment here to
-            // keep segment_size symmetric, since the early return below
-            // bypasses the segment_size += 1 in the SccState::Participant
+            // keep top_pos_exclusive symmetric, since the early return below
+            // bypasses the top_pos_exclusive += 1 in the SccState::Participant
             // arm.
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
-                top_scc.segment_size += 1;
+                top_scc.top_pos_exclusive += 1;
             }
             return match kind {
                 SccNodeStateKind::Fresh => {
@@ -461,7 +461,7 @@ impl CalcStack {
                     .borrow_mut()
                     .last_mut()
                     .expect("SccState::Participant but no SCC on the stack")
-                    .segment_size += 1;
+                    .top_pos_exclusive += 1;
                 BindingAction::Calculate
             }
         }
@@ -470,7 +470,7 @@ impl CalcStack {
     /// Pop a binding frame from the raw binding-level CalcId stack.
     /// - Update both the direct stack and the `position_of` reverse index.
     /// - Also check whether the popped frame was part of the top Scc in the
-    ///   Scc stack; if so, decrement the segment_size to account for the fact
+    ///   Scc stack; if so, decrement the top_pos_exclusive to account for the fact
     ///   that this frame has completed.
     fn pop(&self) -> Option<CalcId> {
         let popped = self.stack.borrow_mut().pop();
@@ -487,7 +487,7 @@ impl CalcStack {
             if let Some(top_scc) = scc_stack.last_mut()
                 && top_scc.node_state.contains_key(calc_id)
             {
-                top_scc.segment_size = top_scc.segment_size.saturating_sub(1);
+                top_scc.top_pos_exclusive = top_scc.top_pos_exclusive.saturating_sub(1);
             }
         }
         popped
@@ -599,17 +599,16 @@ impl CalcStack {
 
     /// Check if an existing SCC overlaps with a newly detected cycle.
     ///
-    /// Uses O(1) position arithmetic: if the existing SCC's segment upper bound
-    /// (bottom_pos_inclusive + segment_size) is greater than the cycle start position,
+    /// Uses O(1) position arithmetic: if the existing SCC's exclusive upper bound
+    /// (top_pos_exclusive) is greater than the cycle start position,
     /// the segments overlap and must be merged.
     ///
     /// This works because segments are contiguous - all frames between bottom_pos_inclusive
-    /// and bottom_pos_inclusive + segment_size belong to this SCC.
+    /// and top_pos_exclusive belong to this SCC.
     fn check_overlap(existing: &Scc, cycle_start_pos: usize) -> bool {
         // O(1) overlap check using segment bounds.
         // If the existing SCC's upper bound <= cycle start, there's no overlap.
-        // Upper bound = bottom_pos_inclusive + segment_size (exact count of live frames in segment)
-        existing.bottom_pos_inclusive + existing.segment_size > cycle_start_pos
+        existing.top_pos_exclusive > cycle_start_pos
     }
 
     /// Handle an SCC we just detected.
@@ -636,7 +635,7 @@ impl CalcStack {
 
         // Find the first (oldest) SCC that overlaps with the new cycle.
         // Overlap is determined by O(1) segment arithmetic: if the existing SCC's
-        // upper bound (bottom_pos_inclusive + segment_size) exceeds cycle_start_pos, they overlap.
+        // upper bound (top_pos_exclusive) exceeds cycle_start_pos, they overlap.
         // Due to LIFO ordering, once we find one overlapping SCC, all subsequent ones
         // on the stack must also overlap.
         let mut first_merge_idx: Option<usize> = None;
@@ -657,8 +656,8 @@ impl CalcStack {
             let mut merged_scc = Scc::merge_many(sccs_to_merge, detected_at.dupe());
 
             // After a merge, everything from the merged anchor to the current stack top
-            // is part of this single SCC. Recompute segment_size from scratch.
-            merged_scc.segment_size = calc_stack_vec.len() - merged_scc.bottom_pos_inclusive;
+            // is part of this single SCC. Recompute top_pos_exclusive from scratch.
+            merged_scc.top_pos_exclusive = calc_stack_vec.len();
 
             scc_stack.push(merged_scc);
         } else {
@@ -682,7 +681,7 @@ impl CalcStack {
     /// above the SCC's segment (i.e., we exited and are now re-entering), or
     /// in a non-top SCC, we call `merge_sccs` immediately to merge all
     /// intervening SCCs and return the underlying state. `Participant` is
-    /// converted to `RevisitingInProgress` after merge since segment_size
+    /// converted to `RevisitingInProgress` after merge since top_pos_exclusive
     /// is already correct (merge recalculates it).
     fn pre_calculate_state(&self, current: &CalcId) -> SccState {
         let stack_len = self.stack.borrow().len();
@@ -718,8 +717,8 @@ impl CalcStack {
 
         if let Some((detected_at, state)) = merge_info {
             self.merge_sccs(&detected_at);
-            // After merge, segment_size is recalculated. Participant would
-            // increment segment_size again in push(), so convert it to
+            // After merge, top_pos_exclusive is recalculated. Participant would
+            // increment top_pos_exclusive again in push(), so convert it to
             // RevisitingInProgress to avoid double-counting.
             match state {
                 SccState::Participant | SccState::RevisitingInProgress => {
@@ -859,8 +858,8 @@ impl CalcStack {
         merged.absorb_calc_stack_members(&calc_stack_vec, min_depth);
 
         // After a merge, everything from the merged anchor to the current stack top
-        // is part of this single SCC. Recompute segment_size from scratch.
-        merged.segment_size = calc_stack_vec.len() - merged.bottom_pos_inclusive;
+        // is part of this single SCC. Recompute top_pos_exclusive from scratch.
+        merged.top_pos_exclusive = calc_stack_vec.len();
 
         scc_stack.push(merged);
     }
@@ -1305,12 +1304,12 @@ enum SccState {
 
 /// Check if the given stack length is within an SCC's segment.
 ///
-/// Returns true if stack_len < bottom_pos_inclusive + segment_size, meaning
+/// Returns true if stack_len < top_pos_exclusive, meaning
 /// we're currently inside the SCC's segment (haven't exited).
-/// The segment covers positions [bottom_pos_inclusive, bottom_pos_inclusive + segment_size),
-/// so at exactly bottom_pos_inclusive + segment_size we've exited.
+/// The segment covers positions [bottom_pos_inclusive, top_pos_exclusive),
+/// so at exactly top_pos_exclusive we've exited.
 fn is_within_scc_segment(stack_len: usize, scc: &Scc) -> bool {
-    stack_len < scc.bottom_pos_inclusive + scc.segment_size
+    stack_len < scc.top_pos_exclusive
 }
 
 /// The action to take for a binding after checking CalcStack and SCC state.
@@ -1439,10 +1438,10 @@ pub struct Scc {
     /// When the stack length drops to bottom_pos_inclusive, the SCC is complete.
     /// This enables O(1) completion checking instead of iterating all participants.
     bottom_pos_inclusive: usize,
-    /// Number of CalcIds in this SCC segment.
-    /// This is the count of stack frames that belong to this SCC.
-    /// Initially the cycle size; grows on merge.
-    segment_size: usize,
+    /// Exclusive upper bound of this SCC's segment on the calc stack.
+    /// The segment is [bottom_pos_inclusive, top_pos_exclusive).
+    /// Initially set to the stack length when the SCC is created; updated on merge.
+    top_pos_exclusive: usize,
     /// Iteration state for iterative fixpoint solving.
     /// `None` during Phase 0 discovery (legacy SCC tracking).
     /// `Some(...)` when the SCC is being iteratively solved.
@@ -1476,18 +1475,17 @@ impl Scc {
         // detection). Its first occurrence is at the deepest position in the cycle
         // (cycle_start), making it a more robust anchor.
         //
-        // The initial segment size is the number of frames from anchor to top of stack.
+        // The segment spans from the anchor to the top of the stack.
         let bottom_pos_inclusive = calc_stack_vec
             .iter()
             .position(|c| c == &detected_at)
             .unwrap_or(0);
-        let segment_size = calc_stack_vec.len() - bottom_pos_inclusive;
 
         Scc {
             node_state,
             detected_at,
             bottom_pos_inclusive,
-            segment_size,
+            top_pos_exclusive: calc_stack_vec.len(),
             iterative: None,
         }
     }
@@ -1613,9 +1611,9 @@ impl Scc {
         self.detected_at = self.detected_at.min(other.detected_at);
         // Keep the minimum anchor position
         self.bottom_pos_inclusive = self.bottom_pos_inclusive.min(other.bottom_pos_inclusive);
-        // Note: segment_size is NOT updated here. After a merge, everything from
+        // Note: top_pos_exclusive is NOT updated here. After a merge, everything from
         // the merged anchor to the current stack top is part of this single SCC.
-        // The caller must recompute segment_size = stack.len() - bottom_pos_inclusive.
+        // The caller must recompute top_pos_exclusive = stack.len().
 
         // Merge iteration state: if either SCC is iterating, build merged
         // iteration state. Node states are already merged via `node_state`
@@ -3561,21 +3559,22 @@ mod scc_tests {
     /// This bypasses the normal Scc::new constructor to allow direct construction
     /// for testing merge logic.
     ///
-    /// Note: segment_size is set to node_state.len() which approximates the number
-    /// of live frames. In production, segment_size may differ from participant count
-    /// due to duplicate CalcIds during cycle breaking.
+    /// Note: top_pos_exclusive is set to bottom_pos_inclusive + node_state.len()
+    /// which approximates the segment span. In production, top_pos_exclusive may
+    /// differ from bottom_pos_inclusive + participant count due to duplicate
+    /// CalcIds during cycle breaking.
     #[allow(clippy::mutable_key_type)]
     fn make_test_scc(
         node_state: BTreeMap<CalcId, SccNodeState>,
         detected_at: CalcId,
         bottom_pos_inclusive: usize,
     ) -> Scc {
-        let segment_size = node_state.len();
+        let top_pos_exclusive = bottom_pos_inclusive + node_state.len();
         Scc {
             node_state,
             detected_at,
             bottom_pos_inclusive,
-            segment_size,
+            top_pos_exclusive,
             iterative: None,
         }
     }
@@ -3971,7 +3970,7 @@ mod scc_tests {
                 node_state,
                 detected_at: a.dupe(),
                 bottom_pos_inclusive: 0,
-                segment_size: 2,
+                top_pos_exclusive: 2,
                 iterative: Some(SccIterationState {
                     iteration: 2,
                     previous_answers: BTreeMap::new(),
@@ -3992,7 +3991,7 @@ mod scc_tests {
                 node_state,
                 detected_at: d.dupe(),
                 bottom_pos_inclusive: 3,
-                segment_size: 2,
+                top_pos_exclusive: 5,
                 iterative: Some(SccIterationState {
                     iteration: 1,
                     previous_answers: BTreeMap::new(),
@@ -4122,7 +4121,7 @@ mod scc_tests {
                 node_state,
                 detected_at: a.dupe(),
                 bottom_pos_inclusive: 0,
-                segment_size: 2,
+                top_pos_exclusive: 2,
                 iterative: Some(SccIterationState {
                     iteration: 2,
                     previous_answers: BTreeMap::new(),
@@ -4143,7 +4142,7 @@ mod scc_tests {
                 node_state,
                 detected_at: d.dupe(),
                 bottom_pos_inclusive: 3,
-                segment_size: 2,
+                top_pos_exclusive: 5,
                 iterative: Some(SccIterationState {
                     iteration: 1,
                     previous_answers: BTreeMap::new(),
