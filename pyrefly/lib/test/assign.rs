@@ -991,6 +991,7 @@ assert_type(x, int)
 );
 
 testcase!(
+    bug = "Reassigned annotated variable should preserve declared type over Any (github #2227)",
     test_reassigned_var_does_not_preserve_annotation_over_any,
     r#"
 from typing import Any, assert_type
