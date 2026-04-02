@@ -63,6 +63,12 @@ impl FindError {
                     p.display()
                 )
             }
+            ConfigSource::FailedParse(p) => {
+                format!(
+                    " (from default config for `{}` which failed to parse)",
+                    p.display()
+                )
+            }
             _ => "".to_owned(),
         };
         let nonempty_paths = path

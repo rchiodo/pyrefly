@@ -103,6 +103,10 @@ pub enum ConfigSource {
     /// "marker" file that contains no pyrefly configuration but marks a project root (e.g., a
     /// `pyproject.toml` file with no `[tool.pyrefly]` section)
     Marker(PathBuf),
+    /// We found a config file and attempted to read/parse it, but failed. The config values
+    /// are defaults, but we respect the file's location for project root detection (similar
+    /// to `Marker`).
+    FailedParse(PathBuf),
     #[default]
     Synthetic,
 }
@@ -136,7 +140,10 @@ pub enum OutputFormat {
 impl ConfigSource {
     pub fn root(&self) -> Option<&Path> {
         match &self {
-            Self::File(path) | Self::PythonToolMarker(path) | Self::Marker(path) => path.parent(),
+            Self::File(path)
+            | Self::PythonToolMarker(path)
+            | Self::Marker(path)
+            | Self::FailedParse(path) => path.parent(),
             Self::Synthetic => None,
         }
     }
@@ -1349,7 +1356,7 @@ impl ConfigFile {
                 Ok(result) => result,
                 Err(e) => {
                     errors.push(ConfigError::error(e));
-                    (None, ConfigSource::File(config_path.to_path_buf()))
+                    (None, ConfigSource::FailedParse(config_path.to_path_buf()))
                 }
             };
             let mut config = match config_path.parent() {
@@ -2468,5 +2475,21 @@ output-format = "omit-errors"
         full_project_excludes.append(ConfigFile::required_project_excludes().globs());
         full_project_excludes.append(&[Glob::new("spp".to_owned()).unwrap()]);
         assert_eq!(&enabled_config.project_excludes, &full_project_excludes);
+    }
+
+    #[test]
+    fn test_failed_parse_on_invalid_toml() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join(ConfigFile::PYREFLY_FILE_NAME);
+        fs::write(&path, "not valid toml [[[").unwrap();
+        let (config, errors) = ConfigFile::from_file(&path);
+        assert!(
+            matches!(config.source, ConfigSource::FailedParse(_)),
+            "Expected FailedParse, got {:?}",
+            config.source
+        );
+        assert!(!errors.is_empty(), "Expected errors for invalid TOML");
+        // The config should still respect the file's location for project root detection.
+        assert_eq!(config.source.root(), Some(root.path()));
     }
 }

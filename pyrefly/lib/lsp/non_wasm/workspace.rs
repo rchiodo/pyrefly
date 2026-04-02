@@ -25,11 +25,13 @@ use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 use tracing::error;
 use tracing::info;
+use tracing::warn;
 
 use crate::commands::config_finder::ConfigConfigurer;
 use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::config_finder::standard_config_finder;
 use crate::config::config::ConfigFile;
+use crate::config::config::ConfigSource;
 use crate::config::environment::environment::PythonEnvironment;
 use crate::config::finder::ConfigFinder;
 use crate::state::lsp::DisplayTypeErrors;
@@ -92,10 +94,18 @@ impl ConfigConfigurer for WorkspaceConfigConfigurer {
             self.0.get_with(dir.to_owned(), |(workspace_root, w)| {
                 if let Some(workspace_config_path) = &w.workspace_config {
                     let (new_config, new_errors) = ConfigFile::from_file(workspace_config_path);
-                    if new_errors.is_empty() {
+                    if matches!(new_config.source, ConfigSource::File(_)) {
+                        // Config was parsed successfully (possibly with non-fatal
+                        // warnings like extra keys). Use it.
                         config = new_config;
-                        errors = vec![];
+                        errors = new_errors;
                     } else {
+                        // Config file couldn't be read or parsed. Fall back to
+                        // auto-discovered config but still report the errors.
+                        warn!(
+                            "Failed to load workspace config at `{}`, falling back to auto-discovered config",
+                            workspace_config_path.display()
+                        );
                         errors = new_errors;
                     }
                 }
