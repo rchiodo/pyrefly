@@ -1252,13 +1252,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// user-defined `class C[T]: x: T | None` makes `type A = C[A]`
     /// inhabitable (e.g. `C(x=C(x=None))`), so we can't assume all generic
     /// containers require their type parameter.
+    /// Returns `true` if a cyclic self-reference was found.
     fn check_type_alias_for_cyclic_reference(
         &self,
         name: &Name,
         ta: &TypeAlias,
         range: TextRange,
         errors: &ErrorCollector,
-    ) {
+    ) -> bool {
         // Unwrap the type[body] wrapper. We operate on the inner body because
         // map_over_union wraps inner union members in type[...] when traversing
         // inside Type::Type, which would prevent matching UntypedAlias nodes.
@@ -1267,7 +1268,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let ty = ta.as_type();
         let body = match &ty {
             Type::Type(inner) => inner.as_ref(),
-            _ => return,
+            _ => return false,
         };
         let is_self_ref = |ty: &Type| matches!(ty, Type::UntypedAlias(ta) if ta.name() == name);
 
@@ -1338,7 +1339,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ErrorInfo::Kind(ErrorKind::InvalidTypeAlias),
                 format!("Found cyclic self-reference in `{name}`"),
             );
+            return true;
         }
+        false
     }
 
     /// `typealiastype_tparams` refers specifically to the elements of the tuple literal passed to the `TypeAliasType` constructor
@@ -1371,7 +1374,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
 
         // Step 2: Check for cyclic self-references after expansion.
-        self.check_type_alias_for_cyclic_reference(name, &ta, range, errors);
+        // If a cycle is found, replace the body with an error type to prevent
+        // infinite recursion when downstream operations (e.g. attribute lookup,
+        // subset checks) try to resolve the alias.
+        if self.check_type_alias_for_cyclic_reference(name, &ta, range, errors) {
+            return self.heap.mk_any_error();
+        }
 
         // Step 3: Extract type parameters from the (now expanded) body.
         let mut seen_type_vars = SmallMap::new();
