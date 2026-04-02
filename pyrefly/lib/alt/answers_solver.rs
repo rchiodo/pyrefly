@@ -218,13 +218,13 @@ impl CalcStack {
         self.pending_completed_scc.borrow_mut().take()
     }
 
-    /// Push a CalcId onto the stack and compute the binding action.
+    /// Push a CalcId onto the stack and determine the binding action.
     ///
-    /// This combines the push operation with computing what action to take,
-    /// performing all SCC state checks and mutations (like `on_scc_detected`,
-    /// `on_calculation_finished`). SCC merging (`merge_sccs`) is handled
-    /// inside `pre_calculate_state` when a node is found in a previous SCC.
-    fn push<T: Dupe>(&self, current: CalcId, calculation: &Calculation<T>) -> BindingAction<T> {
+    /// This is purely thread-local: it manages the CalcStack and SCC state
+    /// without touching the cross-thread Calculation cell. Cycle detection
+    /// uses the thread-local stack exclusively; propose_calculation() is
+    /// called by the caller (get_idx) before push.
+    fn push(&self, current: CalcId) -> BindingAction {
         let position = {
             let mut stack = self.stack.borrow_mut();
             let pos = stack.len();
@@ -434,22 +434,10 @@ impl CalcStack {
                     BindingAction::Calculate
                 }
             }
-            SccState::RevisitingDone => {
-                // Try to read from the SCC-local SccNodeState::Done first.
-                // If the answer is available, return it without touching Calculation.
-                if let Some(answer) = self.get_scc_done_answer(&current) {
-                    BindingAction::SccLocalAnswer(answer)
-                } else {
-                    // Fallback: answer is None (another path computed it).
-                    // Check if another thread already committed a final answer.
-                    match calculation.get() {
-                        Some(v) => BindingAction::Calculated(v),
-                        None => unreachable!(
-                            "RevisitingDone node has no SCC-local answer and no global answer"
-                        ),
-                    }
-                }
-            }
+            SccState::RevisitingDone => BindingAction::SccLocalAnswer(
+                self.get_scc_done_answer(&current)
+                    .expect("RevisitingDone but no answer in SCC node_state"),
+            ),
             SccState::HasPlaceholder => {
                 // Check for new cycles: this node is already in the SCC with a
                 // placeholder, but the current traversal path may have introduced
@@ -459,18 +447,10 @@ impl CalcStack {
                 if let Some(current_cycle) = self.current_cycle() {
                     self.on_scc_detected(current_cycle);
                 }
-                // Read placeholder from SCC-local SccNodeState::HasPlaceholder.
-                // No need to touch the Calculation cell — placeholders are never
-                // stored there.
-                if let Some(v) = calculation.get() {
-                    // Another thread already committed a final answer.
-                    BindingAction::Calculated(v)
-                } else {
-                    let var = self
-                        .get_scc_placeholder_var(&current)
-                        .expect("HasPlaceholder state but no placeholder in SccNodeState");
-                    BindingAction::CycleBroken(var)
-                }
+                let var = self
+                    .get_scc_placeholder_var(&current)
+                    .expect("HasPlaceholder state but no placeholder in SccNodeState");
+                BindingAction::CycleBroken(var)
             }
             SccState::Participant => {
                 // Participant means pre_calculate_state found the node as Fresh
@@ -1333,22 +1313,20 @@ fn is_within_scc_segment(stack_len: usize, scc: &Scc) -> bool {
     stack_len < scc.anchor_pos + scc.segment_size
 }
 
-/// The action to take for a binding after checking SCC state and calculation proposal.
+/// The action to take for a binding after checking CalcStack and SCC state.
 ///
-/// This flattens the nested match on `SccState` and `ProposalResult` into a single
-/// discriminated union. The `CalcStack::push` method performs all state checks and
-/// SCC mutations (like `merge_sccs`, `on_scc_detected`, `on_calculation_finished`),
-/// returning the action that `get_idx` should take.
-enum BindingAction<T> {
+/// This flattens the nested match on `SccState` into a single discriminated
+/// union. The `CalcStack::push` method performs all state checks and SCC
+/// mutations (like `merge_sccs`, `on_scc_detected`, `on_calculation_finished`),
+/// returning the action that `get_idx` should take. Push is purely thread-local
+/// and never touches the cross-thread Calculation cell.
+enum BindingAction {
     /// Calculate the binding and record the answer.
     /// Action: call `calculate_and_record_answer`
     Calculate,
     /// We are at a break point and need to unwind the cycle with a placeholder.
     /// Action: call `attempt_to_unwind_cycle_from_here`
     Unwind,
-    /// A final answer is already available.
-    /// Action: return `v`
-    Calculated(T),
     /// A recursive placeholder exists (in SCC-local `SccNodeState::HasPlaceholder`)
     /// and we should return it.
     /// Action: return `Arc::new(K::promote_recursive(heap, r))`
@@ -2261,12 +2239,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
 
-        let mut result = match self.stack().push(current.dupe(), calculation) {
+        let mut result = match self.stack().push(current.dupe()) {
             BindingAction::Calculate => self.calculate_and_record_answer(current, idx, calculation),
             BindingAction::Unwind => self
                 .attempt_to_unwind_cycle_from_here(&current, idx, calculation)
                 .unwrap_or_else(|r| Arc::new(K::promote_recursive(self.heap, r))),
-            BindingAction::Calculated(v) => v,
             BindingAction::CycleBroken(r) => Arc::new(K::promote_recursive(self.heap, r)),
             BindingAction::SccLocalAnswer(type_erased) => {
                 // Downcast the type-erased answer back to Arc<K::Answer>.
@@ -3948,7 +3925,7 @@ mod scc_tests {
 
         // 3. Push the same calculation.
         // This should NOT panic.
-        let action = stack.push(calc_id, &calculation);
+        let action = stack.push(calc_id);
 
         // 4. Expect Calculate action (to recover).
         match action {
@@ -4039,8 +4016,7 @@ mod scc_tests {
 
         // Push A: A is a member of SCC0 (the non-top iterating SCC).
         // This should trigger a membership back-edge merge.
-        let calculation: Calculation<usize> = Calculation::new();
-        let action = calc_stack.push(a.dupe(), &calculation);
+        let action = calc_stack.push(a.dupe());
 
         // After merge, there should be exactly one SCC.
         let scc_stack = calc_stack.borrow_scc_stack();
@@ -4212,8 +4188,7 @@ mod scc_tests {
 
         // Simulate what happens during driving: push(A) triggers a
         // membership back-edge merge because A is in SCC_outer.
-        let calculation: Calculation<usize> = Calculation::new();
-        let _action = calc_stack.push(a.dupe(), &calculation);
+        let _action = calc_stack.push(a.dupe());
 
         // After merge, there should be exactly one SCC.
         assert_eq!(
