@@ -18,6 +18,7 @@ use parse_display::Display;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::Visit;
 use pyrefly_derive::VisitMut;
+use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::qname::QName;
 use pyrefly_util::assert_words;
 use pyrefly_util::display::commas_iter;
@@ -602,7 +603,7 @@ pub enum SuperObj {
 #[derive(Debug, Clone, Eq, TypeEq, PartialOrd, Ord)]
 pub struct Union {
     pub members: Vec<Type>,
-    pub display_name: Option<Box<str>>,
+    pub display_name: Option<(ModuleName, Name)>,
 }
 
 impl PartialEq for Union {

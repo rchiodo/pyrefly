@@ -289,13 +289,11 @@ fn test_tuple_item() {
 }
 
 #[test]
-#[ignore = "the type alias resolves to Unknown"]
 fn test_type_alias() {
     do_test(77, 6, "def bar.alias() -> bar.TA");
 }
 
 #[test]
-#[ignore = "the signature is returned, not the result"]
 fn test_pos() {
     do_test(86, 0, "typing.Literal[False]");
 }

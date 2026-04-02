@@ -788,9 +788,15 @@ impl<'a> TypeDisplayContext<'a> {
                 output.write_builtin("Never", qname)
             }
             Type::Union(box Union {
-                display_name: Some(name),
+                display_name: Some((module, name)),
                 ..
-            }) if !(self.always_display_expanded_unions || is_toplevel) => output.write_str(name),
+            }) if !(self.always_display_expanded_unions || is_toplevel) => {
+                if self.always_display_module_name && *module != ModuleName::unknown() {
+                    write!(output, "{}.{}", module, name)
+                } else {
+                    output.write_str(name.as_str())
+                }
+            }
             Type::Union(box Union { members, .. }) => {
                 let mut literal_idx = None;
                 let mut literals = Vec::new();
@@ -1188,6 +1194,9 @@ impl<'a> TypeDisplayContext<'a> {
         r: &TypeAliasRef,
         output: &mut impl TypeOutput,
     ) -> fmt::Result {
+        if self.always_display_module_name {
+            write!(output, "{}.", r.module_name)?;
+        }
         match r {
             TypeAliasRef {
                 name,
@@ -1710,7 +1719,7 @@ pub mod tests {
         assert_eq!(
             Type::type_form(Type::Union(Box::new(Union {
                 members: vec![nonlit1, nonlit2],
-                display_name: Some("MyUnion".into())
+                display_name: Some((ModuleName::unknown(), Name::new("MyUnion")))
             })))
             .to_string(),
             "type[MyUnion]"

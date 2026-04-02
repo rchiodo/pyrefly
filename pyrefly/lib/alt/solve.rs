@@ -5193,7 +5193,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::TypeAlias(box TypeAliasData::Value(ta)) => {
                 let mut aliased_type = self.untype_opt(ta.as_type(), range, errors)?;
                 if let Type::Union(box Union { display_name, .. }) = &mut aliased_type {
-                    *display_name = Some(ta.name.as_str().into());
+                    *display_name = Some((self.module().name(), (*ta.name).clone()));
                 }
                 Some(aliased_type)
             }
