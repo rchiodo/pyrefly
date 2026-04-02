@@ -3126,13 +3126,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // precedence over inferred expr type.
                     annot_ty.unwrap_or(expr_ty)
                 } else if style == &AnnotationStyle::ForwardedInitial
-                    && matches!(expr_ty, Type::Any(_))
-                    && annot_ty.is_some()
+                    && expr_ty.is_any()
+                    && let Some(annot) = annot_ty
                 {
                     // First assignment after a bare annotation: if the expression
                     // is Any, preserve the declared type since Any provides no
                     // useful narrowing information.
-                    annot_ty.unwrap()
+                    annot
                 } else {
                     // For reassignment or non-Any expressions, the expression
                     // type takes precedence (narrowing behavior).
@@ -3605,7 +3605,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let value = self.get_produced_type(iterables);
         let check_hint = ann.clone().and_then(|x| x.ty(self.heap, self.stdlib));
         if let Some(check_hint) = check_hint {
-            self.check_and_return_type(value, &check_hint, e.range(), errors, tcc)
+            if value.is_any() {
+                // Any provides no useful narrowing information, so preserve
+                // the declared type rather than letting Any leak through.
+                check_hint
+            } else {
+                self.check_and_return_type(value, &check_hint, e.range(), errors, tcc)
+            }
         } else {
             value
         }

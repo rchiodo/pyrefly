@@ -991,7 +991,6 @@ assert_type(x, int)
 );
 
 testcase!(
-    bug = "Reassigned annotated variable should preserve declared type over Any (github #2227)",
     test_reassigned_var_does_not_preserve_annotation_over_any,
     r#"
 from typing import Any, assert_type
@@ -1005,7 +1004,6 @@ assert_type(x, Any)
 );
 
 testcase!(
-    bug = "For-loop should preserve declared type when iterating over Any (github #2227)",
     test_annotated_var_for_loop_any,
     r#"
 from typing import Any, assert_type
@@ -1014,6 +1012,6 @@ xs: list[Any] = []
 
 y: int
 for y in xs:
-    assert_type(y, int)  # E: assert_type(Any, int) failed
+    assert_type(y, int)
 "#,
 );
