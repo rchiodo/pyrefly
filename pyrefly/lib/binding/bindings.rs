@@ -1606,6 +1606,14 @@ impl<'a> BindingsBuilder<'a> {
     }
 
     pub fn type_params(&mut self, x: &mut TypeParams) -> SmallSet<Name> {
+        self.type_params_with_owner(x, None)
+    }
+
+    pub fn type_params_with_owner(
+        &mut self,
+        x: &mut TypeParams,
+        owner: Option<Name>,
+    ) -> SmallSet<Name> {
         let mut names = SmallSet::new();
         for x in x.type_params.iter_mut() {
             let name = x.name().clone();
@@ -1675,6 +1683,7 @@ impl<'a> BindingsBuilder<'a> {
                     default,
                     bound,
                     constraints,
+                    owner: owner.clone(),
                 })),
                 FlowStyle::Other,
             );

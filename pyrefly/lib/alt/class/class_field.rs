@@ -2706,6 +2706,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         cls: None,
                         name: field_name.clone(),
                         def_index: None,
+                        outer_funcs: None,
                     };
                     ty = self.heap.mk_function(Function {
                         signature: callable,

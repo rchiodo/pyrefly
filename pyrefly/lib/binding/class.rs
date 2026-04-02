@@ -247,7 +247,10 @@ impl<'a> BindingsBuilder<'a> {
         let scoped_type_param_names = x
             .type_params
             .as_mut()
-            .map(|x| self.type_params(x))
+            .map(|tp| {
+                let owner = parent.owner_path(&self.module_info, x.name.id.as_str());
+                self.type_params_with_owner(tp, owner)
+            })
             .unwrap_or_default();
 
         let mut legacy = Some(LegacyTParamCollector::new(x.type_params.is_some()));
