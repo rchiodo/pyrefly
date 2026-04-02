@@ -215,6 +215,8 @@ pub enum ErrorKind {
     MissingSource,
     /// We are using bundled stubs for a package but the source code is missing.
     MissingSourceForStubs,
+    /// The first string argument to a functional type definition does not match the bound name.
+    NameMismatch,
     /// The attribute exists but does not support this access pattern.
     NoAccess,
     /// Attempting to call an overloaded function, but none of the signatures match.
@@ -340,6 +342,7 @@ impl ErrorKind {
             ErrorKind::InvalidDecorator => Severity::Warn,
             ErrorKind::MissingOverrideDecorator => Severity::Ignore,
             ErrorKind::MissingSource => Severity::Ignore,
+            ErrorKind::NameMismatch => Severity::Warn,
             ErrorKind::NonExhaustiveMatch => Severity::Warn,
             ErrorKind::NonConvergentRecursion => Severity::Warn,
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,

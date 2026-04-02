@@ -11353,8 +11353,8 @@
       "concise_description": "Expected string literal \"BadTypedDict3\"",
       "description": "Expected string literal \"BadTypedDict3\"",
       "line": 31,
-      "name": "invalid-argument",
-      "severity": "error",
+      "name": "name-mismatch",
+      "severity": "warn",
       "stop_column": 38,
       "stop_line": 31
     },
