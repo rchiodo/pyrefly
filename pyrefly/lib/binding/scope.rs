@@ -2022,6 +2022,35 @@ impl Scopes {
         Some(self.current().forks.last()?.base.get_info(name)?.idx())
     }
 
+    /// Copy walrus-defined names from the current branch flow into the fork's
+    /// base flow. Walrus names must be in the base flow so the merge can
+    /// distinguish paths where the walrus was vs. wasn't evaluated. This works
+    /// because branches started before the walrus don't inherit the new name.
+    ///
+    /// Also updates base entries that are uninitialized (e.g. `x: int` with no
+    /// assignment) when the branch has an initialized binding, so that the
+    /// merge does not falsely report "may be uninitialized".
+    pub fn propagate_new_flow_entries_to_fork_base(&mut self) {
+        let scope = self.current_mut();
+        let fork = scope
+            .forks
+            .last_mut()
+            .expect("propagate_new_flow_entries_to_fork_base called outside of a fork");
+        for (name, info) in scope.flow.info.iter() {
+            if let Some(existing) = fork.base.info.get(name) {
+                // Update the base entry if it is uninitialized but the branch
+                // has an initialized binding (e.g. walrus targeting `x: int`).
+                if matches!(existing.initialized(), InitializedInFlow::No)
+                    && !matches!(info.initialized(), InitializedInFlow::No)
+                {
+                    fork.base.info.insert(name.clone(), info.clone());
+                }
+            } else {
+                fork.base.info.insert(name.clone(), info.clone());
+            }
+        }
+    }
+
     /// Return the current binding index and flow style for `name`, if it exists
     /// in any enclosing scope.
     pub fn binding_idx_for_name(&self, name: &Name) -> Option<(Idx<Key>, FlowStyle)> {
