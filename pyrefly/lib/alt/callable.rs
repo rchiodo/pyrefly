@@ -621,7 +621,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Returns `Err(q)` when the Var resolved to a quantified ParamSpec `q`
         // (forwarding case), meaning the caller should validate that the
         // remaining args are `*P.args` / `**P.kwargs` and stop matching.
-        let var_to_rparams = |var| -> Result<Vec<&Param>, Quantified> {
+        let var_to_rparams = |var| -> Result<Vec<&Param>, Box<Quantified>> {
             let ps = match self.solver().force_var(var) {
                 Type::ParamSpecValue(ps) => ps,
                 Type::Any(_) | Type::Ellipsis => ParamList::everything(),
@@ -634,7 +634,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // one generic helper forwarding `*args: P.args, **kwargs: P.kwargs`
                 // to another). There are no concrete parameters to contribute;
                 // the caller must validate the forwarding pattern.
-                Type::Quantified(q) if q.is_param_spec() => return Err(*q),
+                Type::Quantified(q) if q.is_param_spec() => return Err(q),
                 t => {
                     error(
                         call_errors,

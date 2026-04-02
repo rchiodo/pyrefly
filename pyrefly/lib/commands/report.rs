@@ -127,18 +127,6 @@ impl SlotCounts {
             (self.n_typed as f64 / self.n_typable as f64) * 100.0
         }
     }
-
-    /// Aggregate slot counts across all functions and variables.
-    fn total(functions: &[Function], variables: &[Variable]) -> SlotCounts {
-        let mut total = SlotCounts::default();
-        for func in functions {
-            total = total.merge(func.slots);
-        }
-        for var in variables {
-            total = total.merge(var.slots);
-        }
-        total
-    }
 }
 
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
