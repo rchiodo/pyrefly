@@ -427,46 +427,11 @@ impl CalcStack {
 
         match self.pre_calculate_state(&current) {
             SccState::NotInScc | SccState::RevisitingInProgress => {
-                match calculation.propose_calculation() {
-                    ProposalResult::Calculated(v) => BindingAction::Calculated(v),
-                    // Use the thread-local stack as the source of truth for
-                    // cycle detection: `position_of` tells us definitively
-                    // whether this CalcId has a live frame on the current stack.
-                    ProposalResult::Calculatable => {
-                        if let Some(current_cycle) = self.current_cycle() {
-                            self.on_scc_detected(current_cycle);
-                            BindingAction::Unwind
-                        } else {
-                            // No cycle on the stack: this node simply needs
-                            // computing. This is the normal case for both
-                            // iterative and legacy modes.
-                            BindingAction::Calculate
-                        }
-                    }
-                    ProposalResult::CycleDetected => {
-                        if let Some(current_cycle) = self.current_cycle() {
-                            self.on_scc_detected(current_cycle);
-                            BindingAction::Unwind
-                        } else if self.get_iteration_node_state(&current).is_some() {
-                            // CycleDetected without an active cycle means Phase 0
-                            // left stale Calculating state (the thread started
-                            // this node in a previous iteration but the stack was
-                            // unwound). Treat as a cold-start back-edge: the
-                            // caller (get_idx) will allocate a placeholder via
-                            // K::create_recursive.
-                            BindingAction::NeedsColdPlaceholder
-                        } else {
-                            // CycleDetected without a stack cycle is surprising
-                            // but has been observed in LSP. The thread started a
-                            // calculation but never saved an answer, and the stack
-                            // frame is gone. Proceed with Calculate as a
-                            // best-effort fallback.
-                            //
-                            // TODO: This may indicate a bug in SCC merging, state
-                            // transition tracking, or batch commit.
-                            BindingAction::Calculate
-                        }
-                    }
+                if let Some(current_cycle) = self.current_cycle() {
+                    self.on_scc_detected(current_cycle);
+                    BindingAction::Unwind
+                } else {
+                    BindingAction::Calculate
                 }
             }
             SccState::RevisitingDone => {
@@ -2282,6 +2247,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             let result = self.handle_depth_overflow(&current, idx, calculation, config);
             return result;
+        }
+
+        // Register this thread's intent to calculate with the Calculation cell.
+        // answers_solver intentionally ignores Calculation's cycle semantics
+        // (CycleDetected vs Calculatable) and uses the thread-local CalcStack
+        // as the sole source of truth for cycle detection.
+        match calculation.propose_calculation() {
+            ProposalResult::Calculated(v) => return v,
+            ProposalResult::Calculatable | ProposalResult::CycleDetected => {
+                // Both cases proceed into push, which uses thread-local
+                // CalcStack cycle detection exclusively.
+            }
         }
 
         let mut result = match self.stack().push(current.dupe(), calculation) {
