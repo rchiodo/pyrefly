@@ -143,6 +143,7 @@ pub trait SourceDbQuerier: Send + Sync + fmt::Debug {
                 db: Ok(TargetManifestDatabase {
                     db: SmallMap::new(),
                     root: cwd.to_path_buf(),
+                    extra_filetypes: SmallSet::new(),
                 }),
                 build_id: None,
                 build_duration: None,
@@ -384,10 +385,16 @@ pub(crate) enum TargetManifest {
 pub(crate) struct TargetManifestDatabase {
     db: SmallMap<Target, TargetManifest>,
     pub root: PathBuf,
+    /// Non-Python file suffixes discovered by the BXL script (e.g. ["thrift"]).
+    /// Used to watch for changes to files with these extensions.
+    #[serde(default)]
+    pub extra_filetypes: SmallSet<String>,
 }
 
 impl TargetManifestDatabase {
-    pub fn produce_map(mut self) -> SmallMap<Target, PythonLibraryManifest> {
+    /// Consumes the raw database and produces a resolved map of targets to manifests,
+    /// along with a list of any non-Python file types discovered by the BXL script.
+    pub fn produce_map(mut self) -> (SmallMap<Target, PythonLibraryManifest>, SmallSet<String>) {
         let mut result = SmallMap::new();
         let aliases: SmallMap<Target, Target> = self
             .db
@@ -417,7 +424,7 @@ impl TargetManifestDatabase {
                 }
             }
         }
-        result
+        (result, self.extra_filetypes)
     }
 }
 
@@ -432,7 +439,11 @@ mod tests {
 
     impl TargetManifestDatabase {
         pub fn new(db: SmallMap<Target, TargetManifest>, root: PathBuf) -> Self {
-            TargetManifestDatabase { db, root }
+            TargetManifestDatabase {
+                db,
+                root,
+                extra_filetypes: SmallSet::new(),
+            }
         }
 
         /// This is a simplified sourcedb taken from the BXL output run on pyre/client/log/log.py.
@@ -604,7 +615,7 @@ mod tests {
                         (
                             "external_package.non_python_file",
                             &[
-                            "/path/to/another/repository/package/external_package/non_python_file.thrift",
+                            "/path/to/another/repository/package/external_package/non_python_file.so",
                             ],
                         ),
                         ],
@@ -862,7 +873,7 @@ mod tests {
               "/path/to/another/repository/package/external_package/main.py"
           ],
           "external_package.non_python_file": [
-              "/path/to/another/repository/package/external_package/non_python_file.thrift"
+              "/path/to/another/repository/package/external_package/non_python_file.so"
           ]
       }, 
       "deps": [],
@@ -1107,7 +1118,7 @@ mod tests {
                 ),
                 (
                     "external_package.non_python_file", &[
-                        "/path/to/another/repository/package/external_package/non_python_file.thrift",
+                        "/path/to/another/repository/package/external_package/non_python_file.so",
                     ],
                 ),
                 ],
@@ -1157,7 +1168,7 @@ mod tests {
             ),
         };
         assert_eq!(
-            TargetManifestDatabase::get_test_database().produce_map(),
+            TargetManifestDatabase::get_test_database().produce_map().0,
             expected
         );
     }
@@ -1167,7 +1178,7 @@ mod tests {
         // Test that fill_implicit_packages correctly synthesizes packages for all targets.
         // This tests explicit __init__ files are preserved and parent packages are synthesized.
         let db = TargetManifestDatabase::get_test_database();
-        let result = db.produce_map();
+        let (result, _) = db.produce_map();
 
         // Test colorama:py-stubs - explicit __init__.pyi
         let colorama_stubs = result
@@ -1363,7 +1374,7 @@ mod tests {
             PathBuf::from("/repo"),
         );
 
-        let result = db.produce_map();
+        let result = db.produce_map().0;
         let manifest = result
             .get(&Target::from_string("//thrift:types".to_owned()))
             .unwrap();
