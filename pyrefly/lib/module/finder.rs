@@ -2485,15 +2485,18 @@ mod tests {
         let result = find_import_filtered(&config, ModuleName::from_str("requests"), None, None);
 
         if let FindingOrError::Finding(finding) = &result {
-            let error = finding.error.as_ref().expect("Expected MissingStubs error");
-            let FindError::MissingStubs(module, stubs_package) = error else {
-                panic!("Expected MissingStubs error, got: {:?}", error);
+            let error = finding
+                .error
+                .as_ref()
+                .expect("Expected UntypedImport error");
+            let FindError::UntypedImport(module, stubs_package) = error else {
+                panic!("Expected UntypedImport error, got: {:?}", error);
             };
             assert_eq!(*module, ModuleName::from_str("requests"));
             assert_eq!(stubs_package.as_str(), "types-requests");
         } else {
             panic!(
-                "Expected Finding with MissingStubs error, got: {:?}",
+                "Expected Finding with UntypedImport error, got: {:?}",
                 result
             );
         }
