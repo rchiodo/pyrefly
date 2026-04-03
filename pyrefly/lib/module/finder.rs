@@ -432,7 +432,7 @@ fn resolve_third_party_stub(
     // If we do have a bundled stub and we also do not find a
     // higher priority stub from the site packages, then we should use the
     // bundled stub. However, if we also don't find the actual
-    // package (normal_result), we should attach a NoSource error.
+    // package (normal_result), we should attach a MissingSource error.
     if let Some(bundled) = bundled_stub
         && stub_result.is_none()
     {
@@ -468,7 +468,7 @@ fn combine_normal_and_stub_results(
         (None, Some(stub_result)) => Some(
             stub_result
                 .module_path()
-                .with_error(FindError::NoSource(module)),
+                .with_error(FindError::MissingSource(module)),
         ),
         (Some(_), Some(stub_result)) => Some(stub_result.module_path()),
         (Some(FindResult::NamespacePackage(namespaces)), _) => {
@@ -1670,7 +1670,7 @@ mod tests {
             .unwrap(),
             FindingOrError::Finding(Finding {
                 finding: ModulePath::filesystem(root.join("foo-stubs/bar/__init__.py")),
-                error: Some(FindError::NoSource(ModuleName::from_str("foo.bar"))),
+                error: Some(FindError::MissingSource(ModuleName::from_str("foo.bar"))),
             })
         );
         assert!(matches!(
@@ -1686,7 +1686,7 @@ mod tests {
             .unwrap(),
             FindingOrError::Finding(Finding {
                 finding: _,
-                error: Some(FindError::NoSource(_)),
+                error: Some(FindError::MissingSource(_)),
             })
         ));
     }
@@ -2549,7 +2549,7 @@ mod tests {
                 finding.finding.details(),
                 ModulePathDetails::BundledTypeshedThirdParty(_)
             ));
-            // Should not have a NoSource error since the package exists
+            // Should not have a MissingSource error since the package exists
             assert!(finding.error.is_none());
         } else {
             panic!("Expected to find typeshed stub, got: {:?}", result);

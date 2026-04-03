@@ -36,7 +36,7 @@ pub enum FindError {
     Ignored,
     /// We found stubs, but no source files were found. This means it's likely stubs
     /// are installed for a project, but the library is not actually importable
-    NoSource(ModuleName),
+    MissingSource(ModuleName),
     /// We have the source files, but do not have the stubs. In this case we should send
     /// a message to the user which will allow them to install the stubs for the package.
     /// The string will hold the name of the pip package that we will tell the user to install.
@@ -104,7 +104,7 @@ impl FindError {
                 )
             }
             Self::Ignored => (None, vec1!["Ignored import".to_owned()]),
-            Self::NoSource(module) => (
+            Self::MissingSource(module) => (
                 None,
                 vec1![format!(
                     "Found stubs for `{module}`, but no source. This means it's likely not \
@@ -127,7 +127,7 @@ impl FindError {
     pub fn kind(&self) -> Option<ErrorKind> {
         match self {
             Self::MissingImport(..) => Some(ErrorKind::MissingImport),
-            Self::NoSource(..) => Some(ErrorKind::MissingSource),
+            Self::MissingSource(..) => Some(ErrorKind::MissingSource),
             Self::NoSourceForStubs(..) => Some(ErrorKind::MissingSourceForStubs),
             Self::MissingStubs(..) => Some(ErrorKind::UntypedImport),
             Self::Ignored => None,
