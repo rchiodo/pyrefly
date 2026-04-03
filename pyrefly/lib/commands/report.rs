@@ -1477,8 +1477,13 @@ mod tests {
     }
 
     /// @overload decorated functions and methods.
-    /// Current: each @overload is a separate Function entry (not deduplicated).
-    /// Typestats: overloads are merged with worst-wins annotation logic.
+    ///
+    /// Deliberate divergence from typestats: pyrefly emits each @overload
+    /// signature as a separate SymbolReport, giving per-signature coverage
+    /// granularity. Typestats merges overloads into a single FunctionReport
+    /// using worst-annotation-wins deduplication (positional by index, named
+    /// by name, variadic as singletons). Typestats can post-process pyrefly's
+    /// output to merge if needed; we keep the richer representation here.
     #[test]
     fn test_report_overloads() {
         let report = build_module_report_for_test("overloads.py");
