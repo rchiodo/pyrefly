@@ -365,6 +365,21 @@ impl ReportArgs {
         }
     }
 
+    /// Build a class's qualified name from its nesting context.
+    /// Returns e.g. `"Outer.Inner"` for a nested class or `"MyClass"` for a top-level one.
+    fn class_qualified_name(
+        module: &Module,
+        parent: &NestingContext,
+        class_name: impl std::fmt::Display,
+    ) -> String {
+        let parent_path = module.display(parent).to_string();
+        if parent_path.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{parent_path}.{class_name}")
+        }
+    }
+
     /// Classify a single annotation slot: is it typed, any, or untyped?
     fn classify_slot(has_annotation: bool, is_type_known: bool) -> SlotCounts {
         if !has_annotation {
@@ -423,8 +438,6 @@ impl ReportArgs {
                         }
                         _ => None,
                     };
-                    // Use the resolved annotation type (not the expression trace)
-                    // to correctly detect Any in annotations like `x: Any`.
                     let is_type_known = annotation_text.is_some()
                         && answers
                             .get_idx(*annot_idx)
@@ -523,14 +536,8 @@ impl ReportArgs {
             if Self::has_function_ancestor(&cls_binding.parent) {
                 continue;
             }
-            let class_name = {
-                let parent_path = module.display(&cls_binding.parent).to_string();
-                if parent_path.is_empty() {
-                    cls_binding.def.name.to_string()
-                } else {
-                    format!("{}.{}", parent_path, cls_binding.def.name)
-                }
-            };
+            let class_name =
+                Self::class_qualified_name(module, &cls_binding.parent, &cls_binding.def.name);
             let qualified_name = format!("{}{}.{}", module_prefix, class_name, field.name);
             let location = Self::range_to_location(module, field.range);
 
@@ -587,16 +594,9 @@ impl ReportArgs {
                             if Self::has_function_ancestor(&cls.parent) {
                                 continue;
                             }
-                            // Build full qualified name using nesting context
-                            let parent_path = module.display(&cls.parent).to_string();
-                            if parent_path.is_empty() {
-                                format!("{}{}.{}", module_prefix, cls.def.name, fun.def.name)
-                            } else {
-                                format!(
-                                    "{}{}.{}.{}",
-                                    module_prefix, parent_path, cls.def.name, fun.def.name
-                                )
-                            }
+                            let class_qname =
+                                Self::class_qualified_name(module, &cls.parent, &cls.def.name);
+                            format!("{module_prefix}{class_qname}.{}", fun.def.name)
                         }
                         BindingClass::FunctionalClassDef(..) => {
                             continue;
@@ -657,8 +657,6 @@ impl ReportArgs {
                         .as_ref()
                         .map(|ann| module.code_at(ann.range()).to_owned());
 
-                    // Use the resolved annotation type (not the expression trace)
-                    // to correctly detect Any in annotations like `a: Any`.
                     let is_param_type_known = if Self::is_self_or_cls(i, param_name) {
                         true
                     } else if param.annotation.is_some() {
@@ -732,14 +730,10 @@ impl ReportArgs {
                 if Self::has_function_ancestor(&cls.parent) {
                     continue;
                 }
-                let class_prefix = {
-                    let parent_path = module.display(&cls.parent).to_string();
-                    if parent_path.is_empty() {
-                        format!("{}{}", module_prefix, cls.def.name)
-                    } else {
-                        format!("{}{}.{}", module_prefix, parent_path, cls.def.name)
-                    }
-                };
+                let class_prefix = format!(
+                    "{module_prefix}{}",
+                    Self::class_qualified_name(module, &cls.parent, &cls.def.name)
+                );
                 let target_qualified = format!("{}.{}", class_prefix, target_name);
                 if let Some(target_func) = functions.iter().find(|f| f.name == target_qualified) {
                     let alias_name = format!("{}.{}", class_prefix, field.name);
@@ -922,14 +916,10 @@ impl ReportArgs {
                 },
                 None => continue,
             };
-            let class_name = {
-                let parent_path = module.display(&cls_binding.parent).to_string();
-                if parent_path.is_empty() {
-                    format!("{}{}", module_prefix, cls_binding.def.name)
-                } else {
-                    format!("{}{}.{}", module_prefix, parent_path, cls_binding.def.name)
-                }
-            };
+            let class_name = format!(
+                "{module_prefix}{}",
+                Self::class_qualified_name(module, &cls_binding.parent, &cls_binding.def.name)
+            );
             let mro = answers
                 .get_idx(bindings.key_to_idx(&KeyClassMro(ClassDefIndex(class_type.index().0))))
                 .unwrap_or_else(|| Arc::new(ClassMro::Cyclic));
@@ -1729,6 +1719,14 @@ mod tests {
     fn test_report_dunder_implicit() {
         let report = build_module_report_for_test("dunder_implicit.py");
         compare_snapshot("dunder_implicit.expected.json", &report);
+    }
+
+    /// Protocol classes define structural interfaces. The class itself should
+    /// have n_typable=0, while its methods still count toward coverage.
+    #[test]
+    fn test_report_protocol() {
+        let report = build_module_report_for_test("protocol.py");
+        compare_snapshot("protocol.expected.json", &report);
     }
 
     /// @staticmethod, @classmethod decorator handling.
