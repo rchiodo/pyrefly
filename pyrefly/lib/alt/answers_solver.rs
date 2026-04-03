@@ -299,7 +299,7 @@ impl CalcStack {
             // The target is in the top SCC's iteration state (not a cross-SCC
             // back-edge). If we've exited the SCC segment, merge from the top
             // SCC anchor so intervening nodes/SCC fragments are absorbed.
-            self.merge_if_outside_segment();
+            self.merge_top_scc_on_outside_reentry();
             // Increment top_pos_exclusive because pop() will decrement
             // top_pos_exclusive for any node in node_state, so push must
             // balance it with an increment.
@@ -331,7 +331,7 @@ impl CalcStack {
             // the top SCC anchor so intervening nodes/SCC fragments are
             // absorbed. This handles dependency chains that exit and re-enter
             // via back-edges.
-            self.merge_if_outside_segment();
+            self.merge_top_scc_on_outside_reentry();
             // The node was unconditionally pushed onto the raw CalcStack
             // above, and pop() will decrement top_pos_exclusive for any node
             // in the top SCC's node_state. We must increment here to
@@ -682,7 +682,7 @@ impl CalcStack {
     /// `merge_sccs` here ensures all phase-0 and phase-1+ re-entry paths share
     /// the same merge+absorb behavior and consistent demotion signaling
     /// (`merge_happened`).
-    fn merge_if_outside_segment(&self) {
+    fn merge_top_scc_on_outside_reentry(&self) {
         let detected_at = {
             let stack_len = self.stack.borrow().len();
             let scc_stack = self.scc_stack.borrow();
