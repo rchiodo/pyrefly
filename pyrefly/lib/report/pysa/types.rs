@@ -38,7 +38,7 @@ pub enum TypeModifier {
 }
 
 /// A class reference along with the modifiers that were stripped to extract it.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClassWithModifiers {
     pub class: ClassRef,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -55,7 +55,7 @@ impl ClassWithModifiers {
 }
 
 // List of class names that a type refers to, after stripping Optional and Awaitable.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct ClassNamesFromType {
     pub classes: Vec<ClassWithModifiers>,
     // Is there an element (after stripping) that isn't a class name?
@@ -64,7 +64,7 @@ pub struct ClassNamesFromType {
 }
 
 /// Information needed from Pysa about a type.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct PysaType {
     // Pretty string representation of the type. Usually meant for the user.
     pub string: String,

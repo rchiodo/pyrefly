@@ -814,11 +814,28 @@ pub fn write_type_of_expressions<W: Write>(
         root.reborrow().set_module_name(exprs.module_name.as_str());
         set_source_path(root.reborrow().init_source_path(), &exprs.source_path);
 
-        let mut list = root.init_type_of_expression(exprs.type_of_expression.len() as u32);
-        for (i, (loc, ty)) in exprs.type_of_expression.iter().enumerate() {
-            let mut entry = list.reborrow().get(i as u32);
-            set_location(entry.reborrow().init_location(), loc);
-            set_pysa_type(entry.init_type(), ty);
+        let mut functions_list = root.init_functions(exprs.functions.len() as u32);
+        for (i, (func_id, func_data)) in exprs.functions.iter().enumerate() {
+            let mut func_builder = functions_list.reborrow().get(i as u32);
+            func_builder
+                .reborrow()
+                .set_function_id(func_id.serialize_to_string());
+
+            // Write deduplicated type table
+            let mut types_list = func_builder
+                .reborrow()
+                .init_types(func_data.type_table.len() as u32);
+            for (j, ty) in func_data.type_table.iter().enumerate() {
+                set_pysa_type(types_list.reborrow().get(j as u32), ty);
+            }
+
+            // Write location -> type_id entries
+            let mut locations_list = func_builder.init_locations(func_data.locations.len() as u32);
+            for (j, (loc, type_id)) in func_data.locations.iter().enumerate() {
+                let mut entry = locations_list.reborrow().get(j as u32);
+                set_location(entry.reborrow().init_location(), loc);
+                entry.set_type_id(type_id.0);
+            }
         }
     }
     capnp::serialize::write_message(writer, &message)?;

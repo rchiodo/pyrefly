@@ -376,16 +376,22 @@ struct ModuleDefinitions {
   globalVariables     @5 :List(GlobalVariable);
 }
 
-struct TypeOfExpressionEntry {
+struct LocationTypeIdEntry {
   location @0 :PysaLocation;
-  type     @1 :PysaType;
+  typeId   @1 :UInt32;
+}
+
+struct FunctionTypeOfExpressions {
+  functionId @0 :Text;
+  types      @1 :List(PysaType);
+  locations  @2 :List(LocationTypeIdEntry);
 }
 
 struct ModuleTypeOfExpressions {
-  moduleId         @0 :UInt32;
-  moduleName       @1 :Text;
-  sourcePath       @2 :SourcePath;
-  typeOfExpression  @3 :List(TypeOfExpressionEntry);
+  moduleId   @0 :UInt32;
+  moduleName @1 :Text;
+  sourcePath @2 :SourcePath;
+  functions  @3 :List(FunctionTypeOfExpressions);
 }
 
 struct ModuleCallGraphs {

@@ -137,6 +137,19 @@ pub struct PysaModuleDefinitions {
     pub global_variables: HashMap<Name, GlobalVariable>,
 }
 
+/// Type identifier within a function's deduplicated type table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+pub struct LocalTypeId(pub u32);
+
+/// Per-function type-of-expression data, with deduplicated types.
+#[derive(Debug, Clone, Serialize)]
+pub struct FunctionTypeOfExpressions {
+    /// Deduplicated type table. `LocalTypeId(n)` refers to `type_table[n]`.
+    pub type_table: Vec<PysaType>,
+    /// Map from expression location to its LocalTypeId in the type table.
+    pub locations: HashMap<PysaLocation, LocalTypeId>,
+}
+
 /// Format of the file `type_of_expressions/my.module:id.json` containing type of expressions
 #[derive(Debug, Clone, Serialize)]
 pub struct PysaModuleTypeOfExpressions {
@@ -144,7 +157,7 @@ pub struct PysaModuleTypeOfExpressions {
     pub module_id: ModuleId,
     pub module_name: ModuleName,
     pub source_path: ModulePathDetails,
-    pub type_of_expression: HashMap<PysaLocation, PysaType>,
+    pub functions: HashMap<FunctionId, FunctionTypeOfExpressions>,
 }
 
 /// Format of the file `call_graphs/my.module:id.json` containing module call graphs
@@ -343,13 +356,13 @@ pub fn export_module_definitions(
 }
 
 pub fn export_module_type_of_expressions(context: &ModuleContext) -> PysaModuleTypeOfExpressions {
-    let type_of_expression = export_type_of_expressions(context);
+    let functions = export_type_of_expressions(context);
     PysaModuleTypeOfExpressions {
         format_version: 1,
         module_id: context.answers_context.module_id,
         module_name: context.answers_context.module_info.name(),
         source_path: context.answers_context.module_info.path().details().clone(),
-        type_of_expression,
+        functions,
     }
 }
 
