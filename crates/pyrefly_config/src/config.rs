@@ -977,6 +977,7 @@ impl ConfigFile {
                     let name = ModuleName::from_path(
                         module_path.as_path(),
                         self.search_path().chain(self.site_package_path()),
+                        &self.extra_file_extensions,
                     )
                     .unwrap_or_else(ModuleName::unknown);
                     ModuleNameWithKind::guaranteed(name)
@@ -987,6 +988,7 @@ impl ConfigFile {
                         module_path.as_path(),
                         self.search_path().chain(self.site_package_path()),
                         fallback_paths.iter(),
+                        &self.extra_file_extensions,
                     )
                     .unwrap_or(ModuleNameWithKind::guaranteed(ModuleName::unknown()))
                 };
