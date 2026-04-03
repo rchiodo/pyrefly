@@ -1516,3 +1516,12 @@ c = Config()
 assert_type(c.name, str)
 "#,
 );
+
+// Regression test for https://github.com/facebook/pyrefly/issues/2983
+testcase!(
+    test_malformed_def_from_star,
+    r#"
+def # E: Expected an identifier
+from *a # E: Expected `)` # E: Cannot find module # E: only allowed at module level # E: Expected a module name # E: Star import must be the only import # E: Expected `,`
+"#,
+);

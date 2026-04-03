@@ -1401,9 +1401,10 @@ impl<'a> BindingsBuilder<'a> {
 
     fn bind_module_exports(&mut self, x: StmtImportFrom, m: ModuleName) {
         for x in x.names {
-            if &x.name == "*"
-                && let Some(wildcards) = self.lookup.get_wildcard(m)
-            {
+            if &x.name == "*" {
+                let Some(wildcards) = self.lookup.get_wildcard(m) else {
+                    continue;
+                };
                 for name in wildcards.iter_hashed() {
                     let key = Key::Import(Box::new((name.into_key().clone(), x.range)));
                     let val = if self.lookup.export_exists(m, &name) {
