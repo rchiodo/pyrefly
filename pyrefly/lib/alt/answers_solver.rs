@@ -659,7 +659,7 @@ impl CalcStack {
 
     /// Find the index in `scc_stack` of an SCC that contains `target`.
     ///
-    /// Scans the SCC stack for an SCC whose `node_state` (legacy membership map)
+    /// Scans the SCC stack for an SCC whose `node_state` membership map
     /// contains the target. Returns the index in the stack (not the SCC's
     /// `bottom_pos_inclusive`). Used for membership-based back-edge detection:
     /// a request for a CalcId in a non-top SCC is a back-edge that must trigger
@@ -1260,7 +1260,8 @@ pub struct Scc {
     /// Initially set to the stack length when the SCC is created; updated on merge.
     top_pos_exclusive: usize,
     /// Iteration state for iterative fixpoint solving.
-    /// Set to iteration 0 on creation (Phase 0 discovery), then reset to
+    /// Invariant: every active SCC has iteration state, initialized to
+    /// iteration 0 on creation (Phase 0 discovery), then reset to
     /// iteration 1 by `reset_for_cold_start` when entering iterative solving.
     iterative: SccIterationState,
 }
@@ -1361,8 +1362,8 @@ impl Scc {
     fn on_placeholder_recorded(&mut self, current: &CalcId, var: Var) {
         if let Some(state) = self.node_state.get_mut(current) {
             // Only upgrade: do not overwrite Done back to HasPlaceholder.
-            // This is defense-in-depth; pre_calculate_state should prevent
-            // this path from being reached for Done nodes.
+            // This is defense-in-depth; placeholder recording should not
+            // regress a completed node.
             if state.advancement_rank() < SccNodeState::HasPlaceholder(var).advancement_rank() {
                 *state = SccNodeState::HasPlaceholder(var);
             }
