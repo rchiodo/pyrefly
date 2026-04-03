@@ -996,14 +996,14 @@ impl CalcStack {
             .dupe()
     }
 
-    /// Returns true if any SCC below the top of the stack is iterating.
+    /// Returns true if any SCC exists below the top of the stack.
     ///
     /// Used by the absorption check in `iterative_resolve_scc`: when the top
     /// SCC's `detected_at` has changed (indicating a merge), the driver can
-    /// only return early if an ancestor iteration driver exists to pick up
-    /// the merged SCC. If no ancestor is iterating, the current driver must
-    /// continue with the merged SCC to avoid orphaning it.
-    fn has_ancestor_iterating_scc(&self) -> bool {
+    /// only return early if an ancestor SCC is still on the stack to own the
+    /// merged SCC. If no ancestor SCC exists, the current driver must continue
+    /// with the merged SCC to avoid orphaning it.
+    fn has_ancestor_scc(&self) -> bool {
         let scc_stack = self.scc_stack.borrow();
         // Skip the last element (the top SCC) and check the rest.
         let len = scc_stack.len();
@@ -2588,9 +2588,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// Absorption detection: if the top SCC's `detected_at` changes during
     /// iteration (because this SCC was merged into an ancestor), the driver
-    /// returns without committing if an ancestor iteration driver exists to
-    /// pick up the merged SCC. If no ancestor is iterating, the current
-    /// driver continues with the updated identity to avoid orphaning.
+    /// returns without committing if an ancestor SCC still exists on stack to
+    /// own the merged SCC. If no ancestor SCC exists, the current driver
+    /// continues with the updated identity to avoid orphaning.
     #[allow(clippy::mutable_key_type)]
     fn iterative_resolve_scc(&self, mut scc: Scc) {
         let mut scc_identity = scc.detected_at.dupe();
@@ -2619,8 +2619,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Absorption detection: if the top SCC's detected_at no longer
             // matches our identity, this SCC was absorbed during iteration.
             // Three cases:
-            // 1. An ancestor iteration driver exists → it will handle the
-            //    merged SCC, so return.
+            // 1. An ancestor SCC still exists on stack → that owner context
+            //    will handle the merged SCC, so return.
             // 2. No ancestor, but the top SCC contains our original
             //    detected_at as a member → our SCC was merged into the top
             //    SCC (merge changes detected_at to min). Continue driving
@@ -2630,7 +2630,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             //    pre-existing SCC (e.g. Phase 0) remains on top. Return
             //    to avoid taking ownership of an unrelated SCC.
             if self.stack().top_scc_detected_at() != scc_identity {
-                if self.stack().has_ancestor_iterating_scc() {
+                if self.stack().has_ancestor_scc() {
                     return;
                 }
                 if !self.stack().top_scc_contains_member(&scc_identity) {
