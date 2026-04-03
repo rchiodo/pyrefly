@@ -39,10 +39,12 @@ use crate::binding::binding::Binding;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingExport;
+use crate::binding::binding::ClassFieldDefinition;
 use crate::binding::binding::FunctionDefData;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
+use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::ReturnTypeKind;
@@ -470,6 +472,95 @@ impl ReportArgs {
         variables
     }
 
+    /// Extract instance attributes assigned in `__init__`/`__new__`/`__post_init__`.
+    ///
+    /// For each class field that is either:
+    /// - `DefinedInMethod` from a recognized attribute-defining method (e.g. `__init__`), or
+    /// - `DeclaredByAnnotation` in the class body AND initialized in such a method,
+    ///
+    /// emit a `Variable` (reported as `SymbolReport::Attr`).
+    fn parse_instance_attrs(
+        module: &Module,
+        bindings: &Bindings,
+        answers: &Answers,
+    ) -> Vec<Variable> {
+        let mut attrs = Vec::new();
+        let module_prefix = if module.name() != ModuleName::unknown() {
+            format!("{}.", module.name())
+        } else {
+            String::new()
+        };
+
+        for field_idx in bindings.keys::<KeyClassField>() {
+            let field = bindings.get(field_idx);
+
+            // Only count instance attrs from recognized methods (__init__, etc.)
+            let annotation_idx = match &field.definition {
+                ClassFieldDefinition::DefinedInMethod {
+                    annotation, method, ..
+                } => {
+                    if !method.recognized_attribute_defining_method {
+                        continue;
+                    }
+                    *annotation
+                }
+                ClassFieldDefinition::DeclaredByAnnotation {
+                    annotation,
+                    initialized_in_recognized_method,
+                } => {
+                    if !initialized_in_recognized_method {
+                        continue;
+                    }
+                    Some(*annotation)
+                }
+                _ => continue,
+            };
+
+            let cls_binding = match bindings.get(field.class_idx) {
+                BindingClass::ClassDef(cls) => cls,
+                BindingClass::FunctionalClassDef(..) => continue,
+            };
+            if Self::has_function_ancestor(&cls_binding.parent) {
+                continue;
+            }
+            let class_name = {
+                let parent_path = module.display(&cls_binding.parent).to_string();
+                if parent_path.is_empty() {
+                    cls_binding.def.name.to_string()
+                } else {
+                    format!("{}.{}", parent_path, cls_binding.def.name)
+                }
+            };
+            let qualified_name = format!("{}{}.{}", module_prefix, class_name, field.name);
+            let location = Self::range_to_location(module, field.range);
+
+            let annotation_text = annotation_idx.and_then(|idx| match bindings.get(idx) {
+                BindingAnnotation::AnnotateExpr(_, expr, _) => {
+                    Some(module.code_at(expr.range()).to_owned())
+                }
+                _ => None,
+            });
+            let is_type_known = annotation_text.is_some()
+                && annotation_idx
+                    .and_then(|idx| {
+                        answers.get_idx(idx).and_then(|awt| {
+                            awt.annotation.ty.as_ref().map(Self::is_type_fully_known)
+                        })
+                    })
+                    .unwrap_or(false);
+            let slots = Self::classify_slot(annotation_text.is_some(), is_type_known);
+
+            attrs.push(Variable {
+                name: qualified_name,
+                annotation: annotation_text,
+                slots,
+                location,
+            });
+        }
+        attrs.sort_by(|a, b| a.location.cmp(&b.location));
+        attrs
+    }
+
     fn parse_functions(
         module: &Module,
         bindings: &Bindings,
@@ -544,9 +635,14 @@ impl ReportArgs {
                 let all_params = Self::extract_parameters(&fun.def.parameters);
                 let mut all_params_type_known = true;
 
-                // Compute slot counts: return + non-self/cls params
-                let return_slot =
-                    Self::classify_slot(return_annotation.is_some(), is_return_type_known);
+                // Compute slot counts: return + non-self/cls params.
+                // __init__ return is always None, so treat it as IMPLICIT (0 slots).
+                let is_init = fun.class_key.is_some() && fun.def.name.as_str() == "__init__";
+                let return_slot = if is_init {
+                    SlotCounts::default()
+                } else {
+                    Self::classify_slot(return_annotation.is_some(), is_return_type_known)
+                };
                 let mut func_slots = return_slot;
 
                 for (i, param) in all_params.iter().enumerate() {
@@ -1027,6 +1123,7 @@ impl ReportArgs {
                 let mut variables = Self::parse_variables(
                     &module, &bindings, &answers, &exports, &functions, &classes,
                 );
+                variables.extend(Self::parse_instance_attrs(&module, &bindings, &answers));
                 let suppressions = Self::parse_suppressions(&module);
 
                 // When a .pyi stub shadows a .py file, include uncovered .py symbols.
@@ -1045,7 +1142,7 @@ impl ReportArgs {
                         transaction,
                         py_handle,
                     );
-                    let py_variables = Self::parse_variables(
+                    let mut py_variables = Self::parse_variables(
                         &py_module,
                         &py_bindings,
                         &py_answers,
@@ -1053,6 +1150,11 @@ impl ReportArgs {
                         &py_functions,
                         &py_classes,
                     );
+                    py_variables.extend(Self::parse_instance_attrs(
+                        &py_module,
+                        &py_bindings,
+                        &py_answers,
+                    ));
                     Self::merge_uncovered_py_symbols(
                         &mut functions,
                         &mut variables,
@@ -1153,9 +1255,12 @@ mod tests {
         let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
         let classes =
             ReportArgs::parse_classes(&module, &bindings, &answers, &transaction, &handle);
-        let variables = ReportArgs::parse_variables(
+        let mut variables = ReportArgs::parse_variables(
             &module, &bindings, &answers, &exports, &functions, &classes,
         );
+        variables.extend(ReportArgs::parse_instance_attrs(
+            &module, &bindings, &answers,
+        ));
         let suppressions = ReportArgs::parse_suppressions(&module);
 
         ReportArgs::build_module_report(
@@ -1192,6 +1297,9 @@ mod tests {
         let mut variables = ReportArgs::parse_variables(
             &module, &bindings, &answers, &exports, &functions, &classes,
         );
+        variables.extend(ReportArgs::parse_instance_attrs(
+            &module, &bindings, &answers,
+        ));
         let suppressions = ReportArgs::parse_suppressions(&module);
 
         // Parse the .py source
@@ -1211,7 +1319,7 @@ mod tests {
             ReportArgs::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
         let py_classes =
             ReportArgs::parse_classes(&py_module, &py_bindings, &py_answers, &py_txn, &py_handle);
-        let py_variables = ReportArgs::parse_variables(
+        let mut py_variables = ReportArgs::parse_variables(
             &py_module,
             &py_bindings,
             &py_answers,
@@ -1219,6 +1327,11 @@ mod tests {
             &py_functions,
             &py_classes,
         );
+        py_variables.extend(ReportArgs::parse_instance_attrs(
+            &py_module,
+            &py_bindings,
+            &py_answers,
+        ));
 
         // Merge uncovered symbols from .py into the stub report
         ReportArgs::merge_uncovered_py_symbols(
