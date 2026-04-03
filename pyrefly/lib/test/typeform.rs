@@ -85,15 +85,16 @@ err1: TypeForm[str | None] = str | int  # E: is not assignable
 );
 
 testcase!(
-    test_typeform_reject_unpack,
+    test_typeform_reject_invalid,
     r#"
-from typing import TypeVarTuple, Unpack
+from typing import Optional, TypeVarTuple, Unpack
 from typing_extensions import TypeForm
 
 Ts = TypeVarTuple("Ts")
 
 # Expressions that are not valid type expressions should not evaluate to a TypeForm type.
-bad: TypeForm = Unpack[Ts]  # E: `type[*TypeVarTuple[Ts]]` is not assignable to `TypeForm[Any]`
+bad1: TypeForm = Unpack[Ts]  # E: `type[*TypeVarTuple[Ts]]` is not assignable to `TypeForm[Any]`
+bad2: TypeForm = Optional  # E: `type[Optional]` is not assignable to `TypeForm[Any]`
     "#,
 );
 

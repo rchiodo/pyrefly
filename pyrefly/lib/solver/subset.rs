@@ -1695,8 +1695,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // TypeForm covariance: TypeForm[S] <: TypeForm[T] when S <: T
             (Type::TypeForm(l), Type::TypeForm(u)) => self.is_subset_eq(l, u),
             // type[T] <: TypeForm[T] — class objects are valid type forms.
-            // Unpack is not a valid standalone type expression (PEP 747).
-            (Type::Type(l), Type::TypeForm(_)) if l.is_unpack() => Err(SubsetError::Other),
+            // Reject types that are not valid standalone type expressions (PEP 747).
+            (Type::Type(box Type::Unpack(_)), Type::TypeForm(_)) => Err(SubsetError::Other),
+            (Type::Type(box Type::SpecialForm(sf)), Type::TypeForm(_))
+                if !sf.is_valid_bare_type_expression() =>
+            {
+                Err(SubsetError::Other)
+            }
             (Type::Type(l), Type::TypeForm(u)) => self.is_subset_eq(l, u),
             // The class representation of Any is compatible with any TypeForm.
             (Type::ClassDef(got), Type::TypeForm(_)) if got.has_toplevel_qname("typing", "Any") => {
