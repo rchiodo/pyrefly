@@ -488,3 +488,21 @@ def foo():
     assert_type(x, int)  # E: assert_type(Literal[1, 2], int) failed
     "#,
 );
+
+testcase!(
+    bug = "cross-barrier reads should promote enum literals to base type (pyright does)",
+    test_promote_module_level_enum_literal_in_function,
+    r#"
+from typing import Literal, assert_type
+from enum import Enum
+
+class Color(Enum):
+    RED = 1
+    GREEN = 2
+
+x = Color.RED
+
+def foo():
+    assert_type(x, Color)  # E: assert_type(Literal[Color.RED], Color) failed
+    "#,
+);
