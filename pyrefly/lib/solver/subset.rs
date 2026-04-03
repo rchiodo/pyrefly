@@ -1692,6 +1692,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             ),
             // Annotated[T, ...] is not a class object; it cannot be assigned to type[T].
             (Type::Annotated(_, _), Type::Type(_)) => Err(SubsetError::Other),
+            // type[X | Y] <: types.UnionType — union expressions create UnionType at runtime.
+            (Type::Type(box Type::Union(_)), Type::ClassType(want))
+                if want.has_qname("types", "UnionType") =>
+            {
+                Ok(())
+            }
             // TypeForm covariance: TypeForm[S] <: TypeForm[T] when S <: T
             (Type::TypeForm(l), Type::TypeForm(u)) => self.is_subset_eq(l, u),
             // type[T] <: TypeForm[T] — class objects are valid type forms.

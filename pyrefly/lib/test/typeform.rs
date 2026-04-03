@@ -119,3 +119,13 @@ x6 = TypeForm(type(1))  # E:
 x7 = TypeForm("type(1)")  # E:
     "#,
 );
+
+testcase!(
+    test_typeform_union_type,
+    r#"
+import types
+
+# At runtime, str | None creates a types.UnionType object.
+v: types.UnionType = str | None
+    "#,
+);

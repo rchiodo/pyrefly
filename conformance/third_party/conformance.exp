@@ -12476,17 +12476,6 @@
     },
     {
       "code": -2,
-      "column": 30,
-      "concise_description": "`type[str | None]` is not assignable to `UnionType`",
-      "description": "`type[str | None]` is not assignable to `UnionType`",
-      "line": 46,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 40,
-      "stop_line": 46
-    },
-    {
-      "code": -2,
       "column": 33,
       "concise_description": "`type[list[int]]` is not assignable to `GenericAlias`",
       "description": "`type[list[int]]` is not assignable to `GenericAlias`",
