@@ -316,19 +316,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.heap.mk_class_type(self.stdlib.bool().clone())
     }
 
+    // isinstance(object, class_info) / issubclass(class, class_info)
     pub(crate) fn check_type_is_class_object(
         &self,
-        ty: Type,
-        object_type: Option<Type>,
+        object_or_class: Option<Type>,
+        class_info: Type,
         contains_subscript: bool,
         range: TextRange,
         func_kind: &FunctionKind,
         errors: &ErrorCollector,
         error_kind: ErrorKind,
     ) {
-        for ty in self.as_class_info(ty) {
-            if let Type::ClassDef(cls) = &ty {
-                if cls.has_toplevel_qname("typing", "Any") {
+        // Decompose class_info, which could be a union or tuple
+        for class_info_ty in self.as_class_info(class_info) {
+            if let Type::ClassDef(class_info_cls) = &class_info_ty {
+                if class_info_cls.has_toplevel_qname("typing", "Any") {
                     self.error(
                         errors,
                         range,
@@ -336,49 +338,53 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         "Expected class object, got `Any`".to_owned(),
                     );
                 }
-                let metadata = self.get_metadata_for_class(cls);
+                let class_info_metadata = self.get_metadata_for_class(class_info_cls);
                 let func_display = || format!("{}()", func_kind.format(self.module().name()));
-                if metadata.is_new_type() {
+                if class_info_metadata.is_new_type() {
                     self.error(
                         errors,
                         range,
                         ErrorInfo::Kind(error_kind),
-                        format!("NewType `{}` not allowed in {}", cls.name(), func_display(),),
+                        format!(
+                            "NewType `{}` not allowed in {}",
+                            class_info_cls.name(),
+                            func_display(),
+                        ),
                     );
                 }
                 // Check if this is a TypedDict
-                if metadata.is_typed_dict() {
+                if class_info_metadata.is_typed_dict() {
                     self.error(
                         errors,
                         range,
                         ErrorInfo::Kind(error_kind),
                         format!(
                             "TypedDict `{}` not allowed as second argument to {}",
-                            cls.name(),
+                            class_info_cls.name(),
                             func_display()
                         ),
                     );
                 }
                 // Check if this is a protocol that needs @runtime_checkable
-                if metadata.is_protocol() && !metadata.is_typed_dict() {
-                    if !metadata.is_runtime_checkable_protocol() {
+                if class_info_metadata.is_protocol() && !class_info_metadata.is_typed_dict() {
+                    if !class_info_metadata.is_runtime_checkable_protocol() {
                         self.error(
                             errors,
                             range,
                             ErrorInfo::Kind(error_kind),
-                            format!("Protocol `{}` is not decorated with @runtime_checkable and cannot be used with {}", cls.name(), func_display()),
+                            format!("Protocol `{}` is not decorated with @runtime_checkable and cannot be used with {}", class_info_cls.name(), func_display()),
                         );
                     } else {
                         // Additional validation for runtime checkable protocols:
                         // issubclass() can only be used with non-data protocols
                         if *func_kind == FunctionKind::IsSubclass
-                            && self.is_data_protocol(cls, range)
+                            && self.is_data_protocol(class_info_cls, range)
                         {
                             self.error(
                                 errors,
                                 range,
                                 ErrorInfo::Kind(error_kind),
-                                format!("Protocol `{}` has non-method members and cannot be used with issubclass()", cls.name()),
+                                format!("Protocol `{}` has non-method members and cannot be used with issubclass()", class_info_cls.name()),
                             );
                         }
                         // Check for unsafe overlap:
@@ -388,13 +394,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         //
                         // Type arguments for the protocol are not provided, so we'll use
                         // fresh vars and solve them during the `is_subset_eq` check below.
-                        let protocol_metadata = metadata.protocol_metadata().unwrap();
-                        if let Some(object_type) = &object_type
+                        let class_info_protocol = class_info_metadata.protocol_metadata().unwrap();
+                        if let Some(object_type) = &object_or_class
                             && let (vs, Type::ClassType(protocol_class_type)) =
-                                self.instantiate_fresh_class(cls)
+                                self.instantiate_fresh_class(class_info_cls)
                         {
                             let mut unsafe_overlap_errors = vec![];
-                            for field_name in &protocol_metadata.members {
+                            for field_name in &class_info_protocol.members {
                                 if !self.has_attr(object_type, field_name) {
                                     // It's okay if the field is missing, since
                                     // we only care about unsafe overlaps
@@ -426,7 +432,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             if !unsafe_overlap_errors.is_empty() {
                                 let mut full_msg = vec1![format!(
                                     "Runtime checkable protocol `{}` has an unsafe overlap with type `{}`",
-                                    cls.name(),
+                                    class_info_cls.name(),
                                     self.for_display(object_type.clone())
                                 )];
                                 full_msg.extend(unsafe_overlap_errors);
@@ -440,7 +446,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
             } else if contains_subscript
-                && matches!(&ty, Type::Type(box Type::ClassType(cls)) if !cls.targs().is_empty())
+                && matches!(&class_info_ty, Type::Type(box Type::ClassType(cls)) if !cls.targs().is_empty())
             {
                 // If the raw expression contains something that structurally looks like `A[T]` and
                 // part of the expression resolves to a parameterized class type, then we likely have a
@@ -451,10 +457,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ErrorInfo::Kind(error_kind),
                     format!(
                         "Expected class object, got parameterized generic type: `{}`",
-                        self.for_display(ty)
+                        self.for_display(class_info_ty)
                     ),
                 );
-            } else if let Type::Type(box Type::SpecialForm(special_form)) = &ty {
+            } else if let Type::Type(box Type::SpecialForm(special_form)) = &class_info_ty {
                 if !special_form.isinstance_safe() {
                     self.error(
                         errors,
@@ -463,16 +469,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         format!("Expected class object, got special form `{}`", special_form),
                     );
                 }
-            } else if self.unwrap_class_object_silently(&ty).is_none() {
+            } else if self.unwrap_class_object_silently(&class_info_ty).is_none() {
                 self.error(
                     errors,
                     range,
                     ErrorInfo::Kind(error_kind),
-                    format!("Expected class object, got `{}`", self.for_display(ty)),
+                    format!(
+                        "Expected class object, got `{}`",
+                        self.for_display(class_info_ty)
+                    ),
                 );
             } else {
                 self.check_type(
-                    &ty,
+                    &class_info_ty,
                     &self.heap.mk_class_type(self.stdlib.builtins_type().clone()),
                     range,
                     errors,
@@ -554,8 +563,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         self.check_type_is_class_object(
-            classinfo_type,
             object_type,
+            classinfo_type,
             contains_subscript,
             classinfo_expr.range(),
             func_kind,

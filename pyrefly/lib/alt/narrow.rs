@@ -1195,8 +1195,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     });
                     self.check_type_is_class_object(
-                        right.clone(),
                         Some(ty.clone()),
+                        right.clone(),
                         contains_subscript,
                         v.range(),
                         &FunctionKind::IsInstance,
