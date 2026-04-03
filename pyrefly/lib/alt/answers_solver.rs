@@ -351,7 +351,7 @@ impl CalcStack {
             SccState::NotInScc | SccState::RevisitingInProgress => {
                 if let Some(current_cycle) = self.current_cycle() {
                     self.on_scc_detected(current_cycle);
-                    BindingAction::Unwind
+                    BindingAction::NeedsColdPlaceholder
                 } else {
                     BindingAction::Calculate
                 }
@@ -1262,9 +1262,6 @@ enum BindingAction {
     /// Calculate the binding and record the answer.
     /// Action: call `calculate_and_record_answer`
     Calculate,
-    /// We are at a break point and need to unwind the cycle with a placeholder.
-    /// Action: call `attempt_to_unwind_cycle_from_here`
-    Unwind,
     /// A recursive placeholder exists (in SCC-local `SccNodeState::HasPlaceholder`)
     /// and we should return it.
     /// Action: return `Arc::new(K::promote_recursive(heap, r))`
@@ -1273,11 +1270,10 @@ enum BindingAction {
     /// Type-erased; will be downcast to `Arc<K::Answer>` in `get_idx`.
     /// Action: downcast and return
     SccLocalAnswer(Arc<dyn Any + Send + Sync>),
-    /// An iterating SCC member is InProgress with no placeholder and no
-    /// previous answer (cold-start back-edge). Two-step protocol: `push`
-    /// returns this because it lacks `K: Solve`; the caller (`get_idx`)
-    /// allocates the placeholder via `K::create_recursive`, stores it in
-    /// iteration state, and returns `K::promote_recursive`.
+    /// A cycle break point where a placeholder is needed. The caller (`get_idx`)
+    /// calls `attempt_to_unwind_cycle_from_here` to check if another thread
+    /// already committed an answer, and if not, allocates a placeholder via
+    /// `K::create_recursive` and stores it in SCC-local state.
     NeedsColdPlaceholder,
 }
 
@@ -2178,9 +2174,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         let mut result = match self.stack().push(current.dupe()) {
             BindingAction::Calculate => self.calculate_and_record_answer(current, idx, calculation),
-            BindingAction::Unwind => self
-                .attempt_to_unwind_cycle_from_here(&current, idx, calculation)
-                .unwrap_or_else(|r| Arc::new(K::promote_recursive(self.heap, r))),
             BindingAction::CycleBroken(r) => Arc::new(K::promote_recursive(self.heap, r)),
             BindingAction::SccLocalAnswer(type_erased) => {
                 // Downcast the type-erased answer back to Arc<K::Answer>.
@@ -2193,13 +2186,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .expect("SccLocalAnswer downcast failed: type mismatch"),
                 )
             }
-            BindingAction::NeedsColdPlaceholder => {
-                // Use the same path as Unwind: attempt_to_unwind_cycle_from_here
-                // checks calculation.get() first (in case another thread already
-                // committed an answer), then falls back to creating a placeholder.
-                self.attempt_to_unwind_cycle_from_here(&current, idx, calculation)
-                    .unwrap_or_else(|r| Arc::new(K::promote_recursive(self.heap, r)))
-            }
+            BindingAction::NeedsColdPlaceholder => self
+                .attempt_to_unwind_cycle_from_here(&current, idx, calculation)
+                .unwrap_or_else(|r| Arc::new(K::promote_recursive(self.heap, r))),
         };
         if let Some(scc) = self.stack().pop_and_take_completed_scc() {
             self.iterative_resolve_scc(scc);
