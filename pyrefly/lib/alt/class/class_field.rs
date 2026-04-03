@@ -2711,7 +2711,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ty = self.heap.mk_function(Function {
                         signature: callable,
                         metadata: FuncMetadata {
-                            kind: FunctionKind::Def(Box::new(func_id)),
+                            kind: FunctionKind::Def(Arc::new(func_id)),
                             flags: FuncFlags::default(),
                         },
                     })

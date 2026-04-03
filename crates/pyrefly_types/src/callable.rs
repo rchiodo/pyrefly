@@ -12,6 +12,7 @@ use std::fmt;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 use dupe::Dupe;
 use parse_display::Display;
@@ -382,7 +383,7 @@ pub struct FuncMetadata {
 impl FuncMetadata {
     pub fn def(module: Module, cls: Class, func: Name, def_index: Option<FuncDefIndex>) -> Self {
         Self {
-            kind: FunctionKind::Def(Box::new(FuncId {
+            kind: FunctionKind::Def(Arc::new(FuncId {
                 module,
                 cls: Some(cls),
                 name: func,
@@ -524,6 +525,14 @@ impl Visit<Type> for FuncId {
     fn recurse<'a>(&'a self, _: &mut dyn FnMut(&'a Type)) {}
 }
 
+/// FuncId contains no Type fields, so visiting through Arc is a no-op.
+impl VisitMut<Type> for Arc<FuncId> {
+    fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {}
+}
+impl Visit<Type> for Arc<FuncId> {
+    fn recurse<'a>(&'a self, _: &mut dyn FnMut(&'a Type)) {}
+}
+
 impl FuncId {
     /// Identity tuple for equality and hashing. `outer_funcs` is intentionally
     /// excluded because it is display-only metadata (the dotted path of enclosing
@@ -609,7 +618,7 @@ pub enum FunctionKind {
     RevealType,
     Final,
     RuntimeCheckable,
-    Def(Box<FuncId>),
+    Def(Arc<FuncId>),
     AbstractMethod,
     /// Instance of a protocol with a `__call__` method. The function has the `__call__` signature.
     CallbackProtocol(Box<ClassType>),
@@ -994,7 +1003,7 @@ impl FunctionKind {
             ("typing" | "typing_extensions", None, "disjoint_base") => Self::DisjointBase,
             ("numba.core.decorators", None, "jit") => Self::NumbaJit,
             ("numba.core.decorators", None, "njit") => Self::NumbaNjit,
-            _ => Self::Def(Box::new(FuncId {
+            _ => Self::Def(Arc::new(FuncId {
                 module,
                 cls,
                 name: func.clone(),

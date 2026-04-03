@@ -1730,12 +1730,9 @@ impl<'a> CallGraphVisitor<'a> {
         // `fromstring = XML` in `xml.etree.ElementTree`) where the type carries the
         // original definition's index.
         let (module, def_index) = match &function.metadata.kind {
-            FunctionKind::Def(box pyrefly_types::callable::FuncId {
-                module,
-                cls: None, // Only handle module-level functions, not methods.
-                def_index: Some(def_index),
-                ..
-            }) => (module, *def_index),
+            FunctionKind::Def(func_id) if func_id.cls.is_none() && func_id.def_index.is_some() => {
+                (&func_id.module, func_id.def_index.unwrap())
+            }
             _ => return None,
         };
 
