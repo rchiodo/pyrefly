@@ -299,35 +299,9 @@ impl CalcStack {
                 );
             }
             // The target is in the top SCC's iteration state (not a cross-SCC
-            // back-edge). Absorb any intervening nodes if the stack has grown
-            // beyond the SCC's segment (same rationale as the iterative bypass).
-            //
-            // TODO: Unify phase-0 and phase-1 re-entry handling so this
-            // special-case is unnecessary.
-            //
-            // Temporary compatibility fix: during phase-0 discovery (iteration 0),
-            // this top-SCC re-entry path can bypass the legacy pre_calculate_state
-            // merge path. A plain absorb is not always equivalent to merge_sccs and
-            // can leave SCC fragments unmerged, changing the membership handed to
-            // iteration 1. Preserve legacy behavior by running merge_sccs when we
-            // re-enter a top-SCC member from outside the SCC segment.
-            let needs_phase0_top_merge = {
-                let scc_stack = self.scc_stack.borrow();
-                if let Some(top_scc) = scc_stack.last() {
-                    let is_phase0 = top_scc
-                        .iterative
-                        .as_ref()
-                        .is_some_and(|iter_state| iter_state.iteration == 0);
-                    is_phase0 && !is_within_scc_segment(self.stack.borrow().len(), top_scc)
-                } else {
-                    false
-                }
-            };
-            if needs_phase0_top_merge {
-                let detected_at = self.top_scc_detected_at();
-                self.merge_sccs(&detected_at);
-            }
-            self.absorb_if_outside_segment();
+            // back-edge). If we've exited the SCC segment, merge from the top
+            // SCC anchor so intervening nodes/SCC fragments are absorbed.
+            self.merge_if_outside_segment();
             // Increment top_pos_exclusive for the same reason the iterative
             // bypass does: pop() will decrement
             // top_pos_exclusive for any node in node_state, so push must
@@ -356,11 +330,11 @@ impl CalcStack {
         // `SccNodeStateKind`, so the shared borrow on `scc_stack` is
         // released before any exclusive borrow for mutation.
         if let Some(kind) = self.get_iteration_node_state(&current) {
-            // If the stack has grown beyond the top SCC's segment, absorb
-            // intervening nodes. This handles the case where a dependency
-            // chain exits the SCC and re-enters it via a back-edge: the
-            // nodes in between must be part of the SCC for correct iteration.
-            self.absorb_if_outside_segment();
+            // If the stack has grown beyond the top SCC's segment, merge from
+            // the top SCC anchor so intervening nodes/SCC fragments are
+            // absorbed. This handles dependency chains that exit and re-enter
+            // via back-edges.
+            self.merge_if_outside_segment();
             // The node was unconditionally pushed onto the raw CalcStack
             // above, and pop() will decrement top_pos_exclusive for any node
             // in the top SCC's node_state. We must increment here to
@@ -774,25 +748,30 @@ impl CalcStack {
         None
     }
 
-    /// Absorb free-floating calc stack nodes into the top SCC when a back-edge
-    /// is detected from outside the SCC's segment.
+    /// Merge from the top SCC anchor when a back-edge re-enters from outside
+    /// the top SCC segment.
     ///
-    /// When a back-edge targets a node in the top SCC but the current stack
-    /// position is beyond the SCC's `top_pos_exclusive`, intervening nodes
-    /// (between `top_pos_exclusive` and the current position) are not tracked
-    /// by the SCC. These nodes are part of the cycle and must be absorbed to
-    /// ensure they participate in iterative convergence. Without this, their
-    /// answers would be committed directly to Calculation using stale SCC
-    /// answers and never re-computed during iteration.
-    fn absorb_if_outside_segment(&self) {
-        let calc_stack_vec = self.into_vec();
-        let stack_len = calc_stack_vec.len();
-        let mut scc_stack = self.scc_stack.borrow_mut();
-        if let Some(top_scc) = scc_stack.last_mut()
-            && stack_len > top_scc.top_pos_exclusive
-        {
-            top_scc.absorb_calc_stack_members(&calc_stack_vec, top_scc.top_pos_exclusive);
-            top_scc.top_pos_exclusive = stack_len;
+    /// A plain top-SCC absorb only handles free-floating nodes and can miss
+    /// full SCC merge semantics when SCC fragments are involved. Using
+    /// `merge_sccs` here ensures all phase-0 and phase-1+ re-entry paths share
+    /// the same merge+absorb behavior and consistent demotion signaling
+    /// (`merge_happened`).
+    fn merge_if_outside_segment(&self) {
+        let detected_at = {
+            let stack_len = self.stack.borrow().len();
+            let scc_stack = self.scc_stack.borrow();
+            if let Some(top_scc) = scc_stack.last() {
+                if stack_len > top_scc.top_pos_exclusive {
+                    Some(top_scc.detected_at())
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(detected_at) = detected_at {
+            self.merge_sccs(&detected_at);
         }
     }
 
