@@ -639,28 +639,44 @@ impl CalcStack {
         errors: Option<Arc<ErrorCollector>>,
         traces: Option<TraceSideEffects>,
     ) -> Arc<dyn Any + Send + Sync> {
+        let canonical = {
+            let mut scc_stack = self.scc_stack.borrow_mut();
+            if let Some(top_scc) = scc_stack.last_mut() {
+                let canonical = top_scc.on_calculation_finished(current, answer, errors, traces);
+                // Debug-only check: verify the node isn't in any other SCC.
+                debug_assert!(
+                    scc_stack
+                        .iter()
+                        .rev()
+                        .skip(1)
+                        .all(|scc| !scc.node_state.contains_key(current)),
+                    "on_calculation_finished: CalcId {} found in multiple SCCs",
+                    current,
+                );
+                canonical
+            } else {
+                // No active SCC; return the provided answer unchanged.
+                answer
+            }
+        }; // scc_stack borrow dropped here
+        self.check_scc_completion();
+        canonical
+    }
+
+    /// Check whether the top SCC has completed and, if so, pop it into
+    /// `pending_completed_scc` for later retrieval by `pop_and_take_completed_scc`.
+    ///
+    /// An SCC is complete when the stack has unwound to (or past) its anchor
+    /// position: `stack_len <= bottom_pos_inclusive + 1`. The `+ 1` exists
+    /// because this check runs during calculation, while the completing
+    /// frame is still on the stack.
+    ///
+    /// This is called after recording a node's answer (via either
+    /// `on_calculation_finished` or `set_iteration_node_done`) to detect
+    /// when the last SCC member has finished.
+    fn check_scc_completion(&self) {
         let stack_len = self.stack.borrow().len();
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let canonical = if let Some(top_scc) = scc_stack.last_mut() {
-            let canonical = top_scc.on_calculation_finished(current, answer, errors, traces);
-            // Debug-only check: verify the node isn't in any other SCC.
-            debug_assert!(
-                scc_stack
-                    .iter()
-                    .rev()
-                    .skip(1)
-                    .all(|scc| !scc.node_state.contains_key(current)),
-                "on_calculation_finished: CalcId {} found in multiple SCCs",
-                current,
-            );
-            canonical
-        } else {
-            // No active SCC; return the provided answer unchanged.
-            answer
-        };
-        // Check if the top SCC has completed. An SCC is complete when the
-        // stack has unwound to (or past) its anchor: at that point all
-        // participants' frames have been popped and their answers recorded.
         if let Some(scc) = scc_stack.last()
             && stack_len <= scc.bottom_pos_inclusive + 1
         {
@@ -680,7 +696,6 @@ impl CalcStack {
             );
             *slot = Some(completed);
         }
-        canonical
     }
 
     /// Merge all SCCs from the target SCC to the top of the stack, and add
