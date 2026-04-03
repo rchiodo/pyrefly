@@ -761,6 +761,26 @@ impl<'a> BindingsBuilder<'a> {
                     }
                 }
             }
+            // TypeForm(expr) — treat the argument as a type expression (forward reference support)
+            Expr::Call(ExprCall {
+                node_index: _,
+                range: _,
+                func,
+                arguments,
+            }) if self.as_special_export(func) == Some(SpecialExport::TypeForm)
+                && !arguments.is_empty() =>
+            {
+                self.ensure_expr(func, usage);
+                if let Some(arg) = arguments.args.first_mut() {
+                    self.ensure_type(arg, &mut None)
+                }
+                for arg in arguments.args.iter_mut().skip(1) {
+                    self.ensure_expr(arg, usage);
+                }
+                for kw in arguments.keywords.iter_mut() {
+                    self.ensure_expr(&mut kw.value, usage);
+                }
+            }
             Expr::Call(ExprCall {
                 node_index: _,
                 range,

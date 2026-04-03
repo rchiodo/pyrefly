@@ -96,3 +96,25 @@ Ts = TypeVarTuple("Ts")
 bad: TypeForm = Unpack[Ts]  # E: `type[*TypeVarTuple[Ts]]` is not assignable to `TypeForm[Any]`
     "#,
 );
+
+testcase!(
+    test_typeform_callable,
+    r#"
+from typing import assert_type
+from typing_extensions import TypeForm
+
+x1 = TypeForm(str | None)
+assert_type(x1, TypeForm[str | None])
+
+x2 = TypeForm(int)
+assert_type(x2, TypeForm[int])
+
+x3 = TypeForm("list[int]")
+assert_type(x3, TypeForm[list[int]])
+
+x4 = TypeForm()  # E: `TypeForm` expected 1 positional argument, got 0
+x5 = TypeForm(int, str)  # E: `TypeForm` expected 1 positional argument, got 2
+x6 = TypeForm(type(1))  # E:
+x7 = TypeForm("type(1)")  # E:
+    "#,
+);

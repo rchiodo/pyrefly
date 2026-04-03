@@ -12,6 +12,7 @@ use dupe::Dupe;
 use pyrefly_python::dunder;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
+use pyrefly_types::special_form::SpecialForm;
 use pyrefly_types::tensor_ops_registry::TensorOpsRegistry;
 use pyrefly_types::typed_dict::TypedDictInner;
 use pyrefly_types::types::CalleeKind;
@@ -1667,6 +1668,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         x.func.range(),
                         x.arguments.range,
                         hint,
+                        errors,
+                    )
+                }
+                None if matches!(
+                    ty,
+                    Type::Type(box Type::SpecialForm(SpecialForm::TypeForm))
+                ) =>
+                {
+                    self.call_typeform(
+                        &x.arguments.args,
+                        &x.arguments.keywords,
+                        x.arguments.range,
                         errors,
                     )
                 }

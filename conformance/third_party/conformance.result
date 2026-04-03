@@ -189,10 +189,6 @@
     "Line 46: Unexpected errors ['`type[str | None]` is not assignable to `UnionType`']",
     "Line 49: Unexpected errors ['`type[list[int]]` is not assignable to `GenericAlias`', 'Expected `v2_actual` to be a type alias, got `GenericAlias`']",
     "Line 53: Unexpected errors [\"`Literal['set[str]']` is not assignable to `TypeForm[set[str]]`\"]",
-    "Line 58: Unexpected errors [\"Argument `Literal['int']` is not assignable to parameter `x` with type `TypeForm[Any]` in function `func1`\"]",
-    "Line 80: Unexpected errors ['Expected a callable, got `type[TypeForm]`']",
-    "Line 81: Unexpected errors ['assert_type(Unknown, TypeForm[str | None]) failed']",
-    "Line 83: Unexpected errors ['Expected a callable, got `type[TypeForm]`']",
-    "Line 84: Unexpected errors ['assert_type(Unknown, TypeForm[list[int]]) failed']"
+    "Line 58: Unexpected errors [\"Argument `Literal['int']` is not assignable to parameter `x` with type `TypeForm[Any]` in function `func1`\"]"
   ]
 }
