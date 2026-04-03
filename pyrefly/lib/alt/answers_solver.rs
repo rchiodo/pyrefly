@@ -237,14 +237,12 @@ impl CalcStack {
             .and_modify(|positions| positions.push(position))
             .or_insert_with(|| Vec1::new(position));
 
-        // Membership back-edge detection: when iterative mode is active, check
-        // if the target is a member of a *non-top* iterating SCC. If so, this
-        // is a cross-SCC back-edge that must merge all SCCs from that index to
-        // the top and demote (restart at iteration 1).
+        // Membership back-edge detection: check if the target is a member of
+        // a *non-top* SCC. If so, this is a cross-SCC back-edge that must merge
+        // all SCCs from that index to the top and demote (restart at iteration 1).
         //
-        // This check runs BEFORE the top-SCC iterative bypass because cross-SCC
-        // back-edges must be caught first. SCCs still in Phase 0 discovery
-        // (iterative: None) are handled by the existing `on_scc_detected` path.
+        // This check runs BEFORE the top-SCC membership check because cross-SCC
+        // back-edges must be caught first.
         //
         // Borrow safety: `find_iterating_scc_containing` returns an owned
         // `Option<usize>`, so the shared borrow on `scc_stack` is released
@@ -302,8 +300,7 @@ impl CalcStack {
             // back-edge). If we've exited the SCC segment, merge from the top
             // SCC anchor so intervening nodes/SCC fragments are absorbed.
             self.merge_if_outside_segment();
-            // Increment top_pos_exclusive for the same reason the iterative
-            // bypass does: pop() will decrement
+            // Increment top_pos_exclusive because pop() will decrement
             // top_pos_exclusive for any node in node_state, so push must
             // balance it with an increment.
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
@@ -321,10 +318,10 @@ impl CalcStack {
             );
         }
 
-        // Iterative bypass: when iterative mode is active and the top SCC is
-        // iterating, check if the target is a member of the top SCC's iteration
-        // state. If so, use SCC-scoped iteration state to determine the action
-        // instead of falling through to the legacy SCC logic.
+        // Top-SCC membership check: if the target is already a member of the
+        // top SCC's iteration state, determine the action from its node state.
+        // This catches back-edges within the top SCC and any member that is
+        // already tracked in the top SCC's iteration state.
         //
         // Borrow safety: `get_iteration_node_state` returns an owned
         // `SccNodeStateKind`, so the shared borrow on `scc_stack` is
@@ -338,18 +335,24 @@ impl CalcStack {
             // The node was unconditionally pushed onto the raw CalcStack
             // above, and pop() will decrement top_pos_exclusive for any node
             // in the top SCC's node_state. We must increment here to
-            // keep top_pos_exclusive symmetric, since the early return below
-            // bypasses the top_pos_exclusive += 1 in the SccState::Participant
-            // arm.
+            // keep top_pos_exclusive symmetric.
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
                 top_scc.top_pos_exclusive += 1;
             }
             return self.binding_action_for_node_state(&current, kind);
         }
 
-        // All SCC members are handled by the iterative bypass or membership
-        // back-edge detection above (every SCC has iterative state from creation).
-        // The only remaining case is a node not in any SCC: check for a new cycle.
+        // At this point, the node is not a known member of any SCC. But it
+        // may still *become* one. If this push itself closes a cycle,
+        // `current_cycle` below triggers immediate SCC creation. Otherwise,
+        // a dependency chain explored during `K::solve` can still cycle back
+        // and create an SCC that includes this node before computation returns.
+        // Because of that, this node's "not in any SCC" status is only final
+        // after computation finishes (see `is_scc_participant` in
+        // `calculate_and_record_answer`).
+        //
+        // Check whether this push itself completes a cycle (i.e., this CalcId
+        // already appears lower on the stack). If so, create a new SCC.
         if let Some(current_cycle) = self.current_cycle() {
             self.on_scc_detected(current_cycle);
             BindingAction::NeedsColdPlaceholder
@@ -385,6 +388,14 @@ impl CalcStack {
     }
 
     /// Check if a CalcId is an SCC participant (exists in the top SCC's node_state).
+    ///
+    /// This is used in `calculate_and_record_answer` to detect nodes that
+    /// became SCC members *during* computation. At push time, a node may not
+    /// be in any SCC yet (so `get_iteration_node_state` returns `None` and
+    /// `push` returns `Calculate`). But during `K::solve`, a dependency chain
+    /// can cycle back to this node, creating an SCC that includes it. After
+    /// `K::solve` returns, this check catches that case so the answer is
+    /// stored in SCC-local state rather than written directly to Calculation.
     fn is_scc_participant(&self, current: &CalcId) -> bool {
         let scc_stack = self.scc_stack.borrow();
         scc_stack
@@ -2067,26 +2078,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
     /// Calculate the answer for a binding using `K::solve` and record it.
     ///
-    /// This is called when the `push` method determines we need to actually compute the value.
+    /// This is called when the `push` method determines we need to actually
+    /// compute the value (i.e., `push` returned `BindingAction::Calculate`).
     ///
-    /// For SCC participants, the answer is stored in `SccNodeState::Done` and will be
-    /// batch-committed to the `Calculation` cell when the entire SCC completes.
-    /// For non-SCC nodes, the answer is written directly to `Calculation` as before.
+    /// There are three recording paths, reflecting the fact that SCC membership
+    /// can be discovered at two different times:
     ///
-    /// In iterative mode, if the current CalcId is a member of the top SCC's
-    /// iteration state, we use a separate iterative path that:
-    /// - Suppresses errors during cold-start (iteration 1) and collects them
-    ///   from iteration 2 onward.
-    /// - Deep-forces the answer to avoid Var-ID inequality in convergence
-    ///   comparisons.
-    /// - Finalizes any placeholder created for this node.
-    /// - Compares to the previous iteration's answer to track convergence.
-    /// - Stores the answer in SCC-local iteration state (not in Calculation)
-    ///   until the final commit.
+    /// - **Already-known SCC member** (iterative path): If the node is already
+    ///   in the top SCC's iteration state at the start of this function, we
+    ///   delegate to `calculate_and_record_answer_iterative`. This applies
+    ///   whenever SCC membership is known before computation begins.
     ///
-    /// A completed SCC is stored in `pending_completed_scc` by
-    /// `on_calculation_finished`; `get_idx` takes it after the frame
-    /// completes.
+    /// - **Became an SCC member during computation** (SCC discovery path): A
+    ///   node may not be in any SCC when `push` returns `Calculate`, but a
+    ///   dependency chain explored during `K::solve` can cycle back to it,
+    ///   creating an SCC mid-computation. After `K::solve` returns, we check
+    ///   `is_scc_participant` to catch this case and store the answer in
+    ///   SCC-local state via `on_calculation_finished`.
+    ///
+    /// - **Not an SCC member** (direct path): The node is not in any SCC even
+    ///   after computation. The answer is written directly to `Calculation`.
+    ///
+    /// Key invariant: at push time, we can determine that a node IS in an SCC
+    /// (because its identity is tracked in an SCC's `node_state`), but we
+    /// cannot determine that it is NOT in an SCC until after computation
+    /// completes — because any dependency chain can cycle back to this node
+    /// during `K::solve`, creating an SCC that includes it.
     fn calculate_and_record_answer<K: Solve<Ans>>(
         &self,
         current: CalcId,
@@ -2097,8 +2114,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
     {
-        // Iterative path: when the current CalcId is in the top SCC's iteration
-        // state, use the iterative code path instead of the non-SCC path.
+        // Already-known SCC member: the node was in the top SCC's
+        // iteration state when `push` was called.
+        // Delegate to the iterative path, which handles error suppression,
+        // convergence comparison, and SCC-local storage.
         if self.stack().get_iteration_node_state(&current).is_some() {
             return self.calculate_and_record_answer_iterative(current, idx);
         }
@@ -2140,8 +2159,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         if self.stack().is_scc_participant(&current) {
-            // SCC path: store in SccNodeState::Done with batch commits to Calculation.
-            // Phase 0 traces are discarded; only final iterative traces are kept.
+            // Became an SCC member during computation: an SCC was discovered by
+            // a dependency chain during K::solve above, and this node is now in
+            // the top SCC's node_state. Store the answer in SCC-local state for
+            // batch commit when the SCC completes.
             //
             // If this node has a placeholder Var (from cycle breaking), we must
             // finalize the recursive answer now, before storing. Finalization
@@ -2166,8 +2187,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .expect("on_calculation_finished canonical answer downcast failed"),
             )
         } else {
-            // Non-SCC path: write directly to Calculation as before.
-            // No recursive placeholder can exist in the Calculation cell because
+            // Not an SCC member even after computation: write directly to
+            // Calculation. No recursive placeholder can exist because
             // placeholders are stored only in SCC-local SccNodeState::HasPlaceholder.
             let (answer, did_write) = calculation.record_value(raw_answer);
             if did_write {
