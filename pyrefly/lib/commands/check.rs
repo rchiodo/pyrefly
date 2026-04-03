@@ -260,7 +260,7 @@ struct OutputArgs {
     #[arg(long, value_name = "OUTPUT_FILE")]
     report_pysa: Option<PathBuf>,
     /// Format for pysa report output (json or capnp)
-    #[arg(long, value_enum, default_value_t = report::pysa::PysaFormat::Json)]
+    #[arg(long, value_enum, default_value_t = report::pysa::PysaFormat::Capnp)]
     report_pysa_format: report::pysa::PysaFormat,
     /// Generate a CinderX-format type report (experimental, internal-only).
     #[arg(long, value_name = "OUTPUT_DIR", hide = true)]

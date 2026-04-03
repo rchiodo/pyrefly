@@ -87,11 +87,10 @@ use crate::report::pysa::type_of_expression::export_type_of_expressions;
 use crate::report::pysa::types::PysaType;
 use crate::state::state::Transaction;
 
-#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 pub enum PysaFormat {
-    #[default]
-    Json,
     Capnp,
+    Json,
 }
 
 #[derive(Debug, Clone, Serialize)]
