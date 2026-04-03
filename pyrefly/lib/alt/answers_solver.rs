@@ -324,11 +324,13 @@ impl CalcStack {
                 );
             }
             // The target is in the top SCC's iteration state (not a cross-SCC
-            // back-edge). This path is an early-return that bypasses the
-            // iterative bypass below — we must increment top_pos_exclusive here for
-            // the same reason the iterative bypass does (Contract P4): pop()
-            // will decrement top_pos_exclusive for any node in node_state, so push
-            // must balance it with an increment.
+            // back-edge). Absorb any intervening nodes if the stack has grown
+            // beyond the SCC's segment (same rationale as the iterative bypass).
+            self.absorb_if_outside_segment();
+            // Increment top_pos_exclusive for the same reason the iterative
+            // bypass does (Contract P4): pop() will decrement
+            // top_pos_exclusive for any node in node_state, so push must
+            // balance it with an increment.
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
                 top_scc.top_pos_exclusive += 1;
             }
@@ -378,6 +380,11 @@ impl CalcStack {
         // `SccNodeStateKind`, so the shared borrow on `scc_stack` is
         // released before any exclusive borrow for mutation.
         if let Some(kind) = self.get_iteration_node_state(&current) {
+            // If the stack has grown beyond the top SCC's segment, absorb
+            // intervening nodes. This handles the case where a dependency
+            // chain exits the SCC and re-enters it via a back-edge: the
+            // nodes in between must be part of the SCC for correct iteration.
+            self.absorb_if_outside_segment();
             // The node was unconditionally pushed onto the raw CalcStack
             // above, and pop() will decrement top_pos_exclusive for any node
             // in the top SCC's node_state. We must increment here to
@@ -879,6 +886,28 @@ impl CalcStack {
             }
         }
         None
+    }
+
+    /// Absorb free-floating calc stack nodes into the top SCC when a back-edge
+    /// is detected from outside the SCC's segment.
+    ///
+    /// When a back-edge targets a node in the top SCC but the current stack
+    /// position is beyond the SCC's `top_pos_exclusive`, intervening nodes
+    /// (between `top_pos_exclusive` and the current position) are not tracked
+    /// by the SCC. These nodes are part of the cycle and must be absorbed to
+    /// ensure they participate in iterative convergence. Without this, their
+    /// answers would be committed directly to Calculation using stale SCC
+    /// answers and never re-computed during iteration.
+    fn absorb_if_outside_segment(&self) {
+        let calc_stack_vec = self.into_vec();
+        let stack_len = calc_stack_vec.len();
+        let mut scc_stack = self.scc_stack.borrow_mut();
+        if let Some(top_scc) = scc_stack.last_mut()
+            && stack_len > top_scc.top_pos_exclusive
+        {
+            top_scc.absorb_calc_stack_members(&calc_stack_vec, top_scc.top_pos_exclusive);
+            top_scc.top_pos_exclusive = stack_len;
+        }
     }
 
     /// Returns true if the top SCC is iterating at iteration 1 (cold start).
