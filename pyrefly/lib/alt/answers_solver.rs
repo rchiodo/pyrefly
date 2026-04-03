@@ -244,10 +244,10 @@ impl CalcStack {
         // This check runs BEFORE the top-SCC membership check because cross-SCC
         // back-edges must be caught first.
         //
-        // Borrow safety: `find_iterating_scc_containing` returns an owned
+        // Borrow safety: `find_scc_containing` returns an owned
         // `Option<usize>`, so the shared borrow on `scc_stack` is released
         // before the exclusive borrow needed for merging.
-        if let Some(scc_idx) = self.find_iterating_scc_containing(&current) {
+        if let Some(scc_idx) = self.find_scc_containing(&current) {
             let is_non_top = {
                 let scc_stack = self.scc_stack.borrow();
                 scc_idx < scc_stack.len() - 1
@@ -657,17 +657,17 @@ impl CalcStack {
         scc_stack.push(merged);
     }
 
-    /// Find the index in `scc_stack` of an iterating SCC that contains `target`.
+    /// Find the index in `scc_stack` of an SCC that contains `target`.
     ///
-    /// Scans the SCC stack for an SCC with `iterative: Some(...)` whose
-    /// `node_state` (legacy membership map) contains the target. Returns the index in the stack
-    /// (not the SCC's `bottom_pos_inclusive`). Used for membership-based back-edge
-    /// detection: a request for a CalcId in a non-top iterating SCC is a
-    /// back-edge that must trigger merge + demotion.
-    fn find_iterating_scc_containing(&self, target: &CalcId) -> Option<usize> {
+    /// Scans the SCC stack for an SCC whose `node_state` (legacy membership map)
+    /// contains the target. Returns the index in the stack (not the SCC's
+    /// `bottom_pos_inclusive`). Used for membership-based back-edge detection:
+    /// a request for a CalcId in a non-top SCC is a back-edge that must trigger
+    /// merge + demotion.
+    fn find_scc_containing(&self, target: &CalcId) -> Option<usize> {
         let scc_stack = self.scc_stack.borrow();
         for (i, scc) in scc_stack.iter().enumerate() {
-            if scc.iterative.is_some() && scc.node_state.contains_key(target) {
+            if scc.node_state.contains_key(target) {
                 return Some(i);
             }
         }
