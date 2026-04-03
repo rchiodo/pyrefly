@@ -442,7 +442,7 @@ impl CalcStack {
                 }
             }
             SccState::RevisitingDone => BindingAction::SccLocalAnswer(
-                self.get_scc_done_answer(&current)
+                self.get_iteration_done_answer(&current)
                     .expect("RevisitingDone but no answer in SCC node_state"),
             ),
             SccState::HasPlaceholder => {
@@ -455,7 +455,7 @@ impl CalcStack {
                     self.on_scc_detected(current_cycle);
                 }
                 let var = self
-                    .get_scc_placeholder_var(&current)
+                    .get_iteration_placeholder(&current)
                     .expect("HasPlaceholder state but no placeholder in SccNodeState");
                 BindingAction::CycleBroken(var)
             }
@@ -506,33 +506,6 @@ impl CalcStack {
         scc_stack
             .last()
             .is_some_and(|top_scc| top_scc.node_state.contains_key(current))
-    }
-
-    /// Retrieve the placeholder Var from SccNodeState::HasPlaceholder in the top SCC.
-    /// Returns `Some(var)` if the node has a placeholder, `None` otherwise.
-    /// Used during calculate_and_record_answer to determine whether
-    /// finalize_recursive_answer needs to be called.
-    fn get_scc_placeholder_var(&self, current: &CalcId) -> Option<Var> {
-        let scc_stack = self.scc_stack.borrow();
-        scc_stack
-            .last()
-            .and_then(|top_scc| match top_scc.node_state.get(current)? {
-                SccNodeState::HasPlaceholder(var) => Some(*var),
-                _ => None,
-            })
-    }
-
-    /// Retrieve the type-erased answer from SccNodeState::Done in the top SCC.
-    /// Returns `Some(answer)` if the node is Done, `None` otherwise
-    /// (node not in SCC or not Done).
-    fn get_scc_done_answer(&self, current: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
-        let scc_stack = self.scc_stack.borrow();
-        scc_stack
-            .last()
-            .and_then(|top_scc| match top_scc.node_state.get(current)? {
-                SccNodeState::Done { answer, .. } => Some(answer.dupe()),
-                _ => None,
-            })
     }
 
     /// Push a CalcId onto the stack without computing the binding action, for tests
@@ -979,15 +952,13 @@ impl CalcStack {
         }
     }
 
-    /// Get the placeholder variable from the target's `InProgress` state,
-    /// if one exists.
-    ///
-    /// Returns `None` if the top SCC is not iterating, the target is not
-    /// found, the target is not `InProgress`, or no placeholder has been set.
+    /// Retrieve the placeholder Var from SccNodeState::HasPlaceholder in the top SCC.
+    /// Returns `Some(var)` if the node has a placeholder, `None` otherwise.
+    /// Used during calculate_and_record_answer to determine whether
+    /// finalize_recursive_answer needs to be called.
     fn get_iteration_placeholder(&self, target: &CalcId) -> Option<Var> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        top_scc.iterative.as_ref()?; // Only return if iterating
         match top_scc.node_state.get(target)? {
             SccNodeState::HasPlaceholder(var) => Some(*var),
             _ => None,
@@ -1089,15 +1060,12 @@ impl CalcStack {
         iter_state.previous_answers.get(target).cloned()
     }
 
-    /// Retrieve the type-erased answer from `SccNodeState::Done` in the
-    /// top SCC's `node_state` (when iterating).
-    ///
-    /// Returns `None` if the top SCC is not iterating, the target is not
-    /// found, or the target is not `Done`.
+    /// Retrieve the type-erased answer from SccNodeState::Done in the top SCC.
+    /// Returns `Some(answer)` if the node is Done, `None` otherwise
+    /// (node not in SCC or not Done).
     fn get_iteration_done_answer(&self, target: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        top_scc.iterative.as_ref()?; // Only return if iterating
         match top_scc.node_state.get(target)? {
             SccNodeState::Done { answer, .. } => Some(answer.dupe()),
             _ => None,
@@ -2393,7 +2361,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // finalize the recursive answer now, before storing. Finalization
             // mutates solver state (force_var) and must happen during computation,
             // not at batch commit.
-            let answer = if let Some(var) = self.stack().get_scc_placeholder_var(&current) {
+            let answer = if let Some(var) = self.stack().get_iteration_placeholder(&current) {
                 self.finalize_recursive_answer::<K>(idx, var, raw_answer, &local_errors)
             } else {
                 raw_answer
