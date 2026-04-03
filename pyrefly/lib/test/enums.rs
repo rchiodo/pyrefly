@@ -69,6 +69,25 @@ def foo(member: MyEnum) -> None:
 );
 
 testcase!(
+    test_enum_class_value,
+    r#"
+from enum import Enum
+from typing import assert_type, Literal, overload
+
+class E(Enum):
+    X = int
+
+@overload
+def f(x: Literal[E.X]) -> int: ...
+@overload
+def f(x: E) -> int | str | None: ...
+def f(x) -> int | str | None: ...
+
+assert_type(f(E.X), int)
+"#,
+);
+
+testcase!(
     test_enum_meta,
     r#"
 from typing import assert_type, Literal
