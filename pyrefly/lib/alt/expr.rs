@@ -77,6 +77,7 @@ use crate::binding::binding::Key;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::binding::LambdaParamId;
+use crate::binding::narrow::AtomicNarrowOp;
 use crate::binding::narrow::int_from_slice;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
@@ -89,7 +90,6 @@ use crate::types::callable::Params;
 use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::facet::FacetKind;
-use crate::types::lit_int::LitInt;
 use crate::types::literal::Lit;
 use crate::types::param_spec::ParamSpec;
 use crate::types::quantified::Quantified;
@@ -1227,9 +1227,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        let target = match op {
-            BoolOp::And => false,
-            BoolOp::Or => true,
+        // `target` is the truthiness that causes short-circuiting: `and` short-circuits on
+        // falsy values, `or` on truthy values.
+        //
+        // `result_narrow` is used to narrow all but the last operand to values that could actually be
+        // returned as the result — for `and` that means the falsy subset, and vice versa for `or`.
+        // For example: `X and Y` only returns `X` if it is falsy, so the returned type is `IsFalsy(X) | Y`
+        let (target, result_narrow) = match op {
+            BoolOp::And => (false, AtomicNarrowOp::IsFalsy),
+            BoolOp::Or => (true, AtomicNarrowOp::IsTruthy),
         };
         let should_shortcircuit =
             |t: &Type, r: TextRange| self.as_bool(t, r, errors) == Some(target);
@@ -1264,21 +1270,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         None => t.clone(),
                         Some(acc) => self.union(acc, t.clone()),
                     });
-                    // Narrow the type for the result of the boolop
-                    let t = if i != last_index
-                        && t == self.heap.mk_class_type(self.stdlib.bool().clone())
-                    {
-                        Lit::Bool(target).to_implicit_type()
-                    } else if i != last_index
-                        && t == self.heap.mk_class_type(self.stdlib.int().clone())
-                        && !target
-                    {
-                        LitInt::new(0).to_implicit_type()
-                    } else if i != last_index
-                        && t == self.heap.mk_class_type(self.stdlib.str().clone())
-                        && !target
-                    {
-                        Lit::Str(Default::default()).to_implicit_type()
+                    let t = if i != last_index {
+                        self.atomic_narrow(&t, &result_narrow, value.range(), errors)
                     } else {
                         t
                     };
