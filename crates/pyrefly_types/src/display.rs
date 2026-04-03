@@ -33,6 +33,7 @@ use crate::stdlib::Stdlib;
 use crate::tuple::Tuple;
 use crate::type_alias::TypeAliasData;
 use crate::type_alias::TypeAliasRef;
+use crate::type_alias::TypeAliasStyle;
 use crate::type_output::DisplayOutput;
 use crate::type_output::OutputWithLocations;
 use crate::type_output::TypeOutput;
@@ -1124,7 +1125,11 @@ impl<'a> TypeDisplayContext<'a> {
             },
             Type::TypeAlias(ta) => match &**ta {
                 TypeAliasData::Value(ta) if is_toplevel => {
-                    if self.always_display_module_name {
+                    // Only add `typing.` for explicit TypeAlias (not LegacyImplicit).
+                    // For LegacyImplicit aliases, `fmt_with_type` delegates directly
+                    // to the inner type, which handles its own module prefix.
+                    if self.always_display_module_name && ta.style != TypeAliasStyle::LegacyImplicit
+                    {
                         output.write_str("typing.")?;
                     }
                     ta.fmt_with_type(output, &|t, o| self.fmt_helper_generic(t, false, o), None)

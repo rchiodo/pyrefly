@@ -436,14 +436,9 @@ class A:
     let _ = query.get_types_in_file(module_name, path).unwrap();
 }
 
-/// BUG: legacy implicit type alias to a builtin container produces
-/// `typing.builtins.type[...]` instead of `builtins.type[...]` in query mode.
-/// This is a known bug introduced by D99099609 — the `Type::TypeAlias` toplevel
-/// branch in `fmt_helper_generic` unconditionally prepends `typing.`, but the
-/// inner type's own formatting also adds `builtins.`, resulting in
-/// double-qualification. Remove `should_panic` once the bug is fixed.
+/// Regression test: legacy implicit type alias to a builtin container must not
+/// produce double-qualified names like `typing.builtins.type[...]` in query mode.
 #[test]
-#[should_panic(expected = "typing.builtins.")]
 fn test_legacy_implicit_type_alias_no_double_qualification() {
     let tdir = TempDir::new().unwrap();
     let file_path = tdir.path().join("main.py");
@@ -472,14 +467,9 @@ def f(x: RawData) -> None:
     );
 }
 
-/// BUG: `Annotated` type alias produces `typing.typing.Annotated[...]` instead
-/// of `typing.Annotated[...]` in query mode.
-/// Same root cause as the legacy alias bug: the `TypeAlias` toplevel branch
-/// prepends `typing.` before delegating to `fmt_with_type`, which formats
-/// `Annotated` — and `Annotated` already includes `typing.` in its own
-/// formatting. Remove `should_panic` once the bug is fixed.
+/// Regression test: `Annotated` type alias must not produce double-qualified
+/// names like `typing.typing.Annotated[...]` in query mode.
 #[test]
-#[should_panic(expected = "typing.typing.")]
 fn test_annotated_type_alias_no_double_qualification() {
     let tdir = TempDir::new().unwrap();
     let file_path = tdir.path().join("main.py");
