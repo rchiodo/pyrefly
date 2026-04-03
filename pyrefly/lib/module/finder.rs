@@ -443,7 +443,7 @@ fn resolve_third_party_stub(
                 return None;
             } else {
                 // Keep existing behavior for non-real config files
-                return Some(bundled.with_error(FindError::NoSourceForStubs(module)));
+                return Some(bundled.with_error(FindError::MissingSourceForStubs(module)));
             }
         } else {
             // We have both typeshed third party stubs and the actual package
@@ -2514,8 +2514,8 @@ mod tests {
         // 'requests' exists in typeshed third party stubs but not in our site_packages
         let result = find_import_filtered(&config, ModuleName::from_str("requests"), None, None);
 
-        let FindError::NoSourceForStubs(module) = result.error().unwrap() else {
-            panic!("Expected NoSourceForStubs error");
+        let FindError::MissingSourceForStubs(module) = result.error().unwrap() else {
+            panic!("Expected MissingSourceForStubs error");
         };
         assert_eq!(module, ModuleName::from_str("requests"));
     }

@@ -42,7 +42,7 @@ pub enum FindError {
     /// The string will hold the name of the pip package that we will tell the user to install.
     MissingStubs(ModuleName, Arc<String>),
     /// This is the condition where we are using stubs but we do not have the source files
-    NoSourceForStubs(ModuleName),
+    MissingSourceForStubs(ModuleName),
 }
 
 impl FindError {
@@ -111,7 +111,7 @@ impl FindError {
                     installed/unimportable."
                 )],
             ),
-            Self::NoSourceForStubs(module) => (
+            Self::MissingSourceForStubs(module) => (
                 None,
                 vec1![format!(
                     "Stubs for `{module}` are bundled with Pyrefly but the source files for the package are not found."
@@ -128,7 +128,7 @@ impl FindError {
         match self {
             Self::MissingImport(..) => Some(ErrorKind::MissingImport),
             Self::MissingSource(..) => Some(ErrorKind::MissingSource),
-            Self::NoSourceForStubs(..) => Some(ErrorKind::MissingSourceForStubs),
+            Self::MissingSourceForStubs(..) => Some(ErrorKind::MissingSourceForStubs),
             Self::MissingStubs(..) => Some(ErrorKind::UntypedImport),
             Self::Ignored => None,
         }
