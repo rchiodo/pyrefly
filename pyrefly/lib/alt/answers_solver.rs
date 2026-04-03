@@ -710,22 +710,20 @@ impl CalcStack {
         let scc_stack = self.scc_stack.borrow();
         scc_stack
             .last()
-            .and_then(|scc| scc.iterative.as_ref())
-            .is_some_and(|iter_state| iter_state.iteration <= 1)
+            .is_some_and(|scc| scc.iterative.iteration <= 1)
     }
 
     /// Get the lightweight summary of a target's iteration node state in
     /// the top SCC.
     ///
-    /// Returns `None` if the top SCC is not iterating or the target is not
-    /// found in the iteration node states. The summary is safe to use for
-    /// read-then-act patterns because it does not borrow the SCC.
+    /// Returns `None` if the target is not found in the iteration node
+    /// states. The summary is safe to use for read-then-act patterns because
+    /// it does not borrow the SCC.
     fn get_iteration_node_state(&self, target: &CalcId) -> Option<SccNodeStateKind> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        let iter_state = top_scc.iterative.as_ref()?;
         let node_state = top_scc.node_state.get(target)?;
-        let has_previous_answer = iter_state.previous_answers.contains_key(target);
+        let has_previous_answer = top_scc.iterative.previous_answers.contains_key(target);
         Some(node_state.kind(has_previous_answer))
     }
 
@@ -774,12 +772,11 @@ impl CalcStack {
 
     /// Mark a target node as `InProgress` in the top SCC's `node_state`.
     ///
-    /// Panics if the top SCC is not iterating, the target is not a member,
-    /// or the target is not `Fresh`.
+    /// Panics if the SCC stack is empty, the target is not a member, or the
+    /// target is not `Fresh`.
     fn set_iteration_node_in_progress(&self, target: &CalcId) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        assert!(top_scc.iterative.is_some(), "top SCC is not iterating");
         let node_state = top_scc
             .node_state
             .get_mut(target)
@@ -835,12 +832,12 @@ impl CalcStack {
 
     /// Mark a target node as `Done` in the top SCC's `node_state`.
     ///
-    /// Silently does nothing if the top SCC is not iterating, which has never
-    /// been observed but seems to occur in the LSP (possibly related to indexing).
+    /// Silently does nothing if there is no top SCC, which has never been
+    /// observed but seems to occur in the LSP (possibly related to indexing).
     ///
-    /// This shouldn't be a correctness bug, because if no Scc is found or the top
-    /// Scc is not iterating, then there's nothing to set - almost certainly it
-    /// already finished, and skipping the update is fine.
+    /// This shouldn't be a correctness bug, because if no SCC is found then
+    /// there's nothing to set. The SCC likely already finished, and skipping
+    /// the update is fine.
     ///
     /// TODO(stroxler): while I'm fairly confident that it's not a correctness bug
     /// to skip this update, it would be good to understand more clearly what the
@@ -856,7 +853,7 @@ impl CalcStack {
     ) {
         let needs_completion_check = {
             let mut scc_stack = self.scc_stack.borrow_mut();
-            let Some(top_scc) = scc_stack.last_mut().filter(|scc| scc.iterative.is_some()) else {
+            let Some(top_scc) = scc_stack.last_mut() else {
                 // TODO(stroxler): Consider panicking here once we're confident this
                 // path is unreachable in the LSP. The silent no-op may mask bugs.
                 debug_assert!(
@@ -866,7 +863,7 @@ impl CalcStack {
                 );
                 return;
             };
-            let is_iteration_0 = top_scc.iterative.as_ref().is_some_and(|s| s.iteration == 0);
+            let is_iteration_0 = top_scc.iterative.iteration == 0;
             top_scc.node_state.insert(
                 target.dupe(),
                 SccNodeState::Done {
@@ -892,14 +889,14 @@ impl CalcStack {
     /// Called when a node's answer differs from its previous-iteration answer,
     /// indicating the fixpoint has not yet converged.
     ///
-    /// Silently does nothing if the top SCC is not iterating. This can occur
-    /// in the LSP when the SCC is prematurely popped from the stack due to a
+    /// Silently does nothing if there is no top SCC. This can occur in the
+    /// LSP when the SCC is prematurely popped from the stack due to a
     /// stale `bottom_pos_inclusive` (see pyrefly-docs/scc-stack-invariants/v0-doc.md).
     /// In that case the SCC has already been committed by a nested driver, so
-    /// there is no iteration state left to update and skipping is safe.
+    /// there is no top SCC left to update and skipping is safe.
     fn mark_iteration_changed(&self) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let Some(iter_state) = scc_stack.last_mut().and_then(|scc| scc.iterative.as_mut()) else {
+        let Some(top_scc) = scc_stack.last_mut() else {
             // TODO(stroxler): Consider panicking here once we're confident this
             // path is unreachable in the LSP. The silent no-op may mask bugs.
             debug_assert!(
@@ -908,7 +905,7 @@ impl CalcStack {
             );
             return;
         };
-        iter_state.has_changed = true;
+        top_scc.iterative.has_changed = true;
     }
 
     /// Record `target` as a recursion break point in the top SCC's iteration state.
@@ -918,26 +915,21 @@ impl CalcStack {
     /// break points are where non-convergence errors should be reported, since
     /// other non-converging members are downstream consequences.
     ///
-    /// Panics if the top SCC is not iterating.
+    /// Panics if the SCC stack is empty.
     fn mark_recursion_break(&self, target: &CalcId) {
         let mut scc_stack = self.scc_stack.borrow_mut();
         let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        let iter_state = top_scc
-            .iterative
-            .as_mut()
-            .expect("top SCC is not iterating");
-        iter_state.recursion_breaks.insert(target.dupe());
+        top_scc.iterative.recursion_breaks.insert(target.dupe());
     }
 
     /// Look up the previous-iteration answer for a target in the top SCC.
     ///
-    /// Returns `None` if the top SCC is not iterating or there is no
-    /// previous answer for the target (e.g., during cold-start iteration 1).
+    /// Returns `None` if there is no top SCC or there is no previous answer
+    /// for the target (e.g., during cold-start iteration 1).
     fn get_previous_answer(&self, target: &CalcId) -> Option<Arc<dyn Any + Send + Sync>> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        let iter_state = top_scc.iterative.as_ref()?;
-        iter_state.previous_answers.get(target).cloned()
+        top_scc.iterative.previous_answers.get(target).cloned()
     }
 
     /// Retrieve the type-erased answer from SccNodeState::Done in the top SCC.
@@ -954,12 +946,11 @@ impl CalcStack {
 
     /// Find the first member in the top SCC's iteration state that is `Fresh`.
     ///
-    /// Returns `None` if all members have been processed or the top SCC is
-    /// not iterating. BTreeMap iteration order gives deterministic results.
+    /// Returns `None` if all members have been processed or there is no top
+    /// SCC. BTreeMap iteration order gives deterministic results.
     fn next_fresh_member(&self) -> Option<CalcId> {
         let scc_stack = self.scc_stack.borrow();
         let top_scc = scc_stack.last()?;
-        top_scc.iterative.as_ref()?; // Only return if iterating
         for (calc_id, state) in &top_scc.node_state {
             if matches!(state, SccNodeState::Fresh) {
                 return Some(calc_id.dupe());
@@ -1016,12 +1007,7 @@ impl CalcStack {
         let scc_stack = self.scc_stack.borrow();
         // Skip the last element (the top SCC) and check the rest.
         let len = scc_stack.len();
-        if len < 2 {
-            return false;
-        }
-        scc_stack[..len - 1]
-            .iter()
-            .any(|scc| scc.iterative.is_some())
+        len >= 2
     }
 
     /// Returns true if the top SCC's `node_state` contains the given CalcId.
@@ -1031,9 +1017,9 @@ impl CalcStack {
     /// Used after nested absorption to distinguish two cases:
     /// - Our SCC was merged into the top SCC (detected_at changed, but our
     ///   members are in the top SCC's node_state) → continue driving.
-    /// - Our SCC was committed by a nested driver, and a pre-existing,
-    ///   possibly non-iterating SCC (e.g. a Phase 0 SCC that was below us
-    ///   on the stack) is now the top → return.
+    /// - Our SCC was committed by a nested driver, and a pre-existing SCC
+    ///   (e.g. a Phase 0 SCC that was below us on the stack) is now the top
+    ///   → return.
     ///
     /// This works because `detected_at` is always a member of the SCC's
     /// `node_state`, and merges union the `node_state` maps. Within a single
@@ -1055,8 +1041,7 @@ impl CalcStack {
         let scc_stack = self.scc_stack.borrow();
         scc_stack
             .last()
-            .and_then(|scc| scc.iterative.as_ref())
-            .is_some_and(|iter_state| iter_state.merge_happened)
+            .is_some_and(|scc| scc.iterative.merge_happened)
     }
 
     /// Set the `demoted` flag on the top SCC's iteration state.
@@ -1067,10 +1052,8 @@ impl CalcStack {
     /// already-done members).
     fn set_top_scc_demoted(&self, demoted: bool) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        if let Some(scc) = scc_stack.last_mut()
-            && let Some(ref mut iter_state) = scc.iterative
-        {
-            iter_state.demoted = demoted;
+        if let Some(scc) = scc_stack.last_mut() {
+            scc.iterative.demoted = demoted;
         }
     }
 
@@ -1087,9 +1070,7 @@ impl CalcStack {
     /// is immediately removed again).
     fn remove_from_iteration_state(&self, calc_id: &CalcId) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        if let Some(scc) = scc_stack.last_mut()
-            && scc.iterative.is_some()
-        {
+        if let Some(scc) = scc_stack.last_mut() {
             scc.node_state.remove(calc_id);
         } else {
             // TODO(stroxler): Consider panicking here once we're confident this
@@ -1279,10 +1260,9 @@ pub struct Scc {
     /// Initially set to the stack length when the SCC is created; updated on merge.
     top_pos_exclusive: usize,
     /// Iteration state for iterative fixpoint solving.
-    /// Iteration state. Set to `Some(iteration: 0)` on creation (Phase 0
-    /// discovery), then reset to iteration 1 by `reset_for_cold_start` when
-    /// entering iterative solving.
-    iterative: Option<SccIterationState>,
+    /// Set to iteration 0 on creation (Phase 0 discovery), then reset to
+    /// iteration 1 by `reset_for_cold_start` when entering iterative solving.
+    iterative: SccIterationState,
 }
 
 impl Display for Scc {
@@ -1323,14 +1303,14 @@ impl Scc {
             detected_at,
             bottom_pos_inclusive,
             top_pos_exclusive: calc_stack_vec.len(),
-            iterative: Some(SccIterationState {
+            iterative: SccIterationState {
                 iteration: 0,
                 previous_answers: BTreeMap::new(),
                 demoted: false,
                 has_changed: false,
                 merge_happened: false,
                 recursion_breaks: BTreeSet::new(),
-            }),
+            },
         }
     }
 
@@ -1419,42 +1399,27 @@ impl Scc {
         // the merged anchor to the current stack top is part of this single SCC.
         // The caller must recompute top_pos_exclusive = stack.len().
 
-        // Merge iteration state: if either SCC is iterating, build merged
-        // iteration state. Node states are already merged via `node_state`
+        // Merge iteration state. Node states are already merged via `node_state`
         // above; the iteration state only carries metadata (iteration number,
         // previous answers, flags).
         // Set merge_happened so the drive loop defers demotion until
         // after the current iteration completes, bounding per-iteration work
         // to O(N) regardless of how many merges occur.
-        self.iterative = match (self.iterative.take(), other.iterative) {
-            (None, None) => None,
-            (self_iter, other_iter) => {
-                // Use the max iteration from either SCC: if one has progressed
-                // further, we should not regress to iteration 1.
-                let iteration = [self_iter.as_ref(), other_iter.as_ref()]
-                    .iter()
-                    .filter_map(|opt| opt.map(|s| s.iteration))
-                    .max()
-                    .unwrap_or(1);
-                // Union previous_answers from both SCCs. Start with other's
-                // answers, then extend with self's (self is the older/lower SCC
-                // so its answers take priority on overlap).
-                let mut previous_answers = other_iter
-                    .as_ref()
-                    .map(|s| s.previous_answers.clone())
-                    .unwrap_or_default();
-                if let Some(self_s) = self_iter {
-                    previous_answers.extend(self_s.previous_answers);
-                }
-                Some(SccIterationState {
-                    iteration,
-                    previous_answers,
-                    demoted: false,
-                    has_changed: false,
-                    merge_happened: true,
-                    recursion_breaks: BTreeSet::new(),
-                })
-            }
+        // Take max iteration from either SCC: if one has progressed further,
+        // we should not regress to iteration 1.
+        let iteration = self.iterative.iteration.max(other.iterative.iteration);
+        // Union previous_answers from both SCCs. Start with other's answers,
+        // then extend with self's (self is the older/lower SCC so its answers
+        // take priority on overlap).
+        let mut previous_answers = other.iterative.previous_answers;
+        previous_answers.extend(self.iterative.previous_answers);
+        self.iterative = SccIterationState {
+            iteration,
+            previous_answers,
+            demoted: false,
+            has_changed: false,
+            merge_happened: true,
+            recursion_breaks: BTreeSet::new(),
         };
 
         self
@@ -1494,8 +1459,8 @@ impl Scc {
                 SccNodeState::InProgress
             });
         }
-        if added_new && let Some(ref mut iter_state) = self.iterative {
-            iter_state.merge_happened = true;
+        if added_new {
+            self.iterative.merge_happened = true;
         }
     }
 
@@ -1503,12 +1468,9 @@ impl Scc {
     ///
     /// Iterates over `node_state`, collecting answers from `Done` variants
     /// into a `BTreeMap`. Used to build `previous_answers` for the next
-    /// iteration. Returns an empty map if the SCC has no iteration state.
+    /// iteration.
     #[allow(clippy::mutable_key_type)]
     fn extract_done_answers(&self) -> BTreeMap<CalcId, Arc<dyn Any + Send + Sync>> {
-        if self.iterative.is_none() {
-            return BTreeMap::new();
-        }
         let mut answers = BTreeMap::new();
         for (calc_id, state) in &self.node_state {
             if let SccNodeState::Done { answer, .. } = state {
@@ -1527,14 +1489,14 @@ impl Scc {
         for state in self.node_state.values_mut() {
             *state = SccNodeState::Fresh;
         }
-        self.iterative = Some(SccIterationState {
+        self.iterative = SccIterationState {
             iteration: 1,
             previous_answers: BTreeMap::new(),
             demoted: false,
             has_changed: false,
             merge_happened: false,
             recursion_breaks: BTreeSet::new(),
-        });
+        };
         debug_assert!(
             self.node_state
                 .values()
@@ -1555,22 +1517,18 @@ impl Scc {
     #[allow(clippy::mutable_key_type)]
     fn advance_to_next_warm_iteration(&mut self) {
         let previous_answers = self.extract_done_answers();
-        let current_iteration = self
-            .iterative
-            .as_ref()
-            .expect("advance_to_next_warm_iteration: SCC has no iteration state")
-            .iteration;
+        let current_iteration = self.iterative.iteration;
         for state in self.node_state.values_mut() {
             *state = SccNodeState::Fresh;
         }
-        self.iterative = Some(SccIterationState {
+        self.iterative = SccIterationState {
             iteration: current_iteration + 1,
             previous_answers,
             demoted: false,
             has_changed: false,
             merge_happened: false,
             recursion_breaks: BTreeSet::new(),
-        });
+        };
         debug_assert!(
             self.node_state
                 .values()
@@ -1583,12 +1541,9 @@ impl Scc {
         );
     }
 
-    /// Returns the current iteration number. Panics if the SCC is not iterating.
+    /// Returns the current iteration number.
     fn iteration(&self) -> u32 {
-        self.iterative
-            .as_ref()
-            .expect("iteration: SCC has no iteration state")
-            .iteration
+        self.iterative.iteration
     }
 }
 
@@ -2485,11 +2440,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Called after the fixpoint iteration converges (or max iterations are
     /// reached).
     fn commit_final_answers(&self, scc: Scc) -> bool {
-        assert!(
-            scc.iterative.is_some(),
-            "commit_final_answers: SCC has no iteration state"
-        );
-
         // Collect Done members from node_state. BTreeMap iteration is already sorted by CalcId.
         let members: Vec<(
             CalcId,
@@ -2699,12 +2649,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
             // Check for demotion: if SCC membership expanded, restart at
             // iteration 1 with fresh state.
-            let iter_state = scc
-                .iterative
-                .as_ref()
-                .expect("iterative_resolve_scc: SCC lost iteration state after pop");
-            let demoted = iter_state.demoted;
-            let has_changed = iter_state.has_changed;
+            let demoted = scc.iterative.demoted;
+            let has_changed = scc.iterative.has_changed;
 
             if demoted {
                 demotions += 1;
@@ -2739,19 +2685,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Arc<dyn Any + Send + Sync>,
             Option<Arc<dyn Any + Send + Sync>>,
         )> = if exceeded_max_iterations {
-            let iter_state = scc.iterative.as_ref().expect(
-                "iterative_resolve_scc: SCC lost iteration state before non-convergence extraction",
-            );
             scc.node_state
                 .iter()
                 .filter_map(|(calc_id, node_state)| match node_state {
                     SccNodeState::Done { answer, .. }
-                        if iter_state.recursion_breaks.contains(calc_id) =>
+                        if scc.iterative.recursion_breaks.contains(calc_id) =>
                     {
                         Some((
                             calc_id.dupe(),
                             answer.dupe(),
-                            iter_state.previous_answers.get(calc_id).cloned(),
+                            scc.iterative.previous_answers.get(calc_id).cloned(),
                         ))
                     }
                     _ => None,
@@ -3379,7 +3322,14 @@ mod scc_tests {
             detected_at,
             bottom_pos_inclusive,
             top_pos_exclusive,
-            iterative: None,
+            iterative: SccIterationState {
+                iteration: 0,
+                previous_answers: BTreeMap::new(),
+                demoted: false,
+                has_changed: false,
+                merge_happened: false,
+                recursion_breaks: BTreeSet::new(),
+            },
         }
     }
 
@@ -3751,14 +3701,14 @@ mod scc_tests {
                 detected_at: a.dupe(),
                 bottom_pos_inclusive: 0,
                 top_pos_exclusive: 2,
-                iterative: Some(SccIterationState {
+                iterative: SccIterationState {
                     iteration: 2,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
                     merge_happened: false,
                     recursion_breaks: BTreeSet::new(),
-                }),
+                },
             }
         };
 
@@ -3772,14 +3722,14 @@ mod scc_tests {
                 detected_at: d.dupe(),
                 bottom_pos_inclusive: 3,
                 top_pos_exclusive: 5,
-                iterative: Some(SccIterationState {
+                iterative: SccIterationState {
                     iteration: 1,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
                     merge_happened: false,
                     recursion_breaks: BTreeSet::new(),
-                }),
+                },
             }
         };
 
@@ -3809,22 +3759,18 @@ mod scc_tests {
 
         // The merged SCC must have merge_happened = true (demotion is deferred
         // until after drive_all_iteration_members completes).
-        let iter_state = merged
-            .iterative
-            .as_ref()
-            .expect("merged SCC should have iterative state");
         assert!(
-            iter_state.merge_happened,
+            merged.iterative.merge_happened,
             "merged SCC should have merge_happened = true after membership back-edge merge"
         );
         assert!(
-            !iter_state.demoted,
+            !merged.iterative.demoted,
             "merged SCC should have demoted = false (demotion is deferred)"
         );
 
         // Iteration should be preserved from self (the more advanced SCC).
         assert_eq!(
-            iter_state.iteration, 2,
+            merged.iterative.iteration, 2,
             "merged SCC iteration should be preserved from self"
         );
 
@@ -3902,14 +3848,14 @@ mod scc_tests {
                 detected_at: a.dupe(),
                 bottom_pos_inclusive: 0,
                 top_pos_exclusive: 2,
-                iterative: Some(SccIterationState {
+                iterative: SccIterationState {
                     iteration: 2,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
                     merge_happened: false,
                     recursion_breaks: BTreeSet::new(),
-                }),
+                },
             }
         };
 
@@ -3923,14 +3869,14 @@ mod scc_tests {
                 detected_at: d.dupe(),
                 bottom_pos_inclusive: 3,
                 top_pos_exclusive: 5,
-                iterative: Some(SccIterationState {
+                iterative: SccIterationState {
                     iteration: 1,
                     previous_answers: BTreeMap::new(),
                     demoted: false,
                     has_changed: false,
                     merge_happened: false,
                     recursion_breaks: BTreeSet::new(),
-                }),
+                },
             }
         };
 
@@ -3994,16 +3940,12 @@ mod scc_tests {
         // merge actually happened; demotion is deferred to drive_all_iteration_members).
         let scc_stack = calc_stack.borrow_scc_stack();
         let merged = &scc_stack[0];
-        let iter_state = merged
-            .iterative
-            .as_ref()
-            .expect("merged SCC should have iterative state");
         assert!(
-            iter_state.merge_happened,
+            merged.iterative.merge_happened,
             "merged SCC should have merge_happened = true"
         );
         assert!(
-            !iter_state.demoted,
+            !merged.iterative.demoted,
             "merged SCC should have demoted = false (demotion is deferred)"
         );
     }
