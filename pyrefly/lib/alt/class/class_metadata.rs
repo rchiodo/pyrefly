@@ -11,6 +11,7 @@ use dupe::Dupe;
 use itertools::Either;
 use itertools::Itertools;
 use pyrefly_graph::index::Idx;
+use pyrefly_python::dunder;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::annotation::Annotation;
@@ -28,6 +29,7 @@ use ruff_python_ast::Expr;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::Hashed;
 use starlark_map::ordered_map::OrderedMap;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
@@ -46,6 +48,7 @@ use crate::alt::types::class_metadata::InitDefaults;
 use crate::alt::types::class_metadata::Metaclass;
 use crate::alt::types::class_metadata::NamedTupleMetadata;
 use crate::alt::types::class_metadata::ProtocolMetadata;
+use crate::alt::types::class_metadata::SlotsInfo;
 use crate::alt::types::class_metadata::TotalOrderingMetadata;
 use crate::alt::types::class_metadata::TypedDictMetadata;
 use crate::alt::types::decorated_function::Decorator;
@@ -54,7 +57,10 @@ use crate::binding::base_class::BaseClass;
 use crate::binding::base_class::BaseClassExpr;
 use crate::binding::base_class::BaseClassGeneric;
 use crate::binding::base_class::BaseClassGenericKind;
+use crate::binding::binding::ClassFieldDefinition;
+use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
+use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyDecorator;
 use crate::binding::django::DjangoFieldInfo;
 use crate::binding::pydantic::PydanticConfigDict;
@@ -424,6 +430,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .as_ref()
             .map(|m| m.pydantic_model_kind.clone());
 
+        // Extract __slots__ info from the binding. This must happen here (in
+        // the class's own module) because ClassDefIndex is per-file, so looking
+        // up a cross-module class's __slots__ in the wrong module's bindings
+        // could match a completely different class.
+        let slots_info = self.extract_slots_info(cls);
+
         ClassMetadata::new(
             bases,
             calculated_metaclass,
@@ -447,7 +459,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             django_model_metadata,
             is_marshmallow_schema,
             is_metaclass,
+            slots_info,
         )
+    }
+
+    fn extract_slots_info(&self, cls: &Class) -> Option<SlotsInfo> {
+        let key = KeyClassField(cls.index(), dunder::SLOTS.clone());
+        let idx = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key))?;
+        let binding = self.bindings().get::<KeyClassField>(idx);
+        let ClassFieldDefinition::AssignedInBody { value, .. } = &binding.definition else {
+            return None;
+        };
+        let ExprOrBinding::Expr(expr) = value.as_ref() else {
+            return None;
+        };
+
+        fn extract_names_from_elts(elts: &[Expr]) -> Option<SlotsInfo> {
+            let mut names = SmallSet::new();
+            let mut has_dict = false;
+            for elt in elts {
+                let Expr::StringLiteral(s) = elt else {
+                    return None;
+                };
+                let name = Name::new(s.value.to_str());
+                if name == dunder::DICT {
+                    has_dict = true;
+                }
+                names.insert(name);
+            }
+            Some(SlotsInfo { names, has_dict })
+        }
+
+        match expr {
+            Expr::Tuple(t) => extract_names_from_elts(&t.elts),
+            Expr::List(l) => extract_names_from_elts(&l.elts),
+            Expr::StringLiteral(s) => {
+                let mut names = SmallSet::new();
+                let name = Name::new(s.value.to_str());
+                let has_dict = name == dunder::DICT;
+                names.insert(name);
+                Some(SlotsInfo { names, has_dict })
+            }
+            _ => None,
+        }
     }
 
     fn initial_protocol_metadata(

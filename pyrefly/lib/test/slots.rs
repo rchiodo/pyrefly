@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use crate::test::util::TestEnv;
 use crate::testcase;
 
 testcase!(
@@ -355,6 +356,41 @@ class Baz(metaclass=Meta):
 # Meta.x is a plain attribute, not a data descriptor, so it does not
 # override the slot descriptor in the MRO.
 print(Baz.x)  # E: Instance-only attribute `x` of class `Baz` is not visible on the class
+"#,
+);
+
+fn env_slots_cross_module() -> TestEnv {
+    TestEnv::one(
+        "m1",
+        r#"
+class A:
+    __slots__ = ('ok',)
+
+    def __init__(self, ok: int) -> None:
+        self.ok = ok
+"#,
+    )
+}
+
+// Regression test: when class A (with __slots__) is imported from another
+// module, and the current module also defines a class B with __slots__, the
+// per-file ClassDefIndex could collide, causing pyrefly to check A's
+// attribute writes against B's slot names instead of A's.
+testcase!(
+    test_slots_cross_module_no_false_positive,
+    env_slots_cross_module(),
+    r#"
+from m1 import A
+
+class B:
+    __slots__ = ('x',)
+
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+def f(a: A) -> None:
+    a.ok = 1   # ok
+    a.bad = 2  # E: not declared in `__slots__`
 "#,
 );
 
