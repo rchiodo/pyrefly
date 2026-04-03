@@ -248,6 +248,19 @@ fn test_fixture_static_call_mixed_args() {
 // Property-based unit tests
 // ---------------------------------------------------------------------------
 
+/// Create a type-checked state with the `__static__` stub and multiple modules.
+fn create_state_multi_module(modules: &[(&str, &str)]) -> crate::state::state::State {
+    let mut test_env = TestEnv::new();
+    test_env.add("__static__", STATIC_MODULE_STUB);
+    for (name, code) in modules {
+        test_env.add(name, code);
+    }
+    let (state, _) = test_env
+        .with_default_require_level(Require::Everything)
+        .to_state();
+    state
+}
+
 /// Create a type-checked state from a single module's Python source.
 fn create_state(module_name: &str, python_code: &str) -> crate::state::state::State {
     let mut test_env = TestEnv::new();
@@ -486,5 +499,73 @@ y: Impl = Impl()
     assert!(
         impl_tags.contains(&"inherits_protocol"),
         "expected 'inherits_protocol' tag on Impl, got: {impl_tags:?}"
+    );
+}
+
+/// BUG: `lookup_attr_type` uses `KeyClassField` with the current module's
+/// bindings, but the class may be from another module. When the imported
+/// class's per-file `ClassDefIndex` collides with a local class that has
+/// an attribute of the same name, the contextual type comes from the wrong
+/// class. Same root cause as the __slots__ cross-module bug (fixed in
+/// `extract_local_slot_names`), but in the CinderX report path.
+#[test]
+fn test_cross_module_attr_contextual_type() {
+    let state = create_state_multi_module(&[
+        // base_mod defines a class with x: int64 (ClassDefIndex 0 in base_mod)
+        (
+            "base_mod",
+            r#"
+from __static__ import int64
+
+class Base:
+    x: int64
+"#,
+        ),
+        // child_mod defines a local class also at ClassDefIndex 0 with x: double,
+        // then imports Base and assigns to b.x on a Base instance directly
+        // (no inheritance, so x is purely a cross-module attribute).
+        (
+            "child_mod",
+            r#"
+from __static__ import double
+from base_mod import Base
+
+class Local:
+    x: double
+
+def f(b: Base) -> None:
+    b.x = 42
+"#,
+        ),
+    ]);
+    let transaction = state.transaction();
+    let handle = get_handle("child_mod", &transaction);
+    let data = collect_module_types(&transaction, &handle).expect("should collect types");
+    let output = format_module_types(&data.entries, &data.locations);
+
+    // The contextual type of `42` in `self.x = 42` should be int64 (from
+    // Base.x), NOT double (from Local.x which happens to share the same
+    // ClassDefIndex in the local module). If the bug is present, this will
+    // either show `contextual: __static__.double` (wrong type from index
+    // collision) or no contextual type at all (if the field name didn't match).
+    //
+    // NOTE: currently lookup_attr_type only searches the current module's
+    // bindings, so cross-module classes won't produce any contextual type.
+    // This assertion documents the current (lossy but not incorrect) behavior.
+    // If/when the bug is fixed to do cross-module lookup, change the assertion
+    // to check for `contextual: __static__.int64`.
+    // The contextual type for `42` in `b.x = 42` should be int64 (from
+    // Base.x), NOT double (from Local.x which happens to share the same
+    // ClassDefIndex in the local module).
+    //
+    // BUG: lookup_attr_type resolves KeyClassField using the current module's
+    // bindings, so the imported class's ClassDefIndex collides with Local and
+    // returns the wrong type. This assertion documents the known-broken
+    // behavior until the fix lands.
+    assert!(
+        output.contains("contextual: __static__.double"),
+        "Expected (buggy) contextual type __static__.double from index collision.\n\
+         If this fails, the bug may have been fixed — update the assertion to \
+         check for __static__.int64 instead.\nOutput:\n{output}"
     );
 }
