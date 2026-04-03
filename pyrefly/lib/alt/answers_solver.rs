@@ -288,32 +288,7 @@ impl CalcStack {
                 // InProgress stay as-is) and new members are Fresh. The target
                 // will typically be Fresh or InProgress. Handle all cases.
                 if let Some(kind) = self.get_iteration_node_state(&current) {
-                    return match kind {
-                        SccNodeStateKind::Fresh => {
-                            self.set_iteration_node_in_progress(&current);
-                            BindingAction::Calculate
-                        }
-                        SccNodeStateKind::InProgressWithPreviousAnswer => {
-                            self.mark_recursion_break(&current);
-                            let answer = self.get_previous_answer(&current).expect(
-                                "InProgressWithPreviousAnswer but no previous answer found",
-                            );
-                            BindingAction::SccLocalAnswer(answer)
-                        }
-                        SccNodeStateKind::InProgressWithPlaceholder => {
-                            let var = self
-                                .get_iteration_placeholder(&current)
-                                .expect("InProgressWithPlaceholder but no placeholder found");
-                            BindingAction::CycleBroken(var)
-                        }
-                        SccNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
-                        SccNodeStateKind::Done => {
-                            let answer = self
-                                .get_iteration_done_answer(&current)
-                                .expect("Done iteration node state but no answer found");
-                            BindingAction::SccLocalAnswer(answer)
-                        }
-                    };
+                    return self.binding_action_for_node_state(&current, kind);
                 }
                 // If we merged but the target is somehow not in iteration state,
                 // this is a bug: the merge should have included it.
@@ -335,32 +310,7 @@ impl CalcStack {
                 top_scc.top_pos_exclusive += 1;
             }
             if let Some(kind) = self.get_iteration_node_state(&current) {
-                return match kind {
-                    SccNodeStateKind::Fresh => {
-                        self.set_iteration_node_in_progress(&current);
-                        BindingAction::Calculate
-                    }
-                    SccNodeStateKind::InProgressWithPreviousAnswer => {
-                        self.mark_recursion_break(&current);
-                        let answer = self
-                            .get_previous_answer(&current)
-                            .expect("InProgressWithPreviousAnswer but no previous answer found");
-                        BindingAction::SccLocalAnswer(answer)
-                    }
-                    SccNodeStateKind::InProgressWithPlaceholder => {
-                        let var = self
-                            .get_iteration_placeholder(&current)
-                            .expect("InProgressWithPlaceholder but no placeholder found");
-                        BindingAction::CycleBroken(var)
-                    }
-                    SccNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
-                    SccNodeStateKind::Done => {
-                        let answer = self
-                            .get_iteration_done_answer(&current)
-                            .expect("Done iteration node state but no answer found");
-                        BindingAction::SccLocalAnswer(answer)
-                    }
-                };
+                return self.binding_action_for_node_state(&current, kind);
             }
             // If we merged but the target is somehow not in iteration state,
             // this is a bug: the merge should have included it.
@@ -394,42 +344,7 @@ impl CalcStack {
             if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
                 top_scc.top_pos_exclusive += 1;
             }
-            return match kind {
-                SccNodeStateKind::Fresh => {
-                    // First encounter in this iteration: mark InProgress
-                    // and proceed to calculate.
-                    self.set_iteration_node_in_progress(&current);
-                    BindingAction::Calculate
-                }
-                SccNodeStateKind::InProgressWithPreviousAnswer => {
-                    // Back-edge with a warm-start answer from prior iteration.
-                    self.mark_recursion_break(&current);
-                    let answer = self
-                        .get_previous_answer(&current)
-                        .expect("InProgressWithPreviousAnswer but no previous answer found");
-                    BindingAction::SccLocalAnswer(answer)
-                }
-                SccNodeStateKind::InProgressWithPlaceholder => {
-                    // Back-edge with a placeholder already allocated.
-                    let var = self
-                        .get_iteration_placeholder(&current)
-                        .expect("InProgressWithPlaceholder but no placeholder found");
-                    BindingAction::CycleBroken(var)
-                }
-                SccNodeStateKind::InProgressCold => {
-                    // Cold-start back-edge: no placeholder, no previous answer.
-                    // Return NeedsColdPlaceholder so the caller (get_idx) can
-                    // allocate via K::create_recursive.
-                    BindingAction::NeedsColdPlaceholder
-                }
-                SccNodeStateKind::Done => {
-                    // Already solved in this iteration; return the answer.
-                    let answer = self
-                        .get_iteration_done_answer(&current)
-                        .expect("Done iteration node state but no answer found");
-                    BindingAction::SccLocalAnswer(answer)
-                }
-            };
+            return self.binding_action_for_node_state(&current, kind);
         }
 
         match self.pre_calculate_state(&current) {
@@ -886,6 +801,49 @@ impl CalcStack {
         let node_state = top_scc.node_state.get(target)?;
         let has_previous_answer = iter_state.previous_answers.contains_key(target);
         Some(node_state.kind(has_previous_answer))
+    }
+
+    /// Convert an `SccNodeStateKind` into the appropriate `BindingAction`.
+    ///
+    /// This is the shared logic for all paths in `push` that find a node in
+    /// an SCC's iteration state: cross-SCC merge, same-top-SCC membership,
+    /// and the iterative bypass. The mapping is:
+    /// - Fresh → mark InProgress, Calculate
+    /// - InProgressWithPreviousAnswer → mark recursion break, return previous answer
+    /// - InProgressWithPlaceholder → return CycleBroken with the placeholder Var
+    /// - InProgressCold → NeedsColdPlaceholder (caller allocates)
+    /// - Done → return the SCC-local answer
+    fn binding_action_for_node_state(
+        &self,
+        current: &CalcId,
+        kind: SccNodeStateKind,
+    ) -> BindingAction {
+        match kind {
+            SccNodeStateKind::Fresh => {
+                self.set_iteration_node_in_progress(current);
+                BindingAction::Calculate
+            }
+            SccNodeStateKind::InProgressWithPreviousAnswer => {
+                self.mark_recursion_break(current);
+                let answer = self
+                    .get_previous_answer(current)
+                    .expect("InProgressWithPreviousAnswer but no previous answer found");
+                BindingAction::SccLocalAnswer(answer)
+            }
+            SccNodeStateKind::InProgressWithPlaceholder => {
+                let var = self
+                    .get_iteration_placeholder(current)
+                    .expect("InProgressWithPlaceholder but no placeholder found");
+                BindingAction::CycleBroken(var)
+            }
+            SccNodeStateKind::InProgressCold => BindingAction::NeedsColdPlaceholder,
+            SccNodeStateKind::Done => {
+                let answer = self
+                    .get_iteration_done_answer(current)
+                    .expect("Done iteration node state but no answer found");
+                BindingAction::SccLocalAnswer(answer)
+            }
+        }
     }
 
     /// Mark a target node as `InProgress` in the top SCC's `node_state`.
