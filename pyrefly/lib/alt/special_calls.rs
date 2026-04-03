@@ -399,12 +399,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             && let (vs, Type::ClassType(protocol_class_type)) =
                                 self.instantiate_fresh_class(class_info_cls)
                         {
+                            let mut all_members_present = true;
                             let mut unsafe_overlap_errors = vec![];
                             for field_name in &class_info_protocol.members {
                                 if !self.has_attr(object_type, field_name) {
-                                    // It's okay if the field is missing, since
-                                    // we only care about unsafe overlaps
-                                    continue;
+                                    all_members_present = false;
+                                    break;
                                 }
                                 if let Err(subset_err) = self.is_protocol_subset_at_attr(
                                     object_type,
@@ -429,7 +429,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     unsafe_overlap_errors.push(e.to_error_msg(self))
                                 }
                             }
-                            if !unsafe_overlap_errors.is_empty() {
+                            if all_members_present && !unsafe_overlap_errors.is_empty() {
                                 let mut full_msg = vec1![format!(
                                     "Runtime checkable protocol `{}` has an unsafe overlap with type `{}`",
                                     class_info_cls.name(),
