@@ -219,7 +219,7 @@ impl ParamList {
     /// Type signature that permits everything, namely `*args, **kwargs`.
     pub fn everything() -> ParamList {
         ParamList(vec![
-            Param::VarArg(None, Type::any_implicit()),
+            Param::Varargs(None, Type::any_implicit()),
             Param::Kwargs(None, Type::any_implicit()),
         ])
     }
@@ -265,7 +265,7 @@ impl Params {
                             counts.keyword.add_arg(req);
                             counts.overall.add_arg(req);
                         }
-                        Param::VarArg(..) => {
+                        Param::Varargs(..) => {
                             counts.positional.max = None;
                             counts.overall.max = None;
                         }
@@ -302,7 +302,7 @@ impl Params {
 pub enum Param {
     PosOnly(Option<Name>, Type, Required),
     Pos(Name, Type, Required),
-    VarArg(Option<Name>, Type),
+    Varargs(Option<Name>, Type),
     KwOnly(Name, Type, Required),
     Kwargs(Option<Name>, Type),
 }
@@ -785,7 +785,7 @@ impl Callable {
                 params: Params::List(params),
                 ret: _,
             } if let Some(param) = params.items().first() => match param {
-                Param::PosOnly(_, ty, _) | Param::Pos(_, ty, _) | Param::VarArg(_, ty) => {
+                Param::PosOnly(_, ty, _) | Param::Pos(_, ty, _) | Param::Varargs(_, ty) => {
                     Some(ty.clone())
                 }
                 _ => None,
@@ -876,13 +876,13 @@ impl Param {
                 output.write_str(" = ")?;
                 output.write_str(&self.fmt_default(default))
             }
-            Param::VarArg(Some(name), ty) => {
+            Param::Varargs(Some(name), ty) => {
                 output.write_str("*")?;
                 output.write_str(name.as_str())?;
                 output.write_str(": ")?;
                 write_type(ty, output)
             }
-            Param::VarArg(None, ty) => {
+            Param::Varargs(None, ty) => {
                 output.write_str("*")?;
                 write_type(ty, output)
             }
@@ -901,7 +901,7 @@ impl Param {
 
     pub fn name(&self) -> Option<&Name> {
         match self {
-            Param::PosOnly(name, ..) | Param::VarArg(name, ..) | Param::Kwargs(name, ..) => {
+            Param::PosOnly(name, ..) | Param::Varargs(name, ..) | Param::Kwargs(name, ..) => {
                 name.as_ref()
             }
             Param::Pos(name, ..) | Param::KwOnly(name, ..) => Some(name),
@@ -912,7 +912,7 @@ impl Param {
         match self {
             Param::PosOnly(_, ty, _)
             | Param::Pos(_, ty, _)
-            | Param::VarArg(_, ty)
+            | Param::Varargs(_, ty)
             | Param::KwOnly(_, ty, _)
             | Param::Kwargs(_, ty) => ty,
         }
@@ -922,7 +922,7 @@ impl Param {
         match self {
             Param::PosOnly(_, ty, _)
             | Param::Pos(_, ty, _)
-            | Param::VarArg(_, ty)
+            | Param::Varargs(_, ty)
             | Param::KwOnly(_, ty, _)
             | Param::Kwargs(_, ty) => ty,
         }
@@ -1185,7 +1185,7 @@ mod tests {
     fn test_arg_counts_varargs() {
         // (*args) -> None
         let callable = Callable::list(
-            ParamList::new(vec![Param::VarArg(None, Type::any_implicit())]),
+            ParamList::new(vec![Param::Varargs(None, Type::any_implicit())]),
             Type::None,
         );
         let counts = callable.arg_counts();
@@ -1220,7 +1220,7 @@ mod tests {
                     Required::Required,
                 ),
                 Param::Pos(Name::new("x"), Type::any_implicit(), Required::Required),
-                Param::VarArg(None, Type::any_implicit()),
+                Param::Varargs(None, Type::any_implicit()),
                 Param::KwOnly(Name::new("y"), Type::any_implicit(), Required::Required),
                 Param::KwOnly(
                     Name::new("z"),

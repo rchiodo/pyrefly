@@ -380,7 +380,7 @@ impl<'a> Transaction<'a> {
                     }
                     positional_params_seen += 1;
                 }
-                Param::VarArg(name, ..) => {
+                Param::Varargs(name, ..) => {
                     if positional_arg_index >= positional_params_seen {
                         return name.as_ref().map(|name| {
                             ParamNameMatch::new(name, positional_arg_index > positional_params_seen)
@@ -660,7 +660,7 @@ mod tests {
     fn param_name_for_positional_argument_marks_vararg_repeats() {
         let params = vec![
             Param::Pos(Name::new_static("x"), any_type(), Required::Required),
-            Param::VarArg(Some(Name::new_static("columns")), any_type()),
+            Param::Varargs(Some(Name::new_static("columns")), any_type()),
             Param::KwOnly(Name::new_static("kw"), any_type(), Required::Required),
         ];
 
@@ -673,7 +673,7 @@ mod tests {
     fn param_name_for_positional_argument_handles_missing_names() {
         let params = vec![
             Param::PosOnly(None, any_type(), Required::Required),
-            Param::VarArg(None, any_type()),
+            Param::Varargs(None, any_type()),
         ];
 
         assert!(Transaction::<'static>::param_name_for_positional_argument(&params, 0).is_none());
@@ -685,7 +685,7 @@ mod tests {
     fn duplicate_vararg_hints_are_not_emitted() {
         let params = vec![
             Param::Pos(Name::new_static("s"), any_type(), Required::Required),
-            Param::VarArg(Some(Name::new_static("args")), any_type()),
+            Param::Varargs(Some(Name::new_static("args")), any_type()),
             Param::KwOnly(Name::new_static("a"), any_type(), Required::Required),
         ];
 

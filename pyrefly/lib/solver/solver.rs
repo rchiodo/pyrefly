@@ -720,12 +720,12 @@ impl Solver {
                 ret: _,
             }) = callable
             {
-                // When a VarArg has a concrete unpacked tuple, expand it to positional-only params
+                // When a Varargs has a concrete unpacked tuple, expand it to positional-only params
                 // e.g., (*args: Unpack[tuple[int, str]]) -> (int, str, /)
                 let mut new_params = Vec::new();
                 for param in mem::take(param_list).into_items() {
                     match param {
-                        Param::VarArg(_, Type::Unpack(box Type::Tuple(Tuple::Concrete(elts)))) => {
+                        Param::Varargs(_, Type::Unpack(box Type::Tuple(Tuple::Concrete(elts)))) => {
                             for elt in elts {
                                 new_params.push(Param::PosOnly(None, elt, Required::Required));
                             }

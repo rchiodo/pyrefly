@@ -458,12 +458,12 @@ impl<'a> PosParam<'a> {
                 name: Some(name),
                 kind: PosParamKind::Positional,
             }),
-            Param::VarArg(name, Type::Unpack(ty)) => Some(Self {
+            Param::Varargs(name, Type::Unpack(ty)) => Some(Self {
                 ty: &**ty,
                 name: name.as_ref(),
                 kind: PosParamKind::Unpacked,
             }),
-            Param::VarArg(name, ty) => Some(Self {
+            Param::Varargs(name, ty) => Some(Self {
                 ty,
                 name: name.as_ref(),
                 kind: PosParamKind::Variadic,
@@ -935,11 +935,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     }
                 }
-                Param::VarArg(_, Type::Unpack(box unpacked)) => {
+                Param::Varargs(_, Type::Unpack(box unpacked)) => {
                     // If we have a TypeVarTuple *args with no matched arguments, resolve it to empty tuple
                     self.is_subset_eq(unpacked, &self.heap.mk_concrete_tuple(Vec::new()));
                 }
-                Param::VarArg(..) => {}
+                Param::Varargs(..) => {}
                 Param::Pos(name, ty, required) | Param::KwOnly(name, ty, required) => {
                     kwparams.insert(name, (ty, required == &Required::Required));
                 }

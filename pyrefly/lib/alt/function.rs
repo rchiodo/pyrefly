@@ -173,7 +173,7 @@ impl ParentParamHints {
             match param {
                 Param::PosOnly(_, ty, _) => hints.posonly.push_back(ty),
                 Param::Pos(_, ty, _) => hints.positional.push_back(ty),
-                Param::VarArg(_, ty) => hints.vararg = Some(ty),
+                Param::Varargs(_, ty) => hints.vararg = Some(ty),
                 Param::KwOnly(name, ty, _) => {
                     hints.kwonly.insert(name, ty);
                 }
@@ -1097,7 +1097,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if let Type::Args(q) = &ty {
                 paramspec_args = Some(q.clone());
             }
-            Param::VarArg(Some(x.name.id.clone()), ty)
+            Param::Varargs(Some(x.name.id.clone()), ty)
         }));
         if paramspec_args.is_some()
             && let Some(param) = def.parameters.kwonlyargs.first()
@@ -1207,8 +1207,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Param::Kwargs(name, Type::Kwargs(_)) => {
                         Param::Kwargs(name, self.heap.mk_any_error())
                     }
-                    Param::VarArg(name, Type::Args(_)) => {
-                        Param::VarArg(name, self.heap.mk_any_error())
+                    Param::Varargs(name, Type::Args(_)) => {
+                        Param::Varargs(name, self.heap.mk_any_error())
                     }
                     _ => p,
                 })
@@ -1218,7 +1218,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             params = params
                 .into_iter()
                 .filter_map(|p| match p {
-                    Param::Kwargs(_, Type::Kwargs(_)) | Param::VarArg(_, Type::Args(_)) => None,
+                    Param::Kwargs(_, Type::Kwargs(_)) | Param::Varargs(_, Type::Args(_)) => None,
                     _ => Some(p),
                 })
                 .collect();

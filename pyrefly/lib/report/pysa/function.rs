@@ -329,7 +329,7 @@ fn export_function_parameter(param: &Param, context: &ModuleContext) -> Function
             annotation: PysaType::from_type(ty, context),
             required: matches!(required, pyrefly_types::callable::Required::Required),
         },
-        Param::VarArg(name, ty) => FunctionParameter::VarArg {
+        Param::Varargs(name, ty) => FunctionParameter::VarArg {
             name: name.clone(),
             annotation: PysaType::from_type(ty, context),
         },

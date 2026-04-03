@@ -436,7 +436,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             self.bindings().get_lambda_param_id(&x.name),
                             var,
                         );
-                        Param::VarArg(Some(x.name.id.clone()), self.solver().force_var(var))
+                        Param::Varargs(Some(x.name.id.clone()), self.solver().force_var(var))
                     }));
                     params.extend(parameters.kwarg.iter().map(|x| {
                         let var = self.solver().fresh_unwrap(self.uniques);

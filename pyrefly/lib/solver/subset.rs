@@ -82,7 +82,7 @@ fn ok_or(b: bool, e: SubsetError) -> Result<(), SubsetError> {
 fn has_any_args_and_kwargs(args: &[Param]) -> bool {
     let has_vararg_any = args
         .iter()
-        .any(|p| matches!(p, Param::VarArg(_, Type::Any(_))));
+        .any(|p| matches!(p, Param::Varargs(_, Type::Any(_))));
     let has_kwargs_any = args
         .iter()
         .any(|p| matches!(p, Param::Kwargs(_, Type::Any(_))));
@@ -190,11 +190,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, Type::Unpack(l))), None) => {
+                (Some(Param::Varargs(_, Type::Unpack(l))), None) => {
                     self.is_subset_eq(&self.solver.heap.mk_concrete_tuple(Vec::new()), l)?;
                     l_arg = l_args.next();
                 }
-                (None, Some(Param::VarArg(_, Type::Unpack(u)))) => {
+                (None, Some(Param::Varargs(_, Type::Unpack(u)))) => {
                     self.is_subset_eq(&self.solver.heap.mk_concrete_tuple(Vec::new()), u)?;
                     u_arg = u_args.next();
                 }
@@ -202,7 +202,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Some(
                         Param::PosOnly(_, _, Required::Optional(_))
                         | Param::Pos(_, _, Required::Optional(_))
-                        | Param::VarArg(_, _),
+                        | Param::Varargs(_, _),
                     ),
                     None,
                 ) => {
@@ -218,7 +218,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                 }
                 (
-                    Some(Param::VarArg(_, Type::Unpack(l))),
+                    Some(Param::Varargs(_, Type::Unpack(l))),
                     Some(Param::PosOnly(_, _, Required::Required)),
                 ) => {
                     let mut u_types = Vec::new();
@@ -226,7 +226,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         if let Some(Param::PosOnly(_, u, Required::Required)) = u_arg {
                             u_types.push(u.clone());
                             u_arg = u_args.next();
-                        } else if let Some(Param::VarArg(_, Type::Unpack(u))) = u_arg {
+                        } else if let Some(Param::Varargs(_, Type::Unpack(u))) = u_arg {
                             self.is_subset_eq(
                                 &self.solver.heap.mk_unpacked_tuple(
                                     u_types,
@@ -238,7 +238,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             l_arg = l_args.next();
                             u_arg = u_args.next();
                             break;
-                        } else if let Some(Param::VarArg(_, u)) = u_arg {
+                        } else if let Some(Param::Varargs(_, u)) = u_arg {
                             self.is_subset_eq(
                                 &self.solver.heap.mk_unpacked_tuple(
                                     u_types,
@@ -259,14 +259,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 }
                 (
                     Some(Param::PosOnly(_, _, _) | Param::Pos(_, _, _)),
-                    Some(Param::VarArg(_, Type::Unpack(u))),
+                    Some(Param::Varargs(_, Type::Unpack(u))),
                 ) => {
                     let mut l_types = Vec::new();
                     loop {
                         if let Some(Param::PosOnly(_, l, _) | Param::Pos(_, l, _)) = l_arg {
                             l_types.push(l.clone());
                             l_arg = l_args.next();
-                        } else if let Some(Param::VarArg(_, Type::Unpack(l))) = l_arg {
+                        } else if let Some(Param::Varargs(_, Type::Unpack(l))) = l_arg {
                             self.is_subset_eq(
                                 u,
                                 &self.solver.heap.mk_unpacked_tuple(
@@ -278,7 +278,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             l_arg = l_args.next();
                             u_arg = u_args.next();
                             break;
-                        } else if let Some(Param::VarArg(_, l)) = l_arg {
+                        } else if let Some(Param::Varargs(_, l)) = l_arg {
                             self.is_subset_eq(
                                 u,
                                 &self.solver.heap.mk_unpacked_tuple(
@@ -297,11 +297,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         }
                     }
                 }
-                (Some(Param::VarArg(_, l)), Some(Param::PosOnly(_, u, _))) => {
+                (Some(Param::Varargs(_, l)), Some(Param::PosOnly(_, u, _))) => {
                     self.is_subset_eq(u, l)?;
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, l)), Some(Param::Pos(name, u, _))) => {
+                (Some(Param::Varargs(_, l)), Some(Param::Pos(name, u, _))) => {
                     // Param::Pos can be passed positionally or by name, so if it matches *args
                     // we need to make sure it matches an optional kw-only argument or *kwargs
                     self.is_subset_eq(u, l)?;
@@ -309,28 +309,31 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     u_arg = u_args.next();
                 }
                 (
-                    Some(Param::VarArg(_, Type::Unpack(l))),
-                    Some(Param::VarArg(_, Type::Unpack(u))),
+                    Some(Param::Varargs(_, Type::Unpack(l))),
+                    Some(Param::Varargs(_, Type::Unpack(u))),
                 ) => {
                     self.is_subset_eq(u, l)?;
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, Type::Any(_))), Some(Param::VarArg(_, Type::Unpack(_)))) => {
+                (
+                    Some(Param::Varargs(_, Type::Any(_))),
+                    Some(Param::Varargs(_, Type::Unpack(_))),
+                ) => {
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, l)), Some(Param::VarArg(_, Type::Unpack(u)))) => {
+                (Some(Param::Varargs(_, l)), Some(Param::Varargs(_, Type::Unpack(u)))) => {
                     self.is_subset_eq(u, &self.solver.heap.mk_unbounded_tuple(l.clone()))?;
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, Type::Unpack(l))), Some(Param::VarArg(_, u))) => {
+                (Some(Param::Varargs(_, Type::Unpack(l))), Some(Param::Varargs(_, u))) => {
                     self.is_subset_eq(&self.solver.heap.mk_unbounded_tuple(u.clone()), l)?;
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
-                (Some(Param::VarArg(_, l)), Some(Param::VarArg(_, u))) => {
+                (Some(Param::Varargs(_, l)), Some(Param::Varargs(_, u))) => {
                     self.is_subset_eq(u, l)?;
                     l_arg = l_args.next();
                     u_arg = u_args.next();

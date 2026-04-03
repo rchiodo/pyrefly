@@ -118,7 +118,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // The known fields are interleaved with dynamically-resolved fields
             // at unknown positions, so we can't synthesize accurate positional
             // params. Accept everything and rely on runtime behavior.
-            params.push(Param::VarArg(None, self.heap.mk_any_implicit()));
+            params.push(Param::Varargs(None, self.heap.mk_any_implicit()));
             params.push(Param::Kwargs(None, self.heap.mk_any_implicit()));
         } else {
             params.extend(self.get_named_tuple_field_params(cls, elements));
@@ -137,7 +137,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let params = vec![
             self.class_self_param(cls, false),
             // NamedTuple.__init__ accepts any args at runtime; rely on __new__ for checking.
-            Param::VarArg(None, self.heap.mk_any_implicit()),
+            Param::Varargs(None, self.heap.mk_any_implicit()),
             Param::Kwargs(None, self.heap.mk_any_implicit()),
         ];
         let ty = self.heap.mk_function(Function {

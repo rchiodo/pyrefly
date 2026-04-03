@@ -392,7 +392,7 @@ impl Transaction<'_> {
                             Param::Pos(name, ty, _)
                             | Param::PosOnly(Some(name), ty, _)
                             | Param::KwOnly(name, ty, _)
-                            | Param::VarArg(Some(name), ty) => {
+                            | Param::Varargs(Some(name), ty) => {
                                 let label = format!("{}=", name.as_str());
                                 let detail = ty.to_string();
                                 if name.as_str() != "self"
@@ -406,7 +406,7 @@ impl Transaction<'_> {
                                     }));
                                 }
                             }
-                            Param::VarArg(None, _)
+                            Param::Varargs(None, _)
                             | Param::Kwargs(_, _)
                             | Param::PosOnly(None, _, _) => {}
                         }

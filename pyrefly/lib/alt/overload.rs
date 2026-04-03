@@ -539,7 +539,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let has_varargs = |o: &CalledOverload| {
                         matches!(
                             &o.func.1.signature.params, Params::List(params)
-                            if params.items().iter().any(|p| matches!(p, Param::VarArg(..))))
+                            if params.items().iter().any(|p| matches!(p, Param::Varargs(..))))
                     };
                     if matched_overloads.iter().any(has_varargs) {
                         matched_overloads.retain(has_varargs);

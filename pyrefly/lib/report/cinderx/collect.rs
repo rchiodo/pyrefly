@@ -329,7 +329,7 @@ fn collect_call_contextual_types(
                 let param = &items[param_idx];
 
                 // Break if we hit a variadic argument - matching past that is complicated.
-                if matches!(param, Param::VarArg(_, _) | Param::Kwargs(_, _)) {
+                if matches!(param, Param::Varargs(_, _) | Param::Kwargs(_, _)) {
                     break;
                 }
                 if is_static_primitive(param.as_type()) {

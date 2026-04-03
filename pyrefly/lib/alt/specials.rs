@@ -402,7 +402,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         match self.check_args_and_construct_tuple(elts, errors) {
                             Some((tuple, true)) => {
                                 self.heap.mk_type_form(self.heap.mk_callable_from_vec(
-                                    vec![Param::VarArg(
+                                    vec![Param::Varargs(
                                         None,
                                         self.heap.mk_unpack(self.heap.mk_tuple(tuple)),
                                     )],

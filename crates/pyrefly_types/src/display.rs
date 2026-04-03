@@ -1798,7 +1798,7 @@ pub mod tests {
 
     #[test]
     fn test_display_args_kwargs_callable() {
-        let args = Param::VarArg(Some(Name::new_static("my_args")), Type::any_implicit());
+        let args = Param::Varargs(Some(Name::new_static("my_args")), Type::any_implicit());
         let kwargs = Param::Kwargs(Some(Name::new_static("my_kwargs")), Type::any_implicit());
         let callable = Callable::list(ParamList::new(vec![args, kwargs]), Type::None);
         let callable_type = Type::Callable(Box::new(callable));
