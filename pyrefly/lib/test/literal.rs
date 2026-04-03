@@ -471,3 +471,20 @@ def foo():
     assert_type(MY_CONST, Literal[42])
     "#,
 );
+
+testcase!(
+    bug = "branchy Literal[1] | Literal[2] should promote to int (pyright does)",
+    test_promote_branchy_literal_in_function,
+    r#"
+from typing import Literal, assert_type
+
+def cond() -> bool: ...
+if cond():
+    x = 1
+else:
+    x = 2
+
+def foo():
+    assert_type(x, int)  # E: assert_type(Literal[1, 2], int) failed
+    "#,
+);
