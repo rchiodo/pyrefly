@@ -285,37 +285,12 @@ impl CalcStack {
                 // After merge, existing iteration states are preserved (Done/
                 // InProgress stay as-is) and new members are Fresh. The target
                 // will typically be Fresh or InProgress. Handle all cases.
-                if let Some(kind) = self.get_iteration_node_state(&current) {
-                    return self.binding_action_for_node_state(&current, kind);
-                }
-                // If we merged but the target is somehow not in iteration state,
-                // this is a bug: the merge should have included it.
-                unreachable!(
-                    "membership back-edge: target {} was in iterating SCC but \
-                     not found in merged SCC's iteration state",
-                    current,
-                );
+                return self.binding_action_for_top_scc_member(&current);
             }
             // The target is in the top SCC's iteration state (not a cross-SCC
             // back-edge). If we've exited the SCC segment, merge from the top
             // SCC anchor so intervening nodes/SCC fragments are absorbed.
-            self.merge_top_scc_on_outside_reentry();
-            // Increment top_pos_exclusive because pop() will decrement
-            // top_pos_exclusive for any node in node_state, so push must
-            // balance it with an increment.
-            if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
-                top_scc.top_pos_exclusive += 1;
-            }
-            if let Some(kind) = self.get_iteration_node_state(&current) {
-                return self.binding_action_for_node_state(&current, kind);
-            }
-            // If we merged but the target is somehow not in iteration state,
-            // this is a bug: the merge should have included it.
-            unreachable!(
-                "membership back-edge: target {} was in iterating SCC but \
-                     not found in merged SCC's iteration state",
-                current,
-            );
+            return self.binding_action_for_top_scc_member(&current);
         }
 
         // Top-SCC membership check: if the target is already a member of the
@@ -326,20 +301,9 @@ impl CalcStack {
         // Borrow safety: `get_iteration_node_state` returns an owned
         // `SccNodeStateKind`, so the shared borrow on `scc_stack` is
         // released before any exclusive borrow for mutation.
-        if let Some(kind) = self.get_iteration_node_state(&current) {
-            // If the stack has grown beyond the top SCC's segment, merge from
-            // the top SCC anchor so intervening nodes/SCC fragments are
-            // absorbed. This handles dependency chains that exit and re-enter
-            // via back-edges.
-            self.merge_top_scc_on_outside_reentry();
-            // The node was unconditionally pushed onto the raw CalcStack
-            // above, and pop() will decrement top_pos_exclusive for any node
-            // in the top SCC's node_state. We must increment here to
-            // keep top_pos_exclusive symmetric.
-            if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
-                top_scc.top_pos_exclusive += 1;
-            }
-            return self.binding_action_for_node_state(&current, kind);
+        if self.get_iteration_node_state(&current).is_some() {
+            // Top-SCC member handling is shared across all re-entry paths.
+            return self.binding_action_for_top_scc_member(&current);
         }
 
         // At this point, the node is not a known member of any SCC. But it
@@ -699,6 +663,31 @@ impl CalcStack {
         if let Some(detected_at) = detected_at {
             self.merge_sccs(&detected_at);
         }
+    }
+
+    /// Shared top-SCC member handling for back-edge re-entry paths in `push`.
+    ///
+    /// Ensures outside-segment re-entry merge runs first, then restores
+    /// top_pos_exclusive symmetry with `pop`, then dispatches using the current
+    /// iteration node state.
+    fn binding_action_for_top_scc_member(&self, current: &CalcId) -> BindingAction {
+        self.merge_top_scc_on_outside_reentry();
+        // Increment top_pos_exclusive because pop() will decrement
+        // top_pos_exclusive for any node in node_state, so push must
+        // balance it with an increment.
+        if let Some(top_scc) = self.scc_stack.borrow_mut().last_mut() {
+            top_scc.top_pos_exclusive += 1;
+        }
+        if let Some(kind) = self.get_iteration_node_state(current) {
+            return self.binding_action_for_node_state(current, kind);
+        }
+        // If we merged but the target is somehow not in iteration state,
+        // this is a bug: the merge should have included it.
+        unreachable!(
+            "membership back-edge: target {} was in iterating SCC but \
+             not found in merged SCC's iteration state",
+            current,
+        );
     }
 
     /// Returns true if the top SCC is iterating at iteration 0 (Phase 0
