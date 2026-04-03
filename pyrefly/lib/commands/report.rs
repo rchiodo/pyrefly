@@ -139,7 +139,7 @@ struct Location {
     column: usize,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 /// Information about a single function parameter.
 struct Parameter {
     name: String,
@@ -709,6 +709,47 @@ impl ReportArgs {
                     slots: func_slots,
                     location,
                 });
+            }
+        }
+        // Resolve method aliases: class body assignments like `__rand__ = __and__`
+        // that point to an existing method. Emit a duplicate Function for the alias.
+        for field_idx in bindings.keys::<KeyClassField>() {
+            let field = bindings.get(field_idx);
+            if let ClassFieldDefinition::AssignedInBody {
+                alias_of: Some(target_name),
+                ..
+            } = &field.definition
+            {
+                let cls = match bindings.get(field.class_idx) {
+                    BindingClass::ClassDef(cls) => cls,
+                    BindingClass::FunctionalClassDef(..) => continue,
+                };
+                if Self::has_function_ancestor(&cls.parent) {
+                    continue;
+                }
+                let class_prefix = {
+                    let parent_path = module.display(&cls.parent).to_string();
+                    if parent_path.is_empty() {
+                        format!("{}{}", module_prefix, cls.def.name)
+                    } else {
+                        format!("{}{}.{}", module_prefix, parent_path, cls.def.name)
+                    }
+                };
+                let target_qualified = format!("{}.{}", class_prefix, target_name);
+                if let Some(target_func) = functions.iter().find(|f| f.name == target_qualified) {
+                    let alias_name = format!("{}.{}", class_prefix, field.name);
+                    let location = Self::range_to_location(module, field.range);
+                    functions.push(Function {
+                        name: alias_name,
+                        slots: target_func.slots,
+                        location,
+                        return_annotation: target_func.return_annotation.clone(),
+                        is_return_type_known: target_func.is_return_type_known,
+                        parameters: target_func.parameters.clone(),
+                        is_type_known: target_func.is_type_known,
+                        is_property: target_func.is_property,
+                    });
+                }
             }
         }
         functions
