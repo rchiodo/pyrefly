@@ -21,6 +21,7 @@ use pyrefly_types::class::ClassType;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::types::BoundMethod;
+use pyrefly_types::types::BoundMethodType;
 use pyrefly_types::types::TParams;
 use pyrefly_types::types::TParamsSource;
 use pyrefly_types::types::Union;
@@ -1971,12 +1972,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    /// Bind a bound method by stripping its first (self/cls) parameter and optionally
+    /// instantiating type variables.
     pub fn bind_boundmethod(
         &self,
         m: &BoundMethod,
         is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
     ) -> Option<Type> {
-        self.bind_function(&m.func.clone().as_type(), &m.obj, false, is_subset)
+        self.bind_bound_method_type(&m.func, &m.obj, false, is_subset)
     }
 
     pub fn bind_dunder_new(&self, t: &Type, cls: ClassType) -> Option<Type> {
@@ -2002,22 +2005,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.bind_function(&func_type, &m.obj, true, &mut |_, _| false)
     }
 
-    /// If this is an unbound callable (i.e., a callable that is not BoundMethod), strip the first parameter.
-    /// If it is generic, we use the bound object to instantiate type variables in the first argument.
-    ///
-    /// If `skip_instantiation` is true, skip type variable instantiation (used for converting
-    /// constructors to callables, where type variables should be inferred at the call site).
-    fn bind_function(
+    /// Strip the first parameter from a BoundMethodType and optionally instantiate
+    /// type variables. This is the shared implementation for `bind_boundmethod` and
+    /// `bind_function` (for the Function/Forall<Function>/Overload arms they share).
+    fn bind_bound_method_type(
         &self,
-        t: &Type,
+        func: &BoundMethodType,
         obj: &Type,
         skip_instantiation: bool,
         is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
     ) -> Option<Type> {
         let mut owner = Owner::new();
-        match t {
-            Type::Forall(forall) => match &forall.body {
-                Forallable::Callable(c) => c.split_first_param(&mut owner).map(|(param, c)| {
+        match func {
+            BoundMethodType::Function(func) => {
+                func.signature.split_first_param(&mut owner).map(|(_, c)| {
+                    self.heap.mk_function(Function {
+                        signature: c,
+                        metadata: func.metadata.clone(),
+                    })
+                })
+            }
+            BoundMethodType::Forall(forall) => forall
+                .body
+                .signature
+                .split_first_param(&mut owner)
+                .map(|(param, c)| {
                     let c = if skip_instantiation {
                         c
                     } else {
@@ -2025,43 +2037,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     };
                     self.heap.mk_forall(Forall {
                         tparams: forall.tparams.clone(),
-                        body: Forallable::Callable(c),
+                        body: Forallable::Function(Function {
+                            signature: c,
+                            metadata: forall.body.metadata.clone(),
+                        }),
                     })
                 }),
-                Forallable::Function(f) => {
-                    f.signature.split_first_param(&mut owner).map(|(param, c)| {
-                        let c = if skip_instantiation {
-                            c
-                        } else {
-                            self.instantiate_callable_self(
-                                &forall.tparams,
-                                obj,
-                                param,
-                                c,
-                                is_subset,
-                            )
-                        };
-                        self.heap.mk_forall(Forall {
-                            tparams: forall.tparams.clone(),
-                            body: Forallable::Function(Function {
-                                signature: c,
-                                metadata: f.metadata.clone(),
-                            }),
-                        })
-                    })
-                }
-                Forallable::TypeAlias(_) => None,
-            },
-            Type::Callable(callable) => callable
-                .split_first_param(&mut owner)
-                .map(|(_, c)| self.heap.mk_callable_from(c)),
-            Type::Function(func) => func.signature.split_first_param(&mut owner).map(|(_, c)| {
-                self.heap.mk_function(Function {
-                    signature: c,
-                    metadata: func.metadata.clone(),
-                })
-            }),
-            Type::Overload(overload) => overload
+            BoundMethodType::Overload(overload) => overload
                 .signatures
                 .try_mapped_ref(|x| match x {
                     OverloadType::Function(f) => f
@@ -2107,6 +2089,63 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         metadata: overload.metadata.clone(),
                     })
                 }),
+        }
+    }
+
+    /// If this is an unbound callable (i.e., a callable that is not BoundMethod), strip the first parameter.
+    /// If it is generic, we use the bound object to instantiate type variables in the first argument.
+    ///
+    /// If `skip_instantiation` is true, skip type variable instantiation (used for converting
+    /// constructors to callables, where type variables should be inferred at the call site).
+    fn bind_function(
+        &self,
+        t: &Type,
+        obj: &Type,
+        skip_instantiation: bool,
+        is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
+    ) -> Option<Type> {
+        let mut owner = Owner::new();
+        match t {
+            // Callable variants have no BoundMethodType equivalent, handle inline.
+            Type::Forall(forall) => match &forall.body {
+                Forallable::Callable(c) => c.split_first_param(&mut owner).map(|(param, c)| {
+                    let c = if skip_instantiation {
+                        c
+                    } else {
+                        self.instantiate_callable_self(&forall.tparams, obj, param, c, is_subset)
+                    };
+                    self.heap.mk_forall(Forall {
+                        tparams: forall.tparams.clone(),
+                        body: Forallable::Callable(c),
+                    })
+                }),
+                Forallable::Function(f) => self.bind_bound_method_type(
+                    &BoundMethodType::Forall(Forall {
+                        tparams: forall.tparams.clone(),
+                        body: f.clone(),
+                    }),
+                    obj,
+                    skip_instantiation,
+                    is_subset,
+                ),
+                Forallable::TypeAlias(_) => None,
+            },
+            Type::Callable(callable) => callable
+                .split_first_param(&mut owner)
+                .map(|(_, c)| self.heap.mk_callable_from(c)),
+            // Function/Overload variants delegate to the shared implementation.
+            Type::Function(func) => self.bind_bound_method_type(
+                &BoundMethodType::Function((**func).clone()),
+                obj,
+                skip_instantiation,
+                is_subset,
+            ),
+            Type::Overload(overload) => self.bind_bound_method_type(
+                &BoundMethodType::Overload(overload.clone()),
+                obj,
+                skip_instantiation,
+                is_subset,
+            ),
             _ => None,
         }
     }
