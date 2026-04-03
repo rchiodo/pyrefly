@@ -347,24 +347,14 @@ impl CalcStack {
             return self.binding_action_for_node_state(&current, kind);
         }
 
-        let state = self.pre_calculate_state(&current);
-        match state {
-            SccState::NotInScc => {
-                if let Some(current_cycle) = self.current_cycle() {
-                    self.on_scc_detected(current_cycle);
-                    BindingAction::NeedsColdPlaceholder
-                } else {
-                    BindingAction::Calculate
-                }
-            }
-            // All SCC member states are now caught by the iterative bypass or
-            // membership back-edge detection before reaching pre_calculate_state,
-            // because all SCCs have iterative state from creation (iteration 0).
-            _ => unreachable!(
-                "SCC member state for {} should have been caught by \
-                 iterative bypass or membership back-edge detection",
-                current,
-            ),
+        // All SCC members are handled by the iterative bypass or membership
+        // back-edge detection above (every SCC has iterative state from creation).
+        // The only remaining case is a node not in any SCC: check for a new cycle.
+        if let Some(current_cycle) = self.current_cycle() {
+            self.on_scc_detected(current_cycle);
+            BindingAction::NeedsColdPlaceholder
+        } else {
+            BindingAction::Calculate
         }
     }
 
@@ -540,71 +530,6 @@ impl CalcStack {
         };
     }
 
-    /// Check the SCC state for a node before calculating it.
-    ///
-    /// We check ALL SCCs on the stack, not just the top one, because a node
-    /// might be a participant in an SCC that's not at the top of the stack.
-    /// This is especially important after merging, where nodes from previously
-    /// separate SCCs are now in the same merged SCC.
-    ///
-    /// Invariant: After merging, each node appears in at most one SCC on the
-    /// stack. We return the first non-NotInScc result when scanning
-    /// top-to-bottom, which will be the unique SCC containing this node (if any).
-    ///
-    /// Special case: If we find a node in the top SCC but we've pushed frames
-    /// above the SCC's segment (i.e., we exited and are now re-entering), or
-    /// in a non-top SCC, we call `merge_sccs` immediately to merge all
-    /// intervening SCCs and return the underlying state. `Participant` is
-    /// converted to `RevisitingInProgress` after merge since top_pos_exclusive
-    /// is already correct (merge recalculates it).
-    fn pre_calculate_state(&self, current: &CalcId) -> SccState {
-        let stack_len = self.stack.borrow().len();
-
-        // Scan SCCs top-to-bottom to find one containing this node.
-        // If found in the top SCC within its segment, return directly.
-        // Otherwise, save the info needed for merge and break out.
-        let merge_info: Option<(CalcId, SccState)> = {
-            let mut scc_stack = self.scc_stack.borrow_mut();
-            let mut result = None;
-            for (rev_idx, scc) in scc_stack.iter_mut().rev().enumerate() {
-                let is_top_scc = rev_idx == 0;
-                let state = scc.pre_calculate_state(current);
-
-                match state {
-                    SccState::NotInScc => continue,
-                    // For the top SCC, check if we're still within its segment.
-                    _ if is_top_scc && is_within_scc_segment(stack_len, scc) => {
-                        // Normal case: still within the top SCC's segment
-                        return state;
-                    }
-                    _ => {}
-                }
-                // Node is in a non-top SCC, or in the top SCC but outside its
-                // segment. Save the detected_at and state, then break so we can
-                // drop the borrow and call merge_sccs.
-                result = Some((scc.detected_at(), state));
-                break;
-            }
-            result
-        };
-        // scc_stack borrow is now dropped
-
-        if let Some((detected_at, state)) = merge_info {
-            self.merge_sccs(&detected_at);
-            // After merge, top_pos_exclusive is recalculated. Participant would
-            // increment top_pos_exclusive again in push(), so convert it to
-            // RevisitingInProgress to avoid double-counting.
-            match state {
-                SccState::Participant | SccState::RevisitingInProgress => {
-                    SccState::RevisitingInProgress
-                }
-                other => other,
-            }
-        } else {
-            SccState::NotInScc
-        }
-    }
-
     /// Handle the completion of a calculation. Mark the node as Done in the
     /// top SCC (if it's a participant), then store the completed SCC (if any)
     /// in `pending_completed_scc` for later commit by `get_idx`.
@@ -681,12 +606,6 @@ impl CalcStack {
     /// any free-floating CalcStack nodes between the target SCC's min_stack_depth
     /// and the current stack position.
     ///
-    /// This is called from `pre_calculate_state` when a node is found in a
-    /// non-top SCC, or in the top SCC but outside its segment. After this call,
-    /// the SCC stack will have one merged SCC at the top containing all
-    /// participants from the merged SCCs plus any free-floating nodes from the
-    /// CalcStack.
-    ///
     /// The oldest previously-known Scc we should merge is identified based on its
     /// `detected_at`; this has the potentially-useful property of being a valid
     /// identifier of the merged Scc *after* the merge, since we always use the
@@ -697,14 +616,10 @@ impl CalcStack {
         let mut scc_stack = self.scc_stack.borrow_mut();
 
         // Pop SCCs until we find the target component (identified by detected_at).
-        //
-        // Push them to a vec we will merge; in addition, when we reach the last component
-        // use it to determine how much of the CalcStack needs to be merged in order
-        // to ensure bindings that weren't yet part of a known SCC are included.
         let mut sccs_to_merge: Vec<Scc> = Vec::new();
         let mut target_bottom_pos_inclusive: Option<usize> = None;
         while let Some(scc) = scc_stack.pop() {
-            let is_target = scc.detected_at() == *detected_at_of_scc;
+            let is_target = scc.detected_at == *detected_at_of_scc;
             if is_target {
                 target_bottom_pos_inclusive = Some(scc.bottom_pos_inclusive);
             }
@@ -762,7 +677,7 @@ impl CalcStack {
             let scc_stack = self.scc_stack.borrow();
             if let Some(top_scc) = scc_stack.last() {
                 if stack_len > top_scc.top_pos_exclusive {
-                    Some(top_scc.detected_at())
+                    Some(top_scc.detected_at.dupe())
                 } else {
                     None
                 }
@@ -1226,43 +1141,6 @@ impl SccNodeState {
     }
 }
 
-/// Represents the current SCC state prior to attempting a particular calculation.
-enum SccState {
-    /// The current idx is not participating in any currently detected SCC (though it
-    /// remains possible we will detect one here).
-    ///
-    /// Note that this does not necessarily mean there is no active SCC: the
-    /// graph solve will frequently branch out from an SCC into other parts of
-    /// the dependency graph, and in those cases we are not in a currently-known
-    /// SCC.
-    NotInScc,
-    /// The current idx is in an active SCC but is already being processed
-    /// (SccNodeState::InProgress). This represents a back-edge through an in-progress
-    /// calculation - we've hit this node via a different path while it's still computing.
-    ///
-    /// This will trigger new cycle detection via propose_calculation().
-    RevisitingInProgress,
-    /// The current idx is in an active SCC but its calculation has already completed
-    /// (SccNodeState::Done). A preliminary answer should be available.
-    RevisitingDone,
-    /// This idx is part of the active SCC, and we are recursing into it for the
-    /// first time as a known SCC participant.
-    Participant,
-    /// This idx has already recorded a placeholder but hasn't computed the real
-    /// answer yet. We should return the placeholder value.
-    HasPlaceholder,
-}
-
-/// Check if the given stack length is within an SCC's segment.
-///
-/// Returns true if stack_len < top_pos_exclusive, meaning
-/// we're currently inside the SCC's segment (haven't exited).
-/// The segment covers positions [bottom_pos_inclusive, top_pos_exclusive),
-/// so at exactly top_pos_exclusive we've exited.
-fn is_within_scc_segment(stack_len: usize, scc: &Scc) -> bool {
-    stack_len < scc.top_pos_exclusive
-}
-
 /// The action to take for a binding after checking CalcStack and SCC state.
 ///
 /// This flattens the nested match on `SccState` into a single discriminated
@@ -1445,41 +1323,6 @@ impl Scc {
         }
     }
 
-    /// Check if the current idx is a participant in this SCC and determine its state.
-    ///
-    /// Returns the appropriate SccState:
-    /// - Participant if this is a Fresh node (marks it as InProgress)
-    /// - RevisitingInProgress if this idx is InProgress (back-edge through in-progress node)
-    /// - RevisitingDone if this idx is Done (preliminary answer should exist)
-    /// - NotInScc if this idx is not in the SCC
-    ///
-    /// When a Fresh node is encountered, it transitions to InProgress.
-    fn pre_calculate_state(&mut self, current: &CalcId) -> SccState {
-        if let Some(state) = self.node_state.get_mut(current) {
-            match state {
-                SccNodeState::Fresh => {
-                    *state = SccNodeState::InProgress;
-                    SccState::Participant
-                }
-                SccNodeState::InProgress => {
-                    // Back-edge: we're hitting a node currently on the call stack
-                    // via a different path. This will trigger new cycle detection.
-                    SccState::RevisitingInProgress
-                }
-                SccNodeState::HasPlaceholder(_) => {
-                    // Already has placeholder, return it
-                    SccState::HasPlaceholder
-                }
-                SccNodeState::Done { .. } => {
-                    // Node completed within this SCC - preliminary answer should exist.
-                    SccState::RevisitingDone
-                }
-            }
-        } else {
-            SccState::NotInScc
-        }
-    }
-
     /// Track that a calculation has finished, marking it as Done.
     /// Stores the type-erased answer and error collector in SccNodeState.
     /// For SCC participants, this is the primary storage until batch commit.
@@ -1533,11 +1376,6 @@ impl Scc {
                 *state = SccNodeState::HasPlaceholder(var);
             }
         }
-    }
-
-    /// Get the detection point of this SCC (stable identifier for merging).
-    fn detected_at(&self) -> CalcId {
-        self.detected_at.dupe()
     }
 
     /// Merge two SCCs into one, taking the most advanced state for each
@@ -3741,30 +3579,6 @@ mod scc_tests {
 
         // bottom_pos_inclusive should be the minimum (0)
         assert_eq!(merged.bottom_pos_inclusive, 0);
-    }
-
-    #[test]
-    #[allow(clippy::mutable_key_type)]
-    fn test_merged_scc_pre_calculate_state() {
-        // After merging two SCCs, `pre_calculate_state` returns Participant
-        // (Fresh → InProgress) for all members.
-        let a = CalcId::for_test("m", 0);
-        let b = CalcId::for_test("m", 1);
-        let c = CalcId::for_test("m", 2);
-        let d = CalcId::for_test("m", 3);
-
-        let scc1 = make_test_scc(fresh_nodes(&[a.dupe(), b.dupe()]), a.dupe(), 0);
-        let scc2 = make_test_scc(fresh_nodes(&[c.dupe(), d.dupe()]), c.dupe(), 2);
-
-        let mut merged = Scc::merge_many(vec1![scc1, scc2], a.dupe());
-
-        // All Fresh members return Participant and transition to InProgress.
-        for calc_id in [&a, &b, &c, &d] {
-            assert!(
-                matches!(merged.pre_calculate_state(calc_id), SccState::Participant),
-                "Fresh node should return Participant"
-            );
-        }
     }
 
     #[test]
