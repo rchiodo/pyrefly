@@ -41,6 +41,8 @@ pub const VALUE: Name = Name::new_static("_value_");
 /// The `value` attribute of an enum is a property that returns `_value_`.
 pub const VALUE_PROP: Name = Name::new_static("value");
 
+pub const GENERATE_NEXT_VALUE: Name = Name::new_static("_generate_next_value_");
+
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn get_enum_member(&self, cls: &Class, name: &Name) -> Option<Lit> {
         self.get_field_from_current_class_only(cls, name)
@@ -285,12 +287,33 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             lit_enum.ty
         };
-        let int_ty = self.heap.mk_class_type(self.stdlib.int().clone());
+        let auto_ty = self.auto_value_type(lit_enum.class.class_object());
         ty.transform(&mut |t| {
             if matches!(t, Type::ClassType(cls) if cls.has_qname(ModuleName::enum_().as_str(), "auto")) {
-                *t = int_ty.clone();
+                *t = auto_ty.clone();
             }
         })
+    }
+
+    /// Determine the type that `auto()` produces for the given enum class.
+    /// 1. If a data type is mixed in (e.g. `class E(str, Enum)`), `auto()` produces
+    ///    that type because `__new__` converts the raw value.
+    /// 2. Otherwise, look up `_generate_next_value_` on the class, defaulting to `int` for `enum.Enum`
+    fn auto_value_type(&self, cls: &Class) -> Type {
+        // A mixed-in data type takes priority: the enum's `__new__` converts values to that type.
+        if let Some(mixed_in) = self.mixed_in_enum_data_type(cls) {
+            return mixed_in;
+        }
+        self.get_class_member_with_defining_class(cls, &GENERATE_NEXT_VALUE)
+            .and_then(|field| {
+                // `enum.Enum` declares an `Any` return, but at runtime it generates `int`
+                if field.defining_class.has_toplevel_qname("enum", "Enum") {
+                    Some(self.heap.mk_class_type(self.stdlib.int().clone()))
+                } else {
+                    field.value.ty().callable_return_type(self.heap)
+                }
+            })
+            .unwrap_or_else(|| self.heap.mk_any_implicit()) // Fall back to `Any` if `_generate_next_value_` is missing or not callable
     }
 
     pub fn get_enum_member_count(&self, cls: &Class) -> Option<usize> {

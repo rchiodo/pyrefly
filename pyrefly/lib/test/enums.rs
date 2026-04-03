@@ -697,6 +697,41 @@ assert_type(E4.X.value, tuple[int])
 );
 
 testcase!(
+    test_auto_generate_next_value,
+    r#"
+from enum import auto, Enum, StrEnum
+from typing import assert_type
+
+# Custom _generate_next_value_ returning float
+class FloatEnum(Enum):
+    @staticmethod
+    def _generate_next_value_(name: str, start: int, count: int, last_values: list[float]) -> float: ...
+    X = auto()
+    Y = auto()
+
+assert_type(FloatEnum.X.value, float)
+assert_type(FloatEnum.Y.value, float)
+
+# StrEnum auto() generates str values
+class Color(StrEnum):
+    RED = auto()
+    GREEN = auto()
+
+assert_type(Color.RED.value, str)
+
+# Mixin type takes priority over _generate_next_value_
+class BytesEnum(bytes, Enum):
+    X = auto()
+
+assert_type(BytesEnum.X.value, bytes)
+
+# Generic instance access should also use auto inference
+def check_float_enum(e: FloatEnum) -> None:
+    assert_type(e.value, float)
+    "#,
+);
+
+testcase!(
     test_callable_nonmember,
     r#"
 from enum import Enum
