@@ -456,3 +456,18 @@ for i, j in enumerate(c):
     test(j) # E: Argument `str` is not assignable to parameter `x` with type `Literal['a', 'b']` in function `test`
     "#,
 );
+
+testcase!(
+    bug = "cross-barrier reads should promote Literal[100] to int (pyright does)",
+    test_promote_module_level_literal_in_function,
+    r#"
+from typing import Literal, assert_type
+
+timeout = 100
+MY_CONST = 42
+
+def foo():
+    assert_type(timeout, int)  # E: assert_type(Literal[100], int) failed
+    assert_type(MY_CONST, Literal[42])
+    "#,
+);
