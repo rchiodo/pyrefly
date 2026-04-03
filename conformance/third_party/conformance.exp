@@ -12509,17 +12509,6 @@
   "typeforms_typeform.py": [
     {
       "code": -2,
-      "column": 29,
-      "concise_description": "`Literal['str | None']` is not assignable to `TypeForm[str | None]`",
-      "description": "`Literal['str | None']` is not assignable to `TypeForm[str | None]`",
-      "line": 20,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 41,
-      "stop_line": 20
-    },
-    {
-      "code": -2,
       "column": 30,
       "concise_description": "`type[int | str]` is not assignable to `TypeForm[str | None]`",
       "description": "`type[int | str]` is not assignable to `TypeForm[str | None]`",
@@ -12572,17 +12561,6 @@
       "severity": "error",
       "stop_column": 42,
       "stop_line": 49
-    },
-    {
-      "code": -2,
-      "column": 26,
-      "concise_description": "`Literal['set[str]']` is not assignable to `TypeForm[set[str]]`",
-      "description": "`Literal['set[str]']` is not assignable to `TypeForm[set[str]]`",
-      "line": 53,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 36,
-      "stop_line": 53
     },
     {
       "code": -2,
@@ -12685,13 +12663,13 @@
     },
     {
       "code": -2,
-      "column": 18,
-      "concise_description": "`Literal['int + str']` is not assignable to `TypeForm[Any]`",
-      "description": "`Literal['int + str']` is not assignable to `TypeForm[Any]`",
+      "column": 19,
+      "concise_description": "`+` is not supported between `type[int]` and `type[str]`",
+      "description": "`+` is not supported between `type[int]` and `type[str]`\n  Cannot find `__add__` or `__radd__`",
       "line": 75,
-      "name": "bad-assignment",
+      "name": "unsupported-operation",
       "severity": "error",
-      "stop_column": 29,
+      "stop_column": 28,
       "stop_line": 75
     },
     {

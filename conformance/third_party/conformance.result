@@ -185,10 +185,8 @@
   "typeddicts_usage.py": [],
   "typeforms_typeform.py": [
     "Line 74: Expected 1 errors",
-    "Line 20: Unexpected errors [\"`Literal['str | None']` is not assignable to `TypeForm[str | None]`\"]",
     "Line 46: Unexpected errors ['`type[str | None]` is not assignable to `UnionType`']",
     "Line 49: Unexpected errors ['`type[list[int]]` is not assignable to `GenericAlias`', 'Expected `v2_actual` to be a type alias, got `GenericAlias`']",
-    "Line 53: Unexpected errors [\"`Literal['set[str]']` is not assignable to `TypeForm[set[str]]`\"]",
     "Line 58: Unexpected errors [\"Argument `Literal['int']` is not assignable to parameter `x` with type `TypeForm[Any]` in function `func1`\"]"
   ]
 }

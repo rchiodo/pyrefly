@@ -3,7 +3,7 @@
   "pass": 125,
   "fail": 14,
   "pass_rate": 0.9,
-  "differences": 38,
+  "differences": 36,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -145,7 +145,7 @@
     "generics_typevartuple_basic.py": 1,
     "protocols_modules.py": 1,
     "qualifiers_final_annotation.py": 2,
-    "typeforms_typeform.py": 6
+    "typeforms_typeform.py": 4
   },
   "comment": "@generated"
 }

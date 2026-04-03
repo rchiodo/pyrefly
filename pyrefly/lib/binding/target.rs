@@ -489,6 +489,10 @@ impl<'a> BindingsBuilder<'a> {
             .is_some_and(|(e, _)| self.as_special_export(e) == Some(SpecialExport::TypeAlias));
         let is_definitely_type_alias =
             has_type_alias_qualifier || self.is_definitely_type_alias_rhs(value.as_ref());
+        let has_typeform_annotation = direct_ann.is_some_and(|(e, _)| {
+            self.as_special_export(e) == Some(SpecialExport::TypeForm)
+                || matches!(e, Expr::Subscript(x) if self.as_special_export(&x.value) == Some(SpecialExport::TypeForm))
+        });
         // Track whether this name assignment participates in partial type inference.
         let uses_first_use = !is_definitely_type_alias && self.infer_with_first_use();
         let scope_idx = current.idx();
@@ -499,6 +503,8 @@ impl<'a> BindingsBuilder<'a> {
             if let Some(collector) = legacy {
                 tparams = Some(collector.lookup_keys().into_boxed_slice());
             }
+        } else if has_typeform_annotation && value.is_string_literal_expr() {
+            self.ensure_type_with_usage(&mut value, &mut None, &mut Usage::StaticTypeInformation);
         } else {
             self.ensure_expr(&mut value, current.usage());
         }
