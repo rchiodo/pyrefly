@@ -1,62 +1,8 @@
 {
   "name": "test",
-  "names": [
-    "test.x",
-    "test.y",
-    "test.z",
-    "test.w"
-  ],
+  "names": [],
   "line_count": 10,
-  "symbol_reports": [
-    {
-      "kind": "attr",
-      "name": "test.x",
-      "n_typable": 1,
-      "n_typed": 0,
-      "n_any": 0,
-      "n_untyped": 1,
-      "location": {
-        "line": 6,
-        "column": 1
-      }
-    },
-    {
-      "kind": "attr",
-      "name": "test.y",
-      "n_typable": 1,
-      "n_typed": 0,
-      "n_any": 0,
-      "n_untyped": 1,
-      "location": {
-        "line": 7,
-        "column": 1
-      }
-    },
-    {
-      "kind": "attr",
-      "name": "test.z",
-      "n_typable": 1,
-      "n_typed": 0,
-      "n_any": 0,
-      "n_untyped": 1,
-      "location": {
-        "line": 8,
-        "column": 1
-      }
-    },
-    {
-      "kind": "attr",
-      "name": "test.w",
-      "n_typable": 1,
-      "n_typed": 0,
-      "n_any": 0,
-      "n_untyped": 1,
-      "location": {
-        "line": 9,
-        "column": 1
-      }
-    }
-  ],
+  "symbol_reports": [],
   "type_ignores": [
     {
       "kind": "type",
@@ -99,10 +45,10 @@
       }
     }
   ],
-  "n_typable": 4,
+  "n_typable": 0,
   "n_typed": 0,
   "n_any": 0,
-  "n_untyped": 4,
-  "coverage": 0.0,
-  "strict_coverage": 0.0
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 100.0
 }

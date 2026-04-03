@@ -25,6 +25,7 @@ use pyrefly_types::types::Type;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::includes::Includes;
 use pyrefly_util::thread_pool::ThreadCount;
+use ruff_python_ast::Expr;
 use ruff_python_ast::Parameters;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
@@ -440,6 +441,20 @@ impl ReportArgs {
                 BindingExport::Forward(idx) => match bindings.get(*idx) {
                     // Skip injected implicit globals
                     Binding::Global(_) => {}
+                    // IMPLICIT: special type forms have 0 slots
+                    Binding::TypeVar(_) | Binding::ParamSpec(_) | Binding::TypeVarTuple(_) => {}
+                    // IMPLICIT: non-call assignments have 0 slots;
+                    // call assignments are untyped (1 slot)
+                    Binding::NameAssign(na) => {
+                        if matches!(na.expr.as_ref(), Expr::Call(_)) {
+                            variables.push(Variable {
+                                name: qualified_name,
+                                annotation: None,
+                                slots: SlotCounts::untyped(),
+                                location,
+                            });
+                        }
+                    }
                     _ => {
                         variables.push(Variable {
                             name: qualified_name,

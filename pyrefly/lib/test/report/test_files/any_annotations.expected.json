@@ -3,7 +3,6 @@
   "names": [
     "test.x",
     "test.y",
-    "test.z",
     "test.func_any",
     "test.func_mixed"
   ],
@@ -34,18 +33,6 @@
       }
     },
     {
-      "kind": "attr",
-      "name": "test.z",
-      "n_typable": 1,
-      "n_typed": 0,
-      "n_any": 0,
-      "n_untyped": 1,
-      "location": {
-        "line": 26,
-        "column": 1
-      }
-    },
-    {
       "kind": "function",
       "name": "test.func_any",
       "n_typable": 3,
@@ -71,10 +58,10 @@
     }
   ],
   "type_ignores": [],
-  "n_typable": 9,
+  "n_typable": 8,
   "n_typed": 3,
   "n_any": 5,
-  "n_untyped": 1,
-  "coverage": 88.88888888888889,
-  "strict_coverage": 33.33333333333333
+  "n_untyped": 0,
+  "coverage": 100.0,
+  "strict_coverage": 37.5
 }
