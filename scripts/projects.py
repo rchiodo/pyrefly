@@ -642,7 +642,7 @@ def get_mypy_primer_projects() -> list[Project]:
             mypy_cmd="{mypy} .",
             pyright_cmd="{pyright}",
             pyrefly_cmd="{pyrefly} .",
-            deps=["types-freezegun", "types-mock", "httpx", "anyio", "pytest"],
+            deps=["types-freezegun", "httpx", "anyio", "pytest"],
             expected_mypy_success=True,
         ),
         Project(
@@ -1146,7 +1146,6 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} .",
             deps=[
                 "types-six",
-                "types-mock",
                 "cryptography",
                 "types-requests",
                 "types-Markdown",
