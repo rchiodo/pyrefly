@@ -3869,9 +3869,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(ann) = ann {
             self.check_final_reassignment(&ann, range, errors);
             if let Some(ty) = ann.ty(self.heap, self.stdlib) {
-                self.check_and_return_type(context_value, &ty, range, errors, &|| {
-                    TypeCheckContext::of_kind(TypeCheckKind::from_annotation_target(&ann.target))
-                })
+                if context_value.is_any() {
+                    // Any provides no useful narrowing information, so preserve
+                    // the declared type rather than letting Any leak through.
+                    ty
+                } else {
+                    self.check_and_return_type(context_value, &ty, range, errors, &|| {
+                        TypeCheckContext::of_kind(TypeCheckKind::from_annotation_target(
+                            &ann.target,
+                        ))
+                    })
+                }
             } else {
                 context_value
             }
