@@ -615,8 +615,8 @@ impl<'a> BindingsBuilder<'a> {
             // namedtuple('Point', [*Base._fields, 'z'])
             // Starred expressions can't be resolved statically, so mark
             // the namedtuple as having dynamic fields. We still extract
-            // any string literals we can see as known fields for
-            // autocomplete and type checking.
+            // any string literals or Final variable references we can see
+            // as known fields for autocomplete and type checking.
             [Expr::List(ExprList { elts, .. }) | Expr::Tuple(ExprTuple { elts, .. })]
                 if elts.iter().any(|elt| matches!(elt, Expr::Starred(_))) =>
             {
@@ -624,19 +624,30 @@ impl<'a> BindingsBuilder<'a> {
                 elts.iter()
                     .filter_map(|elt| match elt {
                         Expr::StringLiteral(s) => Some((s.value.to_string(), s.range(), None)),
+                        Expr::Name(n) => self
+                            .scopes
+                            .lookup_final_string_value(&n.id)
+                            .map(str::to_owned)
+                            .map(|value| (value, n.range(), None)),
                         _ => None,
                     })
                     .collect()
             }
-            // namedtuple('Point', ['x', 'y'])
+            // namedtuple('Point', ['x', 'y']) or namedtuple('Point', [X, Y]) with Final variables
             [Expr::List(ExprList { elts, .. })]
-                if matches!(elts.as_slice(), [Expr::StringLiteral(_), ..]) =>
+                if matches!(
+                    elts.as_slice(),
+                    [Expr::StringLiteral(_) | Expr::Name(_), ..]
+                ) =>
             {
                 self.extract_string_literals(elts)
             }
-            // namedtuple('Point', ('x', 'y'))
+            // namedtuple('Point', ('x', 'y')) or namedtuple('Point', (X, Y)) with Final variables
             [Expr::Tuple(ExprTuple { elts, .. })]
-                if matches!(elts.as_slice(), [Expr::StringLiteral(_), ..]) =>
+                if matches!(
+                    elts.as_slice(),
+                    [Expr::StringLiteral(_) | Expr::Name(_), ..]
+                ) =>
             {
                 self.extract_string_literals(elts)
             }
@@ -705,6 +716,22 @@ impl<'a> BindingsBuilder<'a> {
             .iter()
             .filter_map(|item| match item {
                 Expr::StringLiteral(x) => Some((x.value.to_string(), x.range(), None)),
+                Expr::Name(n) => {
+                    if let Some(value) = self
+                        .scopes
+                        .lookup_final_string_value(&n.id)
+                        .map(str::to_owned)
+                    {
+                        Some((value, n.range(), None))
+                    } else {
+                        self.error(
+                            item.range(),
+                            ErrorInfo::Kind(ErrorKind::InvalidLiteral),
+                            "Expected a string literal".to_owned(),
+                        );
+                        None
+                    }
+                }
                 _ => {
                     self.error(
                         item.range(),
@@ -727,6 +754,22 @@ impl<'a> BindingsBuilder<'a> {
                 Expr::Tuple(ExprTuple { elts, .. }) => match elts.as_slice() {
                     [Expr::StringLiteral(k), v] => {
                         Some((k.value.to_string(), k.range(), Some(v.clone())))
+                    }
+                    [Expr::Name(n), v] => {
+                        if let Some(value) = self
+                            .scopes
+                            .lookup_final_string_value(&n.id)
+                            .map(str::to_owned)
+                        {
+                            Some((value, n.range(), Some(v.clone())))
+                        } else {
+                            self.error(
+                                n.range(),
+                                ErrorInfo::Kind(ErrorKind::InvalidArgument),
+                                "Expected first item to be a string literal".to_owned(),
+                            );
+                            None
+                        }
                     }
                     [k, _] => {
                         self.error(

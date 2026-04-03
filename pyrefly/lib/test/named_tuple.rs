@@ -929,3 +929,52 @@ w3 = WithCls3(cls=3, value="test")
 assert_type(w3.cls, Any)
 "#,
 );
+
+testcase!(
+    test_named_tuple_final_field_names,
+    r#"
+from typing import NamedTuple, Final
+
+X: Final = "x"
+Y: Final = "y"
+N = NamedTuple("N", [(X, int), (Y, int)])
+
+N(x=3, y=4)
+N(a=1)  # E: Unexpected keyword argument `a` in function `N.__new__`  # E: Missing argument `x`  # E: Missing argument `y`
+N(x="", y="")  # E: Argument `Literal['']` is not assignable to parameter `x` with type `int`  # E: Argument `Literal['']` is not assignable to parameter `y` with type `int`
+"#,
+);
+
+testcase!(
+    test_named_tuple_final_field_names_with_starred,
+    r#"
+import collections
+from typing import Final, assert_type, Any
+
+X: Final = "extra"
+BaseFieldInfo = collections.namedtuple("BaseFieldInfo", ["name", "type_code"])
+ExtendedFieldInfo = collections.namedtuple(
+    "ExtendedFieldInfo",
+    [*BaseFieldInfo._fields, X],
+)
+
+info = ExtendedFieldInfo("col1", 1, "extra_val")
+# X resolves to "extra" as a known field
+assert_type(info.extra, Any)
+# Dynamic fields from the starred expression
+assert_type(info.anything, Any)
+"#,
+);
+
+testcase!(
+    test_named_tuple_final_field_name_shadowed,
+    r#"
+from collections import namedtuple
+from typing import Final
+
+X: Final = "x"
+
+def f(X: int) -> None:
+    N = namedtuple("N", [X])  # E: Expected a string literal
+"#,
+);

@@ -156,10 +156,7 @@
   "protocols_subtyping.py": [],
   "protocols_variance.py": [],
   "qualifiers_annotated.py": [],
-  "qualifiers_final_annotation.py": [
-    "Line 131: Unexpected errors ['Expected first item to be a string literal', 'Expected first item to be a string literal']",
-    "Line 133: Unexpected errors ['Unexpected keyword argument `x` in function `N.__new__`', 'Unexpected keyword argument `y` in function `N.__new__`']"
-  ],
+  "qualifiers_final_annotation.py": [],
   "qualifiers_final_decorator.py": [],
   "specialtypes_any.py": [],
   "specialtypes_never.py": [],

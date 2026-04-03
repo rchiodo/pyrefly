@@ -394,7 +394,8 @@ impl Static {
     }
 
     /// Populate static definitions from a list of statements.
-    /// Returns the set of implicit captures (names read but not locally defined).
+    /// Returns the set of implicit captures (names read but not locally defined)
+    /// and a map of Final variable string values.
     fn stmts(
         &mut self,
         x: &[Stmt],
@@ -404,7 +405,7 @@ impl Static {
         sys_info: SysInfo,
         get_annotation_idx: &mut impl FnMut(ShortIdentifier) -> Idx<KeyAnnotation>,
         scopes: Option<&Scopes>,
-    ) -> SmallSet<Name> {
+    ) -> (SmallSet<Name>, SmallMap<Name, String>) {
         let mut d = Definitions::new(
             x,
             module_info.name(),
@@ -453,7 +454,12 @@ impl Static {
                 self.upsert(name.cloned(), range, StaticStyle::MergeableImport, range)
             }
         }
-        implicit_captures
+        let final_string_values = d
+            .final_names
+            .into_iter()
+            .filter_map(|(name, value)| value.map(|v| (name, v)))
+            .collect();
+        (implicit_captures, final_string_values)
     }
 
     fn expr_lvalue(&mut self, x: &Expr) {
@@ -1112,6 +1118,9 @@ pub struct Scope {
     /// from enclosing scopes. Populated during `init_current_static` from the
     /// `Definitions` phase. Used to seed flow entries for captured variables.
     implicit_captures: SmallSet<Name>,
+    /// Names marked `Final` with string literal values, e.g. `X: Final = "x"`.
+    /// Used to resolve Final variable references in synthesized class field names.
+    final_string_values: SmallMap<Name, String>,
 }
 
 impl Scope {
@@ -1130,6 +1139,7 @@ impl Scope {
             finally_depth: 0,
             with_depth: 0,
             implicit_captures: SmallSet::new(),
+            final_string_values: SmallMap::new(),
         }
     }
 
@@ -1574,7 +1584,7 @@ impl Scopes {
         get_annotation_idx: &mut impl FnMut(ShortIdentifier) -> Idx<KeyAnnotation>,
     ) {
         let mut initialize = |scope: &mut Scope, myself: Option<&Self>| {
-            let implicit_captures = scope.stat.stmts(
+            let (implicit_captures, final_string_values) = scope.stat.stmts(
                 x,
                 module_info,
                 top_level,
@@ -1584,6 +1594,7 @@ impl Scopes {
                 myself,
             );
             scope.implicit_captures = implicit_captures;
+            scope.final_string_values = final_string_values;
             // Presize the flow, as its likely to need as much space as static
             scope.flow.info.reserve(scope.stat.0.capacity());
         };
@@ -1599,6 +1610,21 @@ impl Scopes {
             initialize(&mut current, Some(self));
             self.push(current);
         }
+    }
+
+    /// Look up a Final variable's string literal value in the current scope stack.
+    /// Searches from the innermost scope outward, stopping at the first scope
+    /// that binds the name, even if it's not Final.
+    pub fn lookup_final_string_value(&self, name: &Name) -> Option<&str> {
+        for node in self.scopes.iter().rev() {
+            if let Some(value) = node.scope.final_string_values.get(name) {
+                return Some(value.as_str());
+            }
+            if node.scope.stat.0.contains_key(name) {
+                return None;
+            }
+        }
+        None
     }
 
     pub fn push(&mut self, scope: Scope) {
