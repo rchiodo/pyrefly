@@ -636,9 +636,14 @@ impl ReportArgs {
                 let mut all_params_type_known = true;
 
                 // Compute slot counts: return + non-self/cls params.
-                // __init__ return is always None, so treat it as IMPLICIT (0 slots).
-                let is_init = fun.class_key.is_some() && fun.def.name.as_str() == "__init__";
-                let return_slot = if is_init {
+                // Some dunder methods have implicit return types that don't need
+                // annotation (__init__ → None, __bool__ → bool, __len__ → int, etc.).
+                // Only treat as implicit when the annotation is ABSENT; explicit
+                // annotations (e.g. `-> bool` on `__bool__`) are counted normally.
+                let has_implicit_return = fun.class_key.is_some()
+                    && return_annotation.is_none()
+                    && Self::is_implicit_dunder_return(fun.def.name.as_str());
+                let return_slot = if has_implicit_return {
                     SlotCounts::default()
                 } else {
                     Self::classify_slot(return_annotation.is_some(), is_return_type_known)
@@ -790,6 +795,36 @@ impl ReportArgs {
     /// Returns true if the type contains no `Any` anywhere in its structure.
     fn is_type_fully_known(ty: &Type) -> bool {
         !ty.any(|t| t.is_any())
+    }
+
+    /// Dunder methods whose return type is fully determined by the protocol
+    /// and therefore don't need an explicit annotation for coverage.
+    fn is_implicit_dunder_return(name: &str) -> bool {
+        matches!(
+            name,
+            "__init__"
+                | "__del__"
+                | "__init_subclass__"
+                | "__post_init__"
+                | "__bool__"
+                | "__len__"
+                | "__length_hint__"
+                | "__hash__"
+                | "__int__"
+                | "__float__"
+                | "__complex__"
+                | "__index__"
+                | "__str__"
+                | "__repr__"
+                | "__format__"
+                | "__bytes__"
+                | "__sizeof__"
+                | "__contains__"
+                | "__setattr__"
+                | "__delattr__"
+                | "__setitem__"
+                | "__delitem__"
+        )
     }
 
     /// Determine whether a function name represents a method (contains '.', i.e. `Cls.method`).
@@ -1686,6 +1721,14 @@ mod tests {
     fn test_report_instance_attrs() {
         let report = build_module_report_for_test("instance_attrs.py");
         compare_snapshot("instance_attrs.expected.json", &report);
+    }
+
+    /// Dunder methods with implicit return types (__init__, __bool__, __len__, etc.)
+    /// should have their return slot excluded from coverage counting.
+    #[test]
+    fn test_report_dunder_implicit() {
+        let report = build_module_report_for_test("dunder_implicit.py");
+        compare_snapshot("dunder_implicit.expected.json", &report);
     }
 
     /// @staticmethod, @classmethod decorator handling.
