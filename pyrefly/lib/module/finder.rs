@@ -418,7 +418,7 @@ fn resolve_third_party_stub(
         && stub_result.is_none()
     {
         if let Some(pip_package) = recommended_stubs_package(module) {
-            return Some(bundled.clone().with_error(FindError::MissingStubs(
+            return Some(bundled.clone().with_error(FindError::UntypedImport(
                 module,
                 pip_package.to_string().into(),
             )));
@@ -480,7 +480,7 @@ fn combine_normal_and_stub_results(
                 Some(
                     normal_result
                         .module_path()
-                        .with_error(FindError::MissingStubs(
+                        .with_error(FindError::UntypedImport(
                             module,
                             missing_stub_result.as_str().to_owned().into(),
                         )),
