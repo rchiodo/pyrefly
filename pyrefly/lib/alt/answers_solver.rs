@@ -2236,14 +2236,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
             BindingAction::NeedsColdPlaceholder => {
-                // Two-step protocol: push() returned NeedsColdPlaceholder because
-                // it lacks K: Solve. We allocate the placeholder here, store it
-                // in iteration state so subsequent back-edges return CycleBroken,
-                // and return the promoted value.
-                let binding = self.bindings().get(idx);
-                let var = K::create_recursive(self, binding);
-                self.stack().set_iteration_placeholder(&current, var);
-                Arc::new(K::promote_recursive(self.heap, var))
+                // Use the same path as Unwind: attempt_to_unwind_cycle_from_here
+                // checks calculation.get() first (in case another thread already
+                // committed an answer), then falls back to creating a placeholder.
+                self.attempt_to_unwind_cycle_from_here(&current, idx, calculation)
+                    .unwrap_or_else(|r| Arc::new(K::promote_recursive(self.heap, r)))
             }
         };
         if let Some(scc) = self.stack().pop_and_take_completed_scc() {
