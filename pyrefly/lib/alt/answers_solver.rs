@@ -768,28 +768,6 @@ impl CalcStack {
         canonical
     }
 
-    /// Track that a placeholder has been recorded for a cycle-breaking node.
-    ///
-    /// Only the top SCC is checked because each node appears in at most one
-    /// SCC, and placeholder recording happens during active cycle breaking
-    /// in the top SCC.
-    fn on_placeholder_recorded(&self, current: &CalcId, var: Var) {
-        let mut scc_stack = self.scc_stack.borrow_mut();
-        if let Some(top_scc) = scc_stack.last_mut() {
-            top_scc.on_placeholder_recorded(current, var);
-            // Debug-only check: verify the node isn't in any other SCC.
-            debug_assert!(
-                scc_stack
-                    .iter()
-                    .rev()
-                    .skip(1)
-                    .all(|scc| !scc.node_state.contains_key(current)),
-                "on_placeholder_recorded: CalcId {} found in multiple SCCs",
-                current,
-            );
-        }
-    }
-
     /// Merge all SCCs from the target SCC to the top of the stack, and add
     /// any free-floating CalcStack nodes between the target SCC's min_stack_depth
     /// and the current stack position.
@@ -929,26 +907,32 @@ impl CalcStack {
         *node_state = SccNodeState::InProgress;
     }
 
-    /// Set the placeholder variable on an existing `InProgress` iteration
-    /// node state for the target, writing to `node_state`.
+    /// Set the placeholder variable for a cycle-breaking node in the top SCC's
+    /// `node_state`.
     ///
-    /// Panics if the target is not found or is not `InProgress`.
+    /// This is used by both Phase 0 (initial cycle detection in
+    /// `attempt_to_unwind_cycle_from_here`) and Phase 1+ (iteration via
+    /// `NeedsColdPlaceholder` in `get_idx`).
+    ///
+    /// The write is lenient: it delegates to `Scc::on_placeholder_recorded`,
+    /// which uses an advancement rank check so that a `Done` state is never
+    /// overwritten back to `HasPlaceholder`. If the top SCC does not contain
+    /// the target (e.g. during `handle_depth_overflow` where the node may not
+    /// be in any SCC), the call is a no-op.
     fn set_iteration_placeholder(&self, target: &CalcId, var: Var) {
         let mut scc_stack = self.scc_stack.borrow_mut();
-        let top_scc = scc_stack.last_mut().expect("no SCC on the stack");
-        assert!(top_scc.iterative.is_some(), "top SCC is not iterating");
-        let node_state = top_scc
-            .node_state
-            .get_mut(target)
-            .expect("target is not a member of the iterating SCC");
-        match node_state {
-            SccNodeState::InProgress => {
-                *node_state = SccNodeState::HasPlaceholder(var);
-            }
-            _ => panic!(
-                "set_iteration_placeholder called on a node that is not InProgress: {:?}",
-                node_state
-            ),
+        if let Some(top_scc) = scc_stack.last_mut() {
+            top_scc.on_placeholder_recorded(target, var);
+            // Debug-only check: verify the node isn't in any other SCC.
+            debug_assert!(
+                scc_stack
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .all(|scc| !scc.node_state.contains_key(target)),
+                "set_iteration_placeholder: CalcId {} found in multiple SCCs",
+                target,
+            );
         }
     }
 
@@ -3040,7 +3024,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Create a recursive placeholder and store it only in SCC-local state.
         let binding = self.bindings().get(idx);
         let rec = K::create_recursive(self, binding);
-        self.stack().on_placeholder_recorded(current, rec);
+        self.stack().set_iteration_placeholder(current, rec);
         Err(rec)
     }
 
