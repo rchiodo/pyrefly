@@ -15,8 +15,8 @@
       "kind": "attr",
       "name": "test.any_var",
       "n_typable": 1,
-      "n_typed": 1,
-      "n_any": 0,
+      "n_typed": 0,
+      "n_any": 1,
       "n_untyped": 0,
       "location": {
         "line": 25,
@@ -75,8 +75,8 @@
       "kind": "function",
       "name": "test.any_param",
       "n_typable": 2,
-      "n_typed": 2,
-      "n_any": 0,
+      "n_typed": 1,
+      "n_any": 1,
       "n_untyped": 0,
       "location": {
         "line": 17,
@@ -98,9 +98,9 @@
   ],
   "type_ignores": [],
   "n_typable": 13,
-  "n_typed": 8,
-  "n_any": 1,
+  "n_typed": 6,
+  "n_any": 3,
   "n_untyped": 4,
   "coverage": 69.23076923076923,
-  "strict_coverage": 61.53846153846154
+  "strict_coverage": 46.15384615384615
 }

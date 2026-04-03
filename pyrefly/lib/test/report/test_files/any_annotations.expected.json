@@ -13,8 +13,8 @@
       "kind": "attr",
       "name": "test.x",
       "n_typable": 1,
-      "n_typed": 1,
-      "n_any": 0,
+      "n_typed": 0,
+      "n_any": 1,
       "n_untyped": 0,
       "location": {
         "line": 9,
@@ -49,8 +49,8 @@
       "kind": "function",
       "name": "test.func_any",
       "n_typable": 3,
-      "n_typed": 2,
-      "n_any": 1,
+      "n_typed": 0,
+      "n_any": 3,
       "n_untyped": 0,
       "location": {
         "line": 16,
@@ -61,8 +61,8 @@
       "kind": "function",
       "name": "test.func_mixed",
       "n_typable": 3,
-      "n_typed": 3,
-      "n_any": 0,
+      "n_typed": 2,
+      "n_any": 1,
       "n_untyped": 0,
       "location": {
         "line": 21,
@@ -72,9 +72,9 @@
   ],
   "type_ignores": [],
   "n_typable": 9,
-  "n_typed": 7,
-  "n_any": 1,
+  "n_typed": 3,
+  "n_any": 5,
   "n_untyped": 1,
   "coverage": 88.88888888888889,
-  "strict_coverage": 77.77777777777779
+  "strict_coverage": 33.33333333333333
 }

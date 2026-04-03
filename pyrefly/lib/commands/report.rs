@@ -40,6 +40,7 @@ use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingExport;
 use crate::binding::binding::FunctionDefData;
 use crate::binding::binding::Key;
+use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyExport;
@@ -413,19 +414,21 @@ impl ReportArgs {
             };
             match binding {
                 BindingExport::AnnotatedForward(annot_idx, _) => {
-                    let (annotation_text, annotation_range) = match bindings.get(*annot_idx) {
-                        BindingAnnotation::AnnotateExpr(_, expr, _) => (
-                            Some(module.code_at(expr.range()).to_owned()),
-                            Some(expr.range()),
-                        ),
-                        _ => (None, None),
+                    let annotation_text = match bindings.get(*annot_idx) {
+                        BindingAnnotation::AnnotateExpr(_, expr, _) => {
+                            Some(module.code_at(expr.range()).to_owned())
+                        }
+                        _ => None,
                     };
+                    // Use the resolved annotation type (not the expression trace)
+                    // to correctly detect Any in annotations like `x: Any`.
                     let is_type_known = annotation_text.is_some()
-                        && annotation_range.is_some_and(|range| {
-                            answers
-                                .get_type_trace(range)
-                                .is_some_and(|t| Self::is_type_fully_known(&t))
-                        });
+                        && answers
+                            .get_idx(*annot_idx)
+                            .and_then(|awt| {
+                                awt.annotation.ty.as_ref().map(Self::is_type_fully_known)
+                            })
+                            .unwrap_or(false);
                     let slots = Self::classify_slot(annotation_text.is_some(), is_type_known);
                     variables.push(Variable {
                         name: qualified_name,
@@ -538,12 +541,20 @@ impl ReportArgs {
                         .as_ref()
                         .map(|ann| module.code_at(ann.range()).to_owned());
 
+                    // Use the resolved annotation type (not the expression trace)
+                    // to correctly detect Any in annotations like `a: Any`.
                     let is_param_type_known = if Self::is_self_or_cls(i, param_name) {
                         true
-                    } else if let Some(ann) = &param.annotation {
+                    } else if param.annotation.is_some() {
+                        let annot_key =
+                            KeyAnnotation::Annotation(ShortIdentifier::new(&param.name));
+                        let annot_idx = bindings.key_to_idx(&annot_key);
                         answers
-                            .get_type_trace(ann.range())
-                            .is_some_and(|t| Self::is_type_fully_known(&t))
+                            .get_idx(annot_idx)
+                            .and_then(|awt| {
+                                awt.annotation.ty.as_ref().map(Self::is_type_fully_known)
+                            })
+                            .unwrap_or(false)
                     } else {
                         false
                     };
