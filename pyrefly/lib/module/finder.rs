@@ -894,7 +894,19 @@ pub fn find_import_prefixes(config: &ConfigFile, module: ModuleName) -> Vec<Modu
 fn recommended_stubs_package(module: ModuleName) -> Option<ModuleName> {
     match module.first_component().as_str() {
         "django" => Some(ModuleName::from_str("django-stubs")),
-        _ => None,
+        _ => {
+            // If the module has stubs in typeshed, recommend types-<package>
+            if let Ok(ts) = typeshed_third_party()
+                && ts.find(module).is_some()
+            {
+                Some(ModuleName::from_str(&format!(
+                    "types-{}",
+                    module.first_component()
+                )))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -2432,6 +2444,44 @@ mod tests {
             "Should find the module in typeshed third party with marker config, got: {:?}",
             result_marker
         );
+    }
+
+    #[test]
+    fn test_typeshed_third_party_with_real_config_recommends_types_package() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+
+        // Set up site package directory with 'requests' installed but no stubs
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir(
+                "site_packages",
+                vec![TestPath::dir(
+                    "requests",
+                    vec![TestPath::file("__init__.py")],
+                )],
+            )],
+        );
+
+        let mut config = get_config(ConfigSource::File("".into()));
+        config.python_environment.site_package_path = Some(vec![root.join("site_packages")]);
+        config.configure();
+
+        let result = find_import_filtered(&config, ModuleName::from_str("requests"), None, None);
+
+        if let FindingOrError::Finding(finding) = &result {
+            let error = finding.error.as_ref().expect("Expected MissingStubs error");
+            let FindError::MissingStubs(module, stubs_package) = error else {
+                panic!("Expected MissingStubs error, got: {:?}", error);
+            };
+            assert_eq!(*module, ModuleName::from_str("requests"));
+            assert_eq!(stubs_package.as_str(), "types-requests");
+        } else {
+            panic!(
+                "Expected Finding with MissingStubs error, got: {:?}",
+                result
+            );
+        }
     }
 
     #[test]
