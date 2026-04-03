@@ -3009,11 +3009,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         field_name: &Name,
         class_metadata: &Arc<ClassMetadata>,
+        is_explicit_override: bool,
     ) -> bool {
-        // Object construction (`__new__`, `__init__`, `__init_subclass__`) should not participate in override checks
-        if field_name == &dunder::NEW
-            || field_name == &dunder::INIT
-            || field_name == &dunder::INIT_SUBCLASS
+        // Object construction (`__new__`, `__init__`, `__init_subclass__`) should not participate
+        // in override checks unless the user explicitly opts in with `@override`.
+        if !is_explicit_override
+            && (field_name == &dunder::NEW
+                || field_name == &dunder::INIT
+                || field_name == &dunder::INIT_SUBCLASS)
         {
             return false;
         }
@@ -3075,12 +3078,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         bases: &ClassBases,
         errors: &ErrorCollector,
     ) {
-        let is_override = class_field.is_override();
-        if matches!(class_field.1, IsInherited::No) && !is_override {
+        let is_explicit_override = class_field.is_override();
+        if matches!(class_field.1, IsInherited::No) && !is_explicit_override {
             return;
         }
         let metadata = self.get_metadata_for_class(cls);
-        if !self.should_check_field_for_override_consistency(field_name, &metadata) {
+        if !self.should_check_field_for_override_consistency(
+            field_name,
+            &metadata,
+            is_explicit_override,
+        ) {
             return;
         }
 
@@ -3351,7 +3358,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors.add(range, ErrorInfo::Kind(kind), msg);
             }
         }
-        if is_override && !parent_attr_found && !parent_has_any {
+        if is_explicit_override && !parent_attr_found && !parent_has_any {
             self.error(
                     errors,
                     range,
@@ -3366,7 +3373,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Check for missing @override decorator when overriding a parent attribute.
         // This error is emitted when a method overrides a parent but doesn't have @override.
         // Since this error has Severity::Ignore by default, it won't be shown unless enabled.
-        if !is_override
+        if !is_explicit_override
             && parent_attr_found
             && !parent_has_any
             && class_field.can_have_override_decorator()
@@ -3410,6 +3417,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if !self.should_check_field_for_override_consistency(
                     parent_field_name,
                     &current_class_metadata,
+                    false,
                 ) {
                     continue;
                 }
