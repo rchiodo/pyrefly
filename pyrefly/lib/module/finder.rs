@@ -683,7 +683,11 @@ fn find_third_party_stub(
 ) -> Option<FindingOrError<ModulePath>> {
     let third_party_typeshed_stub = if matches!(style_filter, Some(ModuleStyle::Interface) | None) {
         typeshed_third_party().map_or_else(
-            |err| Some(FindingOrError::Error(FindError::not_found(err, module))),
+            |err| {
+                Some(FindingOrError::Error(FindError::missing_import(
+                    err, module,
+                )))
+            },
             |ts| ts.find(module).map(FindingOrError::new_finding),
         )
     } else {
@@ -696,7 +700,11 @@ fn find_third_party_stub(
 
     if matches!(style_filter, Some(ModuleStyle::Interface) | None) {
         get_bundled_third_party().map_or_else(
-            |err| Some(FindingOrError::Error(FindError::not_found(err, module))),
+            |err| {
+                Some(FindingOrError::Error(FindError::missing_import(
+                    err, module,
+                )))
+            },
             |ts| ts.find(module).map(FindingOrError::new_finding),
         )
     } else {
@@ -781,7 +789,11 @@ pub fn find_import_internal(
         path
     } else if matches!(style_filter, Some(ModuleStyle::Interface) | None)
         && let Some(path) = typeshed().map_or_else(
-            |err| Some(FindingOrError::Error(FindError::not_found(err, module))),
+            |err| {
+                Some(FindingOrError::Error(FindError::missing_import(
+                    err, module,
+                )))
+            },
             |ts| ts.find(module).map(FindingOrError::new_finding),
         )
     {
@@ -2357,7 +2369,10 @@ mod tests {
 
         let result = find_import_filtered(&config, ModuleName::from_str("requests"), None, None);
         assert!(
-            matches!(&result, FindingOrError::Error(FindError::NotFound(_, _))),
+            matches!(
+                &result,
+                FindingOrError::Error(FindError::MissingImport(_, _))
+            ),
             "Expected NotFound error for 'requests' with real config file but package not installed, but got: {:?}",
             result
         );
@@ -2411,12 +2426,12 @@ mod tests {
         // Should return NotFound error when using real config and typeshed third party stubs exist but package is not installed
         let error = result.error().expect("Expected error to be present");
         assert!(
-            matches!(error, FindError::NotFound(_, _)),
+            matches!(error, FindError::MissingImport(_, _)),
             "Expected NotFound error with real config, got: {:?}",
             error
         );
 
-        if let FindError::NotFound(module, _) = error {
+        if let FindError::MissingImport(module, _) = error {
             assert_eq!(module, ModuleName::from_str("requests"));
         }
     }

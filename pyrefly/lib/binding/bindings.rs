@@ -1050,7 +1050,7 @@ impl<'a> BindingsBuilder<'a> {
 
     fn inject_builtins(&mut self, builtins_module: ModuleName, ignore_if_missing: bool) {
         match self.lookup.module_exists(builtins_module) {
-            FindingOrError::Error(err @ FindError::NotFound(..)) if !ignore_if_missing => {
+            FindingOrError::Error(err @ FindError::MissingImport(..)) if !ignore_if_missing => {
                 let (_, msg) = err.display();
                 self.errors.internal_error(TextRange::default(), msg);
             }

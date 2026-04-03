@@ -462,7 +462,7 @@ mod tests {
         fn module_exists(&self, module: ModuleName) -> FindingOrError<()> {
             match self.get(&module) {
                 Some(_) => FindingOrError::new_finding(()),
-                None => FindingOrError::Error(FindError::not_found(anyhow!("Error"), module)),
+                None => FindingOrError::Error(FindError::missing_import(anyhow!("Error"), module)),
             }
         }
 

@@ -31,7 +31,7 @@ use crate::module::finder::suggest_stdlib_import;
 #[derive(Debug, Clone, Dupe, PartialEq, Eq)]
 pub enum FindError {
     /// This module could not be found, and we should emit an error
-    NotFound(ModuleName, Arc<Vec1<String>>),
+    MissingImport(ModuleName, Arc<Vec1<String>>),
     /// This import could not be found, but the user configured it to be ignored
     Ignored,
     /// We found stubs, but no source files were found. This means it's likely stubs
@@ -46,8 +46,8 @@ pub enum FindError {
 }
 
 impl FindError {
-    pub fn not_found(err: anyhow::Error, module: ModuleName) -> Self {
-        Self::NotFound(module, Arc::new(vec1![format!("{err:#}")]))
+    pub fn missing_import(err: anyhow::Error, module: ModuleName) -> Self {
+        Self::MissingImport(module, Arc::new(vec1![format!("{err:#}")]))
     }
 
     pub fn import_lookup_path(
@@ -87,12 +87,12 @@ impl FindError {
             format!("Looked in these locations{config_suffix}:")
         }];
         explanation.extend(nonempty_paths);
-        FindError::NotFound(module, Arc::new(explanation))
+        FindError::MissingImport(module, Arc::new(explanation))
     }
 
     pub fn display(&self) -> (Option<Box<dyn Fn() -> ErrorContext + '_>>, Vec1<String>) {
         match self {
-            Self::NotFound(module, err) => {
+            Self::MissingImport(module, err) => {
                 let mut lines = (**err).clone();
                 // Compute suggestion lazily at display time, using global cache
                 if let Some(suggested) = suggest_stdlib_import(*module) {
@@ -126,7 +126,7 @@ impl FindError {
 
     pub fn kind(&self) -> Option<ErrorKind> {
         match self {
-            Self::NotFound(..) => Some(ErrorKind::MissingImport),
+            Self::MissingImport(..) => Some(ErrorKind::MissingImport),
             Self::NoSource(..) => Some(ErrorKind::MissingSource),
             Self::NoSourceForStubs(..) => Some(ErrorKind::MissingSourceForStubs),
             Self::MissingStubs(..) => Some(ErrorKind::UntypedImport),

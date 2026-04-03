@@ -1465,7 +1465,8 @@ impl<'a> BindingsBuilder<'a> {
                         FindingOrError::Finding(finding) => (true, finding.error),
                         FindingOrError::Error(error) => (false, Some(error)),
                     };
-                    let is_not_found = error.is_some_and(|e| matches!(e, FindError::NotFound(..)));
+                    let is_not_found =
+                        error.is_some_and(|e| matches!(e, FindError::MissingImport(..)));
                     if finding {
                         Binding::Module(Box::new((
                             x_as_module_name,
