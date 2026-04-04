@@ -45,8 +45,8 @@ use crate::types::callable::Params;
 use crate::types::literal::Lit;
 use crate::types::types::Type;
 
-struct CalledOverload {
-    func: TargetWithTParams<Function>,
+struct CalledOverload<'f> {
+    func: &'f TargetWithTParams<Function>,
     res: Type,
     ctor_targs: Option<TArgs>,
     call_errors: ErrorCollector,
@@ -261,7 +261,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let (closest_overload, matched) = match Vec1::try_from_vec(arity_compatible_overloads) {
             Err(_) => (
                 CalledOverload {
-                    func: arity_closest_overload.unwrap().0.clone(),
+                    func: arity_closest_overload.unwrap().0,
                     res: self.heap.mk_any_error(),
                     ctor_targs: None,
                     call_errors: self.error_collector(),
@@ -313,10 +313,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         matched_overloads.push(cur_closest);
                     }
                     if let Some(first_overload) = matched_overloads.first() {
+                        let func = first_overload.func;
+                        let ctor_targs = first_overload.ctor_targs.clone();
+                        let expected_types = first_overload.expected_types.clone();
                         closest_overload = CalledOverload {
-                            func: first_overload.func.clone(),
-                            ctor_targs: first_overload.ctor_targs.clone(),
-                            expected_types: first_overload.expected_types.clone(),
+                            func,
+                            ctor_targs,
+                            expected_types,
                             res: self.unions(matched_overloads.into_map(|o| o.res)),
                             call_errors: self.error_collector(),
                         };
@@ -348,7 +351,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             OverloadTrace::new(target.1.signature.clone(), tparams)
         };
         let all_overload_traces = overloads.iter().map(&mut overload_trace).collect();
-        let closest_overload_trace = overload_trace(&closest_overload.func);
+        let closest_overload_trace = overload_trace(closest_overload.func);
         self.record_overload_trace(
             arguments_range,
             all_overload_traces,
@@ -374,7 +377,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
             }
             errors.extend(closest_overload.call_errors);
-            (closest_overload.res, closest_overload.func.1.signature)
+            (
+                closest_overload.res,
+                closest_overload.func.1.signature.clone(),
+            )
         } else {
             // Build a string showing the argument types for error messages
             let mut arg_type_strs = Vec::new();
@@ -405,7 +411,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ),
                 "Possible overloads:".to_owned(),
             ];
-            for overload in overloads {
+            for overload in &overloads {
                 let suffix = if overload.1.signature == closest_overload.func.1.signature {
                     " [closest match]"
                 } else {
@@ -417,8 +423,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .signature
                         .split_first_param(&mut Owner::new())
                         .map(|(_, signature)| signature)
-                        .unwrap_or(overload.1.signature),
-                    None => overload.1.signature,
+                        .unwrap_or_else(|| overload.1.signature.clone()),
+                    None => overload.1.signature.clone(),
                 };
                 let signature = self
                     .solver()
@@ -433,7 +439,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ErrorInfo::new(ErrorKind::NoMatchingOverload, context),
                 msg,
             );
-            (self.heap.mk_any_error(), closest_overload.func.1.signature)
+            (
+                self.heap.mk_any_error(),
+                closest_overload.func.1.signature.clone(),
+            )
         }
     }
 
@@ -480,9 +489,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Returns the overload that matches the given arguments, or the one that produces the fewest
     /// errors if none matches, plus a bool to indicate whether we found a match.
-    fn find_closest_overload(
+    fn find_closest_overload<'c>(
         &self,
-        overloads: &Vec1<&TargetWithTParams<Function>>,
+        overloads: &Vec1<&'c TargetWithTParams<Function>>,
         metadata: &FuncMetadata,
         self_obj: Option<&Type>,
         args: &[CallArg],
@@ -491,9 +500,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         hint: Option<HintRef>,
         ctor_targs: &Option<&mut TArgs>,
-    ) -> (CalledOverload, bool) {
+    ) -> (CalledOverload<'c>, bool) {
         let mut matched_overloads = Vec::with_capacity(overloads.len());
-        let mut closest_unmatched_overload: Option<CalledOverload> = None;
+        let mut closest_unmatched_overload: Option<CalledOverload<'c>> = None;
         for callable in overloads {
             let called_overload = self.call_overload(
                 callable,
@@ -536,7 +545,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 });
                 if nargs_unknown {
-                    let has_varargs = |o: &CalledOverload| {
+                    let has_varargs = |o: &CalledOverload<'_>| {
                         matches!(
                             &o.func.1.signature.params, Params::List(params)
                             if params.items().iter().any(|p| matches!(p, Param::Varargs(..))))
@@ -549,7 +558,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     kw.arg.is_none() && !matches!(kw.value.infer(self, errors), Type::TypedDict(_))
                 });
                 if nkeywords_unknown {
-                    let has_kwargs = |o: &CalledOverload| {
+                    let has_kwargs = |o: &CalledOverload<'_>| {
                         matches!(
                             &o.func.1.signature.params, Params::List(params)
                             if params.items().iter().any(|p| matches!(p, Param::Kwargs(..))))
@@ -615,7 +624,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .iter()
                         .find_position(|o| {
                             let res = self.call_overload(
-                                &o.func,
+                                o.func,
                                 metadata,
                                 self_obj,
                                 &materialized_args,
@@ -645,7 +654,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .expect("Could not find selected overload");
                 // Now that we've selected an overload, use the hint to contextually type the arguments.
                 let contextual_overload = self.call_overload(
-                    &overload.func,
+                    overload.func,
                     metadata,
                     self_obj,
                     args,
@@ -682,7 +691,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn disambiguate_overloads_spec_compliant(
         &self,
-        matched_overloads: &[CalledOverload],
+        matched_overloads: &[CalledOverload<'_>],
     ) -> Option<usize> {
         // Step 5, part 2: are all remaining return types equivalent to one another?
         // If not, the call is ambiguous.
@@ -697,7 +706,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some(0)
     }
 
-    fn disambiguate_overloads(&self, matched_overloads: &[CalledOverload]) -> Option<usize> {
+    fn disambiguate_overloads(&self, matched_overloads: &[CalledOverload<'_>]) -> Option<usize> {
         // When a call to an overloaded function may match multiple overloads, the spec says to
         // return Any when the return types are not all equivalent.
         // However, neither mypy nor pyright fully follows this part of the spec, and many
@@ -729,9 +738,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some(candidate)
     }
 
-    fn call_overload(
+    fn call_overload<'c>(
         &self,
-        callable: &TargetWithTParams<Function>,
+        callable: &'c TargetWithTParams<Function>,
         metadata: &FuncMetadata,
         self_obj: Option<&Type>,
         args: &[CallArg],
@@ -740,7 +749,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         hint: Option<HintRef>,
         ctor_targs: &Option<&mut TArgs>,
-    ) -> CalledOverload {
+    ) -> CalledOverload<'c> {
         // Create a copy of the class type arguments (if any) that should be filled in by this call.
         // The `callable_infer` call below will fill in this copy with the type arguments set
         // by the current overload, and we'll later use the copy to fill in the original
@@ -771,7 +780,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
 
         CalledOverload {
-            func: callable.clone(),
+            func: callable,
             res,
             ctor_targs: overload_ctor_targs,
             call_errors,
