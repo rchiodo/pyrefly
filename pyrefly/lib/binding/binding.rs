@@ -70,6 +70,7 @@ use crate::binding::django::DjangoFieldInfo;
 use crate::binding::narrow::NarrowOp;
 use crate::binding::narrow::NarrowingSubject;
 use crate::binding::pydantic::PydanticConfigDict;
+use crate::binding::scope::is_constant_name;
 use crate::binding::table::TableKeyed;
 use crate::export::special::SpecialExport;
 use crate::module::module_info::ModuleInfo;
@@ -2089,6 +2090,8 @@ pub enum Binding {
     ClassDef(Idx<KeyClass>, Box<[Idx<KeyDecorator>]>),
     /// A forward reference to another binding.
     Forward(Idx<Key>),
+    /// Like Forward, but widens implicit literals.
+    PromoteForward(Idx<Key>),
     /// A forward reference produced during first-use resolution of a partial type.
     /// Behaves identically to `Forward` but marks that this indirection came from
     /// the partial-type / first-use machinery.
@@ -2259,6 +2262,7 @@ impl DisplayWith<Bindings> for Binding {
             }
             Self::ClassDef(x, _) => write!(f, "ClassDef({})", ctx.display(*x)),
             Self::Forward(k) => write!(f, "Forward({})", ctx.display(*k)),
+            Self::PromoteForward(k) => write!(f, "PromoteForward({})", ctx.display(*k)),
             Self::ForwardToFirstUse(k) => {
                 write!(f, "ForwardToFirstUse({})", ctx.display(*k))
             }
@@ -2513,6 +2517,7 @@ impl Binding {
             | Binding::None
             | Binding::Any(_)
             | Binding::Forward(_)
+            | Binding::PromoteForward(_)
             | Binding::ForwardToFirstUse(_)
             | Binding::Phi(_, _)
             | Binding::LoopPhi(_, _)
@@ -2538,14 +2543,23 @@ impl Binding {
 #[derive(Clone, Debug)]
 pub enum BindingExport {
     Forward(Idx<Key>),
+    PromoteForward(Idx<Key>),
     AnnotatedForward(Idx<KeyAnnotation>, Idx<Key>),
 }
 
 impl BindingExport {
+    pub fn forward_maybe_promote(idx: Idx<Key>, name: &Name) -> Self {
+        if is_constant_name(name) {
+            Self::Forward(idx)
+        } else {
+            Self::PromoteForward(idx)
+        }
+    }
+
     /// The forwarded key index that this export points to.
     pub fn key_idx(&self) -> Idx<Key> {
         match self {
-            Self::Forward(idx) | Self::AnnotatedForward(_, idx) => *idx,
+            Self::Forward(idx) | Self::PromoteForward(idx) | Self::AnnotatedForward(_, idx) => *idx,
         }
     }
 }
@@ -2554,6 +2568,9 @@ impl DisplayWith<Bindings> for BindingExport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
         match self {
             Self::Forward(idx) => write!(f, "BindingExport::Forward({})", ctx.display(*idx)),
+            Self::PromoteForward(idx) => {
+                write!(f, "BindingExport::PromoteForward({})", ctx.display(*idx))
+            }
             Self::AnnotatedForward(ann, idx) => {
                 write!(
                     f,

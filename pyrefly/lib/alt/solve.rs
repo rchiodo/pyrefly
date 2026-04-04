@@ -1948,6 +1948,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Binding::Forward(fwd) | Binding::ForwardToFirstUse(fwd) = binding {
             return self.get_idx(*fwd);
         }
+        if let Binding::PromoteForward(fwd) = binding {
+            return Arc::new(self.resolve_promote_forward(*fwd));
+        }
         // Inline first-use pinning for NameAssign.
         let mut type_info = if let Binding::NameAssign(na) = binding
             && self.solver().infer_with_first_use
@@ -4266,9 +4269,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         type_info
     }
 
+    fn resolve_promote_forward(&self, fwd: Idx<Key>) -> TypeInfo {
+        self.get_idx(fwd)
+            .arc_clone()
+            .map_ty(|ty| ty.promote_shallow_implicit_literals(self.stdlib))
+    }
+
     fn binding_to_type_info(&self, binding: &Binding, errors: &ErrorCollector) -> TypeInfo {
         match binding {
             Binding::Forward(k) => self.get_idx(*k).arc_clone(),
+            Binding::PromoteForward(k) => self.resolve_promote_forward(*k),
             Binding::ForwardToFirstUse(k) => {
                 if let Some(def_idx) = self.def_idx_for_forward_to_first_use(*k)
                     && let Some(type_info) = self.check_partial_answer(def_idx)
@@ -4691,6 +4701,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn binding_to_type(&self, binding: &Binding, errors: &ErrorCollector) -> Type {
         match binding {
             Binding::Forward(..)
+            | Binding::PromoteForward(..)
             | Binding::ForwardToFirstUse(..)
             | Binding::Phi(..)
             | Binding::LoopPhi(..)

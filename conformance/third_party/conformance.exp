@@ -9658,19 +9658,8 @@
     {
       "code": -2,
       "column": 17,
-      "concise_description": "`Module[_protocols_modules1]` is not assignable to `Options1`",
-      "description": "`Module[_protocols_modules1]` is not assignable to `Options1`\n  `Module[_protocols_modules1].timeout` has type `Literal[100]`, which is not consistent with `int` in `Options1.timeout` (the type of read-write attributes cannot be changed)",
-      "line": 25,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 36,
-      "stop_line": 25
-    },
-    {
-      "code": -2,
-      "column": 17,
       "concise_description": "`Module[_protocols_modules1]` is not assignable to `Options2`",
-      "description": "`Module[_protocols_modules1]` is not assignable to `Options2`\n  `Module[_protocols_modules1].timeout` has type `Literal[100]`, which is not consistent with `str` in `Options2.timeout` (the type of read-write attributes cannot be changed)",
+      "description": "`Module[_protocols_modules1]` is not assignable to `Options2`\n  `Module[_protocols_modules1].timeout` has type `int`, which is not consistent with `str` in `Options2.timeout` (the type of read-write attributes cannot be changed)",
       "line": 26,
       "name": "bad-assignment",
       "severity": "error",

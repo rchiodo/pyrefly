@@ -286,8 +286,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if Ast::is_synthesized_empty_name(x) {
                     TypeInfo::of_ty(self.heap.mk_any_error())
                 } else {
-                    self.get(&Key::BoundName(ShortIdentifier::expr_name(x)))
-                        .arc_clone()
+                    let result = self
+                        .get(&Key::BoundName(ShortIdentifier::expr_name(x)))
+                        .arc_clone();
+                    // Complements PromoteForward for seeded captures.
+                    if self.bindings().should_promote_at_range(x.range) {
+                        result.map_ty(|ty| ty.promote_shallow_implicit_literals(self.stdlib))
+                    } else {
+                        result
+                    }
                 }
             }
             Expr::Attribute(x) => {

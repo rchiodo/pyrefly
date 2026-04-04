@@ -56,7 +56,7 @@ else:
     test_env.add("linux", "import lib; x: int = lib.value");
     test_env.add(
         "main",
-        "import lib; x: str = lib.value  # E: `Literal[42]` is not assignable to `str`",
+        "import lib; x: str = lib.value  # E: `int` is not assignable to `str`",
     );
     let config_file = test_env.config();
     let state = State::new(test_env.config_finder(), TEST_THREAD_COUNT);
@@ -74,6 +74,34 @@ else:
         f("windows", &windows),
         f("main", &linux),
     ];
+    let mut transaction = state.new_transaction(Require::Exports, None);
+    transaction.set_memory(test_env.get_memory());
+    transaction.run(&handles, Require::Everything, None);
+    transaction
+        .get_errors(&handles)
+        .check_against_expectations()
+        .unwrap();
+}
+
+#[test]
+fn test_cross_module_literal_promotion() {
+    let sys_info = SysInfo::new(PythonVersion::default(), PythonPlatform::linux());
+    let mut test_env = TestEnv::new();
+    test_env.add("lib", "timeout = 100\nMY_CONST = 42");
+    test_env.add(
+        "main",
+        "import lib; x: str = lib.timeout  # E: `int` is not assignable to `str`",
+    );
+    let config_file = test_env.config();
+    let state = State::new(test_env.config_finder(), TEST_THREAD_COUNT);
+    let f = |name: &str| {
+        let name = ModuleName::from_str(name);
+        let path = find_import(&config_file, name, None, None)
+            .finding()
+            .unwrap();
+        Handle::new(name, path, sys_info.dupe())
+    };
+    let handles = [f("main")];
     let mut transaction = state.new_transaction(Require::Exports, None);
     transaction.set_memory(test_env.get_memory());
     transaction.run(&handles, Require::Everything, None);

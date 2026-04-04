@@ -1,9 +1,9 @@
 {
   "total": 139,
-  "pass": 126,
-  "fail": 13,
+  "pass": 127,
+  "fail": 12,
   "pass_rate": 0.91,
-  "differences": 32,
+  "differences": 31,
   "passing": [
     "aliases_explicit.py",
     "aliases_newtype.py",
@@ -101,6 +101,7 @@
     "protocols_explicit.py",
     "protocols_generic.py",
     "protocols_merging.py",
+    "protocols_modules.py",
     "protocols_recursive.py",
     "protocols_runtime_checkable.py",
     "protocols_self.py",
@@ -144,7 +145,6 @@
     "generics_self_basic.py": 2,
     "generics_self_usage.py": 1,
     "generics_typevartuple_basic.py": 1,
-    "protocols_modules.py": 1,
     "typeforms_typeform.py": 2
   },
   "comment": "@generated"

@@ -1592,7 +1592,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn step_pred(&self, pred: &mut Option<Idx<Key>>) -> Option<DecoratedFunction> {
         let pred_idx = (*pred)?;
         let mut b = self.bindings().get(pred_idx);
-        while let Binding::Forward(k) | Binding::ForwardToFirstUse(k) = b {
+        while let Binding::Forward(k) | Binding::PromoteForward(k) | Binding::ForwardToFirstUse(k) =
+            b
+        {
             b = self.bindings().get(*k);
         }
         if let Binding::Function(idx, pred_, _) = b {

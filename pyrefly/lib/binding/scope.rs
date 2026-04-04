@@ -96,6 +96,7 @@ pub enum NameReadInfo {
     Anywhere {
         key: Key,
         initialized: InitializedInFlow,
+        is_module_scope: bool,
     },
     /// No such name is defined in the current scope stack.
     NotFound,
@@ -332,6 +333,14 @@ impl StaticInfo {
             },
         }
     }
+}
+/// ALL_CAPS names preserve their literal types (matching pyright).
+pub(crate) fn is_constant_name(name: &Name) -> bool {
+    let s = name.as_str();
+    !s.is_empty()
+        && s.chars().any(|c| c.is_alphabetic())
+        && s.chars()
+            .all(|c| c.is_uppercase() || c == '_' || c.is_ascii_digit())
 }
 
 impl Static {
@@ -1320,6 +1329,20 @@ impl Scopes {
             .filter(|name| scope.stat.0.get_hashed(Hashed::new(*name)).is_none())
             .cloned()
             .collect()
+    }
+
+    /// True if the first non-class scope defining this name is the module scope.
+    pub fn is_defined_at_module_scope(&self, name: &Name) -> bool {
+        for node in self.scopes.iter().rev() {
+            let scope = &node.scope;
+            if matches!(scope.kind, ScopeKind::Class(_)) {
+                continue;
+            }
+            if scope.stat.0.contains_key(name) {
+                return matches!(scope.kind, ScopeKind::Module);
+            }
+        }
+        false
     }
 
     /// The range of the current (innermost) scope.
@@ -2840,6 +2863,7 @@ impl Scopes {
                     } else {
                         InitializedInFlow::No
                     },
+                    is_module_scope: matches!(scope.kind, ScopeKind::Module),
                 });
             }
             None

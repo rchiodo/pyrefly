@@ -1093,7 +1093,8 @@ testcase!(
 from typing import assert_type, Literal
 x = 1
 def foo():
-    assert_type(x, Literal['test', 1])
+    # Cross-barrier read promotes Literal[1, 'test'] → int | str
+    assert_type(x, int | str)
 foo()
 x = "test"
 "#,

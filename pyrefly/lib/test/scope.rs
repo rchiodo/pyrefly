@@ -914,8 +914,8 @@ x = 'string'
 class A:
     x = 42
     def f():
-        assert_type(x, Literal['string'])
-    lambda_f = lambda: assert_type(x, Literal['string'])
+        assert_type(x, str)
+    lambda_f = lambda: assert_type(x, str)
     class B:
         assert_type(x, Literal['string'])
     [assert_type(x, Literal['string']) for _ in range(1)]

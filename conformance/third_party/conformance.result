@@ -147,9 +147,7 @@
   "protocols_explicit.py": [],
   "protocols_generic.py": [],
   "protocols_merging.py": [],
-  "protocols_modules.py": [
-    "Line 25: Unexpected errors ['`Module[_protocols_modules1]` is not assignable to `Options1`\\n  `Module[_protocols_modules1].timeout` has type `Literal[100]`, which is not consistent with `int` in `Options1.timeout` (the type of read-write attributes cannot be changed)']"
-  ],
+  "protocols_modules.py": [],
   "protocols_recursive.py": [],
   "protocols_runtime_checkable.py": [],
   "protocols_self.py": [],

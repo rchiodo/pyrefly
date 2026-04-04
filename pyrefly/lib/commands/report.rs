@@ -453,15 +453,25 @@ impl ReportArgs {
                         location,
                     });
                 }
-                BindingExport::Forward(idx) => match bindings.get(*idx) {
-                    // Skip injected implicit globals
-                    Binding::Global(_) => {}
-                    // IMPLICIT: special type forms have 0 slots
-                    Binding::TypeVar(_) | Binding::ParamSpec(_) | Binding::TypeVarTuple(_) => {}
-                    // IMPLICIT: non-call assignments have 0 slots;
-                    // call assignments are untyped (1 slot)
-                    Binding::NameAssign(na) => {
-                        if matches!(na.expr.as_ref(), Expr::Call(_)) {
+                BindingExport::Forward(idx) | BindingExport::PromoteForward(idx) => {
+                    match bindings.get(*idx) {
+                        // Skip injected implicit globals
+                        Binding::Global(_) => {}
+                        // IMPLICIT: special type forms have 0 slots
+                        Binding::TypeVar(_) | Binding::ParamSpec(_) | Binding::TypeVarTuple(_) => {}
+                        // IMPLICIT: non-call assignments have 0 slots;
+                        // call assignments are untyped (1 slot)
+                        Binding::NameAssign(na) => {
+                            if matches!(na.expr.as_ref(), Expr::Call(_)) {
+                                variables.push(Variable {
+                                    name: qualified_name,
+                                    annotation: None,
+                                    slots: SlotCounts::untyped(),
+                                    location,
+                                });
+                            }
+                        }
+                        _ => {
                             variables.push(Variable {
                                 name: qualified_name,
                                 annotation: None,
@@ -470,15 +480,7 @@ impl ReportArgs {
                             });
                         }
                     }
-                    _ => {
-                        variables.push(Variable {
-                            name: qualified_name,
-                            annotation: None,
-                            slots: SlotCounts::untyped(),
-                            location,
-                        });
-                    }
-                },
+                }
             }
         }
         variables.sort_by(|a, b| a.location.cmp(&b.location));
