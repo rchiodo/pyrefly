@@ -139,7 +139,7 @@ Running `buck test pyrefly:pyrefly` triggers both test targets.
   You can override this with `--mode buck` or `--mode cargo`.
 - For external builds, always use `python3 test.py` instead of `./test.py`.
 - To run just formatting and linting (much faster than running tests):
-  `./test.py --no-test --no-conformance`
+  `./test.py --no-test --no-conformance --no-jsonschema`
 
 ### After modifying BUCK files (internal only)
 
