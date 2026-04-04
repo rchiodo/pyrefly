@@ -490,6 +490,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     }
 
     fn is_subset_protocol(&mut self, got: Type, protocol: ClassType) -> Result<(), SubsetError> {
+        let want = Type::ClassType(protocol.clone());
+        let has_no_vars = got.collect_all_vars().is_empty() && want.collect_all_vars().is_empty();
+
+        // Check cross-call protocol cache for types without Vars.
+        if has_no_vars && let Some(result) = self.solver.check_protocol_cache(&got, &want) {
+            return result;
+        }
+
+        // Save coinductive state so we can detect if any coinductive assumptions
+        // were used during this protocol check.
+        let prev_coinductive = self.coinductive_assumptions_used;
+        self.coinductive_assumptions_used = false;
+
         // For class-level coinductive reasoning: if the `got` type's type arguments
         // contain Vars, we're likely in a recursive pattern (e.g., checking method return
         // types that reference the same classes). Use (Class, Class) matching to detect
@@ -502,18 +515,35 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 protocol.class_object().clone(),
             );
             if !self.class_protocol_assumptions.insert(key.clone()) {
-                // Coinductive: assume this recursive class-level check succeeds
+                // Coinductive: assume this recursive class-level check succeeds.
+                // Mark that a coinductive assumption was used so callers don't
+                // cache results that depend on this optimistic assumption.
+                self.coinductive_assumptions_used = true;
                 return Ok(());
             }
             Some(key)
         } else {
             None
         };
-        let res = self.is_subset_protocol_inner(got, protocol);
+        let res = self.is_subset_protocol_inner(got.clone(), protocol);
         // Clean up assumptions
         if let Some(key) = class_check {
             self.class_protocol_assumptions.shift_remove(&key);
         }
+
+        // Only cache in the persistent cross-call cache when:
+        // 1. Neither type contains Vars (so the result is context-independent)
+        // 2. No coinductive assumptions were used during this check
+        //    (otherwise the result may be contingent on an assumption
+        //    that could be invalidated by rollback)
+        let used_coinductive = self.coinductive_assumptions_used;
+        if has_no_vars && !used_coinductive {
+            self.solver.store_protocol_cache(got, want, res.clone());
+        }
+
+        // Restore: propagate any coinductive usage upward
+        self.coinductive_assumptions_used = prev_coinductive || used_coinductive;
+
         res
     }
 
@@ -1171,7 +1201,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             let key = (got.clone(), want.clone());
             if let Some(entry) = self.subset_cache.get(&key) {
                 return match entry {
-                    SubsetCacheEntry::InProgress | SubsetCacheEntry::Ok => Ok(()),
+                    SubsetCacheEntry::InProgress => {
+                        self.coinductive_assumptions_used = true;
+                        Ok(())
+                    }
+                    SubsetCacheEntry::Ok => Ok(()),
                     SubsetCacheEntry::Err(err) => Err(err.clone()),
                 };
             }
