@@ -1148,16 +1148,24 @@ impl Solver {
             .for_each(|t| self.expand_vars_mut(t));
         let lock = self.variables.lock();
         targs.iter_paired_mut().for_each(|(param, t)| {
-            if let Type::Var(v) = t
-                && let Variable::Quantified {
+            if let Type::Var(v) = t {
+                let mut e = lock.get_mut(*v);
+                if let Variable::Quantified {
                     quantified: q,
                     bounds,
-                } = &*lock.get(*v)
-                // If the variable has already been solved, do not generalize it.
-                && bounds.is_empty()
-                && *q == *param
-            {
-                *t = param.clone().to_type(&self.heap);
+                } = &mut *e
+                    && *q == *param
+                {
+                    if bounds.is_empty() {
+                        *t = param.clone().to_type(&self.heap);
+                    } else {
+                        // If the variable has already been solved, finalize its type now.
+                        *e = Variable::Answer(
+                            self.solve_bounds(mem::take(bounds))
+                                .unwrap_or_else(|| q.as_gradual_type()),
+                        );
+                    }
+                }
             }
         })
     }
