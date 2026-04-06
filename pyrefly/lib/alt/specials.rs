@@ -46,6 +46,33 @@ fn is_chained_attribute_access(x: &Expr) -> bool {
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
+    /// Apply a special form that takes exactly one type argument.
+    /// Validates arity, evaluates the argument, wraps the result in a type form.
+    pub(crate) fn apply_unary_special_form(
+        &self,
+        special_form: String,
+        arguments: &[Expr],
+        range: TextRange,
+        context: TypeFormContext,
+        errors: &ErrorCollector,
+        wrap: impl FnOnce(Type) -> Type,
+    ) -> Type {
+        if arguments.len() == 1 {
+            let arg = self.expr_untype(&arguments[0], context, errors);
+            self.heap.mk_type_form(wrap(arg))
+        } else {
+            self.error(
+                errors,
+                range,
+                ErrorInfo::Kind(ErrorKind::BadSpecialization),
+                format!(
+                    "Expected 1 type argument for `{special_form}`, got {}",
+                    arguments.len()
+                ),
+            )
+        }
+    }
+
     fn extra_unpack_error(&self, errors: &ErrorCollector, range: TextRange) -> Type {
         self.error(
             errors,
@@ -309,24 +336,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Expr::Tuple(x) => (x.elts.as_slice(), x.parenthesized),
             _ => (slice::from_ref(arguments), false),
         };
-
         match special_form {
-            SpecialForm::Optional if arguments.len() == 1 => {
-                self.heap
-                    .mk_type_form(self.heap.mk_optional(self.expr_untype(
-                        &arguments[0],
-                        TypeFormContext::TypeArgument,
-                        errors,
-                    )))
-            }
-            SpecialForm::Optional => self.error(
-                errors,
+            SpecialForm::Optional => self.apply_unary_special_form(
+                SpecialForm::Optional.to_string(),
+                arguments,
                 range,
-                ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                format!(
-                    "Expected 1 type argument for `Optional`, got {}",
-                    arguments.len()
-                ),
+                TypeFormContext::TypeArgument,
+                errors,
+                |arg| self.heap.mk_optional(arg),
             ),
             SpecialForm::Union => self.heap.mk_type_form(self.unions(
                 arguments.map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors)),
@@ -393,6 +410,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             SpecialForm::Callable if arguments.len() == 2 => {
+                let callable_error = || {
+                    self.heap
+                        .mk_type_form(self.heap.mk_callable_ellipsis(self.heap.mk_any_error()))
+                };
                 let ret = self.expr_untype(
                     &arguments[1],
                     TypeFormContext::TypeArgumentCallableReturn,
@@ -425,13 +446,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     ErrorInfo::Kind(ErrorKind::BadSpecialization),
                                     "Unrecognized callable type form".to_owned(),
                                 );
-                                self.heap.mk_type_form(
-                                    self.heap.mk_callable_ellipsis(self.heap.mk_any_error()),
-                                )
+                                callable_error()
                             }
-                            None => self.heap.mk_type_form(
-                                self.heap.mk_callable_ellipsis(self.heap.mk_any_error()),
-                            ),
+                            None => callable_error(),
                         }
                     }
                     Expr::EllipsisLiteral(_) => {
@@ -444,9 +461,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 .mk_type_form(self.heap.mk_callable_param_spec(ty, ret))
                         } else {
                             self.error(errors, name.range(),ErrorInfo::Kind(ErrorKind::BadSpecialization), format!("Callable types can only have `ParamSpec` in this position, got `{}`", self.for_display(ty)));
-                            self.heap.mk_type_form(
-                                self.heap.mk_callable_ellipsis(self.heap.mk_any_error()),
-                            )
+                            callable_error()
                         }
                     }
                     x @ Expr::Subscript(_) => {
@@ -457,9 +472,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 .mk_type_form(self.heap.mk_callable_concatenate(args, *pspec, ret)),
                             _ => {
                                 self.error(errors, x.range(),ErrorInfo::Kind(ErrorKind::BadSpecialization), format!("Callable types can only have `Concatenate` in this position, got `{}`", self.for_display(ty)));
-                                self.heap.mk_type_form(
-                                    self.heap.mk_callable_ellipsis(self.heap.mk_any_error()),
-                                )
+                                callable_error()
                             }
                         }
                     }
@@ -470,8 +483,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             ErrorInfo::Kind(ErrorKind::InvalidSyntax),
                             "Invalid `Callable` type".to_owned(),
                         );
-                        self.heap
-                            .mk_type_form(self.heap.mk_callable_ellipsis(self.heap.mk_any_error()))
+                        callable_error()
                     }
                 }
             }
@@ -488,39 +500,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap
                     .mk_type_form(self.heap.mk_callable_ellipsis(self.heap.mk_any_error()))
             }
-            SpecialForm::TypeGuard if arguments.len() == 1 => {
-                self.heap
-                    .mk_type_form(self.heap.mk_type_guard(self.expr_untype(
-                        &arguments[0],
-                        TypeFormContext::TypeArgument,
-                        errors,
-                    )))
-            }
-            SpecialForm::TypeGuard => self.error(
-                errors,
+            SpecialForm::TypeGuard => self.apply_unary_special_form(
+                SpecialForm::TypeGuard.to_string(),
+                arguments,
                 range,
-                ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                format!(
-                    "Expected 1 type argument for `TypeGuard`, got {}",
-                    arguments.len()
-                ),
+                TypeFormContext::TypeArgument,
+                errors,
+                |arg| self.heap.mk_type_guard(arg),
             ),
-            SpecialForm::TypeIs if arguments.len() == 1 => {
-                self.heap
-                    .mk_type_form(self.heap.mk_type_is(self.expr_untype(
-                        &arguments[0],
-                        TypeFormContext::TypeArgument,
-                        errors,
-                    )))
-            }
-            SpecialForm::TypeIs => self.error(
-                errors,
+            SpecialForm::TypeIs => self.apply_unary_special_form(
+                SpecialForm::TypeIs.to_string(),
+                arguments,
                 range,
-                ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                format!(
-                    "Expected 1 type argument for `TypeIs`, got {}",
-                    arguments.len()
-                ),
+                TypeFormContext::TypeArgument,
+                errors,
+                |arg| self.heap.mk_type_is(arg),
             ),
             SpecialForm::Unpack if arguments.len() == 1 => {
                 let arg = self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors);
@@ -543,35 +537,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     arguments.len()
                 ),
             ),
-            SpecialForm::Type if arguments.len() == 1 => {
-                self.heap
-                    .mk_type_form(self.heap.mk_type_form(self.expr_untype(
-                        &arguments[0],
-                        TypeFormContext::TypeArgumentForType,
-                        errors,
-                    )))
-            }
-            SpecialForm::Type => self.error(
-                errors,
+            SpecialForm::Type => self.apply_unary_special_form(
+                SpecialForm::Type.to_string(),
+                arguments,
                 range,
-                ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                format!(
-                    "Expected 1 type argument for `Type`, got {}",
-                    arguments.len()
-                ),
+                TypeFormContext::TypeArgumentForType,
+                errors,
+                |arg| self.heap.mk_type_form(arg),
             ),
-            SpecialForm::TypeForm if arguments.len() == 1 => {
-                let inner = self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors);
-                self.heap.mk_type_form(self.heap.mk_typeform(inner))
-            }
-            SpecialForm::TypeForm => self.error(
-                errors,
+            SpecialForm::TypeForm => self.apply_unary_special_form(
+                SpecialForm::TypeForm.to_string(),
+                arguments,
                 range,
-                ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                format!(
-                    "Expected 1 type argument for `TypeForm`, got {}",
-                    arguments.len()
-                ),
+                TypeFormContext::TypeArgument,
+                errors,
+                |arg| self.heap.mk_typeform(arg),
             ),
             SpecialForm::Annotated if arguments.len() > 1 => {
                 let inner = self.expr_untype(&arguments[0], TypeFormContext::TypeArgument, errors);
