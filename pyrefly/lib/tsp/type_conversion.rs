@@ -29,6 +29,7 @@
 //! All `Type` variants are explicitly handled; no types fall through to a
 //! generic `SynthesizedType` stub.
 
+use std::sync::Arc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 
@@ -107,22 +108,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         }
 
         // --- Callable (typing.Callable[[int, str], bool]) ---
-        PyreflyType::Callable(c) => {
-            let ret = convert_type(&c.ret);
-            TspType::Function(TspFunctionType {
-                bound_to_type: None,
-                declaration: Declaration::Synthesized(SynthesizedDeclaration {
-                    kind: DeclarationKind::Synthesized,
-                    uri: String::new(),
-                }),
-                flags: TypeFlags::CALLABLE,
-                id: next_id(),
-                kind: TypeKind::Function,
-                return_type: Some(Box::new(ret)),
-                specialized_types: None,
-                type_alias_info: None,
-            })
-        }
+        PyreflyType::Callable(c) => convert_callable(c),
 
         // --- Unions ---
         PyreflyType::Union(u) => {
@@ -172,27 +158,12 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         // --- Forall (generic functions/callables) — unwrap body ---
         PyreflyType::Forall(forall) => match &forall.body {
             Forallable::Function(f) => convert_function(&f.signature, &f.metadata.kind, None),
-            Forallable::Callable(c) => {
-                let ret = convert_type(&c.ret);
-                TspType::Function(TspFunctionType {
-                    bound_to_type: None,
-                    declaration: Declaration::Synthesized(SynthesizedDeclaration {
-                        kind: DeclarationKind::Synthesized,
-                        uri: String::new(),
-                    }),
-                    flags: TypeFlags::CALLABLE,
-                    id: next_id(),
-                    kind: TypeKind::Function,
-                    return_type: Some(Box::new(ret)),
-                    specialized_types: None,
-                    type_alias_info: None,
-                })
-            }
+            Forallable::Callable(c) => convert_callable(c),
             Forallable::TypeAlias(ta) => match ta {
                 pyrefly_types::type_alias::TypeAliasData::Value(alias) => {
                     convert_type(&alias.as_type())
                 }
-                pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(&r.name.to_string()),
+                pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(r.name.as_str()),
             },
         },
 
@@ -252,9 +223,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         }
 
         // --- Quantified / QuantifiedValue (type params during solving) ---
-        PyreflyType::Quantified(q) | PyreflyType::QuantifiedValue(q) => {
-            builtin(&q.name.to_string())
-        }
+        PyreflyType::Quantified(q) | PyreflyType::QuantifiedValue(q) => builtin(q.name.as_str()),
 
         // --- LiteralString → built-in ---
         PyreflyType::LiteralString(_) => builtin("LiteralString"),
@@ -279,7 +248,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
             pyrefly_types::type_alias::TypeAliasData::Value(alias) => {
                 convert_type(&alias.as_type())
             }
-            pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(&r.name.to_string()),
+            pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(r.name.as_str()),
         },
 
         // --- SpecialForm → built-in with the form name ---
@@ -295,13 +264,13 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         PyreflyType::Intersect(pair) => convert_type(&pair.1),
 
         // --- ElementOfTypeVarTuple → builtin with name ---
-        PyreflyType::ElementOfTypeVarTuple(q) => builtin(&q.name.to_string()),
+        PyreflyType::ElementOfTypeVarTuple(q) => builtin(q.name.as_str()),
 
         // --- ParamSpec-related internal types → builtin with name ---
         PyreflyType::Args(q)
         | PyreflyType::Kwargs(q)
         | PyreflyType::ArgsValue(q)
-        | PyreflyType::KwargsValue(q) => builtin(&q.name.to_string()),
+        | PyreflyType::KwargsValue(q) => builtin(q.name.as_str()),
 
         // --- ParamSpecValue → built-in ---
         PyreflyType::ParamSpecValue(_) => builtin("ParamSpec"),
@@ -428,6 +397,24 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
     }
 }
 
+/// Convert a `typing.Callable` to a TSP `FunctionType` with synthesized declaration.
+fn convert_callable(callable: &Callable) -> TspType {
+    let ret = convert_type(&callable.ret);
+    TspType::Function(TspFunctionType {
+        bound_to_type: None,
+        declaration: Declaration::Synthesized(SynthesizedDeclaration {
+            kind: DeclarationKind::Synthesized,
+            uri: String::new(),
+        }),
+        flags: TypeFlags::CALLABLE,
+        id: next_id(),
+        kind: TypeKind::Function,
+        return_type: Some(Box::new(ret)),
+        specialized_types: None,
+        type_alias_info: None,
+    })
+}
+
 /// Convert a pyrefly function to a TSP `FunctionType` with declaration info.
 ///
 /// For `FunctionKind::Def`, produces a `RegularDeclaration` pointing to the
@@ -476,18 +463,21 @@ fn convert_overload_to_tsp(
     overload: &pyrefly_types::types::Overload,
     bound_to_type: Option<Box<TspType>>,
 ) -> TspType {
+    // Wrap in Arc to share across overloads without deep-cloning the Box each time.
+    let shared = bound_to_type.map(Arc::from);
     let overloads: Vec<TspType> = overload
         .signatures
         .iter()
-        .map(|sig| match sig {
-            pyrefly_types::types::OverloadType::Function(f) => {
-                convert_function(&f.signature, &f.metadata.kind, bound_to_type.clone())
+        .map(|sig| {
+            let bt = shared.as_ref().map(|arc| Box::new(TspType::clone(arc)));
+            match sig {
+                pyrefly_types::types::OverloadType::Function(f) => {
+                    convert_function(&f.signature, &f.metadata.kind, bt)
+                }
+                pyrefly_types::types::OverloadType::Forall(f) => {
+                    convert_function(&f.body.signature, &f.body.metadata.kind, bt)
+                }
             }
-            pyrefly_types::types::OverloadType::Forall(f) => convert_function(
-                &f.body.signature,
-                &f.body.metadata.kind,
-                bound_to_type.clone(),
-            ),
         })
         .collect();
     TspType::Overloaded(TspOverloadedType {
