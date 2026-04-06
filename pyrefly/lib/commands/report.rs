@@ -291,6 +291,13 @@ pub struct ReportArgs {
     /// file is also present in the set of files to check.
     #[clap(long, default_value_t = true, action = clap::ArgAction::Set)]
     prefer_stubs: bool,
+
+    /// Override the module name in the report output. When set, all modules
+    /// use this name instead of the name derived from the file path. Useful
+    /// when reporting on a single module whose canonical package name differs
+    /// from its filesystem layout.
+    #[clap(long)]
+    module: Option<String>,
 }
 
 impl ReportArgs {
@@ -305,6 +312,7 @@ impl ReportArgs {
             files_to_check,
             config_finder,
             self.prefer_stubs,
+            self.module,
             thread_count,
         )
     }
@@ -1231,6 +1239,7 @@ impl ReportArgs {
 
     fn build_module_report(
         name: String,
+        derived_name: &str,
         line_count: usize,
         functions: &[Function],
         variables: &[Variable],
@@ -1278,8 +1287,10 @@ impl ReportArgs {
             });
         }
 
-        // Compute per-module entity counts.
-        let module_prefix = format!("{}.", name);
+        // Compute per-module entity counts. Use the derived (file-based)
+        // module name for prefix matching, since symbol names are built from
+        // the derived name and only rewritten to the override name later.
+        let module_prefix = format!("{}.", derived_name);
         let mut n_functions = 0usize;
         let mut n_methods = 0usize;
         let mut n_function_params = 0usize;
@@ -1332,6 +1343,7 @@ impl ReportArgs {
         files_to_check: Box<dyn Includes>,
         config_finder: ConfigFinder,
         prefer_stubs: bool,
+        module_name_override: Option<String>,
         thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
@@ -1463,15 +1475,38 @@ impl ReportArgs {
                     );
                 }
 
-                let name = handle.module().to_string();
-                let module_report = Self::build_module_report(
-                    name,
+                let derived_name = handle.module().to_string();
+                let name = module_name_override.clone().unwrap_or(derived_name.clone());
+                let mut module_report = Self::build_module_report(
+                    name.clone(),
+                    &derived_name,
                     line_count,
                     &functions,
                     &variables,
                     &classes,
                     suppressions,
                 );
+                // When --module overrides the name, rewrite symbol prefixes to match.
+                if module_name_override.is_some() && name != derived_name {
+                    let old_prefix = format!("{}.", derived_name);
+                    let new_prefix = format!("{}.", name);
+                    for n in &mut module_report.names {
+                        if let Some(rest) = n.strip_prefix(&old_prefix) {
+                            *n = format!("{new_prefix}{rest}");
+                        }
+                    }
+                    for sym in &mut module_report.symbol_reports {
+                        let sym_name = match sym {
+                            SymbolReport::Attr { name, .. }
+                            | SymbolReport::Function { name, .. }
+                            | SymbolReport::Class { name, .. }
+                            | SymbolReport::Property { name, .. } => name,
+                        };
+                        if let Some(rest) = sym_name.strip_prefix(&old_prefix) {
+                            *sym_name = format!("{new_prefix}{rest}");
+                        }
+                    }
+                }
                 module_reports.push(module_report);
             }
         }
@@ -1574,12 +1609,40 @@ mod tests {
 
         ReportArgs::build_module_report(
             "test".to_owned(),
+            "test",
             line_count,
             &functions,
             &variables,
             &classes,
             suppressions,
         )
+    }
+
+    /// Build a `ModuleReport` with a module name override, mirroring
+    /// the `run_inner` --module flag logic.
+    fn build_module_report_with_override(py_file: &str, override_name: &str) -> ModuleReport {
+        let mut report = build_module_report_for_test(py_file);
+        let derived_name = "test";
+        let old_prefix = format!("{}.", derived_name);
+        let new_prefix = format!("{}.", override_name);
+        report.name = override_name.to_owned();
+        for n in &mut report.names {
+            if let Some(rest) = n.strip_prefix(&old_prefix) {
+                *n = format!("{new_prefix}{rest}");
+            }
+        }
+        for sym in &mut report.symbol_reports {
+            let sym_name = match sym {
+                SymbolReport::Attr { name, .. }
+                | SymbolReport::Function { name, .. }
+                | SymbolReport::Class { name, .. }
+                | SymbolReport::Property { name, .. } => name,
+            };
+            if let Some(rest) = sym_name.strip_prefix(&old_prefix) {
+                *sym_name = format!("{new_prefix}{rest}");
+            }
+        }
+        report
     }
 
     /// Build a `ModuleReport` that merges a `.pyi` stub with its `.py` source,
@@ -1678,6 +1741,7 @@ mod tests {
 
         ReportArgs::build_module_report(
             "test".to_owned(),
+            "test",
             line_count,
             &functions,
             &variables,
@@ -2040,5 +2104,13 @@ mod tests {
     fn test_report_private_filtering() {
         let report = build_module_report_for_test("private_filtering.py");
         compare_snapshot("private_filtering.expected.json", &report);
+    }
+
+    /// --module name override: entity counts (n_functions vs n_methods) must
+    /// be correct even when the output module name differs from the derived name.
+    #[test]
+    fn test_report_module_name_override() {
+        let report = build_module_report_with_override("functions.py", "my.package.module");
+        compare_snapshot("module_name_override.expected.json", &report);
     }
 }
