@@ -11,32 +11,43 @@
 //!  - `ClassType` → TSP `ClassType` with a `RegularDeclaration` pointing to
 //!    the class definition in source (or bundled typeshed).
 //!  - `ClassDef` → TSP `ClassType` with `Instantiable` flag.
-//!  - `Function` → TSP `SynthesizedType` with stub content.
-//!  - `BoundMethod` → TSP `SynthesizedType` with stub content.
+//!  - `Function` → TSP `FunctionType` with declaration and return type.
+//!  - `BoundMethod` → TSP `FunctionType` with `bound_to_type`.
 //!  - `Literal` → TSP `ClassType` with `literal_value`.
 //!  - `Union` → TSP `UnionType` (recursively converting members).
 //!  - `Module` → TSP `ModuleType`.
+//!  - `TypeVar`/`ParamSpec`/`TypeVarTuple` → TSP `TypeVarType` (`DeclaredType`).
+//!  - `Forall` → unwraps body and converts recursively.
+//!  - `Callable` → TSP `FunctionType` with synthesized declaration.
+//!  - `Tuple` → TSP `ClassType` with type args.
+//!  - `Tensor`/`NNModule` → TSP `ClassType` from their base class.
+//!  - `TypeAlias` → unwraps to the aliased type.
+//!  - `SpecialForm` → TSP `BuiltInType` with the form name.
 //!  - `Any`, `Never`, `None`, `Ellipsis` → TSP `BuiltInType`.
-//!  - Everything else → TSP `SynthesizedType` as a fallback.
+//!  - Solver-internal types → TSP `BuiltInType` with a representative name.
+//!
+//! All `Type` variants are explicitly handled; no types fall through to a
+//! generic `SynthesizedType` stub.
 
-use std::collections::HashSet;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
 
 use lsp_types::Url;
 use pyrefly_types::callable::Callable;
 use pyrefly_types::callable::FunctionKind;
-use pyrefly_types::callable::Params;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType as PyreflyClassType;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::types::BoundMethodType;
+use pyrefly_types::types::Forallable;
 use pyrefly_types::types::Type as PyreflyType;
 use tsp_types::BuiltInType;
 use tsp_types::ClassType as TspClassType;
 use tsp_types::Declaration;
 use tsp_types::DeclarationCategory;
 use tsp_types::DeclarationKind;
+use tsp_types::DeclaredType;
+use tsp_types::FunctionType as TspFunctionType;
 use tsp_types::LiteralValue;
 use tsp_types::ModuleType as TspModuleType;
 use tsp_types::Node;
@@ -44,8 +55,7 @@ use tsp_types::OverloadedType as TspOverloadedType;
 use tsp_types::Position as TspPosition;
 use tsp_types::Range as TspRange;
 use tsp_types::RegularDeclaration;
-use tsp_types::SynthesizedType;
-use tsp_types::SynthesizedTypeMetadata;
+use tsp_types::SynthesizedDeclaration;
 use tsp_types::Type as TspType;
 use tsp_types::TypeFlags;
 use tsp_types::TypeKind;
@@ -80,16 +90,39 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         PyreflyType::Literal(lit) => convert_literal(lit),
 
         // --- Functions ---
-        PyreflyType::Function(func) => convert_function(&func.signature, &func.metadata.kind),
+        PyreflyType::Function(func) => convert_function(&func.signature, &func.metadata.kind, None),
 
         // --- Bound methods ---
-        PyreflyType::BoundMethod(bm) => match &bm.func {
-            BoundMethodType::Function(f) => convert_function(&f.signature, &f.metadata.kind),
-            BoundMethodType::Forall(f) => {
-                convert_function(&f.body.signature, &f.body.metadata.kind)
+        PyreflyType::BoundMethod(bm) => {
+            let bound_to = Some(Box::new(convert_type(&bm.obj)));
+            match &bm.func {
+                BoundMethodType::Function(f) => {
+                    convert_function(&f.signature, &f.metadata.kind, bound_to)
+                }
+                BoundMethodType::Forall(f) => {
+                    convert_function(&f.body.signature, &f.body.metadata.kind, bound_to)
+                }
+                BoundMethodType::Overload(overload) => convert_overload_to_tsp(overload, bound_to),
             }
-            BoundMethodType::Overload(_) => synthesized(ty),
-        },
+        }
+
+        // --- Callable (typing.Callable[[int, str], bool]) ---
+        PyreflyType::Callable(c) => {
+            let ret = convert_type(&c.ret);
+            TspType::Function(TspFunctionType {
+                bound_to_type: None,
+                declaration: Declaration::Synthesized(SynthesizedDeclaration {
+                    kind: DeclarationKind::Synthesized,
+                    uri: String::new(),
+                }),
+                flags: TypeFlags::CALLABLE,
+                id: next_id(),
+                kind: TypeKind::Function,
+                return_type: Some(Box::new(ret)),
+                specialized_types: None,
+                type_alias_info: None,
+            })
+        }
 
         // --- Unions ---
         PyreflyType::Union(u) => {
@@ -128,36 +161,65 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
                     type_args: None,
                 })
             } else {
-                synthesized(ty)
+                // Anonymous TypedDict — no class backing
+                builtin("TypedDict")
             }
         }
 
         // --- Overloaded functions ---
-        PyreflyType::Overload(overload) => {
-            let overloads: Vec<TspType> = overload
-                .signatures
-                .iter()
-                .map(|sig| match sig {
-                    pyrefly_types::types::OverloadType::Function(f) => {
-                        convert_function(&f.signature, &f.metadata.kind)
-                    }
-                    pyrefly_types::types::OverloadType::Forall(f) => {
-                        convert_function(&f.body.signature, &f.body.metadata.kind)
-                    }
+        PyreflyType::Overload(overload) => convert_overload_to_tsp(overload, None),
+
+        // --- Forall (generic functions/callables) — unwrap body ---
+        PyreflyType::Forall(forall) => match &forall.body {
+            Forallable::Function(f) => convert_function(&f.signature, &f.metadata.kind, None),
+            Forallable::Callable(c) => {
+                let ret = convert_type(&c.ret);
+                TspType::Function(TspFunctionType {
+                    bound_to_type: None,
+                    declaration: Declaration::Synthesized(SynthesizedDeclaration {
+                        kind: DeclarationKind::Synthesized,
+                        uri: String::new(),
+                    }),
+                    flags: TypeFlags::CALLABLE,
+                    id: next_id(),
+                    kind: TypeKind::Function,
+                    return_type: Some(Box::new(ret)),
+                    specialized_types: None,
+                    type_alias_info: None,
                 })
-                .collect();
-            TspType::Overloaded(TspOverloadedType {
-                flags: TypeFlags::CALLABLE,
+            }
+            Forallable::TypeAlias(ta) => match ta {
+                pyrefly_types::type_alias::TypeAliasData::Value(alias) => {
+                    convert_type(&alias.as_type())
+                }
+                pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(&r.name.to_string()),
+            },
+        },
+
+        // --- Tuples → ClassType for `tuple` with type args ---
+        PyreflyType::Tuple(t) => {
+            let type_args = match t {
+                pyrefly_types::tuple::Tuple::Concrete(elts) if !elts.is_empty() => {
+                    Some(elts.iter().map(convert_type).collect())
+                }
+                pyrefly_types::tuple::Tuple::Unbounded(elem) => {
+                    Some(vec![convert_type(elem.as_ref())])
+                }
+                _ => None,
+            };
+            TspType::Class(TspClassType {
+                declaration: Declaration::Synthesized(SynthesizedDeclaration {
+                    kind: DeclarationKind::Synthesized,
+                    uri: String::new(),
+                }),
+                flags: TypeFlags::INSTANCE,
                 id: next_id(),
-                implementation: None,
-                kind: TypeKind::Overloaded,
-                overloads,
+                kind: TypeKind::Class,
+                literal_value: None,
                 type_alias_info: None,
+                type_args,
             })
         }
-
-        // --- Tuples are structurally typed; emit as SynthesizedType ---
-        PyreflyType::Tuple(_) => synthesized(ty),
 
         // --- type[X] wrapper ---
         PyreflyType::Type(inner) => {
@@ -175,8 +237,89 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
         // --- SelfType is a class type ---
         PyreflyType::SelfType(ct) => convert_class_type(ct, TypeFlags::INSTANCE),
 
-        // --- Fallback: emit a SynthesizedType with the Display string ---
-        _other => synthesized(ty),
+        // --- TypeVar, ParamSpec, TypeVarTuple → TSP TypeVarType (DeclaredType) ---
+        PyreflyType::TypeVar(tv) => {
+            let qname = tv.qname();
+            TspType::Var(make_typevar_declared(qname))
+        }
+        PyreflyType::ParamSpec(ps) => {
+            let qname = ps.qname();
+            TspType::Var(make_typevar_declared(qname))
+        }
+        PyreflyType::TypeVarTuple(tvt) => {
+            let qname = tvt.qname();
+            TspType::Var(make_typevar_declared(qname))
+        }
+
+        // --- Quantified / QuantifiedValue (type params during solving) ---
+        PyreflyType::Quantified(q) | PyreflyType::QuantifiedValue(q) => {
+            builtin(&q.name.to_string())
+        }
+
+        // --- LiteralString → built-in ---
+        PyreflyType::LiteralString(_) => builtin("LiteralString"),
+
+        // --- Annotated[X, ...] → unwrap to X ---
+        PyreflyType::Annotated(inner, _) => convert_type(inner),
+
+        // --- TypeGuard[X] / TypeIs[X] → convert as bool (the runtime return type) ---
+        PyreflyType::TypeGuard(_) | PyreflyType::TypeIs(_) => builtin("bool"),
+
+        // --- SuperInstance → convert as the class type ---
+        PyreflyType::SuperInstance(si) => convert_class_type(&si.0, TypeFlags::INSTANCE),
+
+        // --- Tensor → ClassType from base_class ---
+        PyreflyType::Tensor(t) => convert_class_type(&t.base_class, TypeFlags::INSTANCE),
+
+        // --- NNModule → ClassType from class ---
+        PyreflyType::NNModule(m) => convert_class_type(&m.class, TypeFlags::INSTANCE),
+
+        // --- TypeAlias → unwrap to the aliased type, or builtin for refs ---
+        PyreflyType::TypeAlias(ta) | PyreflyType::UntypedAlias(ta) => match ta.as_ref() {
+            pyrefly_types::type_alias::TypeAliasData::Value(alias) => {
+                convert_type(&alias.as_type())
+            }
+            pyrefly_types::type_alias::TypeAliasData::Ref(r) => builtin(&r.name.to_string()),
+        },
+
+        // --- SpecialForm → built-in with the form name ---
+        PyreflyType::SpecialForm(sf) => builtin(&sf.to_string()),
+
+        // --- Unpack(X) → convert inner ---
+        PyreflyType::Unpack(inner) => convert_type(inner),
+
+        // --- TypeForm(X) → convert inner ---
+        PyreflyType::TypeForm(inner) => convert_type(inner),
+
+        // --- Intersect → convert the fallback type ---
+        PyreflyType::Intersect(pair) => convert_type(&pair.1),
+
+        // --- ElementOfTypeVarTuple → builtin with name ---
+        PyreflyType::ElementOfTypeVarTuple(q) => builtin(&q.name.to_string()),
+
+        // --- ParamSpec-related internal types → builtin with name ---
+        PyreflyType::Args(q)
+        | PyreflyType::Kwargs(q)
+        | PyreflyType::ArgsValue(q)
+        | PyreflyType::KwargsValue(q) => builtin(&q.name.to_string()),
+
+        // --- ParamSpecValue → built-in ---
+        PyreflyType::ParamSpecValue(_) => builtin("ParamSpec"),
+
+        // --- Concatenate → built-in ---
+        PyreflyType::Concatenate(..) => builtin("Concatenate"),
+
+        // --- KwCall → convert the return type ---
+        PyreflyType::KwCall(kw) => convert_type(&kw.return_ty),
+
+        // --- Size / Dim → int (they represent integer dimensions) ---
+        PyreflyType::Size(_) | PyreflyType::Dim(_) => builtin("int"),
+
+        // --- Solver-internal variable → built-in unknown ---
+        PyreflyType::Var(_) => builtin("Unknown"),
+
+        // --- Materialization is a solver artifact ---
+        PyreflyType::Materialization => builtin("Unknown"),
     }
 }
 
@@ -249,25 +392,15 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
                 Lit::Bytes(_) | Lit::Enum(_) => (None, ""),
             };
             if let Some(lv) = literal_value {
-                let dummy_node = Node {
-                    range: TspRange {
-                        start: TspPosition {
-                            line: 0,
-                            character: 0,
-                        },
-                        end: TspPosition {
-                            line: 0,
-                            character: 0,
-                        },
-                    },
-                    uri: String::new(),
-                };
                 TspType::Class(TspClassType {
                     declaration: Declaration::Regular(RegularDeclaration {
                         kind: DeclarationKind::Regular,
                         category: DeclarationCategory::Class,
                         name: Some(class_name.to_owned()),
-                        node: dummy_node,
+                        node: Node {
+                            range: zero_range(),
+                            uri: String::new(),
+                        },
                     }),
                     flags: TypeFlags::INSTANCE.with_literal(),
                     id: next_id(),
@@ -277,157 +410,117 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
                     type_args: None,
                 })
             } else {
-                // Bytes or other literals without a simple TSP representation
-                synthesized(&PyreflyType::Literal(Box::new(lit.clone())))
+                // Bytes literal — no direct TSP LiteralValue for bytes
+                TspType::Class(TspClassType {
+                    declaration: Declaration::Synthesized(SynthesizedDeclaration {
+                        kind: DeclarationKind::Synthesized,
+                        uri: String::new(),
+                    }),
+                    flags: TypeFlags::INSTANCE.with_literal(),
+                    id: next_id(),
+                    kind: TypeKind::Class,
+                    literal_value: None,
+                    type_alias_info: None,
+                    type_args: None,
+                })
             }
         }
     }
 }
 
-/// Convert a pyrefly function to a TSP `SynthesizedType` with stub content.
+/// Convert a pyrefly function to a TSP `FunctionType` with declaration info.
 ///
-/// Functions don't carry a TextRange in their FuncId, so we can't point
-/// the client at the original source declaration. Instead, we generate a
-/// self-contained Python stub that the client's SynthesizedType handler can
-/// parse, bind, and evaluate to reconstruct the function type.
-fn convert_function(callable: &Callable, kind: &FunctionKind) -> TspType {
-    if let FunctionKind::Def(func_id) = kind {
-        let func_name = func_id.name.as_str();
-        let (stub_content, offset) = generate_function_stub(callable, func_name);
-
-        let module = &func_id.module;
-        let module_path = module.path();
-        let module_uri = path_to_uri(module_path);
-        let module_name = module.name().to_string();
-
-        TspType::Synthesized(SynthesizedType {
-            flags: TypeFlags::CALLABLE,
-            id: next_id(),
-            kind: TypeKind::Synthesized,
-            metadata: SynthesizedTypeMetadata {
-                module: TspModuleType {
-                    flags: TypeFlags::NONE,
-                    id: next_id(),
-                    kind: TypeKind::Module,
-                    module_name,
-                    type_alias_info: None,
-                    uri: module_uri,
-                },
-                primary_definition_offset: offset,
+/// For `FunctionKind::Def`, produces a `RegularDeclaration` pointing to the
+/// module where the function is defined. For other kinds, produces a
+/// `SynthesizedDeclaration`.
+fn convert_function(
+    callable: &Callable,
+    kind: &FunctionKind,
+    bound_to_type: Option<Box<TspType>>,
+) -> TspType {
+    let ret = convert_type(&callable.ret);
+    let declaration = if let FunctionKind::Def(func_id) = kind {
+        let module_path = func_id.module.path();
+        let uri = path_to_uri(module_path);
+        Declaration::Regular(RegularDeclaration {
+            category: DeclarationCategory::Function,
+            kind: DeclarationKind::Regular,
+            name: Some(func_id.name.to_string()),
+            node: Node {
+                range: zero_range(),
+                uri,
             },
-            stub_content,
-            type_alias_info: None,
         })
     } else {
-        // Non-Def function kinds (IsInstance, Cast, etc.)
-        TspType::Synthesized(SynthesizedType {
-            flags: TypeFlags::CALLABLE,
-            id: next_id(),
-            kind: TypeKind::Synthesized,
-            metadata: empty_synthesized_metadata(),
-            stub_content: format!("{kind:?}"),
-            type_alias_info: None,
+        Declaration::Synthesized(SynthesizedDeclaration {
+            kind: DeclarationKind::Synthesized,
+            uri: String::new(),
         })
-    }
+    };
+
+    TspType::Function(TspFunctionType {
+        bound_to_type,
+        declaration,
+        flags: TypeFlags::CALLABLE,
+        id: next_id(),
+        kind: TypeKind::Function,
+        return_type: Some(Box::new(ret)),
+        specialized_types: None,
+        type_alias_info: None,
+    })
 }
 
-/// Collect type names from a pyrefly `Type` that need local `class X: pass`
-/// declarations in stub files. Stub `.pyi` files are isolated so ALL
-/// referenced type names must be declared locally.
-fn collect_type_names(ty: &PyreflyType, names: &mut HashSet<String>) {
-    match ty {
-        PyreflyType::ClassType(ct) => {
-            let name = ct.class_object().name().to_string();
-            names.insert(name);
-            for arg in ct.targs().as_slice() {
-                collect_type_names(arg, names);
+/// Convert a pyrefly `Overload` to a TSP `OverloadedType`.
+fn convert_overload_to_tsp(
+    overload: &pyrefly_types::types::Overload,
+    bound_to_type: Option<Box<TspType>>,
+) -> TspType {
+    let overloads: Vec<TspType> = overload
+        .signatures
+        .iter()
+        .map(|sig| match sig {
+            pyrefly_types::types::OverloadType::Function(f) => {
+                convert_function(&f.signature, &f.metadata.kind, bound_to_type.clone())
             }
-        }
-        PyreflyType::ClassDef(cls) => {
-            let name = cls.name().to_string();
-            names.insert(name);
-        }
-        PyreflyType::Quantified(q) | PyreflyType::QuantifiedValue(q) => {
-            let name = q.name.to_string();
-            names.insert(name);
-        }
-        PyreflyType::Union(u) => {
-            for member in &u.members {
-                collect_type_names(member, names);
-            }
-        }
-        PyreflyType::Type(inner) => {
-            collect_type_names(inner, names);
-        }
-        PyreflyType::Tuple(t) => match t {
-            pyrefly_types::tuple::Tuple::Concrete(elts) => {
-                for elem in elts {
-                    collect_type_names(elem, names);
-                }
-            }
-            pyrefly_types::tuple::Tuple::Unbounded(elem) => {
-                collect_type_names(elem.as_ref(), names);
-            }
-            pyrefly_types::tuple::Tuple::Unpacked(parts) => {
-                for elem in &parts.0 {
-                    collect_type_names(elem, names);
-                }
-                collect_type_names(&parts.1, names);
-                for elem in &parts.2 {
-                    collect_type_names(elem, names);
-                }
-            }
-        },
-        _ => {}
-    }
+            pyrefly_types::types::OverloadType::Forall(f) => convert_function(
+                &f.body.signature,
+                &f.body.metadata.kind,
+                bound_to_type.clone(),
+            ),
+        })
+        .collect();
+    TspType::Overloaded(TspOverloadedType {
+        flags: TypeFlags::CALLABLE,
+        id: next_id(),
+        implementation: None,
+        kind: TypeKind::Overloaded,
+        overloads,
+        type_alias_info: None,
+    })
 }
 
-/// Collect type names from a `Callable` (params + return type) for local
-/// stub declarations.
-fn collect_callable_type_names(callable: &Callable, names: &mut HashSet<String>) {
-    match &callable.params {
-        Params::List(params) => {
-            for param in params.items() {
-                collect_type_names(param.as_type(), names);
-            }
-        }
-        Params::ParamSpec(prefix, _) => {
-            for (ty, _) in prefix.iter() {
-                collect_type_names(ty, names);
-            }
-        }
-        Params::Ellipsis | Params::Materialization => {}
+/// Build a `DeclaredType` with `TypeKind::Typevar` from a `QName`.
+fn make_typevar_declared(qname: &pyrefly_python::qname::QName) -> DeclaredType {
+    let module_path = qname.module_path();
+    let uri = path_to_uri(module_path);
+    let range = qname.range();
+    let lsp_range = qname.module().to_lsp_range(range);
+
+    DeclaredType {
+        declaration: Declaration::Regular(RegularDeclaration {
+            category: DeclarationCategory::Typeparam,
+            kind: DeclarationKind::Regular,
+            name: Some(qname.id().to_string()),
+            node: Node {
+                range: lsp_range_to_tsp(lsp_range),
+                uri,
+            },
+        }),
+        flags: TypeFlags::NONE,
+        id: next_id(),
+        kind: TypeKind::Typevar,
+        type_alias_info: None,
     }
-    collect_type_names(&callable.ret, names);
-}
-
-/// Generate stub content for a function from its `Callable` signature.
-///
-/// The stub contains:
-/// 1. `class X: pass` declarations for each type referenced in the
-///    function signature.
-/// 2. A `def func_name(params) -> ret: ...` definition.
-///
-/// Returns `(stub_content, primary_definition_offset)`.
-fn generate_function_stub(callable: &Callable, func_name: &str) -> (String, i32) {
-    let mut names = HashSet::new();
-    collect_callable_type_names(callable, &mut names);
-
-    // Build preamble with class declarations for ALL referenced type names.
-    let mut stub = String::new();
-    let mut sorted_names: Vec<&String> = names.iter().collect();
-    sorted_names.sort(); // deterministic order
-    for name in sorted_names {
-        stub.push_str(&format!("class {name}:\n    pass\n"));
-    }
-
-    // Record offset before function definition
-    let offset = stub.len() as i32;
-
-    // Generate function definition using the Callable's Display.
-    stub.push_str(&format!("def {func_name}{callable}: ...\n"));
-
-    (stub, offset)
 }
 
 /// Build a `RegularDeclaration` from a pyrefly `Class`.
@@ -478,6 +571,20 @@ fn lsp_range_to_tsp(r: lsp_types::Range) -> TspRange {
     }
 }
 
+/// Build a TSP zero-based range (0:0–0:0).
+fn zero_range() -> TspRange {
+    TspRange {
+        start: TspPosition {
+            line: 0,
+            character: 0,
+        },
+        end: TspPosition {
+            line: 0,
+            character: 0,
+        },
+    }
+}
+
 /// Build a TSP `BuiltInType` with the given name.
 fn builtin(name: &str) -> TspType {
     TspType::BuiltInType(BuiltInType {
@@ -491,42 +598,39 @@ fn builtin(name: &str) -> TspType {
     })
 }
 
-/// Build a TSP `SynthesizedType` whose stub content is the type's display
-/// string.
-fn synthesized(ty: &PyreflyType) -> TspType {
-    let display = ty.to_string();
-    TspType::Synthesized(SynthesizedType {
-        flags: TypeFlags::INSTANCE,
-        id: next_id(),
-        kind: TypeKind::Synthesized,
-        metadata: empty_synthesized_metadata(),
-        stub_content: display,
-        type_alias_info: None,
-    })
-}
-
-/// Placeholder metadata for synthesized types.
-fn empty_synthesized_metadata() -> SynthesizedTypeMetadata {
-    SynthesizedTypeMetadata {
-        module: TspModuleType {
-            flags: TypeFlags::NONE,
-            id: 0,
-            kind: TypeKind::Module,
-            module_name: String::new(),
-            type_alias_info: None,
-            uri: String::new(),
-        },
-        primary_definition_offset: 0,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use pyrefly_types::types::AnyStyle;
     use pyrefly_types::types::NeverStyle;
     use pyrefly_types::types::Type as PyreflyType;
+    use tsp_types::SynthesizedType;
+    use tsp_types::SynthesizedTypeMetadata;
 
     use super::*;
+
+    /// Build a TSP `SynthesizedType` whose stub content is the type's display
+    /// string. Used only in tests.
+    fn synthesized(ty: &PyreflyType) -> TspType {
+        let display = ty.to_string();
+        TspType::Synthesized(SynthesizedType {
+            flags: TypeFlags::INSTANCE,
+            id: next_id(),
+            kind: TypeKind::Synthesized,
+            metadata: SynthesizedTypeMetadata {
+                module: TspModuleType {
+                    flags: TypeFlags::NONE,
+                    id: 0,
+                    kind: TypeKind::Module,
+                    module_name: String::new(),
+                    type_alias_info: None,
+                    uri: String::new(),
+                },
+                primary_definition_offset: 0,
+            },
+            stub_content: display,
+            type_alias_info: None,
+        })
+    }
 
     #[test]
     fn test_convert_any() {
