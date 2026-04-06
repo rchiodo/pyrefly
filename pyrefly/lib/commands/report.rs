@@ -530,7 +530,12 @@ impl ReportArgs {
                 continue;
             }
 
-            // Determine whether this field is from a recognized method (__init__, etc.)
+            // Skip class-body dunder attrs with implicit types (__slots__, __doc__, etc.)
+            if Self::is_implicit_dunder_attr(field.name.as_str()) {
+                continue;
+            }
+
+            // Only count instance attrs from recognized methods (__init__, etc.)
             let annotation_idx = match &field.definition {
                 ClassFieldDefinition::DefinedInMethod {
                     annotation, method, ..
@@ -906,6 +911,31 @@ impl ReportArgs {
             "__set_name__" => non_self_param_pos == 1,
             _ => false,
         }
+    }
+
+    /// Class-body dunder attributes whose types are implicit (determined by
+    /// the Python runtime). These should be excluded from coverage counting.
+    fn is_implicit_dunder_attr(name: &str) -> bool {
+        matches!(
+            name,
+            "__annotations__"
+                | "__base__"
+                | "__bases__"
+                | "__class__"
+                | "__dict__"
+                | "__doc__"
+                | "__firstlineno__"
+                | "__match_args__"
+                | "__module__"
+                | "__mro__"
+                | "__name__"
+                | "__objclass__"
+                | "__qualname__"
+                | "__slots__"
+                | "__static_attributes__"
+                | "__type_params__"
+                | "__weakref__"
+        )
     }
 
     /// Determine whether a function name represents a method (contains '.', i.e. `Cls.method`).
@@ -1811,6 +1841,14 @@ mod tests {
     fn test_report_dunder_params() {
         let report = build_module_report_for_test("dunder_params.py");
         compare_snapshot("dunder_params.expected.json", &report);
+    }
+
+    /// Class-body dunder attrs (__slots__, __doc__, __module__, etc.) are
+    /// excluded from coverage counting — their types are implicit.
+    #[test]
+    fn test_report_dunder_attrs() {
+        let report = build_module_report_for_test("dunder_attrs.py");
+        compare_snapshot("dunder_attrs.expected.json", &report);
     }
 
     /// Protocol classes define structural interfaces. The class itself should
