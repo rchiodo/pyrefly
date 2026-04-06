@@ -391,6 +391,21 @@ impl ReportArgs {
         }
     }
 
+    /// Returns true if the annotation text represents an explicit `Any` annotation.
+    fn is_any_annotation(annotation_text: &Option<String>) -> bool {
+        annotation_text.as_deref() == Some("Any")
+    }
+
+    /// Returns true if the name is public: does not start with `_`, or is a dunder (`__x__`).
+    /// Matches typestats `is_public_name`.
+    fn is_public_name(name: &str) -> bool {
+        !name.starts_with('_') || name.ends_with("__")
+    }
+
+    /// Module-level dunders that typestats always excludes from the report.
+    const EXCLUDED_MODULE_DUNDERS: &'static [&'static str] =
+        &["__all__", "__dir__", "__doc__", "__getattr__"];
+
     /// Returns true if the first parameter is self/cls (implicit, excluded from slot counting).
     fn is_self_or_cls(index: usize, name: &str) -> bool {
         index == 0 && (name == "self" || name == "cls")
@@ -419,6 +434,12 @@ impl ReportArgs {
         let mut variables = Vec::new();
         for idx in bindings.keys::<KeyExport>() {
             let KeyExport(name) = bindings.idx_to_key(idx);
+            // Skip non-public module-level names and excluded dunders.
+            let name_str = name.as_str();
+            if !Self::is_public_name(name_str) || Self::EXCLUDED_MODULE_DUNDERS.contains(&name_str)
+            {
+                continue;
+            }
             let qualified_name = format!("{module_prefix}{name}");
             if reported_names.contains(qualified_name.as_str()) {
                 continue;
@@ -509,7 +530,12 @@ impl ReportArgs {
         for field_idx in bindings.keys::<KeyClassField>() {
             let field = bindings.get(field_idx);
 
-            // Only count instance attrs from recognized methods (__init__, etc.)
+            // Skip private class attrs (single-underscore prefix).
+            if !Self::is_public_name(field.name.as_str()) {
+                continue;
+            }
+
+            // Determine whether this field is from a recognized method (__init__, etc.)
             let annotation_idx = match &field.definition {
                 ClassFieldDefinition::DefinedInMethod {
                     annotation, method, ..
@@ -612,6 +638,10 @@ impl ReportArgs {
                             if Self::has_function_ancestor(&cls.parent) {
                                 continue;
                             }
+                            // Skip private class methods (single-underscore prefix).
+                            if !Self::is_public_name(fun.def.name.as_str()) {
+                                continue;
+                            }
                             let class_qname =
                                 Self::class_qualified_name(module, &cls.parent, &cls.def.name);
                             format!("{module_prefix}{class_qname}.{}", fun.def.name)
@@ -624,6 +654,10 @@ impl ReportArgs {
                     // Skip functions not present in the module's exports
                     // (e.g. functions nested inside other functions).
                     if !exports.contains_key(&fun.def.name.id) {
+                        continue;
+                    }
+                    // Skip non-public module-level functions.
+                    if !Self::is_public_name(fun.def.name.as_str()) {
                         continue;
                     }
                     format!("{}{}", module_prefix, fun.def.name)
@@ -1758,5 +1792,12 @@ mod tests {
     fn test_report_method_aliases() {
         let report = build_module_report_for_test("method_aliases.py");
         compare_snapshot("method_aliases.expected.json", &report);
+    }
+
+    /// Non-public names and excluded module dunders are filtered from the report.
+    #[test]
+    fn test_report_private_filtering() {
+        let report = build_module_report_for_test("private_filtering.py");
+        compare_snapshot("private_filtering.expected.json", &report);
     }
 }
