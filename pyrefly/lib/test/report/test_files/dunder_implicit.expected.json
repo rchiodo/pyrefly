@@ -102,5 +102,13 @@
   "n_any": 0,
   "n_untyped": 0,
   "coverage": 100.0,
-  "strict_coverage": 100.0
+  "strict_coverage": 100.0,
+  "n_functions": 0,
+  "n_methods": 6,
+  "n_function_params": 0,
+  "n_method_params": 0,
+  "n_classes": 1,
+  "n_attrs": 0,
+  "n_properties": 0,
+  "n_type_ignores": 0
 }

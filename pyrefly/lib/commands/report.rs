@@ -167,6 +167,8 @@ struct Function {
     parameters: Vec<Parameter>,
     is_type_known: bool,
     is_property: bool,
+    /// Number of non-self/cls, non-implicit params (for entity counting).
+    n_params: usize,
     slots: SlotCounts,
     location: Location,
 }
@@ -239,6 +241,14 @@ struct ModuleReport {
     slots: SlotCounts,
     coverage: f64,
     strict_coverage: f64,
+    n_functions: usize,
+    n_methods: usize,
+    n_function_params: usize,
+    n_method_params: usize,
+    n_classes: usize,
+    n_attrs: usize,
+    n_properties: usize,
+    n_type_ignores: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -701,6 +711,7 @@ impl ReportArgs {
                     Self::classify_slot(return_annotation.is_some(), is_return_type_known)
                 };
                 let mut func_slots = return_slot;
+                let mut n_params = 0usize;
 
                 for (i, param) in all_params.iter().enumerate() {
                     let param_name = param.name.as_str();
@@ -746,6 +757,7 @@ impl ReportArgs {
                         let param_slot =
                             Self::classify_slot(param_annotation.is_some(), is_param_type_known);
                         func_slots = func_slots.merge(param_slot);
+                        n_params += 1;
                     }
 
                     parameters.push(Parameter {
@@ -774,6 +786,7 @@ impl ReportArgs {
                     parameters,
                     is_type_known,
                     is_property,
+                    n_params,
                     slots: func_slots,
                     location,
                 });
@@ -812,6 +825,7 @@ impl ReportArgs {
                         parameters: target_func.parameters.clone(),
                         is_type_known: target_func.is_type_known,
                         is_property: target_func.is_property,
+                        n_params: target_func.n_params,
                     });
                 }
             }
@@ -944,7 +958,7 @@ impl ReportArgs {
         without_prefix.contains('.')
     }
 
-    /// Calculate the aggregate summary for all module reports.
+    /// Calculate the aggregate summary by summing per-module entity counts.
     fn calculate_summary(module_reports: &[ModuleReport]) -> ReportSummary {
         let n_modules = module_reports.len();
         let mut total_slots = SlotCounts::default();
@@ -959,32 +973,14 @@ impl ReportArgs {
 
         for module in module_reports {
             total_slots = total_slots.merge(module.slots);
-            n_type_ignores += module.type_ignores.len();
-
-            let module_prefix = format!("{}.", module.name);
-            for sym in &module.symbol_reports {
-                match sym {
-                    SymbolReport::Function { name, slots, .. } => {
-                        let params = slots.n_typable.saturating_sub(1);
-                        if Self::is_method(name, &module_prefix) {
-                            n_methods += 1;
-                            n_method_params += params;
-                        } else {
-                            n_functions += 1;
-                            n_function_params += params;
-                        }
-                    }
-                    SymbolReport::Property { .. } => {
-                        n_properties += 1;
-                    }
-                    SymbolReport::Attr { .. } => {
-                        n_attrs += 1;
-                    }
-                    SymbolReport::Class { .. } => {
-                        n_classes += 1;
-                    }
-                }
-            }
+            n_functions += module.n_functions;
+            n_methods += module.n_methods;
+            n_function_params += module.n_function_params;
+            n_method_params += module.n_method_params;
+            n_classes += module.n_classes;
+            n_attrs += module.n_attrs;
+            n_properties += module.n_properties;
+            n_type_ignores += module.n_type_ignores;
         }
 
         ReportSummary {
@@ -1222,6 +1218,36 @@ impl ReportArgs {
             });
         }
 
+        // Compute per-module entity counts.
+        let module_prefix = format!("{}.", name);
+        let mut n_functions = 0usize;
+        let mut n_methods = 0usize;
+        let mut n_function_params = 0usize;
+        let mut n_method_params = 0usize;
+        let mut n_classes = 0usize;
+        let mut n_attrs = 0usize;
+        let mut n_properties = 0usize;
+        // Count functions/methods using the Function list directly so we
+        // can use n_params (accurate even for implicit-return dunders).
+        for func in functions.iter().filter(|f| !f.is_property) {
+            if Self::is_method(&func.name, &module_prefix) {
+                n_methods += 1;
+                n_method_params += func.n_params;
+            } else {
+                n_functions += 1;
+                n_function_params += func.n_params;
+            }
+        }
+        for sym in &symbol_reports {
+            match sym {
+                SymbolReport::Property { .. } => n_properties += 1,
+                SymbolReport::Attr { .. } => n_attrs += 1,
+                SymbolReport::Class { .. } => n_classes += 1,
+                SymbolReport::Function { .. } => {}
+            }
+        }
+        let n_type_ignores = suppressions.len();
+
         ModuleReport {
             name,
             names,
@@ -1231,6 +1257,14 @@ impl ReportArgs {
             coverage: total_slots.coverage(),
             strict_coverage: total_slots.strict_coverage(),
             slots: total_slots,
+            n_functions,
+            n_methods,
+            n_function_params,
+            n_method_params,
+            n_classes,
+            n_attrs,
+            n_properties,
+            n_type_ignores,
         }
     }
 
@@ -1699,6 +1733,7 @@ mod tests {
                     .collect(),
                 is_type_known: false, // Not relevant for annotation-only tests
                 is_property: false,
+                n_params: 0,
                 slots: SlotCounts::default(),
                 location: Location { line: 1, column: 1 },
             }
