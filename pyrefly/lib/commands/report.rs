@@ -391,11 +391,6 @@ impl ReportArgs {
         }
     }
 
-    /// Returns true if the annotation text represents an explicit `Any` annotation.
-    fn is_any_annotation(annotation_text: &Option<String>) -> bool {
-        annotation_text.as_deref() == Some("Any")
-    }
-
     /// Returns true if the name is public: does not start with `_`, or is a dunder (`__x__`).
     /// Matches typestats `is_public_name`.
     fn is_public_name(name: &str) -> bool {
@@ -725,11 +720,24 @@ impl ReportArgs {
                         false
                     };
 
-                    if !is_param_type_known && !Self::is_self_or_cls(i, param_name) {
+                    // Check if this non-self param has an implicit type for a dunder method.
+                    // Like implicit returns, only applies when annotation is absent.
+                    let is_implicit_param = !Self::is_self_or_cls(i, param_name)
+                        && fun.class_key.is_some()
+                        && param_annotation.is_none()
+                        && Self::is_implicit_dunder_param(
+                            fun.def.name.as_str(),
+                            i.saturating_sub(1),
+                        );
+
+                    if !is_param_type_known
+                        && !Self::is_self_or_cls(i, param_name)
+                        && !is_implicit_param
+                    {
                         all_params_type_known = false;
                     }
 
-                    if !Self::is_self_or_cls(i, param_name) {
+                    if !Self::is_self_or_cls(i, param_name) && !is_implicit_param {
                         let param_slot =
                             Self::classify_slot(param_annotation.is_some(), is_param_type_known);
                         func_slots = func_slots.merge(param_slot);
@@ -870,7 +878,34 @@ impl ReportArgs {
                 | "__delattr__"
                 | "__setitem__"
                 | "__delitem__"
+                | "__dir__"
+                | "__instancecheck__"
+                | "__subclasscheck__"
+                | "__set__"
+                | "__delete__"
+                | "__set_name__"
+                | "__buffer__"
+                | "__release_buffer__"
+                | "__mro_entries__"
+                | "__subclasses__"
         )
+    }
+
+    /// Dunder method parameters whose types are fully determined by the
+    /// protocol (e.g. `__exit__`'s exception triple, `__getattr__`'s `name: str`).
+    /// Positions are 0-indexed after excluding self/cls.
+    /// Only applies when the annotation is absent — explicit annotations count normally.
+    fn is_implicit_dunder_param(name: &str, non_self_param_pos: usize) -> bool {
+        match name {
+            // __exit__/__aexit__(self, exc_type, exc_val, exc_tb)
+            "__exit__" | "__aexit__" => non_self_param_pos <= 2,
+            // First non-self param is protocol-fixed (str, int, or memoryview)
+            "__getattr__" | "__delattr__" | "__setattr__" | "__format__" | "__buffer__"
+            | "__release_buffer__" => non_self_param_pos == 0,
+            // __set_name__(self, owner, name: str) — name at position 1
+            "__set_name__" => non_self_param_pos == 1,
+            _ => false,
+        }
     }
 
     /// Determine whether a function name represents a method (contains '.', i.e. `Cls.method`).
@@ -1767,6 +1802,15 @@ mod tests {
     fn test_report_dunder_implicit() {
         let report = build_module_report_for_test("dunder_implicit.py");
         compare_snapshot("dunder_implicit.expected.json", &report);
+    }
+
+    /// Dunder methods with implicit parameter types (__exit__ exception triple,
+    /// __getattr__ name, __setattr__ name). Unannotated implicit params get 0 slots;
+    /// explicit annotations on implicit params count normally.
+    #[test]
+    fn test_report_dunder_params() {
+        let report = build_module_report_for_test("dunder_params.py");
+        compare_snapshot("dunder_params.expected.json", &report);
     }
 
     /// Protocol classes define structural interfaces. The class itself should
