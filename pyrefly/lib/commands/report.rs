@@ -587,7 +587,23 @@ impl ReportArgs {
             if let Key::Definition(id) = bindings.idx_to_key(idx)
                 && let Binding::Function(x, _pred, _class_meta) = bindings.get(idx)
             {
-                let fun = bindings.get(bindings.get(*x).undecorated_idx);
+                let decorated = bindings.get(*x);
+                let fun = bindings.get(decorated.undecorated_idx);
+                // Skip overload implementation signatures — only @overload
+                // decorated signatures are part of the public API.
+                if let Some(pred) = _pred
+                    && let Binding::Function(pred_x, _, _) = bindings.get(*pred)
+                {
+                    let pred_is_overload = answers
+                        .get_idx(bindings.get(*pred_x).undecorated_idx)
+                        .is_some_and(|u| u.metadata.flags.is_overload);
+                    let this_is_overload = answers
+                        .get_idx(decorated.undecorated_idx)
+                        .is_some_and(|u| u.metadata.flags.is_overload);
+                    if pred_is_overload && !this_is_overload {
+                        continue;
+                    }
+                }
                 let location = Self::range_to_location(module, fun.def.range);
                 let func_name = if let Some(class_key) = fun.class_key {
                     match bindings.get(class_key) {
@@ -1685,12 +1701,8 @@ mod tests {
 
     /// @overload decorated functions and methods.
     ///
-    /// Deliberate divergence from typestats: pyrefly emits each @overload
-    /// signature as a separate SymbolReport, giving per-signature coverage
-    /// granularity. Typestats merges overloads into a single FunctionReport
-    /// using worst-annotation-wins deduplication (positional by index, named
-    /// by name, variadic as singletons). Typestats can post-process pyrefly's
-    /// output to merge if needed; we keep the richer representation here.
+    /// Only the @overload signatures are reported; the implementation
+    /// signature is excluded because it is not part of the public API.
     #[test]
     fn test_report_overloads() {
         let report = build_module_report_for_test("overloads.py");
