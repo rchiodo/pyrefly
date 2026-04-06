@@ -546,7 +546,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             &def.name.id,
             Some(def_index),
             outer_funcs,
-            def.name.range,
         );
         let metadata = FuncMetadata { kind, flags };
 

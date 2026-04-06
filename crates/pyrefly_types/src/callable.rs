@@ -29,7 +29,6 @@ use pyrefly_util::visit::Visit;
 use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::Keyword;
 use ruff_python_ast::name::Name;
-use ruff_text_size::TextRange;
 use vec1::Vec1;
 use vec1::vec1;
 
@@ -451,7 +450,6 @@ impl FuncMetadata {
                 name: func,
                 def_index,
                 outer_funcs: None,
-                name_range: TextRange::default(),
             })),
             flags: FuncFlags::default(),
         }
@@ -552,9 +550,6 @@ pub struct FuncId {
     /// Dot-separated path of enclosing function names (e.g. `"f1"` for a function nested inside `f1`).
     /// `None` for top-level and class-method functions.
     pub outer_funcs: Option<Name>,
-    /// Source range of the function name identifier. Used for declaration
-    /// locations in the TSP protocol. Excluded from identity/hashing.
-    pub name_range: TextRange,
 }
 
 impl PartialEq for FuncId {
@@ -1046,7 +1041,6 @@ impl FunctionKind {
         func: &Name,
         def_index: Option<FuncDefIndex>,
         outer_funcs: Option<Name>,
-        name_range: TextRange,
     ) -> Self {
         match (module.name().as_str(), cls.as_ref(), func.as_str()) {
             ("builtins", None, "isinstance") => Self::IsInstance,
@@ -1076,7 +1070,6 @@ impl FunctionKind {
                 name: func.clone(),
                 def_index,
                 outer_funcs,
-                name_range,
             })),
         }
     }

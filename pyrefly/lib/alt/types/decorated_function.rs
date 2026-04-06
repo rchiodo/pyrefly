@@ -122,7 +122,6 @@ impl UndecoratedFunction {
                     name: Name::default(),
                     def_index: None,
                     outer_funcs: None,
-                    name_range: TextRange::default(),
                 })),
                 flags: FuncFlags::default(),
             },
