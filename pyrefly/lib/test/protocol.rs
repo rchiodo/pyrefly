@@ -969,7 +969,6 @@ other_flag = False
 }
 
 testcase!(
-    bug = "conformance: Module with Literal[100] should be accepted for protocol expecting int",
     test_protocols_modules_conformance,
     env_protocols_modules(),
     r#"
@@ -981,7 +980,7 @@ class Options1(Protocol):
     one_flag: bool
     other_flag: bool
 
-op1: Options1 = _protocols_modules1  # E: `Module[_protocols_modules1]` is not assignable to `Options1`
+op1: Options1 = _protocols_modules1
 "#,
 );
 

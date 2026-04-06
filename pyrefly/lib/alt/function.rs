@@ -75,6 +75,7 @@ use crate::types::callable::Function;
 use crate::types::callable::FunctionKind;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
+use crate::types::callable::PrefixParam;
 use crate::types::callable::PropertyMetadata;
 use crate::types::callable::PropertyRole;
 use crate::types::callable::Required;
@@ -687,8 +688,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 def.params
                     .iter()
                     .filter_map(|p| match p {
-                        Param::PosOnly(_, ty, req) => Some((ty.clone(), req.clone())),
-                        Param::Pos(_, ty, req) => Some((ty.clone(), req.clone())),
+                        Param::PosOnly(name, ty, req) => {
+                            Some(PrefixParam::PosOnly(name.clone(), ty.clone(), req.clone()))
+                        }
+                        Param::Pos(name, ty, req) => {
+                            Some(PrefixParam::Pos(name.clone(), ty.clone(), req.clone()))
+                        }
                         _ => None,
                     })
                     .collect(),
@@ -1593,7 +1598,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn step_pred(&self, pred: &mut Option<Idx<Key>>) -> Option<DecoratedFunction> {
         let pred_idx = (*pred)?;
         let mut b = self.bindings().get(pred_idx);
-        while let Binding::Forward(k) | Binding::ForwardToFirstUse(k) = b {
+        while let Binding::Forward(k) | Binding::PromoteForward(k) | Binding::ForwardToFirstUse(k) =
+            b
+        {
             b = self.bindings().get(*k);
         }
         if let Binding::Function(idx, pred_, _) = b {

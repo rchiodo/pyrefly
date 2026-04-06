@@ -988,3 +988,18 @@ C()     # E: Missing argument `x`  # E: Missing argument `x` in function `C.__ne
 C("5")  # E: Argument `Literal['5']` is not assignable to parameter `x` with type `int`  # E: Argument `Literal['5']` is not assignable to parameter `x` with type `int` in function `C.__new__`
     "#,
 );
+
+testcase!(
+    test_redundant_dict_constructor_call_ok,
+    r#"
+from collections.abc import Mapping
+from typing import Literal
+
+type Kind = Literal["a", "b"]
+
+def g(x: Mapping[Kind, int]) -> None: ...
+
+def f(x: dict[Kind, int]) -> None:
+    g(dict(x))
+    "#,
+);

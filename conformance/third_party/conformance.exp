@@ -2007,8 +2007,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "`Callable` requires exactly two arguments but 1 was found",
-      "description": "`Callable` requires exactly two arguments but 1 was found",
+      "concise_description": "Expected 2 arguments for `Callable`, got 1",
+      "description": "Expected 2 arguments for `Callable`, got 1",
       "line": 55,
       "name": "bad-specialization",
       "severity": "error",
@@ -2040,8 +2040,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "`Callable` requires exactly two arguments but 3 was found",
-      "description": "`Callable` requires exactly two arguments but 3 was found",
+      "concise_description": "Expected 2 arguments for `Callable`, got 3",
+      "description": "Expected 2 arguments for `Callable`, got 3",
       "line": 58,
       "name": "bad-specialization",
       "severity": "error",
@@ -5987,23 +5987,12 @@
     {
       "code": -2,
       "column": 13,
-      "concise_description": "Unexpected keyword argument `x` in function `foo`",
-      "description": "Unexpected keyword argument `x` in function `foo`",
+      "concise_description": "Expected argument `x` to be positional in function `foo`",
+      "description": "Expected argument `x` to be positional in function `foo`",
       "line": 83,
       "name": "unexpected-keyword",
       "severity": "error",
       "stop_column": 14,
-      "stop_line": 83
-    },
-    {
-      "code": -2,
-      "column": 13,
-      "concise_description": "Expected 1 more positional argument in function `foo`",
-      "description": "Expected 1 more positional argument in function `foo`",
-      "line": 83,
-      "name": "bad-argument-count",
-      "severity": "error",
-      "stop_column": 16,
       "stop_line": 83
     },
     {
@@ -8015,17 +8004,6 @@
     },
     {
       "code": -2,
-      "column": 50,
-      "concise_description": "`str` is not assignable to upper bound `LiteralString` of type variable `T`",
-      "description": "`str` is not assignable to upper bound `LiteralString` of type variable `T`",
-      "line": 133,
-      "name": "bad-specialization",
-      "severity": "error",
-      "stop_column": 53,
-      "stop_line": 133
-    },
-    {
-      "code": -2,
       "column": 51,
       "concise_description": "Argument `str` is not assignable to parameter `value` with type `LiteralString` in function `Container.__init__`",
       "description": "Argument `str` is not assignable to parameter `value` with type `LiteralString` in function `Container.__init__`",
@@ -9658,19 +9636,8 @@
     {
       "code": -2,
       "column": 17,
-      "concise_description": "`Module[_protocols_modules1]` is not assignable to `Options1`",
-      "description": "`Module[_protocols_modules1]` is not assignable to `Options1`\n  `Module[_protocols_modules1].timeout` has type `Literal[100]`, which is not consistent with `int` in `Options1.timeout` (the type of read-write attributes cannot be changed)",
-      "line": 25,
-      "name": "bad-assignment",
-      "severity": "error",
-      "stop_column": 36,
-      "stop_line": 25
-    },
-    {
-      "code": -2,
-      "column": 17,
       "concise_description": "`Module[_protocols_modules1]` is not assignable to `Options2`",
-      "description": "`Module[_protocols_modules1]` is not assignable to `Options2`\n  `Module[_protocols_modules1].timeout` has type `Literal[100]`, which is not consistent with `str` in `Options2.timeout` (the type of read-write attributes cannot be changed)",
+      "description": "`Module[_protocols_modules1]` is not assignable to `Options2`\n  `Module[_protocols_modules1].timeout` has type `int`, which is not consistent with `str` in `Options2.timeout` (the type of read-write attributes cannot be changed)",
       "line": 26,
       "name": "bad-assignment",
       "severity": "error",

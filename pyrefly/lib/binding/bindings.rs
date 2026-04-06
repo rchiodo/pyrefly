@@ -126,6 +126,7 @@ pub enum NameLookupResult {
     Found {
         idx: Idx<Key>,
         initialized: InitializedInFlow,
+        is_module_scope: bool,
     },
     /// This name is not defined in the current scope stack.
     NotFound,
@@ -187,6 +188,7 @@ struct BindingsInner {
     unused_parameters: Vec<UnusedParameter>,
     unused_imports: Vec<UnusedImport>,
     unused_variables: Vec<UnusedVariable>,
+    promote_ranges: SmallSet<TextRange>,
     /// Yield and yield-from indices for each lambda that contains yields,
     /// keyed by the lambda's TextRange. Populated at binding time so the
     /// solver can look up yield info without re-walking the AST.
@@ -235,6 +237,7 @@ struct DeferredBoundName {
     lookup_result_idx: Idx<Key>,
     /// Information about the usage context where the lookup occurred
     usage: Usage,
+    promote: bool,
 }
 
 pub struct BindingsBuilder<'a> {
@@ -273,6 +276,7 @@ pub struct BindingsBuilder<'a> {
     /// Defaults extracted from an adjacent `__new__.__defaults__` assignment,
     /// set by `stmts()` and consumed by namedtuple synthesis in `stmt()`.
     pub adjacent_namedtuple_defaults: Option<Vec<Expr>>,
+    pub promote_ranges: SmallSet<TextRange>,
 }
 
 /// An enum tracking whether we are in a generator expression
@@ -323,6 +327,7 @@ impl Bindings {
             unused_variables: Vec::new(),
             lambda_yield_keys: Vec::new(),
             subsequently_initialized: SmallSet::new(),
+            promote_ranges: SmallSet::new(),
         }))
     }
 
@@ -396,6 +401,10 @@ impl Bindings {
     /// It may not exist within `if False:` or `if sys.version == 0:` style code.
     pub fn is_valid_key(&self, k: &Key) -> bool {
         self.0.table.get::<Key>().0.key_to_idx(k).is_some()
+    }
+
+    pub fn should_promote_at_range(&self, range: TextRange) -> bool {
+        self.0.promote_ranges.contains(&range)
     }
 
     pub fn key_to_idx<K: Keyed>(&self, k: &K) -> Idx<K>
@@ -546,6 +555,7 @@ impl Bindings {
             next_lambda_param_id: 0,
             subsequently_initialized: SmallSet::new(),
             adjacent_namedtuple_defaults: None,
+            promote_ranges: SmallSet::new(),
         };
         builder.init_static_scope(&x.body, true);
         if module_info.name() != ModuleName::builtins() {
@@ -614,10 +624,13 @@ impl Bindings {
                 Exportable::Initialized(key, Some(ann)) => {
                     BindingExport::AnnotatedForward(ann, key)
                 }
-                Exportable::Initialized(key, None) => BindingExport::Forward(key),
-                Exportable::Uninitialized(key) => {
-                    BindingExport::Forward(builder.table.types.0.insert(key))
+                Exportable::Initialized(key, None) => {
+                    BindingExport::forward_maybe_promote(key, name.key())
                 }
+                Exportable::Uninitialized(key) => BindingExport::forward_maybe_promote(
+                    builder.table.types.0.insert(key),
+                    name.key(),
+                ),
             };
             if exported.contains_key_hashed(name.as_ref()) {
                 let key = name.into_key().clone();
@@ -631,9 +644,10 @@ impl Bindings {
         for (name, key) in invalid_all_exports {
             if !exported_names.contains(&name) {
                 exported_names.insert(name.clone());
-                builder
-                    .table
-                    .insert(KeyExport(name), BindingExport::Forward(key));
+                builder.table.insert(
+                    KeyExport(name.clone()),
+                    BindingExport::forward_maybe_promote(key, &name),
+                );
             }
         }
         Self(Arc::new(BindingsInner {
@@ -650,6 +664,7 @@ impl Bindings {
             unused_variables: builder.unused_variables,
             lambda_yield_keys: builder.lambda_yield_keys,
             subsequently_initialized: builder.subsequently_initialized,
+            promote_ranges: builder.promote_ranges,
         }))
     }
 
@@ -1141,7 +1156,9 @@ impl<'a> BindingsBuilder<'a> {
             }
             let binding = self.idx_to_binding(idx)?;
             match binding {
-                Binding::Forward(inner_idx) | Binding::ForwardToFirstUse(inner_idx) => {
+                Binding::Forward(inner_idx)
+                | Binding::PromoteForward(inner_idx)
+                | Binding::ForwardToFirstUse(inner_idx) => {
                     idx = *inner_idx;
                 }
                 Binding::NameAssign(x) => {
@@ -1282,9 +1299,17 @@ impl<'a> BindingsBuilder<'a> {
                         .unwrap_or(FlowStyle::Other);
                     self.scopes.define_in_current_flow(name, idx, style);
                 }
-                NameLookupResult::Found { idx, initialized }
+                NameLookupResult::Found {
+                    idx,
+                    initialized,
+                    is_module_scope: false,
+                }
             }
-            NameReadInfo::Anywhere { key, initialized } => {
+            NameReadInfo::Anywhere {
+                key,
+                initialized,
+                is_module_scope,
+            } => {
                 self.scopes.mark_parameter_used(name.key());
                 self.scopes.mark_import_used(name.key());
                 self.scopes.mark_variable_used(name.key());
@@ -1297,7 +1322,11 @@ impl<'a> BindingsBuilder<'a> {
                     self.scopes
                         .define_in_current_flow(name, idx, FlowStyle::Other);
                 }
-                NameLookupResult::Found { idx, initialized }
+                NameLookupResult::Found {
+                    idx,
+                    initialized,
+                    is_module_scope,
+                }
             }
             NameReadInfo::NotFound => NameLookupResult::NotFound,
         }
@@ -1337,12 +1366,14 @@ impl<'a> BindingsBuilder<'a> {
         key: Key,
         lookup_result_idx: Idx<Key>,
         usage: &Usage,
+        promote: bool,
     ) -> Idx<Key> {
         let bound_name_idx = self.idx_for_promise(key);
         self.deferred_bound_names.push(DeferredBoundName {
             bound_name_idx,
             lookup_result_idx,
             usage: usage.clone(),
+            promote,
         });
         bound_name_idx
     }
@@ -1413,8 +1444,12 @@ impl<'a> BindingsBuilder<'a> {
             // All partial type reads forward to the NameAssign (def_idx).
             self.insert_binding_idx(deferred.bound_name_idx, Binding::ForwardToFirstUse(def_idx));
         } else {
-            // Default: forward to whatever we found (no partial type in chain)
-            self.insert_binding_idx(deferred.bound_name_idx, Binding::Forward(default_idx));
+            let binding = if deferred.promote {
+                Binding::PromoteForward(default_idx)
+            } else {
+                Binding::Forward(default_idx)
+            };
+            self.insert_binding_idx(deferred.bound_name_idx, binding);
         }
     }
 
@@ -1436,7 +1471,11 @@ impl<'a> BindingsBuilder<'a> {
             seen.insert(current);
 
             match self.idx_to_binding(current) {
-                Some(Binding::Forward(target) | Binding::ForwardToFirstUse(target)) => {
+                Some(
+                    Binding::Forward(target)
+                    | Binding::PromoteForward(target)
+                    | Binding::ForwardToFirstUse(target),
+                ) => {
                     current = *target;
                 }
                 Some(Binding::NameAssign(na)) if na.def_idx.is_some() => {
@@ -1833,6 +1872,7 @@ impl TParamLookupResult {
             .map_or(NameLookupResult::NotFound, |idx| NameLookupResult::Found {
                 idx,
                 initialized: InitializedInFlow::Yes,
+                is_module_scope: false,
             })
     }
 }
@@ -1955,6 +1995,7 @@ impl<'a> BindingsBuilder<'a> {
         let mut gas = Gas::new(100);
         while let Some(
             Binding::Forward(fwd_idx)
+            | Binding::PromoteForward(fwd_idx)
             | Binding::ForwardToFirstUse(fwd_idx)
             | Binding::Phi(JoinStyle::NarrowOf(fwd_idx), _),
         ) = original_binding

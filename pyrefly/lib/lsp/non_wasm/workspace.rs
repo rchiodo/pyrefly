@@ -68,6 +68,7 @@ pub struct Workspace {
     search_path: Option<Vec<PathBuf>>,
     pub disable_language_services: bool,
     pub disabled_language_services: Option<DisabledLanguageServices>,
+    pub runnable_code_lens: bool,
     pub display_type_errors: Option<DisplayTypeErrors>,
     pub lsp_analysis_config: Option<LspAnalysisConfig>,
     pub stream_diagnostics: Option<bool>,
@@ -197,6 +198,7 @@ struct PyreflyClientConfig {
     display_type_errors: Option<DisplayTypeErrors>,
     disable_language_services: Option<bool>,
     extra_paths: Option<Vec<PathBuf>>,
+    runnable_code_lens: Option<bool>,
     diagnostic_mode: Option<DiagnosticMode>,
     #[serde(default, deserialize_with = "deserialize_analysis")]
     analysis: Option<LspAnalysisConfig>,
@@ -246,6 +248,8 @@ pub struct DisabledLanguageServices {
     #[serde(default)]
     pub document_symbol: bool,
     #[serde(default)]
+    pub code_lens: bool,
+    #[serde(default)]
     pub semantic_tokens: bool,
     #[serde(default)]
     pub implementation: bool,
@@ -268,6 +272,7 @@ impl DisabledLanguageServices {
             "textDocument/hover" => self.hover,
             "textDocument/inlayHint" => self.inlay_hint,
             "textDocument/documentSymbol" => self.document_symbol,
+            "textDocument/codeLens" => self.code_lens,
             "textDocument/semanticTokens/full" | "textDocument/semanticTokens/range" => {
                 self.semantic_tokens
             }
@@ -418,6 +423,9 @@ impl Workspaces {
             if let Some(disabled_language_services) = pyrefly.disabled_language_services {
                 self.update_disabled_language_services(scope_uri, disabled_language_services);
             }
+            if let Some(runnable_code_lens) = pyrefly.runnable_code_lens {
+                self.update_runnable_code_lens(scope_uri, runnable_code_lens);
+            }
             if let Some(stream_diagnostics) = pyrefly.stream_diagnostics {
                 self.update_stream_diagnostics(scope_uri, stream_diagnostics);
             }
@@ -476,6 +484,20 @@ impl Workspaces {
             None => {
                 self.default.write().disabled_language_services = Some(disabled_language_services);
             }
+        }
+    }
+
+    fn update_runnable_code_lens(&self, scope_uri: &Option<Url>, runnable_code_lens: bool) {
+        let mut workspaces = self.workspaces.write();
+        match scope_uri {
+            Some(scope_uri) => {
+                if let Ok(path) = scope_uri.to_file_path()
+                    && let Some(workspace) = workspaces.get_mut(&path)
+                {
+                    workspace.runnable_code_lens = runnable_code_lens;
+                }
+            }
+            None => self.default.write().runnable_code_lens = runnable_code_lens,
         }
     }
 

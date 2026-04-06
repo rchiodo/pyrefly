@@ -368,12 +368,10 @@ impl Definitions {
             // Explicitly defined and resolvable, so don't redefine it
             return;
         }
-        if style == ModuleStyle::Executable {
-            for (x, range) in self.import_all.iter() {
-                self.dunder_all
-                    .entries
-                    .push(DunderAllEntry::Module(*range, *x));
-            }
+        for (x, range) in self.import_all.iter() {
+            self.dunder_all
+                .entries
+                .push(DunderAllEntry::Module(*range, *x));
         }
         for (name, def) in self.definitions.iter() {
             if !is_private_name(name)

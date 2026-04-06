@@ -61,6 +61,7 @@ use crate::binding::narrow::NarrowOps;
 use crate::binding::narrow::NarrowSource;
 use crate::binding::scope::FlowStyle;
 use crate::binding::scope::Scope;
+use crate::binding::scope::is_constant_name;
 use crate::config::error_kind::ErrorKind;
 use crate::error::context::ErrorInfo;
 use crate::export::special::SpecialExport;
@@ -344,6 +345,7 @@ impl<'a> BindingsBuilder<'a> {
             NameLookupResult::Found {
                 idx: lookup_result_idx,
                 initialized: is_initialized,
+                is_module_scope,
             } => {
                 // Uninitialized local errors are only reported when we are neither in a stub
                 // nor a static type context.
@@ -371,7 +373,15 @@ impl<'a> BindingsBuilder<'a> {
                     }
                 }
 
-                self.defer_bound_name(key, lookup_result_idx, usage)
+                // TODO: `global x` reads bypass this (they use Flow, not Anywhere).
+
+                let promote = self.scopes.in_function_scope()
+                    && (is_module_scope || self.scopes.is_defined_at_module_scope(&name.id))
+                    && !is_constant_name(&name.id);
+                if promote {
+                    self.promote_ranges.insert(name.range);
+                }
+                self.defer_bound_name(key, lookup_result_idx, usage, promote)
             }
             NameLookupResult::NotFound => {
                 let suggestion = self

@@ -39,9 +39,9 @@ use crate::callable::FunctionKind;
 use crate::callable::Param;
 use crate::callable::ParamList;
 use crate::callable::Params;
+use crate::callable::PrefixParam;
 use crate::callable::PropertyMetadata;
 use crate::callable::PropertyRole;
-use crate::callable::Required;
 use crate::class::Class;
 use crate::class::ClassKind;
 use crate::class::ClassType;
@@ -819,7 +819,7 @@ pub enum Type {
     ParamSpec(ParamSpec),
     TypeVarTuple(TypeVarTuple),
     SpecialForm(SpecialForm),
-    Concatenate(Box<[(Type, Required)]>, Box<Type>),
+    Concatenate(Box<[PrefixParam]>, Box<Type>),
     ParamSpecValue(ParamList),
     /// The type of a value which is annotated with `P.args`.
     Args(Box<Quantified>),
@@ -1130,11 +1130,7 @@ impl Type {
         matches!(self, Type::Unpack(_))
     }
 
-    pub fn callable_concatenate(
-        args: Box<[(Type, Required)]>,
-        param_spec: Type,
-        ret: Type,
-    ) -> Self {
+    pub fn callable_concatenate(args: Box<[PrefixParam]>, param_spec: Type, ret: Type) -> Self {
         Type::Callable(Box::new(Callable::concatenate(args, param_spec, ret)))
     }
 
@@ -1701,6 +1697,29 @@ impl Type {
         sigs
     }
 
+    fn widen_one_implicit_literal(ty: &mut Type, stdlib: &Stdlib) {
+        match &*ty {
+            Type::Literal(lit) if lit.style == LitStyle::Implicit => {
+                *ty = lit.value.general_class_type(stdlib).clone().to_type()
+            }
+            Type::LiteralString(LitStyle::Implicit) => *ty = stdlib.str().clone().to_type(),
+            _ => {}
+        }
+    }
+
+    /// Like `promote_implicit_literals` but only recurses into unions.
+    pub fn promote_shallow_implicit_literals(mut self, stdlib: &Stdlib) -> Type {
+        match &mut self {
+            Type::Union(union) => {
+                for member in &mut union.members {
+                    Self::widen_one_implicit_literal(member, stdlib);
+                }
+            }
+            _ => Self::widen_one_implicit_literal(&mut self, stdlib),
+        }
+        self
+    }
+
     pub fn promote_implicit_literals(mut self, stdlib: &Stdlib) -> Type {
         fn g(ty: &mut Type, f: &mut dyn FnMut(&mut Type)) {
             // Don't recurse into NNModule fields — they carry captured constructor
@@ -1712,12 +1731,8 @@ impl Type {
             ty.recurse_mut(&mut |ty| g(ty, f));
             f(ty);
         }
-        g(&mut self, &mut |ty| match &ty {
-            Type::Literal(lit) if lit.style == LitStyle::Implicit => {
-                *ty = lit.value.general_class_type(stdlib).clone().to_type()
-            }
-            Type::LiteralString(LitStyle::Implicit) => *ty = stdlib.str().clone().to_type(),
-            _ => {}
+        g(&mut self, &mut |ty| {
+            Self::widen_one_implicit_literal(ty, stdlib)
         });
         self
     }

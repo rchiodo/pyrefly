@@ -8,6 +8,7 @@
 use std::cell::LazyCell;
 use std::fmt;
 use std::fmt::Display;
+use std::slice;
 
 use dupe::Dupe;
 use itertools::Either;
@@ -286,8 +287,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if Ast::is_synthesized_empty_name(x) {
                     TypeInfo::of_ty(self.heap.mk_any_error())
                 } else {
-                    self.get(&Key::BoundName(ShortIdentifier::expr_name(x)))
-                        .arc_clone()
+                    let result = self
+                        .get(&Key::BoundName(ShortIdentifier::expr_name(x)))
+                        .arc_clone();
+                    // Complements PromoteForward for seeded captures.
+                    if self.bindings().should_promote_at_range(x.range) {
+                        result.map_ty(|ty| ty.promote_shallow_implicit_literals(self.stdlib))
+                    } else {
+                        result
+                    }
                 }
             }
             Expr::Attribute(x) => {
@@ -1952,20 +1960,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Note that we have to check for `builtins.type` by name here because this code runs
                 // when we're bootstrapping the stdlib and don't have access to class objects yet.
                 Type::ClassDef(cls) if cls.is_builtin("type") => {
-                    let targ = match xs.len() {
-                        // This causes us to treat `type[list]` as equivalent to `type[list[Any]]`,
-                        // which may or may not be what we want.
-                        1 => self.expr_untype(&xs[0], TypeFormContext::TypeArgumentForType, errors),
-                        _ => self.error(
-                            errors,
-                            range,
-                            ErrorInfo::Kind(ErrorKind::BadSpecialization),
-                            format!("Expected 1 type argument for `type`, got {}", xs.len()),
-                        ),
+                    let (arguments, _) = match slice {
+                            Expr::Tuple(x) => (x.elts.as_slice(), x.parenthesized),
+                            _ => (slice::from_ref(slice), false),
                     };
-                    // TODO: Validate that `targ` refers to a "valid in-scope class or TypeVar"
-                    // (https://typing.readthedocs.io/en/latest/spec/annotations.html#type-and-annotation-expressions)
-                    self.heap.mk_type_form(self.heap.mk_type_form(targ))
+                    self.apply_unary_special_form("type".to_owned(), arguments, range, TypeFormContext::TypeArgumentForType, errors, |arg| self.heap.mk_type_form(arg))
                 }
                 // TODO: pyre_extensions.PyreReadOnly is a non-standard type system extension that marks read-only
                 // objects. We don't support it yet.

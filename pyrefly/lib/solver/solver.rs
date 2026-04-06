@@ -9,6 +9,7 @@ use std::cell::Cell;
 use std::cell::Ref;
 use std::cell::RefCell;
 use std::cell::RefMut;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 use std::mem;
@@ -54,6 +55,7 @@ use crate::types::callable::Function;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
 use crate::types::callable::Params;
+use crate::types::callable::PrefixParam;
 use crate::types::callable::Required;
 use crate::types::class::Class;
 use crate::types::module::ModuleType;
@@ -339,6 +341,10 @@ pub enum PinError {
 pub struct Solver {
     variables: Mutex<Variables>,
     instantiation_errors: RwLock<SmallMap<Var, TypeVarSpecializationError>>,
+    /// Cross-call cache for protocol conformance results.
+    /// Only caches results for types that contain no Vars, to ensure
+    /// soundness across different subset contexts.
+    protocol_cache: Mutex<HashMap<(Type, Type), Result<(), SubsetError>>>,
     pub infer_with_first_use: bool,
     pub heap: TypeHeap,
     pub tensor_shapes: bool,
@@ -370,6 +376,7 @@ impl Solver {
         Self {
             variables: Default::default(),
             instantiation_errors: Default::default(),
+            protocol_cache: Default::default(),
             infer_with_first_use,
             heap: TypeHeap::new(),
             tensor_shapes,
@@ -380,6 +387,19 @@ impl Solver {
 
     pub fn recurse<'a>(&self, var: Var, recurser: &'a VarRecurser) -> Option<Guard<'a, Var>> {
         self.variables.lock().recurse(var, recurser)
+    }
+
+    /// Look up a cached protocol conformance result.
+    pub fn check_protocol_cache(&self, got: &Type, want: &Type) -> Option<Result<(), SubsetError>> {
+        self.protocol_cache
+            .lock()
+            .get(&(got.clone(), want.clone()))
+            .cloned()
+    }
+
+    /// Store a protocol conformance result.
+    pub fn store_protocol_cache(&self, got: Type, want: Type, result: Result<(), SubsetError>) {
+        self.protocol_cache.lock().insert((got, want), result);
     }
 
     /// Force all non-recursive Vars in `vars`.
@@ -665,14 +685,8 @@ impl Solver {
                 *x = self.heap.mk_param_spec_value(params);
             }
             if let Type::Concatenate(ts, box Type::Concatenate(ts2, pspec)) = x {
-                *x = self.heap.mk_concatenate(
-                    ts.iter()
-                        .chain(ts2.iter())
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .into_boxed_slice(),
-                    (**pspec).clone(),
-                );
+                let combined: Box<[PrefixParam]> = ts.iter().chain(ts2.iter()).cloned().collect();
+                *x = self.heap.mk_concatenate(combined, (**pspec).clone());
             }
             let (callable, kind) = match x {
                 Type::Callable(c) => (Some(&mut **c), None),
@@ -1129,16 +1143,24 @@ impl Solver {
             .for_each(|t| self.expand_vars_mut(t));
         let lock = self.variables.lock();
         targs.iter_paired_mut().for_each(|(param, t)| {
-            if let Type::Var(v) = t
-                && let Variable::Quantified {
+            if let Type::Var(v) = t {
+                let mut e = lock.get_mut(*v);
+                if let Variable::Quantified {
                     quantified: q,
                     bounds,
-                } = &*lock.get(*v)
-                // If the variable has already been solved, do not generalize it.
-                && bounds.is_empty()
-                && *q == *param
-            {
-                *t = param.clone().to_type(&self.heap);
+                } = &mut *e
+                    && *q == *param
+                {
+                    if bounds.is_empty() {
+                        *t = param.clone().to_type(&self.heap);
+                    } else {
+                        // If the variable has already been solved, finalize its type now.
+                        *e = Variable::Answer(
+                            self.solve_bounds(mem::take(bounds))
+                                .unwrap_or_else(|| q.as_gradual_type()),
+                        );
+                    }
+                }
             }
         })
     }
@@ -1437,6 +1459,7 @@ impl Solver {
             gas: INITIAL_GAS,
             subset_cache: SmallMap::new(),
             class_protocol_assumptions: SmallSet::new(),
+            coinductive_assumptions_used: false,
         }
     }
 }
@@ -1686,6 +1709,10 @@ pub struct Subset<'a, Ans: LookupAnswer> {
     /// pairs to detect cycles. This enables coinductive reasoning for recursive protocols
     /// like Functor/Maybe without falsely assuming success for unrelated protocol checks.
     pub class_protocol_assumptions: SmallSet<(Class, Class)>,
+    /// Tracks whether a coinductive assumption (InProgress → Ok) was used during
+    /// the current computation. Used to avoid caching protocol results in the
+    /// persistent cross-call cache when they depend on coinductive assumptions.
+    pub coinductive_assumptions_used: bool,
 }
 
 impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
