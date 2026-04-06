@@ -442,12 +442,13 @@ fn convert_function(
     let declaration = if let FunctionKind::Def(func_id) = kind {
         let module_path = func_id.module.path();
         let uri = path_to_uri(module_path);
+        let lsp_range = func_id.module.to_lsp_range(func_id.name_range);
         Declaration::Regular(RegularDeclaration {
             category: DeclarationCategory::Function,
             kind: DeclarationKind::Regular,
             name: Some(func_id.name.to_string()),
             node: Node {
-                range: zero_range(),
+                range: lsp_range_to_tsp(lsp_range),
                 uri,
             },
         })

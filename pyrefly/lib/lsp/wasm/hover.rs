@@ -706,6 +706,7 @@ mod tests {
                 name: Name::new(func_name),
                 def_index: None,
                 outer_funcs: None,
+                name_range: TextRange::default(),
             })),
             flags: FuncFlags::default(),
         };

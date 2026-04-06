@@ -503,6 +503,124 @@ def f(x):
 }
 
 #[test]
+fn test_overloaded_function_each_overload_has_distinct_return_type() {
+    // Regression: pyrefly was duplicating the first overload's signature for all
+    // overloads, so both entries had return type `str` instead of `str` and `int`.
+    // Pylance round-trip expected: Overload[(value: int) -> str, (value: str) -> int]
+    // Pylance round-trip received: Overload[(value: int) -> str, (value: int) -> str]
+    let code = "\
+from typing import overload
+
+@overload
+def process(value: int) -> str: ...
+@overload
+def process(value: str) -> int: ...
+def process(value):
+    if isinstance(value, int):
+        return str(value)
+    return len(value)
+";
+    let (mut tsp, file_uri, snapshot) = setup_project(code);
+
+    // Query the implementation line (line 6, `def process(value):`)
+    let result = get_computed_type_ok(&mut tsp, &file_uri, 6, 4, snapshot);
+    assert_kind(&result, TypeKind::Overloaded);
+
+    let overloads = result
+        .get("overloads")
+        .and_then(|v| v.as_array())
+        .expect("Expected overloads array");
+    assert_eq!(overloads.len(), 2, "Expected 2 overload signatures");
+
+    // First overload: (value: int) -> str
+    let ret0 = overloads[0]
+        .get("returnType")
+        .expect("Expected returnType on first overload");
+    let ret0_decl = ret0
+        .get("declaration")
+        .and_then(|d| d.get("name"))
+        .and_then(|n| n.as_str());
+    assert_eq!(
+        ret0_decl,
+        Some("str"),
+        "First overload should return str, got: {ret0}"
+    );
+
+    // Second overload: (value: str) -> int
+    let ret1 = overloads[1]
+        .get("returnType")
+        .expect("Expected returnType on second overload");
+    let ret1_decl = ret1
+        .get("declaration")
+        .and_then(|d| d.get("name"))
+        .and_then(|n| n.as_str());
+    assert_eq!(
+        ret1_decl,
+        Some("int"),
+        "Second overload should return int, got: {ret1}"
+    );
+
+    // The two return types must differ
+    assert_ne!(
+        serde_json::to_string(&overloads[0].get("returnType")).unwrap(),
+        serde_json::to_string(&overloads[1].get("returnType")).unwrap(),
+        "Both overloads have identical return types — the second overload's signature is duplicated from the first"
+    );
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_overloaded_function_each_overload_has_distinct_declaration_node() {
+    // Each overload should point to a different source location (line number).
+    let code = "\
+from typing import overload
+
+@overload
+def process(value: int) -> str: ...
+@overload
+def process(value: str) -> int: ...
+def process(value):
+    if isinstance(value, int):
+        return str(value)
+    return len(value)
+";
+    let (mut tsp, file_uri, snapshot) = setup_project(code);
+
+    let result = get_computed_type_ok(&mut tsp, &file_uri, 6, 4, snapshot);
+    assert_kind(&result, TypeKind::Overloaded);
+
+    let overloads = result
+        .get("overloads")
+        .and_then(|v| v.as_array())
+        .expect("Expected overloads array");
+    assert_eq!(overloads.len(), 2, "Expected 2 overloads");
+
+    let get_start_line = |overload: &serde_json::Value| -> Option<u64> {
+        overload
+            .get("declaration")
+            .and_then(|d| d.get("node"))
+            .and_then(|n| n.get("range"))
+            .and_then(|r| r.get("start"))
+            .and_then(|s| s.get("line"))
+            .and_then(|l| l.as_u64())
+    };
+
+    let line0 = get_start_line(&overloads[0])
+        .expect("Expected declaration node with line on first overload");
+    let line1 = get_start_line(&overloads[1])
+        .expect("Expected declaration node with line on second overload");
+
+    // The two @overload decorated `def` statements are on different lines
+    assert_ne!(
+        line0, line1,
+        "Both overloads point to the same declaration line ({line0}) — they should be distinct"
+    );
+
+    tsp.shutdown();
+}
+
+#[test]
 fn test_get_computed_type_function_has_return_type() {
     // Verify that the function's returnType is properly populated
     let (mut tsp, file_uri, snapshot) =
