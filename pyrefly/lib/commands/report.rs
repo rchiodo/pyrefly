@@ -14,6 +14,7 @@ use clap::Parser;
 use pyrefly_build::handle::Handle;
 use pyrefly_config::args::ConfigOverrideArgs;
 use pyrefly_config::finder::ConfigFinder;
+use pyrefly_graph::index::Idx;
 use pyrefly_python::ignore::Ignore;
 use pyrefly_python::ignore::Tool;
 use pyrefly_python::module::Module;
@@ -46,6 +47,7 @@ use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMro;
+use crate::binding::binding::KeyDecorator;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::ReturnTypeKind;
 use crate::binding::bindings::Bindings;
@@ -485,6 +487,9 @@ impl ReportArgs {
                         Binding::Global(_) => {}
                         // IMPLICIT: special type forms have 0 slots
                         Binding::TypeVar(_) | Binding::ParamSpec(_) | Binding::TypeVarTuple(_) => {}
+                        // Functions and classes are handled by parse_functions/parse_classes;
+                        // skip them here even when excluded (e.g. @type_check_only).
+                        Binding::Function(..) | Binding::ClassDef(..) => {}
                         // IMPLICIT: non-call assignments have 0 slots;
                         // call assignments are untyped (1 slot)
                         Binding::NameAssign(na) => {
@@ -524,6 +529,7 @@ impl ReportArgs {
         module: &Module,
         bindings: &Bindings,
         answers: &Answers,
+        tco_classes: &HashSet<Idx<KeyClass>>,
     ) -> Vec<Variable> {
         let mut attrs = Vec::new();
         let module_prefix = if module.name() != ModuleName::unknown() {
@@ -542,6 +548,11 @@ impl ReportArgs {
 
             // Skip class-body dunder attrs with implicit types (__slots__, __doc__, etc.)
             if Self::is_implicit_dunder_attr(field.name.as_str()) {
+                continue;
+            }
+
+            // Skip attrs of @type_check_only classes.
+            if tco_classes.contains(&field.class_idx) {
                 continue;
             }
 
@@ -611,6 +622,7 @@ impl ReportArgs {
         bindings: &Bindings,
         answers: &Answers,
         exports: &SmallMap<Name, ExportLocation>,
+        tco_classes: &HashSet<Idx<KeyClass>>,
     ) -> Vec<Function> {
         let mut functions = Vec::new();
         let module_prefix = if module.name() != ModuleName::unknown() {
@@ -625,6 +637,14 @@ impl ReportArgs {
             {
                 let decorated = bindings.get(*x);
                 let fun = bindings.get(decorated.undecorated_idx);
+                // Skip @type_check_only decorated functions.
+                if Self::has_type_check_only_decorator(&fun.decorators, bindings) {
+                    continue;
+                }
+                // Skip methods of @type_check_only decorated classes.
+                if fun.class_key.is_some_and(|ck| tco_classes.contains(&ck)) {
+                    continue;
+                }
                 // Skip overload implementation signatures — only @overload
                 // decorated signatures are part of the public API.
                 if let Some(pred) = _pred
@@ -952,6 +972,41 @@ impl ReportArgs {
         )
     }
 
+    /// Check whether a decorator expression matches `type_check_only`.
+    /// Handles `@type_check_only`, `@typing.type_check_only`, and call forms.
+    fn is_type_check_only_expr(expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name) => name.id.as_str() == "type_check_only",
+            Expr::Attribute(attr) => attr.attr.as_str() == "type_check_only",
+            Expr::Call(call) => Self::is_type_check_only_expr(&call.func),
+            _ => false,
+        }
+    }
+
+    /// Check if any decorator in the list is `@type_check_only`.
+    fn has_type_check_only_decorator(
+        decorators: &[Idx<KeyDecorator>],
+        bindings: &Bindings,
+    ) -> bool {
+        decorators.iter().any(|&dec_idx| {
+            let decorator = bindings.get(dec_idx);
+            Self::is_type_check_only_expr(&decorator.expr)
+        })
+    }
+
+    /// Collect all class keys that have the `@type_check_only` decorator.
+    fn collect_type_check_only_classes(bindings: &Bindings) -> HashSet<Idx<KeyClass>> {
+        let mut tco_classes = HashSet::new();
+        for idx in bindings.keys::<Key>() {
+            if let Binding::ClassDef(class_key, decorators) = bindings.get(idx)
+                && Self::has_type_check_only_decorator(decorators, bindings)
+            {
+                tco_classes.insert(*class_key);
+            }
+        }
+        tco_classes
+    }
+
     /// Determine whether a function name represents a method (contains '.', i.e. `Cls.method`).
     fn is_method(name: &str, module_prefix: &str) -> bool {
         let without_prefix = name.strip_prefix(module_prefix).unwrap_or(name);
@@ -1005,6 +1060,7 @@ impl ReportArgs {
         answers: &Answers,
         transaction: &Transaction,
         handle: &Handle,
+        tco_classes: &HashSet<Idx<KeyClass>>,
     ) -> Vec<ReportClass> {
         let mut classes = Vec::new();
         let module_prefix = if module.name() != ModuleName::unknown() {
@@ -1013,6 +1069,10 @@ impl ReportArgs {
             String::new()
         };
         for class_idx in bindings.keys::<KeyClass>() {
+            // Skip @type_check_only classes.
+            if tco_classes.contains(&class_idx) {
+                continue;
+            }
             let binding_class = bindings.get(class_idx);
             let cls_binding = match binding_class {
                 BindingClass::ClassDef(cls) => cls,
@@ -1334,13 +1394,26 @@ impl ReportArgs {
             {
                 let line_count = module.lined_buffer().line_index().line_count();
                 let exports = transaction.get_exports(handle);
-                let mut functions = Self::parse_functions(&module, &bindings, &answers, &exports);
-                let mut classes =
-                    Self::parse_classes(&module, &bindings, &answers, transaction, handle);
+                let tco_classes = Self::collect_type_check_only_classes(&bindings);
+                let mut functions =
+                    Self::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+                let mut classes = Self::parse_classes(
+                    &module,
+                    &bindings,
+                    &answers,
+                    transaction,
+                    handle,
+                    &tco_classes,
+                );
                 let mut variables = Self::parse_variables(
                     &module, &bindings, &answers, &exports, &functions, &classes,
                 );
-                variables.extend(Self::parse_instance_attrs(&module, &bindings, &answers));
+                variables.extend(Self::parse_instance_attrs(
+                    &module,
+                    &bindings,
+                    &answers,
+                    &tco_classes,
+                ));
                 let suppressions = Self::parse_suppressions(&module);
 
                 // When a .pyi stub shadows a .py file, include uncovered .py symbols.
@@ -1350,14 +1423,21 @@ impl ReportArgs {
                     && let Some(py_answers) = transaction.get_answers(py_handle)
                 {
                     let py_exports = transaction.get_exports(py_handle);
-                    let py_functions =
-                        Self::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
+                    let py_tco_classes = Self::collect_type_check_only_classes(&py_bindings);
+                    let py_functions = Self::parse_functions(
+                        &py_module,
+                        &py_bindings,
+                        &py_answers,
+                        &py_exports,
+                        &py_tco_classes,
+                    );
                     let py_classes = Self::parse_classes(
                         &py_module,
                         &py_bindings,
                         &py_answers,
                         transaction,
                         py_handle,
+                        &py_tco_classes,
                     );
                     let mut py_variables = Self::parse_variables(
                         &py_module,
@@ -1371,6 +1451,7 @@ impl ReportArgs {
                         &py_module,
                         &py_bindings,
                         &py_answers,
+                        &py_tco_classes,
                     ));
                     Self::merge_uncovered_py_symbols(
                         &mut functions,
@@ -1469,14 +1550,25 @@ mod tests {
         let exports = transaction.get_exports(&handle);
 
         let line_count = module.lined_buffer().line_index().line_count();
-        let functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        let classes =
-            ReportArgs::parse_classes(&module, &bindings, &answers, &transaction, &handle);
+        let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
+        let functions =
+            ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+        let classes = ReportArgs::parse_classes(
+            &module,
+            &bindings,
+            &answers,
+            &transaction,
+            &handle,
+            &tco_classes,
+        );
         let mut variables = ReportArgs::parse_variables(
             &module, &bindings, &answers, &exports, &functions, &classes,
         );
         variables.extend(ReportArgs::parse_instance_attrs(
-            &module, &bindings, &answers,
+            &module,
+            &bindings,
+            &answers,
+            &tco_classes,
         ));
         let suppressions = ReportArgs::parse_suppressions(&module);
 
@@ -1508,14 +1600,25 @@ mod tests {
         let exports = pyi_txn.get_exports(&pyi_handle);
 
         let line_count = module.lined_buffer().line_index().line_count();
-        let mut functions = ReportArgs::parse_functions(&module, &bindings, &answers, &exports);
-        let mut classes =
-            ReportArgs::parse_classes(&module, &bindings, &answers, &pyi_txn, &pyi_handle);
+        let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
+        let mut functions =
+            ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+        let mut classes = ReportArgs::parse_classes(
+            &module,
+            &bindings,
+            &answers,
+            &pyi_txn,
+            &pyi_handle,
+            &tco_classes,
+        );
         let mut variables = ReportArgs::parse_variables(
             &module, &bindings, &answers, &exports, &functions, &classes,
         );
         variables.extend(ReportArgs::parse_instance_attrs(
-            &module, &bindings, &answers,
+            &module,
+            &bindings,
+            &answers,
+            &tco_classes,
         ));
         let suppressions = ReportArgs::parse_suppressions(&module);
 
@@ -1532,10 +1635,22 @@ mod tests {
         let py_answers = py_txn.get_answers(&py_handle).unwrap();
         let py_exports = py_txn.get_exports(&py_handle);
 
-        let py_functions =
-            ReportArgs::parse_functions(&py_module, &py_bindings, &py_answers, &py_exports);
-        let py_classes =
-            ReportArgs::parse_classes(&py_module, &py_bindings, &py_answers, &py_txn, &py_handle);
+        let py_tco_classes = ReportArgs::collect_type_check_only_classes(&py_bindings);
+        let py_functions = ReportArgs::parse_functions(
+            &py_module,
+            &py_bindings,
+            &py_answers,
+            &py_exports,
+            &py_tco_classes,
+        );
+        let py_classes = ReportArgs::parse_classes(
+            &py_module,
+            &py_bindings,
+            &py_answers,
+            &py_txn,
+            &py_handle,
+            &py_tco_classes,
+        );
         let mut py_variables = ReportArgs::parse_variables(
             &py_module,
             &py_bindings,
@@ -1548,6 +1663,7 @@ mod tests {
             &py_module,
             &py_bindings,
             &py_answers,
+            &py_tco_classes,
         ));
 
         // Merge uncovered symbols from .py into the stub report
@@ -1900,6 +2016,14 @@ mod tests {
     fn test_report_decorators() {
         let report = build_module_report_for_test("decorators.py");
         compare_snapshot("decorators.expected.json", &report);
+    }
+
+    /// @type_check_only exclusion: decorated functions and classes are
+    /// entirely excluded from the report.
+    #[test]
+    fn test_report_type_check_only() {
+        let report = build_module_report_for_test("type_check_only.py");
+        compare_snapshot("type_check_only.expected.json", &report);
     }
 
     /// Class method aliases: __rand__ = __and__.
