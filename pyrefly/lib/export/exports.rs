@@ -546,7 +546,7 @@ _x = 2
             &imports,
             &["simple_val", "X", "Z", "Q", "baz", "test", "x"],
         );
-        eq_wildcards(&interface, &imports, &["Q", "test", "x"]);
+        eq_wildcards(&interface, &imports, &["simple_val", "Q", "test", "x"]);
 
         for x in [&executable, &interface] {
             assert!(contains(x, &imports, "Z"));
@@ -563,7 +563,7 @@ _x = 2
         let b = mk_exports("from a import *", ModuleStyle::Interface);
         let imports = smallmap! {ModuleName::from_str("a") => a};
         assert!(contains(&b, &imports, "a"));
-        eq_wildcards(&b, &imports, &[]);
+        eq_wildcards(&b, &imports, &["a"]);
     }
 
     #[test]
@@ -574,7 +574,7 @@ _x = 2
                 ModuleName::from_str("a") => a.dupe(),
                 ModuleName::from_str("b") => b.dupe(),
         };
-        eq_wildcards(&a, &imports, &[]);
+        eq_wildcards(&a, &imports, &["x"]);
         eq_wildcards(&b, &imports, &["x"]);
         assert!(contains(&b, &imports, "x"));
         assert!(!contains(&b, &imports, "y"));
