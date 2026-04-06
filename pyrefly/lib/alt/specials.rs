@@ -324,7 +324,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`Optional` requires exactly one argument but {} was found",
+                    "Expected 1 type argument for `Optional`, got {}",
                     arguments.len()
                 ),
             ),
@@ -359,7 +359,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         ErrorInfo::Kind(ErrorKind::BadSpecialization),
                         format!(
-                            "`Concatenate` must take at least two arguments, got {}",
+                            "Expected at least 2 arguments for `Concatenate`, got {}",
                             arguments.len()
                         ),
                     )
@@ -481,7 +481,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     range,
                     ErrorInfo::Kind(ErrorKind::BadSpecialization),
                     format!(
-                        "`Callable` requires exactly two arguments but {} was found",
+                        "Expected 2 arguments for `Callable`, got {}",
                         arguments.len()
                     ),
                 );
@@ -501,7 +501,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`TypeGuard` requires exactly one argument but got {}",
+                    "Expected 1 type argument for `TypeGuard`, got {}",
                     arguments.len()
                 ),
             ),
@@ -518,7 +518,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`TypeIs` requires exactly one argument but got {}",
+                    "Expected 1 type argument for `TypeIs`, got {}",
                     arguments.len()
                 ),
             ),
@@ -539,7 +539,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`Unpack` requires exactly one argument but got {}",
+                    "Expected 1 type argument for `Unpack`, got {}",
                     arguments.len()
                 ),
             ),
@@ -556,7 +556,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`Type` requires exactly one argument but got {}",
+                    "Expected 1 type argument for `Type`, got {}",
                     arguments.len()
                 ),
             ),
@@ -569,7 +569,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 range,
                 ErrorInfo::Kind(ErrorKind::BadSpecialization),
                 format!(
-                    "`TypeForm` requires exactly one argument but got {}",
+                    "Expected 1 type argument for `TypeForm`, got {}",
                     arguments.len()
                 ),
             ),

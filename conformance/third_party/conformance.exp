@@ -2007,8 +2007,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "`Callable` requires exactly two arguments but 1 was found",
-      "description": "`Callable` requires exactly two arguments but 1 was found",
+      "concise_description": "Expected 2 arguments for `Callable`, got 1",
+      "description": "Expected 2 arguments for `Callable`, got 1",
       "line": 55,
       "name": "bad-specialization",
       "severity": "error",
@@ -2040,8 +2040,8 @@
     {
       "code": -2,
       "column": 5,
-      "concise_description": "`Callable` requires exactly two arguments but 3 was found",
-      "description": "`Callable` requires exactly two arguments but 3 was found",
+      "concise_description": "Expected 2 arguments for `Callable`, got 3",
+      "description": "Expected 2 arguments for `Callable`, got 3",
       "line": 58,
       "name": "bad-specialization",
       "severity": "error",

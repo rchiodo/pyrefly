@@ -22,7 +22,7 @@ testcase!(
     r#"
 from typing_extensions import TypeForm
 
-x: TypeForm[int, str]  # E: `TypeForm` requires exactly one argument but got 2
+x: TypeForm[int, str]  # E: Expected 1 type argument for `TypeForm`, got 2
     "#,
 );
 

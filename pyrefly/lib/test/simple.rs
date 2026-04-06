@@ -644,11 +644,11 @@ testcase!(
     r#"
 from typing import Callable, Optional, Type, TypeGuard, TypeIs
 
-def test0() -> Type[int, int]: ...  # E: requires exactly one argument
-def test1() -> TypeGuard[int, int]: ...  # E: requires exactly one argument
-def test2() -> TypeIs[int, int]: ...  # E: requires exactly one argument
-def test3() -> Optional[int, int]: ...  # E: requires exactly one argument
-def test4() -> Callable[[], int, int]: ...  # E: requires exactly two arguments
+def test0() -> Type[int, int]: ...  # E: Expected 1 type argument
+def test1() -> TypeGuard[int, int]: ...  # E: Expected 1 type argument
+def test2() -> TypeIs[int, int]: ...  # E: Expected 1 type argument
+def test3() -> Optional[int, int]: ...  # E: Expected 1 type argument
+def test4() -> Callable[[], int, int]: ...  # E: Expected 2 arguments
 "#,
 );
 
