@@ -1736,6 +1736,15 @@ def g(f: Callable[[Any], int], inputs: Any) -> None:
 );
 
 testcase!(
+    bug = "map(str.strip, a.splitlines()) should not error; list[str] is Iterable[str]",
+    test_map_str_method_with_splitlines,
+    r#"
+def main(a: str) -> None:
+    _ = map(str.strip, a.splitlines()) # E: Argument `list[str]` is not assignable to parameter `iterable` with type `Iterable[LiteralString]` in function `map.__new__`
+    "#,
+);
+
+testcase!(
     test_union_function_exponential,
     r#"
 # This used to take an exponential amount of time to type check
