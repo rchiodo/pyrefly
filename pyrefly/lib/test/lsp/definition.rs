@@ -339,7 +339,7 @@ fn exception_handler_name_test() {
     let code = r#"
 def test(flag: bool) -> None:
   try:
-    1 / 0
+    raise Exception()
   except Exception as e:
 #                     ^
     pass

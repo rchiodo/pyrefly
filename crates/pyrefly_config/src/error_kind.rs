@@ -141,6 +141,8 @@ pub enum ErrorKind {
     BadUnpacking,
     /// Calling a function marked with `@deprecated`
     Deprecated,
+    /// Division, floor division, or modulo by a literal zero value.
+    DivisionByZero,
     /// Raised when a class implicitly becomes abstract by defining abstract members without
     /// inheriting from `abc.ABC` or using `abc.ABCMeta`.
     ImplicitAbstractClass,
@@ -335,6 +337,7 @@ impl ErrorKind {
         // IMPORTANT: When updating these, also update error-kinds.mdx in the docs
         match self {
             ErrorKind::Deprecated => Severity::Warn,
+            ErrorKind::DivisionByZero => Severity::Warn,
             ErrorKind::ImplicitAbstractClass => Severity::Ignore,
             ErrorKind::ImplicitAny => Severity::Ignore,
             ErrorKind::ImplicitImport => Severity::Warn,
