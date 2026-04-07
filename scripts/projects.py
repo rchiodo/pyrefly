@@ -1475,4 +1475,13 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd=None,  # TODO: this crashes
             deps=["cryptography", "pydantic", "pytest", "textual"],
         ),
+        Project(
+            location="https://github.com/WoLpH/numpy-stl",
+            mypy_cmd="{mypy} stl",
+            pyright_cmd="{pyright} stl",
+            pyrefly_cmd="{pyrefly} stl",
+            deps=["numpy", "python-utils"],
+            expected_mypy_success=True,
+            expected_pyright_success=True,
+        ),
     ]
