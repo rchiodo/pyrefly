@@ -1061,7 +1061,6 @@ def get_mypy_primer_projects() -> list[Project]:
             mypy_cmd="{mypy} alectryon.py",
             pyright_cmd="{pyright}",
             pyrefly_cmd="{pyrefly} alectryon.py",
-            expected_pyrefly_success=True,
         ),
         Project(
             location="https://github.com/yurijmikhalevich/rclip",
@@ -1466,7 +1465,6 @@ def get_mypy_primer_projects() -> list[Project]:
                 "torch",
                 "{repo}'[dev,surrogate]'",
             ],
-            expected_pyrefly_success=False,
         ),
         Project(
             location="https://github.com/wemake-services/django-test-migrations",
