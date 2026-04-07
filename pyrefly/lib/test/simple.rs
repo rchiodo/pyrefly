@@ -1736,11 +1736,18 @@ def g(f: Callable[[Any], int], inputs: Any) -> None:
 );
 
 testcase!(
-    bug = "map(str.strip, a.splitlines()) should not error; list[str] is Iterable[str]",
     test_map_str_method_with_splitlines,
     r#"
 def main(a: str) -> None:
-    _ = map(str.strip, a.splitlines()) # E: Argument `list[str]` is not assignable to parameter `iterable` with type `Iterable[LiteralString]` in function `map.__new__`
+    _ = map(str.strip, a.splitlines())
+    "#,
+);
+
+testcase!(
+    test_str_maketrans_with_dict,
+    r#"
+def main() -> None:
+    _ = str.maketrans({"a": "b", "c": None})
     "#,
 );
 
