@@ -2205,4 +2205,11 @@ mod tests {
         let report = build_module_report_with_override("functions.py", "my.package.module");
         compare_snapshot("module_name_override.expected.json", &report);
     }
+
+    /// Inherited attrs should only appear under the defining class, not subclasses.
+    #[test]
+    fn test_report_inherited_attrs() {
+        let report = build_module_report_for_test("inherited_attrs.py");
+        compare_snapshot("inherited_attrs.expected.json", &report);
+    }
 }
