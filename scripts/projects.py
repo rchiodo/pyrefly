@@ -1468,4 +1468,11 @@ def get_mypy_primer_projects() -> list[Project]:
             ],
             expected_pyrefly_success=False,
         ),
+        Project(
+            location="https://github.com/archlinux/archinstall",
+            mypy_cmd="{mypy} .",
+            pyright_cmd="{pyright} .",
+            pyrefly_cmd=None,  # TODO: this crashes
+            deps=["cryptography", "pydantic", "pytest", "textual"],
+        ),
     ]
