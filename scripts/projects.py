@@ -716,7 +716,7 @@ def get_mypy_primer_projects() -> list[Project]:
             location="https://github.com/DataDog/dd-trace-py",
             mypy_cmd="{mypy}",
             pyright_cmd="{pyright}",
-            pyrefly_cmd=None,
+            pyrefly_cmd="{pyrefly}",
             deps=[
                 "attrs",
                 "types-six",
@@ -1128,7 +1128,7 @@ def get_mypy_primer_projects() -> list[Project]:
                 "MYPYPATH=$MYPYPATH:misc/python {mypy} --explicit-package-bases ci misc/python"
             ),
             pyright_cmd="{pyright}",
-            pyrefly_cmd=None,
+            pyrefly_cmd="{pyrefly}",
             install_cmd="{install} -r ci/builder/requirements.txt",
         ),
         Project(
