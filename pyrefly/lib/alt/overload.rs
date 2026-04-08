@@ -22,6 +22,7 @@ use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::small_map::SmallMap;
 use vec1::Vec1;
 use vec1::vec1;
 
@@ -44,6 +45,7 @@ use crate::types::callable::Function;
 use crate::types::callable::Params;
 use crate::types::literal::Lit;
 use crate::types::types::Type;
+use crate::types::types::Var;
 
 struct CalledOverload<'f> {
     func: &'f TargetWithTParams<Function>,
@@ -736,6 +738,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
         Some(candidate)
+    }
+
+    /// Substitute fresh vars for originals in a type. This is used to generate fresh partial vars
+    /// for overload calls.
+    #[expect(dead_code)]
+    fn substitute_vars(ty: &mut Type, mapping: &SmallMap<Var, Var>) {
+        ty.transform_mut(&mut |t| {
+            if let Type::Var(v) = t
+                && let Some(fresh) = mapping.get(v)
+            {
+                *t = Type::Var(*fresh);
+            }
+        });
     }
 
     fn call_overload<'c>(
