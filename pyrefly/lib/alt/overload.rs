@@ -51,6 +51,8 @@ struct CalledOverload<'f> {
     func: &'f TargetWithTParams<Function>,
     res: Type,
     ctor_targs: Option<TArgs>,
+    /// Mapping from original partial vars to fresh copies used in this overload call.
+    partial_var_map: SmallMap<Var, Var>,
     call_errors: ErrorCollector,
     /// Maps each argument's source range to the parameter type it was matched against.
     expected_types: HashMap<TextRange, Type>,
@@ -266,6 +268,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     func: arity_closest_overload.unwrap().0,
                     res: self.heap.mk_any_error(),
                     ctor_targs: None,
+                    partial_var_map: SmallMap::new(),
                     call_errors: self.error_collector(),
                     expected_types: HashMap::new(),
                 },
@@ -321,6 +324,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         closest_overload = CalledOverload {
                             func,
                             ctor_targs,
+                            partial_var_map: first_overload.partial_var_map.clone(),
                             expected_types,
                             res: self.unions(matched_overloads.into_map(|o| o.res)),
                             call_errors: self.error_collector(),
@@ -337,11 +341,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
 
-        if matched
-            && let Some(targs) = ctor_targs
-            && let Some(chosen_targs) = closest_overload.ctor_targs
-        {
-            *targs = chosen_targs;
+        if matched {
+            if let Some(targs) = ctor_targs
+                && let Some(chosen_targs) = closest_overload.ctor_targs
+            {
+                *targs = chosen_targs;
+            }
+            self.solver()
+                .solve_partial_vars_from_fresh(&closest_overload.partial_var_map);
         }
         // Record the closest overload to power IDE services.
         let mut overload_trace = |target: &TargetWithTParams<Function>| {
@@ -832,6 +839,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             func: callable,
             res,
             ctor_targs: overload_ctor_targs,
+            partial_var_map: SmallMap::new(),
             call_errors,
             expected_types,
         }
