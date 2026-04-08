@@ -96,12 +96,11 @@ def f(outcomes: list[Any]) -> dict[str, int]:
 );
 
 testcase!(
-    bug = "setdefault with a default value should not include None in the return type",
     test_setdefault_append,
     r#"
 d = {}
 items = [("news", "token1"), ("sports", "token2"), ("news", "token3")]
 for topic, token in items:
-    d.setdefault(topic, []).append(token)  # E: Object of class `NoneType` has no attribute `append`
+    d.setdefault(topic, []).append(token)
 "#,
 );
