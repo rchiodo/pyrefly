@@ -460,6 +460,30 @@ impl Solver {
         )
     }
 
+    /// Create fresh copies of all partial variables in the given list.
+    /// Returns a mapping from original vars to their fresh copies.
+    /// Used during overload resolution to prevent one overload's constraint
+    /// solving from contaminating other overloads' partial variables.
+    pub fn freshen_partial_vars(
+        &self,
+        vars: &[Var],
+        uniques: &UniqueFactory,
+    ) -> SmallMap<Var, Var> {
+        let mut fresh = SmallMap::with_capacity(vars.len());
+        let mut lock = self.variables.lock();
+        for v in vars {
+            let cloned = match &*lock.get(*v) {
+                Variable::PartialContained(range) => Variable::PartialContained(*range),
+                Variable::PartialQuantified(q) => Variable::PartialQuantified(q.clone()),
+                _ => continue,
+            };
+            let fresh_var = Var::new(uniques);
+            fresh.insert(*v, fresh_var);
+            lock.insert_fresh(fresh_var, cloned);
+        }
+        fresh
+    }
+
     /// Finish the type returned from a function call. This entails expanding solved variables,
     /// erasing unsolved variables without defaults from unions, and canonicalizing dimension
     /// expressions so that all-literal SizeExpr trees fold to single literals.
