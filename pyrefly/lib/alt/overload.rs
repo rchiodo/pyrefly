@@ -740,6 +740,40 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some(candidate)
     }
 
+    /// Collect partial vars from self_obj and Type-valued arguments.
+    #[expect(dead_code)]
+    fn collect_partial_vars(
+        &self,
+        self_obj: Option<&Type>,
+        args: &[CallArg],
+        keywords: &[CallKeyword],
+    ) -> Vec<Var> {
+        let mut partial_vars: Vec<Var> = Vec::new();
+        let mut collect = |ty: &Type| {
+            for var in ty.collect_all_vars() {
+                if self.solver().var_is_partial(var) && !partial_vars.contains(&var) {
+                    partial_vars.push(var);
+                }
+            }
+        };
+        if let Some(obj) = self_obj {
+            collect(obj);
+        }
+        for arg in args {
+            if let CallArg::Arg(TypeOrExpr::Type(ty, _))
+            | CallArg::Star(TypeOrExpr::Type(ty, _), _) = arg
+            {
+                collect(ty);
+            }
+        }
+        for kw in keywords {
+            if let TypeOrExpr::Type(ty, _) = &kw.value {
+                collect(ty);
+            }
+        }
+        partial_vars
+    }
+
     /// Substitute fresh vars for originals in a type. This is used to generate fresh partial vars
     /// for overload calls.
     #[expect(dead_code)]
