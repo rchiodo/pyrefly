@@ -189,7 +189,7 @@ impl QuantifiedHandle {
 
     /// Split the handle into (vars in ty, vars not in ty)
     pub fn partition_by(self, ty: &Type) -> (Self, Self) {
-        let vars_in_ty = ty.collect_maybe_quantified_vars();
+        let vars_in_ty = ty.collect_maybe_placeholder_vars();
         let (left, right) = self.0.into_iter().partition(|var| vars_in_ty.contains(var));
         (QuantifiedHandle(left), QuantifiedHandle(right))
     }
@@ -1140,7 +1140,7 @@ impl Solver {
     }
 
     pub fn finish_all_quantified(&self, ty: &Type) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        let vs = QuantifiedHandle(ty.collect_maybe_quantified_vars());
+        let vs = QuantifiedHandle(ty.collect_maybe_placeholder_vars());
         self.finish_quantified(vs, self.infer_with_first_use)
     }
 
