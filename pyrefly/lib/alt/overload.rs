@@ -756,7 +756,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Vec<Var> {
         let mut partial_vars: Vec<Var> = Vec::new();
         let mut collect = |ty: &Type| {
-            for var in ty.collect_all_vars() {
+            for var in ty.collect_maybe_quantified_vars() {
                 if self.solver().var_is_partial(var) && !partial_vars.contains(&var) {
                     partial_vars.push(var);
                 }
