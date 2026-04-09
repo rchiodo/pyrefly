@@ -1058,3 +1058,17 @@ x = f()
 assert_type(x, int | None)  # E: assert_type(Any, int | None) failed
 "#,
 );
+
+testcase!(
+    bug = "Any assignment should not erase nullable parameter annotation",
+    test_param_nullable_annotation_any_reassign,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+def test(x: int | None) -> None:
+    x = f()
+    assert_type(x, int | None)  # E: assert_type(Any, int | None) failed
+"#,
+);
