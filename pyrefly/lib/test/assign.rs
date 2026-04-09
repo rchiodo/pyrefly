@@ -1100,3 +1100,17 @@ x = f()
 assert_type(x, int | str)  # E: assert_type(Any, int | str) failed
 "#,
 );
+
+testcase!(
+    bug = "Any assignment should not erase generic annotation",
+    test_generic_annotation_any_assign,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+x: list[int] = [1, 2, 3]
+x = f()
+assert_type(x, list[int])  # E: assert_type(Any, list[int]) failed
+"#,
+);
