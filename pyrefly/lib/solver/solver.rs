@@ -126,10 +126,6 @@ enum Variable {
     /// A variable due to generic instantiation, `def f[T](x: T): T` with `f(1)`
     Quantified {
         quantified: Quantified,
-        // TODO(https://github.com/facebook/pyrefly/issues/105): This will eventually be used to
-        // collect lower bounds for typevars rather than eagerly pinning them. Currently, the only
-        // thing it does is store `Any` lower bounds to avoid pinning to `Any` unless we have no
-        // other solution.
         bounds: Bounds,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
