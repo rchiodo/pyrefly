@@ -224,6 +224,7 @@ use pyrefly_util::telemetry::TelemetryEvent;
 use pyrefly_util::telemetry::TelemetryEventKind;
 use pyrefly_util::telemetry::TelemetryFileStats;
 use pyrefly_util::telemetry::TelemetryFileWatcherStats;
+use pyrefly_util::telemetry::TelemetryInvalidateFindReason;
 use pyrefly_util::telemetry::TelemetryServerState;
 use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
@@ -2898,9 +2899,11 @@ impl Server {
     }
 
     fn invalidate_find_for_configs(&self, invalidated_configs: SmallSet<ArcId<ConfigFile>>) {
-        self.invalidate(TelemetryEventKind::InvalidateFind, |t| {
-            t.invalidate_find_for_configs(invalidated_configs)
-        });
+        self.invalidate(
+            TelemetryEventKind::InvalidateFind,
+            Some(TelemetryInvalidateFindReason::SourceDbConfigChanged),
+            |t| t.invalidate_find_for_configs(invalidated_configs),
+        );
     }
 
     fn populate_project_files_if_necessary(
@@ -2993,12 +2996,16 @@ impl Server {
     fn invalidate(
         &self,
         kind: TelemetryEventKind,
+        invalidate_find_reason: Option<TelemetryInvalidateFindReason>,
         f: impl FnOnce(&mut Transaction) + Send + Sync + 'static,
     ) {
         let open_handles = self.get_open_file_handles();
         self.recheck_queue.queue_task(
             kind,
             Box::new(move |server, _telemetry, telemetry_event| {
+                if let Some(reason) = invalidate_find_reason {
+                    telemetry_event.set_invalidate_find_reason(reason);
+                }
                 // Filter to only include handles from workspaces with streaming enabled
                 let streaming_handles: SmallSet<Handle> = open_handles
                     .iter()
@@ -3297,7 +3304,7 @@ impl Server {
 
     fn did_save(&self, url: Url) {
         if let Some(path) = self.path_for_uri(&url) {
-            self.invalidate(TelemetryEventKind::InvalidateDisk, move |t| {
+            self.invalidate(TelemetryEventKind::InvalidateDisk, None, move |t| {
                 t.invalidate_disk(&[path])
             })
         }
@@ -3625,6 +3632,10 @@ impl Server {
 
         // Record the files that changed for telemetry
         telemetry_event.set_did_change_watched_files_stats(TelemetryDidChangeWatchedFilesStats {
+            created_count: events.created.len(),
+            modified_count: events.modified.len(),
+            removed_count: events.removed.len(),
+            unknown_count: events.unknown.len(),
             created: events.created.iter().take(20).cloned().collect(),
             modified: events.modified.iter().take(20).cloned().collect(),
             removed: events.removed.iter().take(20).cloned().collect(),
@@ -3645,12 +3656,16 @@ impl Server {
         // and subsequent tasks find an empty buffer and become no-ops.
         self.pending_invalidation_events.lock().extend(events);
         let pending = Arc::clone(&self.pending_invalidation_events);
-        self.invalidate(TelemetryEventKind::InvalidateFind, move |t| {
-            let events = std::mem::take(&mut *pending.lock());
-            if !events.is_empty() {
-                t.invalidate_events(&events);
-            }
-        });
+        self.invalidate(
+            TelemetryEventKind::InvalidateFind,
+            Some(TelemetryInvalidateFindReason::WatcherEvents),
+            move |t| {
+                let events = std::mem::take(&mut *pending.lock());
+                if !events.is_empty() {
+                    t.invalidate_events(&events);
+                }
+            },
+        );
 
         // If a non-Python, non-config file was changed, then try rebuilding build systems.
         // If no build system file was changed, then we should just not do anything. If
