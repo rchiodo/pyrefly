@@ -1086,3 +1086,17 @@ def test(x: int) -> None:
     assert_type(x, int)  # E: assert_type(Any, int) failed
 "#,
 );
+
+testcase!(
+    bug = "Any assignment should not erase union annotation",
+    test_union_annotation_any_assign,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+x: int | str = 0
+x = f()
+assert_type(x, int | str)  # E: assert_type(Any, int | str) failed
+"#,
+);
