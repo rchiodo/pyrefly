@@ -1055,10 +1055,11 @@ impl Solver {
         v: Var,
         bound: Type,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-    ) {
+    ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
         let mut first_bound = None;
+        let mut lower_bound = None;
         match &*e {
             Variable::Quantified {
                 quantified: _,
@@ -1068,12 +1069,19 @@ impl Solver {
                 if let Some(first) = bounds.upper.first() {
                     first_bound = Some(first.clone());
                 }
+                lower_bound = self.get_current_bound(bounds.lower.clone());
             }
             _ => {}
         }
         drop(e);
         drop(lock);
-        let new_bound = self.get_new_bound(first_bound, bound, is_subset);
+        let res = lower_bound.map_or(Ok(()), |lower_bound| is_subset(&lower_bound, &bound));
+        let new_bound = if res.is_ok() {
+            self.get_new_bound(first_bound, bound, is_subset)
+        } else {
+            // TODO(https://github.com/facebook/pyrefly/issues/105): don't throw away the bound.
+            NewBound::AddBound(Type::any_error())
+        };
         let lock = self.variables.lock();
         match &mut *lock.get_mut(v) {
             Variable::Quantified {
@@ -1083,6 +1091,7 @@ impl Solver {
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.upper, new_bound),
             _ => {}
         }
+        res
     }
 
     /// Get current bound from a set of bounds of an unfinished variable.
@@ -2081,29 +2090,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         variables.update(*v1, Variable::Answer(t2.clone()));
                         Ok(())
                     }
-                    Variable::Quantified {
-                        quantified: _,
-                        bounds,
-                    }
-                    | Variable::Unwrap(bounds) => {
-                        let lower_bound = self.solver.get_current_bound(bounds.lower.clone());
+                    Variable::Quantified { .. } | Variable::Unwrap(_) => {
                         drop(v1_ref);
                         drop(variables);
-                        let res = if let Some(lower_bound) = lower_bound {
-                            self.is_subset_eq(&lower_bound, t2)
-                        } else {
-                            Ok(())
-                        };
-                        self.solver.add_upper_bound(
-                            *v1,
-                            if res.is_ok() {
-                                t2.clone()
-                            } else {
-                                Type::any_error()
-                            },
-                            &mut |got, want| self.is_subset_eq(got, want),
-                        );
-                        res
+                        self.solver
+                            .add_upper_bound(*v1, t2.clone(), &mut |got, want| {
+                                self.is_subset_eq(got, want)
+                            })
                     }
                     Variable::PartialQuantified(q) => {
                         let name = q.name.clone();

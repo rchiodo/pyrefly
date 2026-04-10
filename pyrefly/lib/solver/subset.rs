@@ -1263,14 +1263,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 })
             }
             (_, Type::Any(_)) => {
-                for var in got.collect_maybe_placeholder_vars() {
+                all(got.collect_maybe_placeholder_vars().iter(), |var| {
                     // Variables in `got` now have `Any` as an upper bound.
+                    // TODO(https://github.com/facebook/pyrefly/issues/105): whether to add a lower
+                    // or upper bound should depend on variance.
                     self.solver
-                        .add_upper_bound(var, want.clone(), &mut |got, want| {
+                        .add_upper_bound(*var, want.clone(), &mut |got, want| {
                             self.is_subset_eq(got, want)
-                        });
-                }
-                Ok(())
+                        })
+                })
             }
             (Type::Never(_), _) => Ok(()),
             (_, Type::ClassType(want)) if want.is_builtin("object") => {
