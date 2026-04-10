@@ -1011,10 +1011,11 @@ impl Solver {
         v: Var,
         bound: Type,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-    ) {
+    ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
         let mut first_bound = None;
+        let mut upper_bound = None;
         match &*e {
             Variable::Quantified {
                 quantified: _,
@@ -1024,12 +1025,19 @@ impl Solver {
                 if let Some(first) = bounds.lower.first() {
                     first_bound = Some(first.clone());
                 }
+                upper_bound = self.get_current_bound(bounds.upper.clone());
             }
             _ => {}
         }
         drop(e);
         drop(lock);
-        let new_bound = self.get_new_bound(first_bound, bound, is_subset);
+        let res = upper_bound.map_or(Ok(()), |upper_bound| is_subset(&bound, &upper_bound));
+        let new_bound = if res.is_ok() {
+            self.get_new_bound(first_bound, bound, is_subset)
+        } else {
+            // TODO(https://github.com/facebook/pyrefly/issues/105): don't throw away the bound.
+            NewBound::AddBound(Type::any_error())
+        };
         let lock = self.variables.lock();
         match &mut *lock.get_mut(v) {
             Variable::Quantified {
@@ -1039,6 +1047,7 @@ impl Solver {
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.lower, new_bound),
             _ => {}
         }
+        res
     }
 
     pub fn add_upper_bound(
@@ -2223,21 +2232,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                 .update(*v2, Variable::Answer(answer));
                             Ok(())
                         } else {
-                            let res = if let Some(upper_bound) = upper_bound {
-                                self.is_subset_eq(&answer, &upper_bound)
-                            } else {
-                                Ok(())
-                            };
-                            self.solver.add_lower_bound(
-                                *v2,
-                                if res.is_ok() {
-                                    answer
-                                } else {
-                                    Type::any_error()
-                                },
-                                &mut |got, want| self.is_subset_eq(got, want),
-                            );
-                            res
+                            self.solver.add_lower_bound(*v2, answer, &mut |got, want| {
+                                self.is_subset_eq(got, want)
+                            })
                         }
                     }
                     Variable::PartialQuantified(q) => {
@@ -2281,25 +2278,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         variables.update(*v2, Variable::Answer(answer));
                         Ok(())
                     }
-                    Variable::Unwrap(bounds) => {
-                        let upper_bound = self.solver.get_current_bound(bounds.upper.clone());
+                    Variable::Unwrap(_) => {
                         drop(v2_ref);
                         drop(variables);
-                        let res = if let Some(upper_bound) = upper_bound {
-                            self.is_subset_eq(t1, &upper_bound)
-                        } else {
-                            Ok(())
-                        };
-                        self.solver.add_lower_bound(
-                            *v2,
-                            if res.is_ok() {
-                                t1.clone()
-                            } else {
-                                Type::any_error()
-                            },
-                            &mut |got, want| self.is_subset_eq(got, want),
-                        );
-                        res
+                        self.solver
+                            .add_lower_bound(*v2, t1.clone(), &mut |got, want| {
+                                self.is_subset_eq(got, want)
+                            })
                     }
                     Variable::Recursive => {
                         drop(v2_ref);
