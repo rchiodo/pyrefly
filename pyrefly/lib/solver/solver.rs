@@ -1014,21 +1014,17 @@ impl Solver {
     ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
-        let mut first_bound = None;
-        let mut upper_bound = None;
-        match &*e {
+        let (first_bound, upper_bound) = match &*e {
             Variable::Quantified {
                 quantified: _,
                 bounds,
             }
-            | Variable::Unwrap(bounds) => {
-                if let Some(first) = bounds.lower.first() {
-                    first_bound = Some(first.clone());
-                }
-                upper_bound = self.get_current_bound(bounds.upper.clone());
-            }
-            _ => {}
-        }
+            | Variable::Unwrap(bounds) => (
+                bounds.lower.first().cloned(),
+                self.get_current_bound(bounds.upper.clone()),
+            ),
+            _ => return Ok(()),
+        };
         drop(e);
         drop(lock);
         let res = upper_bound.map_or(Ok(()), |upper_bound| is_subset(&bound, &upper_bound));
@@ -1058,21 +1054,17 @@ impl Solver {
     ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
-        let mut first_bound = None;
-        let mut lower_bound = None;
-        match &*e {
+        let (first_bound, lower_bound) = match &*e {
             Variable::Quantified {
                 quantified: _,
                 bounds,
             }
-            | Variable::Unwrap(bounds) => {
-                if let Some(first) = bounds.upper.first() {
-                    first_bound = Some(first.clone());
-                }
-                lower_bound = self.get_current_bound(bounds.lower.clone());
-            }
-            _ => {}
-        }
+            | Variable::Unwrap(bounds) => (
+                bounds.upper.first().cloned(),
+                self.get_current_bound(bounds.lower.clone()),
+            ),
+            _ => return Ok(()),
+        };
         drop(e);
         drop(lock);
         let res = lower_bound.map_or(Ok(()), |lower_bound| is_subset(&lower_bound, &bound));
