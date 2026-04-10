@@ -48,6 +48,7 @@ use vec1::Vec1;
 use crate::module::module_info::ModuleInfo;
 use crate::report::glean::facts::*;
 use crate::report::glean::schema::*;
+use crate::state::lsp::FindDefinitionItemWithDocstring;
 use crate::state::lsp::FindPreference;
 use crate::state::state::Transaction;
 use crate::types::types::Type;
@@ -615,6 +616,26 @@ impl GleanState<'_> {
         definitions
     }
 
+    fn resolve_name_use(
+        &self,
+        identifier: &Identifier,
+        only_resolved_name: bool,
+        definition: Option<FindDefinitionItemWithDocstring>,
+    ) -> Vec<DefinitionLocation> {
+        let additional_definitions =
+            self.get_additional_definitions(identifier.range(), only_resolved_name);
+
+        match definition {
+            Some(def) => self.get_definition_location(
+                def.definition_range,
+                &def.module,
+                None,
+                additional_definitions,
+            ),
+            None => additional_definitions,
+        }
+    }
+
     fn find_definition_for_name_use(
         &self,
         identifier: Identifier,
@@ -624,42 +645,22 @@ impl GleanState<'_> {
             .transaction
             .find_definition_for_name_use(self.handle, &identifier, find_preference_glean())
             .unwrap_or(None);
-
-        let additional_definitions =
-            self.get_additional_definitions(identifier.range(), only_resolved_name);
-
-        definition.map_or(additional_definitions.clone(), |def| {
-            self.get_definition_location(
-                def.definition_range,
-                &def.module,
-                None,
-                additional_definitions,
-            )
-        })
+        self.resolve_name_use(&identifier, only_resolved_name, definition)
     }
 
     fn find_definition_for_str_literal(&self, range: TextRange) -> Vec<DefinitionLocation> {
         let name = self.module.code_at(range);
-        let fqname = join_names(self.module_name.as_str(), name);
+        let as_name = join_names(self.module_name.as_str(), name);
         let identifier = Identifier::new(name, range);
         let definition = self
             .transaction
             .find_definition_for_name_use(self.handle, &identifier, find_preference_glean())
             .unwrap_or(None);
-        let additional_definitions = if definition.is_some() || self.names.contains(&fqname) {
-            self.get_additional_definitions(range, false)
+        if definition.is_some() || self.names.contains(&as_name) {
+            self.resolve_name_use(&identifier, false, definition)
         } else {
             vec![]
-        };
-
-        definition.map_or(additional_definitions.clone(), |def| {
-            self.get_definition_location(
-                def.definition_range,
-                &def.module,
-                None,
-                additional_definitions,
-            )
-        })
+        }
     }
 
     fn find_definition_for_literal_symbol(&self, name: &str) -> DefinitionLocation {
