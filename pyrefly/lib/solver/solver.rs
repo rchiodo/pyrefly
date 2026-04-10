@@ -366,6 +366,14 @@ impl Display for Solver {
 /// but we don't want to stack overflow.
 const TYPE_LIMIT: usize = 20;
 
+/// A new bound to add to a variable.
+enum NewBound {
+    /// The new bound should replace the existing bound.
+    UpdateExistingBound(Type),
+    /// The new bound should be appended to the existing bounds.
+    AddBound(Type),
+}
+
 impl Solver {
     /// Create a new solver.
     pub fn new(
@@ -951,38 +959,19 @@ impl Solver {
     }
 
     /// Add a bound to the variable if it is a Quantified or Unwrap
-    fn add_bound(
+    fn get_new_bound(
         &self,
-        v: Var,
+        existing_bound: Option<Type>,
         bound: Type,
         is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
-        get: &dyn Fn(&Bounds) -> &Vec<Type>,
-        get_mut: &dyn Fn(&mut Bounds) -> &mut Vec<Type>,
-    ) {
-        let lock = self.variables.lock();
-        let e = lock.get(v);
-        let mut first_bound = None;
-        match &*e {
-            Variable::Quantified {
-                quantified: _,
-                bounds,
-            }
-            | Variable::Unwrap(bounds) => {
-                if let Some(first) = get(bounds).first() {
-                    first_bound = Some(first.clone());
-                }
-            }
-            _ => {}
-        }
-        drop(e);
-        drop(lock);
-        // Check if the new bound can absorb or be absorbed into the first bound.
+    ) -> NewBound {
+        // Check if the new bound can absorb or be absorbed into the existing bound.
         // Examples: `float` absorbs `int`, `list[Any]` absorbs `list[int]`.
         // TODO(https://github.com/facebook/pyrefly/issues/105): there are a few fishy things:
         // * We're only checking against the first bound.
         // * We're keeping `Any` separate so it can be filtered out in `solve_one_bounds`.
         // * We're relying on `is_subset` to pin vars.
-        let new_first_bound = first_bound.and_then(|first| {
+        let updated_bound = existing_bound.and_then(|first| {
             let can_absorb = |t: &Type| !t.is_any() && t.collect_all_vars().is_empty();
             if !can_absorb(&first) || !can_absorb(&bound) {
                 is_subset(&bound, &first); // Ignore the result, just pin vars
@@ -995,22 +984,25 @@ impl Solver {
                 None
             }
         });
-        let lock = self.variables.lock();
-        match &mut *lock.get_mut(v) {
-            Variable::Quantified {
-                quantified: _,
-                bounds,
-            }
-            | Variable::Unwrap(bounds) => {
-                if let Some(new_first) = new_first_bound
-                    && let Some(old_first) = get_mut(bounds).first_mut()
-                {
+        if let Some(updated_bound) = updated_bound {
+            NewBound::UpdateExistingBound(updated_bound)
+        } else {
+            NewBound::AddBound(bound)
+        }
+    }
+
+    fn add_bound(&self, bounds: &mut Vec<Type>, bound: NewBound) {
+        match bound {
+            NewBound::UpdateExistingBound(new_first) => {
+                if let Some(old_first) = bounds.first_mut() {
                     *old_first = new_first;
                 } else {
-                    get_mut(bounds).push(bound);
+                    *bounds = vec![new_first];
                 }
             }
-            _ => {}
+            NewBound::AddBound(bound) => {
+                bounds.push(bound);
+            }
         }
     }
 
@@ -1020,9 +1012,33 @@ impl Solver {
         bound: Type,
         is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
     ) {
-        self.add_bound(v, bound, is_subset, &|bounds| &bounds.lower, &|bounds| {
-            &mut bounds.lower
-        })
+        let lock = self.variables.lock();
+        let e = lock.get(v);
+        let mut first_bound = None;
+        match &*e {
+            Variable::Quantified {
+                quantified: _,
+                bounds,
+            }
+            | Variable::Unwrap(bounds) => {
+                if let Some(first) = bounds.lower.first() {
+                    first_bound = Some(first.clone());
+                }
+            }
+            _ => {}
+        }
+        drop(e);
+        drop(lock);
+        let new_bound = self.get_new_bound(first_bound, bound, is_subset);
+        let lock = self.variables.lock();
+        match &mut *lock.get_mut(v) {
+            Variable::Quantified {
+                quantified: _,
+                bounds,
+            }
+            | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.lower, new_bound),
+            _ => {}
+        }
     }
 
     pub fn add_upper_bound(
@@ -1031,9 +1047,33 @@ impl Solver {
         bound: Type,
         is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
     ) {
-        self.add_bound(v, bound, is_subset, &|bounds| &bounds.upper, &|bounds| {
-            &mut bounds.upper
-        })
+        let lock = self.variables.lock();
+        let e = lock.get(v);
+        let mut first_bound = None;
+        match &*e {
+            Variable::Quantified {
+                quantified: _,
+                bounds,
+            }
+            | Variable::Unwrap(bounds) => {
+                if let Some(first) = bounds.upper.first() {
+                    first_bound = Some(first.clone());
+                }
+            }
+            _ => {}
+        }
+        drop(e);
+        drop(lock);
+        let new_bound = self.get_new_bound(first_bound, bound, is_subset);
+        let lock = self.variables.lock();
+        match &mut *lock.get_mut(v) {
+            Variable::Quantified {
+                quantified: _,
+                bounds,
+            }
+            | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.upper, new_bound),
+            _ => {}
+        }
     }
 
     /// Get current bound from a set of bounds of an unfinished variable.
