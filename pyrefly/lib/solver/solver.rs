@@ -963,7 +963,7 @@ impl Solver {
         &self,
         existing_bound: Option<Type>,
         bound: Type,
-        is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
+        is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
     ) -> NewBound {
         // Check if the new bound can absorb or be absorbed into the existing bound.
         // Examples: `float` absorbs `int`, `list[Any]` absorbs `list[int]`.
@@ -974,11 +974,11 @@ impl Solver {
         let updated_bound = existing_bound.and_then(|first| {
             let can_absorb = |t: &Type| !t.is_any() && t.collect_all_vars().is_empty();
             if !can_absorb(&first) || !can_absorb(&bound) {
-                is_subset(&bound, &first); // Ignore the result, just pin vars
+                let _ = is_subset(&bound, &first); // Ignore the result, just pin vars
                 None
-            } else if is_subset(&bound.materialize(), &first) {
+            } else if is_subset(&bound.materialize(), &first).is_ok() {
                 Some(first)
-            } else if is_subset(&first.materialize(), &bound) {
+            } else if is_subset(&first.materialize(), &bound).is_ok() {
                 Some(bound.clone())
             } else {
                 None
@@ -1010,7 +1010,7 @@ impl Solver {
         &self,
         v: Var,
         bound: Type,
-        is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
+        is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
     ) {
         let lock = self.variables.lock();
         let e = lock.get(v);
@@ -1045,7 +1045,7 @@ impl Solver {
         &self,
         v: Var,
         bound: Type,
-        is_subset: &mut dyn FnMut(&Type, &Type) -> bool,
+        is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
     ) {
         let lock = self.variables.lock();
         let e = lock.get(v);
@@ -2092,7 +2092,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             } else {
                                 Type::any_error()
                             },
-                            &mut |got, want| self.is_subset_eq(got, want).is_ok(),
+                            &mut |got, want| self.is_subset_eq(got, want),
                         );
                         res
                     }
@@ -2235,7 +2235,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                 } else {
                                     Type::any_error()
                                 },
-                                &mut |got, want| self.is_subset_eq(got, want).is_ok(),
+                                &mut |got, want| self.is_subset_eq(got, want),
                             );
                             res
                         }
@@ -2297,7 +2297,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             } else {
                                 Type::any_error()
                             },
-                            &mut |got, want| self.is_subset_eq(got, want).is_ok(),
+                            &mut |got, want| self.is_subset_eq(got, want),
                         );
                         res
                     }

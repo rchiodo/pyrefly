@@ -1256,7 +1256,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     // Variables in `want` now have `Any` as a lower bound.
                     self.solver
                         .add_lower_bound(var, got.clone(), &mut |got, want| {
-                            self.is_subset_eq(got, want).is_ok()
+                            self.is_subset_eq(got, want)
                         });
                 }
                 Ok(())
@@ -1266,7 +1266,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     // Variables in `got` now have `Any` as an upper bound.
                     self.solver
                         .add_upper_bound(var, want.clone(), &mut |got, want| {
-                            self.is_subset_eq(got, want).is_ok()
+                            self.is_subset_eq(got, want)
                         });
                 }
                 Ok(())
