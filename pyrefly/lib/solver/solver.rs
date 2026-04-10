@@ -104,7 +104,7 @@ impl Bounds {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Variable {
     /// A "partial type" (terminology borrowed from mypy) for an empty container.
     ///
@@ -333,6 +333,11 @@ pub enum PinError {
     UnfinishedQuantified(Quantified),
 }
 
+/// Snapshot of solver variable state.
+/// IMPORTANT: this struct is deliberately opaque.
+/// `Variable` should not be exposed outside this file.
+pub struct VarSnapshot(Vec<(Var, Variable)>);
+
 #[derive(Debug)]
 pub struct Solver {
     variables: Mutex<Variables>,
@@ -454,6 +459,20 @@ impl Solver {
             &*variable,
             Variable::PartialQuantified(_) | Variable::PartialContained(_) | Variable::Unwrap(_)
         )
+    }
+
+    /// Snapshot the current state of the given vars so they can be restored later.
+    pub fn snapshot_vars(&self, vars: &[Var]) -> VarSnapshot {
+        let lock = self.variables.lock();
+        VarSnapshot(vars.iter().map(|v| (*v, lock.get(*v).clone())).collect())
+    }
+
+    /// Restore vars to a previously saved snapshot.
+    pub fn restore_vars(&self, snapshot: &VarSnapshot) {
+        let lock = self.variables.lock();
+        for (var, state) in &snapshot.0 {
+            lock.update(*var, state.clone());
+        }
     }
 
     /// Finish the type returned from a function call. This entails expanding solved variables,
