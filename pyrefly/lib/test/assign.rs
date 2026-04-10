@@ -1135,3 +1135,18 @@ x = [1, 2, 3]
 assert_type(x, list[Any])
 "#,
 );
+
+testcase!(
+    bug = "None guard + Any assignment should preserve annotation",
+    test_param_none_guard_any_reassign,
+    r#"
+from typing import Any, assert_type
+
+def f() -> Any: ...
+
+def test(x: int | None) -> None:
+    if x is None:
+        x = f()
+    assert_type(x, int | None)  # E: assert_type(int | Any, int | None) failed
+"#,
+);
