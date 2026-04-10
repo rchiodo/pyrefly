@@ -1837,6 +1837,7 @@ def test_types_csv(path: str) -> None:
 );
 
 testcase!(
+    bug = "False positives",
     test_partial_inference_through_overload,
     r#"
 from typing import assert_type, overload
@@ -1847,8 +1848,8 @@ def f(x: list[int], y: int): ...
 @overload
 def f(x: list[str], y: str): ...
 def f(x, y): ...
-f(x, y)
-assert_type(x, list[str])
+f(x, y)  # E: No matching overload
+assert_type(x, list[str])  # E: assert_type
     "#,
 );
 
