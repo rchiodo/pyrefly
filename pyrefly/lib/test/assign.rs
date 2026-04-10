@@ -1114,3 +1114,24 @@ x = f()
 assert_type(x, list[int])  # E: assert_type(Any, list[int]) failed
 "#,
 );
+
+testcase!(
+    test_gradual_annotation_direct_preserved,
+    r#"
+from typing import Any, assert_type
+
+x: list[Any] = [1, 2, 3]
+assert_type(x, list[Any])
+"#,
+);
+
+testcase!(
+    test_gradual_annotation_forwarded_preserved,
+    r#"
+from typing import Any, assert_type
+
+x: list[Any] = []
+x = [1, 2, 3]
+assert_type(x, list[Any])
+"#,
+);
