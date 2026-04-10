@@ -502,9 +502,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         ctor_targs: &Option<&mut TArgs>,
     ) -> (CalledOverload<'c>, bool) {
+        // Collect partial vars so we can save/restore them around each overload evaluation. This
+        // prevents premature pinning of partial vars on failed overload calls.
+        let partial_vars = self.collect_partial_vars(self_obj, args, keywords);
+
         let mut matched_overloads = Vec::with_capacity(overloads.len());
         let mut closest_unmatched_overload: Option<CalledOverload<'c>> = None;
         for callable in overloads {
+            let snapshot = self.solver().snapshot_vars(&partial_vars);
             let called_overload = self.call_overload(
                 callable,
                 metadata,
@@ -516,6 +521,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 None, // don't use the hint yet, it shouldn't influence overload selection
                 ctor_targs,
             );
+            self.solver().restore_vars(&snapshot);
             if called_overload.call_errors.is_empty() {
                 matched_overloads.push(called_overload);
             } else {
@@ -624,6 +630,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     matched_overloads
                         .iter()
                         .find_position(|o| {
+                            let snapshot = self.solver().snapshot_vars(&partial_vars);
                             let res = self.call_overload(
                                 o.func,
                                 metadata,
@@ -635,6 +642,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 None, // don't use the hint yet, it shouldn't influence overload selection
                                 &None,
                             );
+                            self.solver().restore_vars(&snapshot);
                             res.call_errors.is_empty()
                         })
                         .map(|(split_point, _)| split_point + 1)
@@ -740,7 +748,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Collect partial vars from self_obj and Type-valued arguments.
-    #[expect(dead_code)]
     fn collect_partial_vars(
         &self,
         self_obj: Option<&Type>,
