@@ -205,7 +205,7 @@ struct Variables(SmallMap<Var, RefCell<VariableNode>>);
 /// can implement path compression. We use a separate Cell instead of using
 /// the RefCell around the node, because we might find that two vars point
 /// to the same root, which would cause us to borrow_mut twice and panic.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum VariableNode {
     Goto(Cell<Var>),
     Root(Variable, usize),
@@ -339,6 +339,7 @@ pub enum PinError {
 pub struct VarSnapshot(Vec<(Var, VarState)>);
 
 struct VarState {
+    node: VariableNode,
     variable: Variable,
 }
 
@@ -482,6 +483,7 @@ impl Solver {
                     (
                         *v,
                         VarState {
+                            node: lock.get_node(*v).borrow().clone(),
                             variable: lock.get(*v).clone(),
                         },
                     )
@@ -494,6 +496,7 @@ impl Solver {
     pub fn restore_vars(&self, snapshot: VarSnapshot) {
         let lock = self.variables.lock();
         for (var, state) in snapshot.0 {
+            *lock.get_node(var).borrow_mut() = state.node;
             lock.update(var, state.variable);
         }
     }
