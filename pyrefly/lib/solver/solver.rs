@@ -341,6 +341,7 @@ pub struct VarSnapshot(Vec<(Var, VarState)>);
 struct VarState {
     node: VariableNode,
     variable: Variable,
+    error: Option<TypeVarSpecializationError>,
 }
 
 #[derive(Debug)]
@@ -476,15 +477,17 @@ impl Solver {
 
     /// Snapshot the current state of the given vars so they can be restored later.
     pub fn snapshot_vars(&self, vars: &[Var]) -> VarSnapshot {
-        let lock = self.variables.lock();
+        let variables = self.variables.lock();
+        let errors = self.instantiation_errors.read();
         VarSnapshot(
             vars.iter()
                 .map(|v| {
                     (
                         *v,
                         VarState {
-                            node: lock.get_node(*v).borrow().clone(),
-                            variable: lock.get(*v).clone(),
+                            node: variables.get_node(*v).borrow().clone(),
+                            variable: variables.get(*v).clone(),
+                            error: errors.get(v).cloned(),
                         },
                     )
                 })
@@ -494,10 +497,19 @@ impl Solver {
 
     /// Restore vars to a previously saved snapshot.
     pub fn restore_vars(&self, snapshot: VarSnapshot) {
-        let lock = self.variables.lock();
+        let variables = self.variables.lock();
+        let mut errors = self.instantiation_errors.write();
         for (var, state) in snapshot.0 {
-            *lock.get_node(var).borrow_mut() = state.node;
-            lock.update(var, state.variable);
+            *variables.get_node(var).borrow_mut() = state.node;
+            variables.update(var, state.variable);
+            match state.error {
+                Some(e) => {
+                    errors.insert(var, e);
+                }
+                None => {
+                    errors.shift_remove(&var);
+                }
+            }
         }
     }
 
