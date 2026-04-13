@@ -335,8 +335,12 @@ pub enum PinError {
 
 /// Snapshot of solver variable state.
 /// IMPORTANT: this struct is deliberately opaque.
-/// `Variable` should not be exposed outside this file.
-pub struct VarSnapshot(Vec<(Var, Variable)>);
+/// Var state should not be exposed outside this file.
+pub struct VarSnapshot(Vec<(Var, VarState)>);
+
+struct VarState {
+    variable: Variable,
+}
 
 #[derive(Debug)]
 pub struct Solver {
@@ -472,14 +476,25 @@ impl Solver {
     /// Snapshot the current state of the given vars so they can be restored later.
     pub fn snapshot_vars(&self, vars: &[Var]) -> VarSnapshot {
         let lock = self.variables.lock();
-        VarSnapshot(vars.iter().map(|v| (*v, lock.get(*v).clone())).collect())
+        VarSnapshot(
+            vars.iter()
+                .map(|v| {
+                    (
+                        *v,
+                        VarState {
+                            variable: lock.get(*v).clone(),
+                        },
+                    )
+                })
+                .collect(),
+        )
     }
 
     /// Restore vars to a previously saved snapshot.
     pub fn restore_vars(&self, snapshot: &VarSnapshot) {
         let lock = self.variables.lock();
         for (var, state) in &snapshot.0 {
-            lock.update(*var, state.clone());
+            lock.update(*var, state.variable.clone());
         }
     }
 
