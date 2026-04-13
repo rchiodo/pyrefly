@@ -1036,6 +1036,32 @@ impl Solver {
         }
     }
 
+    fn validate_bound_consistency(
+        &self,
+        bound: &Type,
+        existing_bounds: &Vec<Type>,
+        kind: QuantifiedKind,
+    ) -> Result<(), SubsetError> {
+        if kind == QuantifiedKind::TypeVarTuple
+            && let Type::Tuple(Tuple::Concrete(elts)) = bound
+        {
+            // Validate that the tuple length is consistent.
+            for t in existing_bounds {
+                if let Type::Tuple(Tuple::Concrete(existing_elts)) = t {
+                    if elts.len() == existing_elts.len() {
+                        // We only need to validate against the first tuple encountered.
+                        // If subsequent ones are a different length, we would've already reported
+                        // a violation when adding them.
+                        return Ok(());
+                    } else {
+                        return Err(SubsetError::Other);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn add_lower_bound(
         &self,
         v: Var,
@@ -1044,7 +1070,7 @@ impl Solver {
     ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
-        let (first_bound, upper_bound) = match &*e {
+        let (first_bound, upper_bound, res) = match &*e {
             Variable::Quantified {
                 quantified: _,
                 bounds,
@@ -1052,12 +1078,19 @@ impl Solver {
             | Variable::Unwrap(bounds) => (
                 bounds.lower.first().cloned(),
                 self.get_current_bound(bounds.upper.clone()),
+                if let Variable::Quantified { quantified, .. } = &*e {
+                    self.validate_bound_consistency(&bound, &bounds.lower, quantified.kind())
+                } else {
+                    Ok(())
+                },
             ),
             _ => return Ok(()),
         };
         drop(e);
         drop(lock);
-        let res = upper_bound.map_or(Ok(()), |upper_bound| is_subset(&bound, &upper_bound));
+        let res = res.and_then(|_| {
+            upper_bound.map_or(Ok(()), |upper_bound| is_subset(&bound, &upper_bound))
+        });
         let new_bound = if res.is_ok() {
             self.get_new_bound(first_bound, bound, is_subset)
         } else {
@@ -1084,7 +1117,7 @@ impl Solver {
     ) -> Result<(), SubsetError> {
         let lock = self.variables.lock();
         let e = lock.get(v);
-        let (first_bound, lower_bound) = match &*e {
+        let (first_bound, lower_bound, res) = match &*e {
             Variable::Quantified {
                 quantified: _,
                 bounds,
@@ -1092,12 +1125,19 @@ impl Solver {
             | Variable::Unwrap(bounds) => (
                 bounds.upper.first().cloned(),
                 self.get_current_bound(bounds.lower.clone()),
+                if let Variable::Quantified { quantified, .. } = &*e {
+                    self.validate_bound_consistency(&bound, &bounds.upper, quantified.kind())
+                } else {
+                    Ok(())
+                },
             ),
             _ => return Ok(()),
         };
         drop(e);
         drop(lock);
-        let res = lower_bound.map_or(Ok(()), |lower_bound| is_subset(&lower_bound, &bound));
+        let res = res.and_then(|_| {
+            lower_bound.map_or(Ok(()), |lower_bound| is_subset(&lower_bound, &bound))
+        });
         let new_bound = if res.is_ok() {
             self.get_new_bound(first_bound, bound, is_subset)
         } else {
@@ -2105,9 +2145,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         bounds: _,
-                    } if q.kind() != QuantifiedKind::TypeVar => {
+                    } if q.kind() == QuantifiedKind::ParamSpec => {
                         // TODO(https://github.com/facebook/pyrefly/issues/105): figure out what to
-                        // do with ParamSpec and TypeVarTuple.
+                        // do with ParamSpec.
                         drop(v1_ref);
                         variables.update(*v1, Variable::Answer(t2.clone()));
                         Ok(())
@@ -2233,14 +2273,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                 .write()
                                 .insert(*v2, specialization_error);
                         }
-                        if q.kind() != QuantifiedKind::TypeVar
+                        if q.kind() == QuantifiedKind::ParamSpec
                             || matches!(q.restriction(), Restriction::Constraints(_))
                         {
                             // If the TypeVar has constraints, we write the answer immediately to
                             // enforce that we always match the same constraint.
                             //
                             // TODO(https://github.com/facebook/pyrefly/issues/105): figure out
-                            // what to do with ParamSpec and TypeVarTuple.
+                            // what to do with ParamSpec.
                             self.solver
                                 .variables
                                 .lock()
