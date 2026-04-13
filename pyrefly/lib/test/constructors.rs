@@ -1003,3 +1003,26 @@ def f(x: dict[Kind, int]) -> None:
     g(dict(x))
     "#,
 );
+
+testcase!(
+    test_overloaded_constructor_with_hint,
+    r#"
+from collections.abc import Mapping
+from typing import assert_type, Generic, Never, overload, SupportsInt, TypeVar
+
+_T_co = TypeVar("_T_co", covariant=True)
+_T = TypeVar("_T")
+
+class Box(Generic[_T_co]):
+    @overload
+    def __init__(self: "Box[Never]", val: Mapping[Never, SupportsInt], /) -> None: ...
+    @overload
+    def __init__(self: "Box[_T]", val: Mapping[_T, SupportsInt], /) -> None: ...
+    def __init__(self, val: object, /) -> None:
+        pass
+
+def process(items: Box[_T]) -> "Box[_T]": ...
+
+assert_type(process(Box({1: 1})), Box[int])
+    "#,
+);
