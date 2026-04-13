@@ -491,10 +491,10 @@ impl Solver {
     }
 
     /// Restore vars to a previously saved snapshot.
-    pub fn restore_vars(&self, snapshot: &VarSnapshot) {
+    pub fn restore_vars(&self, snapshot: VarSnapshot) {
         let lock = self.variables.lock();
-        for (var, state) in &snapshot.0 {
-            lock.update(*var, state.variable.clone());
+        for (var, state) in snapshot.0 {
+            lock.update(var, state.variable);
         }
     }
 

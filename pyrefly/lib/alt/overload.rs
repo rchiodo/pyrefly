@@ -521,7 +521,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 None, // don't use the hint yet, it shouldn't influence overload selection
                 ctor_targs,
             );
-            self.solver().restore_vars(&snapshot);
+            self.solver().restore_vars(snapshot);
             if called_overload.call_errors.is_empty() {
                 matched_overloads.push(called_overload);
             } else {
@@ -642,7 +642,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 None, // don't use the hint yet, it shouldn't influence overload selection
                                 &None,
                             );
-                            self.solver().restore_vars(&snapshot);
+                            self.solver().restore_vars(snapshot);
                             res.call_errors.is_empty()
                         })
                         .map(|(split_point, _)| split_point + 1)
