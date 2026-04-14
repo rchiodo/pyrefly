@@ -81,6 +81,7 @@ def use_middleware() -> None:
 );
 
 testcase!(
+    bug = "Generic functions don't work with ParamSpec",
     test_param_spec_generic_function,
     r#"
 from typing import Callable, reveal_type
