@@ -6,6 +6,11 @@
 name: Test Pyrefly Action
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "action.yml"
+      - ".github/workflows/test_action.yml"
   pull_request:
     paths:
       - "action.yml"
