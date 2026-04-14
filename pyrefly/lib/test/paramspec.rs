@@ -387,7 +387,6 @@ P1 = ParamSpec("P1")
 P2 = ParamSpec("P2")
 
 def test1(x: Callable[P1, None], y: Callable[P2, None], *args: P1.args, **kwargs: P2.kwargs) -> None: ...  # E: *args and **kwargs must come from the same `ParamSpec`
-
 def test2(x: int, *args: P1.args, **kwargs: P2.kwargs) -> None: ...  # E: Expected a type form, got instance of `ParamSpecArgs` # E: Expected a type form, got instance of `ParamSpecKwargs`
 "#,
 );
@@ -406,9 +405,7 @@ def a_int_b_str(a: int, b: str) -> int:
   return a
 
 twice(a_int_b_str, 1, "A")     # Accepted
-
 twice(a_int_b_str, b="A", a=1) # Accepted
-
 twice(a_int_b_str, "A", 1)     # Rejected # E: `Literal['A']` is not assignable to parameter `a` with type `int` # E: `Literal[1]` is not assignable to parameter `b` with type `str`
 "#,
 );
