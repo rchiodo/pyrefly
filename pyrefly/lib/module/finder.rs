@@ -909,12 +909,9 @@ fn recommended_stubs_package(module: ModuleName) -> Option<ModuleName> {
         _ => {
             // If the module has stubs in typeshed, recommend types-<package>
             if let Ok(ts) = typeshed_third_party()
-                && ts.find(module).is_some()
+                && let Some(package_name) = ts.package_name(module)
             {
-                Some(ModuleName::from_str(&format!(
-                    "types-{}",
-                    module.first_component()
-                )))
+                Some(ModuleName::from_str(&format!("types-{}", package_name)))
             } else {
                 None
             }
@@ -2494,6 +2491,47 @@ mod tests {
             };
             assert_eq!(*module, ModuleName::from_str("requests"));
             assert_eq!(stubs_package.as_str(), "types-requests");
+        } else {
+            panic!(
+                "Expected Finding with UntypedImport error, got: {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_typeshed_third_party_recommends_correct_package_for_dateutil() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+
+        // Set up site package directory with 'dateutil' installed but no stubs
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir(
+                "site_packages",
+                vec![TestPath::dir(
+                    "dateutil",
+                    vec![TestPath::file("__init__.py")],
+                )],
+            )],
+        );
+
+        let mut config = get_config(ConfigSource::File("".into()));
+        config.python_environment.site_package_path = Some(vec![root.join("site_packages")]);
+        config.configure();
+
+        let result = find_import_filtered(&config, ModuleName::from_str("dateutil"), None, None);
+
+        if let FindingOrError::Finding(finding) = &result {
+            let error = finding
+                .error
+                .as_ref()
+                .expect("Expected UntypedImport error");
+            let FindError::UntypedImport(module, stubs_package) = error else {
+                panic!("Expected UntypedImport error, got: {:?}", error);
+            };
+            assert_eq!(*module, ModuleName::from_str("dateutil"));
+            assert_eq!(stubs_package.as_str(), "types-python-dateutil");
         } else {
             panic!(
                 "Expected Finding with UntypedImport error, got: {:?}",
