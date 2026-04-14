@@ -484,6 +484,58 @@ impl StateData {
     }
 }
 
+/// Copy atomic timing counters into telemetry stats for scuba logging.
+fn copy_timing_counters(t: &TransactionTimingCounters, stats: &mut TelemetryTransactionStats) {
+    stats.step_load_time = Duration::from_nanos(t.step_load_ns.load(Ordering::Relaxed));
+    stats.step_load_count = t.step_load_count.load(Ordering::Relaxed) as usize;
+    stats.step_ast_time = Duration::from_nanos(t.step_ast_ns.load(Ordering::Relaxed));
+    stats.step_ast_count = t.step_ast_count.load(Ordering::Relaxed) as usize;
+    stats.step_exports_time = Duration::from_nanos(t.step_exports_ns.load(Ordering::Relaxed));
+    stats.step_exports_count = t.step_exports_count.load(Ordering::Relaxed) as usize;
+    stats.step_answers_time = Duration::from_nanos(t.step_answers_ns.load(Ordering::Relaxed));
+    stats.step_answers_count = t.step_answers_count.load(Ordering::Relaxed) as usize;
+    stats.step_solutions_time = Duration::from_nanos(t.step_solutions_ns.load(Ordering::Relaxed));
+    stats.step_solutions_count = t.step_solutions_count.load(Ordering::Relaxed) as usize;
+    stats.clean_time = Duration::from_nanos(t.clean_ns.load(Ordering::Relaxed));
+    stats.clean_count = t.clean_count.load(Ordering::Relaxed) as usize;
+    stats.find_import_time = Duration::from_nanos(t.find_import_ns.load(Ordering::Relaxed));
+    stats.find_import_count = t.find_import_count.load(Ordering::Relaxed) as usize;
+    stats.demand_wait_time = Duration::from_nanos(t.demand_wait_ns.load(Ordering::Relaxed));
+    stats.demand_wait_count = t.demand_wait_count.load(Ordering::Relaxed) as usize;
+    stats.cold_modules = t.cold_modules.load(Ordering::Relaxed) as usize;
+    stats.warm_modules = t.warm_modules.load(Ordering::Relaxed) as usize;
+}
+
+/// Atomic nanosecond counters accumulated across worker threads during a transaction.
+/// Stored on `Transaction` (not `TransactionData`) so they reset on each save/restore cycle,
+/// ensuring per-request deltas rather than cumulative totals.
+#[derive(Default)]
+pub(crate) struct TransactionTimingCounters {
+    // Per-step compute time (inside guard.compute())
+    pub step_load_ns: AtomicU64,
+    pub step_load_count: AtomicU64,
+    pub step_ast_ns: AtomicU64,
+    pub step_ast_count: AtomicU64,
+    pub step_exports_ns: AtomicU64,
+    pub step_exports_count: AtomicU64,
+    pub step_answers_ns: AtomicU64,
+    pub step_answers_count: AtomicU64,
+    pub step_solutions_ns: AtomicU64,
+    pub step_solutions_count: AtomicU64,
+    // Clean phase
+    pub clean_ns: AtomicU64,
+    pub clean_count: AtomicU64,
+    // find_import time (imports cache miss in TransactionHandle::get_module)
+    pub find_import_ns: AtomicU64,
+    pub find_import_count: AtomicU64,
+    // Condvar wait time (waiting for another thread to finish computing a module)
+    pub demand_wait_ns: AtomicU64,
+    pub demand_wait_count: AtomicU64,
+    // Module temperature
+    pub cold_modules: AtomicU64,
+    pub warm_modules: AtomicU64,
+}
+
 /// `TransactionData` contains most of the information in `Transaction`, but it doesn't lock
 /// the read of `State`.
 /// It is used to store uncommitted transaction state in between transaction runs.
@@ -531,6 +583,7 @@ impl<'a> TransactionData<'a> {
                 }),
                 sub_task_telemetry: None,
                 readable,
+                timing: Default::default(),
             })
         } else {
             Err(state_lock_blocked)
@@ -548,6 +601,8 @@ pub struct Transaction<'a> {
     stats: Mutex<TelemetryTransactionStats>,
     sub_task_telemetry: Option<SubTaskTelemetry<'a>>,
     readable: RwLockReadGuard<'a, StateData>,
+    /// Atomic nanosecond counters accumulated across worker threads during a transaction.
+    timing: TransactionTimingCounters,
 }
 
 impl<'a> Transaction<'a> {
@@ -558,12 +613,18 @@ impl<'a> Transaction<'a> {
             stats,
             sub_task_telemetry: _,
             readable,
+            timing,
         } = self;
         drop(readable);
         let mut stats = stats.into_inner();
         stats.cancelled = data.todo.get_cancellation_handle().is_cancelled();
+        copy_timing_counters(&timing, &mut stats);
         telemetry.set_transaction_stats(stats);
         data
+    }
+
+    pub(crate) fn timing(&self) -> &TransactionTimingCounters {
+        &self.timing
     }
 
     pub fn set_subscriber(&mut self, subscriber: Option<Box<dyn Subscriber>>) {
@@ -1124,7 +1185,12 @@ impl<'a> Transaction<'a> {
         if !module_data.state.is_checked(self.data.now)
             && let Some(guard) = module_data.state.try_start_clean(self.data.now)
         {
+            let clean_start = Instant::now();
             self.clean(module_data, guard);
+            self.timing
+                .clean_ns
+                .fetch_add(clean_start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            self.timing.clean_count.fetch_add(1, Ordering::Relaxed);
             computed = true;
         }
 
@@ -1136,12 +1202,21 @@ impl<'a> Transaction<'a> {
             }
 
             // Try to acquire exclusive compute access for the next step.
-            let guard = match module_data.state.try_start_compute(step) {
+            let wait_start = Instant::now();
+            let result = module_data.state.try_start_compute(step);
+            let wait_ns = wait_start.elapsed().as_nanos() as u64;
+            if wait_ns > 1000 {
+                self.timing
+                    .demand_wait_ns
+                    .fetch_add(wait_ns, Ordering::Relaxed);
+                self.timing
+                    .demand_wait_count
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            let guard = match result {
                 Some(guard) => guard,
-                None => {
-                    // Another thread finished computing the step, we're done.
-                    break;
-                }
+                // Another thread finished computing the step while we waited.
+                None => break,
             };
 
             // The step we are going to compute. This makes progress toward computing `step`.
@@ -1188,7 +1263,27 @@ impl<'a> Transaction<'a> {
             // then releases the computing flag and notifies waiting threads.
             // Post-compute work (diffing, invalidation, eviction) runs without
             // the flag held.
+            let compute_start = Instant::now();
             let post = guard.compute(&ctx);
+            let elapsed_ns = compute_start.elapsed().as_nanos() as u64;
+            let (ns_counter, count_counter) = match todo {
+                Step::Load => (&self.timing.step_load_ns, &self.timing.step_load_count),
+                Step::Ast => (&self.timing.step_ast_ns, &self.timing.step_ast_count),
+                Step::Exports => (
+                    &self.timing.step_exports_ns,
+                    &self.timing.step_exports_count,
+                ),
+                Step::Answers => (
+                    &self.timing.step_answers_ns,
+                    &self.timing.step_answers_count,
+                ),
+                Step::Solutions => (
+                    &self.timing.step_solutions_ns,
+                    &self.timing.step_solutions_count,
+                ),
+            };
+            ns_counter.fetch_add(elapsed_ns, Ordering::Relaxed);
+            count_counter.fetch_add(1, Ordering::Relaxed);
 
             let mut load_result = None;
             // Compute which exports changed for fine-grained invalidation.
@@ -1398,8 +1493,13 @@ impl<'a> Transaction<'a> {
         // Figure out if we won the race, and thus are the person who actually did the creation.
         if inserted {
             self.stats.lock().modules += 1;
-            if created && let Some(subscriber) = &self.data.subscriber {
-                subscriber.start_work(handle);
+            if created {
+                self.timing.cold_modules.fetch_add(1, Ordering::Relaxed);
+                if let Some(subscriber) = &self.data.subscriber {
+                    subscriber.start_work(handle);
+                }
+            } else {
+                self.timing.warm_modules.fetch_add(1, Ordering::Relaxed);
             }
         }
         (res, created)
@@ -2305,10 +2405,20 @@ impl<'a> TransactionHandle<'a> {
                     Some(path) => path.dupe(),
                     None => {
                         drop(imports_read);
+                        let fi_start = Instant::now();
                         let finding = self
                             .transaction
                             .get_cached_loader(&self.module_data.config.read())
                             .find_import(module, Some(self.module_data.handle.path()));
+                        let fi_ns = fi_start.elapsed().as_nanos() as u64;
+                        self.transaction
+                            .timing()
+                            .find_import_ns
+                            .fetch_add(fi_ns, Ordering::Relaxed);
+                        self.transaction
+                            .timing()
+                            .find_import_count
+                            .fetch_add(1, Ordering::Relaxed);
                         self.module_data
                             .imports
                             .write()
@@ -2908,6 +3018,7 @@ impl State {
                 ..Default::default()
             }),
             sub_task_telemetry: None,
+            timing: Default::default(),
             data: TransactionData {
                 state: self,
                 stdlib,
@@ -2978,6 +3089,7 @@ impl State {
                     readable,
                     stats,
                     sub_task_telemetry: _,
+                    timing,
                     data:
                         TransactionData {
                             stdlib,
@@ -3003,6 +3115,7 @@ impl State {
 
         let mut stats = stats.into_inner();
         stats.committed = true;
+        copy_timing_counters(&timing, &mut stats);
 
         // ArcId<ModuleDataMut> is shared across todo, changed, dirty, and
         // updated_modules during a transaction. All of these except
