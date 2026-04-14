@@ -429,14 +429,13 @@ testcase!(
     r#"
 from typing import Callable, ParamSpec, Concatenate
 
-P = ParamSpec("P")
-def f(f: Callable[P, int], *args: P.args, **kwargs: P.kwargs) -> int:
-    return f(*args, **kwargs)
-P2 = ParamSpec("P2")
-def g(x: Callable[Concatenate[int, P2], int], *args: P2.args, **kwargs: P2.kwargs):
-    f(x, 1)
-    f(x)  # E: Expected 1 more positional argument in function `f`
-    f(x, 1, 2)  # Not OK, we aren't sure the 2nd param is an int
+def f[**P](h: Callable[P, int], *args: P.args, **kwargs: P.kwargs) -> int:
+    return h(*args, **kwargs)
+
+def g[**P2](h: Callable[Concatenate[int, P2], int], *args: P2.args, **kwargs: P2.kwargs):
+    f(h, 1)
+    f(h)  # E: Expected 1 more positional argument in function `f`
+    f(h, 1, 2)  # Not OK, we aren't sure the 2nd param is an int
 "#,
 );
 
