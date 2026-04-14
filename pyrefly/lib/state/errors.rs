@@ -161,6 +161,19 @@ impl Errors {
         Self { loads }
     }
 
+    fn merge_display_errors(mut ordinary: Vec<Error>, directives: Vec<Error>) -> Vec<Error> {
+        ordinary.extend(directives);
+        ordinary.sort_by_cached_key(|e| {
+            (
+                e.module().name(),
+                e.path().dupe(),
+                e.range().start(),
+                e.range().end(),
+            )
+        });
+        ordinary
+    }
+
     pub fn collect_errors(&self) -> CollectedErrors {
         let mut errors = CollectedErrors::default();
         for (load, config, ranges) in &self.loads {
@@ -197,6 +210,11 @@ impl Errors {
             processor.process_errors(&mut errors.ordinary, &mut errors.baseline, relative_to);
         }
         errors
+    }
+
+    pub fn collect_display_errors(&self) -> Vec<Error> {
+        let errors = self.collect_errors();
+        Self::merge_display_errors(errors.ordinary, errors.directives)
     }
 
     pub fn collect_ignores(&self) -> SmallMap<&ModulePath, &Ignore> {
@@ -431,9 +449,7 @@ impl Errors {
                 &ranges.ignore_all,
                 &mut result,
             );
-            let mut output_errors = result.ordinary;
-            output_errors.extend(result.directives);
-            output_errors.sort_by_key(|e| (e.range().start(), e.range().end()));
+            let output_errors = Self::merge_display_errors(result.ordinary, result.directives);
             Expectation::parse(load.module_info.dupe(), load.module_info.contents())
                 .check(&output_errors)?;
         }
