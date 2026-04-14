@@ -433,9 +433,12 @@ def f[**P](h: Callable[P, int], *args: P.args, **kwargs: P.kwargs) -> int:
     return h(*args, **kwargs)
 
 def g[**P2](h: Callable[Concatenate[int, P2], int], *args: P2.args, **kwargs: P2.kwargs):
+    # This call is valid
+    f(h, 1, *args, **kwargs)
+    # Every one of these is buggy - we're completely dropping the P2 <-> P correspondence
     f(h, 1)
     f(h)  # E: Expected 1 more positional argument in function `f`
-    f(h, 1, 2)  # Not OK, we aren't sure the 2nd param is an int
+    f(h, 1, 2)
 "#,
 );
 
