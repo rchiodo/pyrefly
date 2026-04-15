@@ -1392,6 +1392,10 @@ impl ReportArgs {
             });
         }
 
+        // Overloads and property accessors produce duplicate names.
+        let mut seen = HashSet::new();
+        names.retain(|n| seen.insert(n.clone()));
+
         // Compute per-module entity counts. Use the derived (file-based)
         // module name for prefix matching, since symbol names are built from
         // the derived name and only rewritten to the override name later.
