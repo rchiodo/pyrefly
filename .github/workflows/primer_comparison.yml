@@ -7,9 +7,9 @@ on:
         description: 'Comma-separated project names to run (empty = all). See scripts/projects.py for valid names.'
         required: false
         default: ''
-  schedule:
-    # Run daily at 06:00 UTC
-    - cron: '0 6 * * *'
+  # Uncomment to enable daily runs after manual testing:
+  # schedule:
+  #   - cron: '0 6 * * *'
 
 permissions: {}
 
@@ -87,7 +87,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: scripts/merge_primer_shards.py
+          sparse-checkout: |
+            scripts/merge_primer_shards.py
+            scripts/primer_history.py
           persist-credentials: false
 
       - uses: actions/setup-python@v6
@@ -110,49 +112,42 @@ jobs:
             -o /tmp/primer_errors.json
           echo "Merged size: $(du -h /tmp/primer_errors.json | cut -f1)"
 
-      - name: Print summary
+      - name: Download previous history
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: primer_comparison.yml
+          name: primer-history
+          path: /tmp/prev
+          if_no_artifact_found: warn
+          search_artifacts: true
+        continue-on-error: true
+
+      - name: Build history and summary
         run: |
-          python3 << 'PYEOF' | tee -a "$GITHUB_STEP_SUMMARY"
-          import json
-          from datetime import datetime, timezone
+          PREV_FLAG=""
+          if [ -f /tmp/prev/primer_history.json ]; then
+            PREV_FLAG="--previous /tmp/prev/primer_history.json"
+            echo "Found previous history"
+          else
+            echo "No previous history found, starting fresh"
+          fi
+          python3 scripts/primer_history.py \
+            --current /tmp/primer_errors.json \
+            $PREV_FLAG \
+            --output-history /tmp/primer_history.json \
+            --output-markdown /tmp/primer_summary.md \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
-          with open("/tmp/primer_errors.json") as f:
-              data = json.load(f)
-
-          now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-          projects = data["projects"]
-
-          print(f"# Primer Comparison — {now}\n")
-          print(f"**{len(projects)} projects**\n")
-
-          # Totals
-          print("| Checker | Total Errors | Clean | Crashes |")
-          print("|---------|-------------|-------|---------|")
-          for checker in ("pyrefly", "pyright", "mypy"):
-              total = sum(p[checker]["error_count"] for p in projects if p[checker]["error_count"] > 0)
-              zeros = sum(1 for p in projects if p[checker]["error_count"] == 0)
-              crashes = sum(1 for p in projects if p[checker]["error_count"] < 0)
-              print(f"| {checker} | {total:,} | {zeros} | {crashes} |")
-
-          # Per-project table
-          print("\n<details><summary>Per-project breakdown</summary>\n")
-          print("| Project | Pyrefly | Pyright | Mypy |")
-          print("|---------|---------|---------|------|")
-          for p in sorted(projects, key=lambda x: x["pyrefly"]["error_count"], reverse=True):
-              name = p["name"]
-              pe = p["pyrefly"]["error_count"]
-              pr = p["pyright"]["error_count"]
-              my = p["mypy"]["error_count"]
-              pe_s = "CRASH" if pe < 0 else f"{pe:,}"
-              pr_s = "CRASH" if pr < 0 else f"{pr:,}"
-              my_s = "CRASH" if my < 0 else f"{my:,}"
-              print(f"| {name} | {pe_s} | {pr_s} | {my_s} |")
-          print("\n</details>")
-          PYEOF
-
-      - name: Upload merged results
+      - name: Upload results
         uses: actions/upload-artifact@v6
         with:
           name: primer-results
           path: /tmp/primer_errors.json
+          retention-days: 7
+
+      - name: Upload history
+        uses: actions/upload-artifact@v6
+        with:
+          name: primer-history
+          path: /tmp/primer_history.json
           retention-days: 7
