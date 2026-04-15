@@ -285,6 +285,12 @@ impl LinedBuffer {
         } else {
             OneIndexed::from_zero_indexed(position.line as usize)
         };
+        // Clamp line number to the valid range. The LSP client may send a line
+        // number beyond EOF (e.g., when the editor's view is stale after a file
+        // truncation). LineIndex::line_start() only handles row_index ==
+        // line_count (one-past-the-end) but panics for anything beyond that.
+        let max_line = OneIndexed::from_zero_indexed(self.lines.line_count());
+        let line = std::cmp::min(line, max_line);
         // Clamp character offset to the line length per the LSP specification:
         // "If the character value is greater than the line length it defaults
         // back to the line length."
@@ -687,19 +693,15 @@ mod tests {
     ///   "index out of bounds: the len is 13 but the index is 14"
     /// in `LineIndex::line_start()` via `LinedBuffer::from_lsp_position()`.
     #[test]
-    #[should_panic(expected = "index out of bounds")]
     fn test_from_lsp_position_out_of_range_line() {
-        // 3-line file: line_starts has 3 entries (indices 0, 1, 2).
-        // Requesting line 100 (zero-indexed) panics because from_lsp_position
-        // does not clamp the line number before calling LineIndex::line_start().
-        // Once the bug is fixed, remove #[should_panic] and assert the offset
-        // clamps to EOF instead.
         let contents = Arc::new("def foo():\n    pass\n".to_owned());
         let lined_buffer = LinedBuffer::new(Arc::clone(&contents));
         let position = lsp_types::Position {
             line: 100,
             character: 0,
         };
-        let _offset = lined_buffer.from_lsp_position(position, None);
+        // Should clamp to EOF, not panic.
+        let offset = lined_buffer.from_lsp_position(position, None);
+        assert_eq!(offset, TextSize::new(contents.len() as u32));
     }
 }
