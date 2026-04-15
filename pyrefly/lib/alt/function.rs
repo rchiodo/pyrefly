@@ -1432,7 +1432,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // can be applied with or without parentheses like @d or @d(flag)):
             //
             // If a decorator `d` is of type `T1 | ... | Tn`, and any of `T1`, ..., `Tn`,
-            // or `Z` has the `*args: Any, **kwargs: Any -> Any` signature (or is
+            // has the `*args: Any, **kwargs: Any -> Any` signature (or is
             // a `functools._Wrapped`), we throw all of the other type info away
             // and claim `d` as having the signature-preserving type `T -> T`
             // (where `T <: Callable`), i.e. the decorated function keeps its
