@@ -307,7 +307,7 @@ impl GleanState<'_> {
 
     fn gencode_fact(&mut self) -> Option<gencode::GenCode> {
         let generated_pattern = RegexBuilder::new(
-            r"^.*@(?P<tag>(partially-)?generated)( SignedSource<<(?P<sign>[0-9a-f]+)>>)?$",
+            r"^.*@(?P<tag>(partially-)?generated)( (?:SignedSource<<(?P<sign>[0-9a-f]+)>>|<<SignedSource::[^>]+>>))?$",
         )
         .multi_line(true)
         .build()
