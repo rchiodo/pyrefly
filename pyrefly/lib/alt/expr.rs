@@ -1028,32 +1028,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if !key_t.is_error() {
                         key_tys.push(key_t);
                     }
-                    if !value_t.is_error() {
-                        if can_create_anonymous_typed_dict
-                            && let Some(string_lit) = key.as_string_literal_expr()
-                        {
-                            let key_name = Name::new(string_lit.value.to_str());
-                            typed_dict_fields_map.insert(
-                                key_name,
-                                TypedDictField {
-                                    ty: if value_t.is_none() {
-                                        self.heap.mk_union(vec![
-                                            self.heap.mk_none(),
-                                            self.solver()
-                                                .fresh_partial_contained(
-                                                    self.uniques,
-                                                    x.value.range(),
-                                                )
-                                                .to_type(self.heap),
-                                        ])
-                                    } else {
-                                        value_t.clone()
-                                    },
-                                    required: false,
-                                    read_only_reason: None,
+                    if can_create_anonymous_typed_dict
+                        && let Some(string_lit) = key.as_string_literal_expr()
+                    {
+                        let key_name = Name::new(string_lit.value.to_str());
+                        typed_dict_fields_map.insert(
+                            key_name,
+                            TypedDictField {
+                                ty: if value_t.is_none() {
+                                    self.heap.mk_union(vec![
+                                        self.heap.mk_none(),
+                                        self.solver()
+                                            .fresh_partial_contained(self.uniques, x.value.range())
+                                            .to_type(self.heap),
+                                    ])
+                                } else {
+                                    value_t.clone()
                                 },
-                            );
-                        }
+                                required: false,
+                                read_only_reason: None,
+                            },
+                        );
+                    }
+                    if !value_t.is_error() {
                         value_tys.push(value_t);
                     }
                 }
