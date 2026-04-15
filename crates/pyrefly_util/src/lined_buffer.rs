@@ -675,4 +675,31 @@ mod tests {
         // This should not panic - it should clamp to the end of the buffer.
         let _lsp_range = lined_buffer.to_lsp_range(range, None);
     }
+
+    /// Regression test: `from_lsp_position` must not panic when the LSP client
+    /// sends a position with a line number beyond the end of the buffer. This
+    /// can happen when the editor's view of the file is stale (e.g., after a
+    /// DidChangeTextDocument race where the file was truncated). The LSP spec
+    /// says out-of-range positions should be clamped, not crash the server.
+    ///
+    /// This reproduces the crash reported in Pyrefly 0.60 where a
+    /// `textDocument/codeAction` request triggered:
+    ///   "index out of bounds: the len is 13 but the index is 14"
+    /// in `LineIndex::line_start()` via `LinedBuffer::from_lsp_position()`.
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_from_lsp_position_out_of_range_line() {
+        // 3-line file: line_starts has 3 entries (indices 0, 1, 2).
+        // Requesting line 100 (zero-indexed) panics because from_lsp_position
+        // does not clamp the line number before calling LineIndex::line_start().
+        // Once the bug is fixed, remove #[should_panic] and assert the offset
+        // clamps to EOF instead.
+        let contents = Arc::new("def foo():\n    pass\n".to_owned());
+        let lined_buffer = LinedBuffer::new(Arc::clone(&contents));
+        let position = lsp_types::Position {
+            line: 100,
+            character: 0,
+        };
+        let _offset = lined_buffer.from_lsp_position(position, None);
+    }
 }
