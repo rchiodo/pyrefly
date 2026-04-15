@@ -296,9 +296,9 @@ impl PrefixParam {
         }
     }
 
-    /// Convert to a positional-only `Param`. Per the typing spec, params before
-    /// `*args: P.args` are always positional-only at the call site, regardless of
-    /// whether they were originally `Pos` or `PosOnly` in the function definition.
+    /// Convert to a positional-only `Param`. Per the typing spec, params in
+    /// `Concatenate` are positional-only at the call site. This is also appropriate
+    /// for ParamSpec forwarding where prefix params must be passed positionally.
     pub fn into_param(self) -> Param {
         match self {
             Self::PosOnly(name, ty, required) => Param::PosOnly(name, ty, required),
@@ -319,7 +319,8 @@ impl PrefixParam {
     }
 
     /// Convert to a `Param` preserving the Pos vs PosOnly distinction.
-    /// Used for subset/subtype checking where name matching matters.
+    /// Used for subset/subtype checking where name matching matters,
+    /// and for direct calls where prefix params should remain keyword-passable.
     pub fn to_subset_param(&self) -> Param {
         match self {
             Self::PosOnly(name, ty, required) => {

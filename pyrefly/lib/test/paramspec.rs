@@ -824,3 +824,49 @@ def bare_fn(a: int) -> str: ...
 reveal_type(bare_fn) # E: Wrapper[[a: int], str]
 "#,
 );
+
+testcase!(
+    test_paramspec_named_params_before_args,
+    r#"
+from typing import ParamSpec, TypeVar, Callable
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def call_with_retry(
+    f: Callable[P, R],
+    max_attempts: int = 10,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> R:
+    return f(*args, **kwargs)
+
+def write_data() -> None:
+    pass
+
+call_with_retry(write_data, max_attempts=5)
+call_with_retry(write_data, 5)
+
+def compute(x: int, y: str) -> bool:
+    return True
+
+call_with_retry(compute, max_attempts=3, x=1, y="hello")
+call_with_retry(compute, 3, 1, "hello")
+"#,
+);
+
+testcase!(
+    test_paramspec_forwarding_prefix_param_keyword,
+    r#"
+from typing import ParamSpec, Callable
+
+P = ParamSpec("P")
+Q = ParamSpec("Q")
+
+def call_fn(f: Callable[P, None], x: int, *args: P.args, **kwargs: P.kwargs) -> None:
+    f(*args, **kwargs)
+
+def forward(g: Callable[Q, None], *args: Q.args, **kwargs: Q.kwargs) -> None:
+    call_fn(g, x=1, *args, **kwargs)
+"#,
+);
