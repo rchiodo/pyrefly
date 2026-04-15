@@ -1026,3 +1026,13 @@ def process(items: Box[_T]) -> "Box[_T]": ...
 assert_type(process(Box({1: 1})), Box[int])
     "#,
 );
+
+testcase!(
+    bug = "False positive",
+    test_construct_list_with_union_input,
+    r#"
+Y = list[int] | list[str] | str
+def f(x: str):
+    y: Y = list(x)  # E: `str` is not assignable to parameter `iterable` with type `Iterable[int]`
+    "#,
+);
