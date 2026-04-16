@@ -518,7 +518,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // accordingly. This is not totally correct, since it doesn't account for chaining
         // decorators, or weird cases like both decorators existing at the same time.
         if flags.is_classmethod || found_class_property || is_dunder_new {
-            self_type = self_type.map(|t| self.heap.mk_type_form(t));
+            self_type = self_type.map(|t| self.heap.mk_type_of(t));
         } else if flags.is_staticmethod {
             self_type = None;
         }
@@ -2041,7 +2041,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn bind_dunder_new(&self, t: &Type, cls: ClassType) -> Option<Type> {
         self.bind_function(
             t,
-            &self.heap.mk_type_form(self.heap.mk_self_type(cls)),
+            &self.heap.mk_type_of(self.heap.mk_self_type(cls)),
             false,
             &mut |a, b| self.is_subset_eq(a, b),
         )

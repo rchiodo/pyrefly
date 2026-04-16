@@ -4169,7 +4169,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .and_then(|ty| {
                     make_bound_method(
                         self.heap,
-                        self.heap.mk_type_form(self.heap.mk_class_type(cls.clone())),
+                        self.heap.mk_type_of(self.heap.mk_class_type(cls.clone())),
                         ty,
                     )
                     .ok()

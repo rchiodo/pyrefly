@@ -1402,37 +1402,37 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Type::SpecialForm(SpecialForm::Type) => {
                 Self::add_implicit_any_error(errors, range, "class `type`".to_owned(), None);
-                *ty = self.heap.mk_type_form(self.heap.mk_any_implicit())
+                *ty = self.heap.mk_type_of(self.heap.mk_any_implicit())
             }
             Type::ClassDef(cls) => {
                 if cls.is_builtin("tuple") {
                     Self::add_implicit_any_error(errors, range, "class `tuple`".to_owned(), None);
                     *ty = self
                         .heap
-                        .mk_type_form(self.heap.mk_unbounded_tuple(self.heap.mk_any_implicit()));
+                        .mk_type_of(self.heap.mk_unbounded_tuple(self.heap.mk_any_implicit()));
                 } else if cls.is_builtin("type") {
                     // `type`` is equivalent to `type[Any]`. As a result, the class def itself
                     // has type `type[type[Any]]`.
                     *ty = self
                         .heap
-                        .mk_type_form(self.heap.mk_type_form(self.heap.mk_any_implicit()));
+                        .mk_type_of(self.heap.mk_type_of(self.heap.mk_any_implicit()));
                 } else if cls.has_toplevel_qname("typing", "Any") {
-                    *ty = self.heap.mk_type_form(self.heap.mk_any_explicit())
+                    *ty = self.heap.mk_type_of(self.heap.mk_any_explicit())
                 } else if cls.has_toplevel_qname("typing", "NamedTuple") {
                     // When `NamedTuple` is used as a type annotation (e.g. TypeVar bound),
                     // resolve to `NamedTupleFallback` — the class that actually appears in
                     // the MRO of user-defined NamedTuple subclasses.
-                    *ty = self.heap.mk_type_form(
+                    *ty = self.heap.mk_type_of(
                         self.heap
                             .mk_class_type(self.stdlib.named_tuple_fallback().clone()),
                     );
                 } else {
                     // All other classes (including Tensor) get promoted and wrapped in type_form
-                    *ty = self.heap.mk_type_form(self.promote(cls, range, errors));
+                    *ty = self.heap.mk_type_of(self.promote(cls, range, errors));
                 }
             }
             Type::ClassType(cls) if cls.is_builtin("type") => {
-                *ty = self.heap.mk_type_form(self.heap.mk_any_implicit());
+                *ty = self.heap.mk_type_of(self.heap.mk_any_implicit());
             }
             _ => {}
         })
@@ -1932,7 +1932,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 base = self.solver().force_var(v);
             }
             if matches!(&base, Type::ClassDef(t) if t.name() == "tuple") {
-                base = self.heap.mk_type_form(self.heap.mk_special_form(SpecialForm::Tuple));
+                base = self.heap.mk_type_of(self.heap.mk_special_form(SpecialForm::Tuple));
             }
             if let Type::Intersect(x) = base {
                 // TODO: Handle subscription of intersections properly.
@@ -1961,7 +1961,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             Expr::Tuple(x) => (x.elts.as_slice(), x.parenthesized),
                             _ => (slice::from_ref(slice), false),
                     };
-                    self.apply_unary_special_form("type".to_owned(), arguments, range, TypeFormContext::TypeArgumentForType, errors, |arg| self.heap.mk_type_form(arg))
+                    self.apply_unary_special_form("type".to_owned(), arguments, range, TypeFormContext::TypeArgumentForType, errors, |arg| self.heap.mk_type_of(arg))
                 }
                 // TODO: pyre_extensions.PyreReadOnly is a non-standard type system extension that marks read-only
                 // objects. We don't support it yet.
@@ -2074,7 +2074,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Some(result) = class_getitem_result.or(metaclass_getitem_result) {
                         result
                     } else {
-                        self.heap.mk_type_form(self.specialize(
+                        self.heap.mk_type_of(self.specialize(
                             &cls,
                             xs.map(|x| self.expr_untype(x, TypeFormContext::TypeArgument, errors)),
                             range,
@@ -2116,7 +2116,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
                 Type::Type(inner) if self.is_enum_class_type(inner.as_ref()) => {
-                    let base_display_ty = self.heap.mk_type_form((*inner).clone());
+                    let base_display_ty = self.heap.mk_type_of((*inner).clone());
                     let enum_value_ty = *inner;
                     if self.is_subset_eq(
                         &self.expr(slice, None, errors),
@@ -2861,7 +2861,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Wrap in Type::Dim(...)
         self.heap
-            .mk_type_form(self.heap.mk_dim(dims.into_iter().next().unwrap()))
+            .mk_type_of(self.heap.mk_dim(dims.into_iter().next().unwrap()))
     }
 
     /// Return the reason why we think `ty` is suspicious to use as a branching condition

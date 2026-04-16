@@ -180,7 +180,7 @@ impl<'a, Ans: LookupAnswer> ArgsExpander<'a, Ans> {
                     .collect()
             }
             Type::Type(box Type::Union(box Union { members: ts, .. })) => {
-                ts.into_map(|t| self.solver.heap.mk_type_form(t))
+                ts.into_map(|t| self.solver.heap.mk_type_of(t))
             }
             Type::Tuple(Tuple::Concrete(elements)) => {
                 let mut count: usize = 1;

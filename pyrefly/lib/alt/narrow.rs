@@ -548,7 +548,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             original.clone()
         } else {
-            self.heap.mk_type_form(instance_result)
+            self.heap.mk_type_of(instance_result)
         }
     }
 
