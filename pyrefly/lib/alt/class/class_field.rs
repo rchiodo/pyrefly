@@ -4573,6 +4573,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 want: want_setter.clone(),
                                 got: got.clone(),
                                 got_is_property: false,
+                                want_is_property: true,
                                 subset_error,
                             })
                         })
@@ -4603,6 +4604,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 want: want_setter.clone(),
                                 got: got_setter.clone(),
                                 got_is_property: true,
+                                want_is_property: true,
                                 subset_error,
                             })
                         }),

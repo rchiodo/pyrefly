@@ -1437,8 +1437,8 @@ class Base:
     def p(self, value: A) -> None:
         pass
 
-class Child(Base):
-    p: B  # E: Class member `Child.p` overrides parent class `Base` in an inconsistent manner
+class ChildNarrowed(Base):
+    p: B  # E: `ChildNarrowed.p` has type `B`, which is not assignable from `(self: ChildNarrowed, value: A) -> None`, the property setter for `Base.p`
 
 class ChildSameType(Base):
     p: A  # OK, same type
@@ -1447,5 +1447,14 @@ class ChildSameType(Base):
 # subtype of A), even though the setter check would pass.
 class ChildWidened(Base):
     p: object  # E: Class member `ChildWidened.p` overrides parent class `Base` in an inconsistent manner
+
+# Property-to-property override with narrowed setter.
+class ChildPropertyNarrowedSetter(Base):
+    @property
+    def p(self) -> A:  # E: The property setter for `ChildPropertyNarrowedSetter.p` has type `(self: ChildPropertyNarrowedSetter, value: B) -> None`, which is not assignable from `(self: ChildPropertyNarrowedSetter, value: A) -> None`, the property setter for `Base.p`
+        return A()
+    @p.setter
+    def p(self, value: B) -> None:
+        pass
  "#,
 );

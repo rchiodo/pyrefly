@@ -123,6 +123,7 @@ pub enum AttrSubsetError {
         got: Type,
         want: Type,
         got_is_property: bool,
+        want_is_property: bool,
         subset_error: SubsetError,
     },
 }
@@ -212,15 +213,21 @@ impl AttrSubsetError {
                 got,
                 want,
                 got_is_property,
+                want_is_property,
                 subset_error: _,
             } => {
-                let desc = if *got_is_property {
+                let got_desc = if *got_is_property {
                     "The property setter for "
                 } else {
                     ""
                 };
+                let want_desc = if *want_is_property {
+                    ", the property setter for "
+                } else {
+                    ", the type of "
+                };
                 format!(
-                    "{desc}`{child_class}.{attr_name}` has type `{}`, which is not assignable from `{}`, the property getter for `{parent_class}.{attr_name}`",
+                    "{got_desc}`{child_class}.{attr_name}` has type `{}`, which is not assignable from `{}`{want_desc}`{parent_class}.{attr_name}`",
                     got.clone().deterministic_printing(),
                     want.clone().deterministic_printing()
                 )
