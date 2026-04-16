@@ -1054,7 +1054,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             // Convert to type[...] so `x in (int, float)` can
                             // narrow x to type[int] | type[float].
                             Type::ClassDef(cls) => {
-                                literal_types.push(Type::type_form(self.promote_silently(&cls)));
+                                literal_types.push(Type::type_of(self.promote_silently(&cls)));
                             }
                             // Already-wrapped type[X] expressions pass through.
                             Type::Type(box Type::ClassType(_)) => {
@@ -1118,7 +1118,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             // subtracted in the `not in` case (see comment in
                             // distribute_over_union below).
                             Type::ClassDef(cls) => {
-                                literal_types.push(Type::type_form(self.promote_silently(&cls)));
+                                literal_types.push(Type::type_of(self.promote_silently(&cls)));
                             }
                             Type::Type(box Type::ClassType(_)) => {
                                 literal_types.push(expr_ty);

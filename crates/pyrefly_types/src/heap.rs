@@ -336,7 +336,7 @@ impl TypeHeap {
     ///
     /// This is an alias for `mk_type` matching the `Type::type_form` helper.
     pub fn mk_type_form(&self, inner: Type) -> Type {
-        Type::type_form(inner)
+        Type::type_of(inner)
     }
 
     /// Create a `Type::Literal` from a Literal.
