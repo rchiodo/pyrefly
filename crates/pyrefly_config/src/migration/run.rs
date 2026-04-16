@@ -467,9 +467,10 @@ files = ["mypy.py"]
         fs_anyhow::write(&original_config_path, b"[mypy]\nfake_option = True\n")?;
         config_migration(&original_config_path, MigrationSource::Auto)?;
         let output = fs_anyhow::read_to_string(&pyrefly_config_path)?;
+        // mutable-override is disabled by default when migrating from mypy
         assert_eq!(
             output.trim(),
-            "check-unannotated-defs = false\ninfer-return-types = \"never\""
+            "check-unannotated-defs = false\ninfer-return-types = \"never\"\n\n[errors]\nbad-override-mutable-attribute = \"ignore\""
         );
         Ok(())
     }
