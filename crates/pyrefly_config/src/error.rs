@@ -29,16 +29,22 @@ impl ErrorDisplayConfig {
         Self(config)
     }
 
-    /// Gets the severity for the given `ErrorKind`. If the value isn't
-    /// found, check the parent kind (for sub-kinds like
-    /// `BadOverrideMutableAttribute` → `BadOverride`). If neither is
-    /// found, use the default severity for that error kind.
+    /// Gets the severity for the given `ErrorKind`. Checks in order:
+    /// 1. Explicit override for this kind
+    /// 2. Override for the parent kind (sub-kind relationship)
+    /// 3. Override for a deprecated alias
+    /// 4. Default severity for this kind
     pub fn severity(&self, kind: ErrorKind) -> Severity {
         if let Some(&severity) = self.0.get(&kind) {
             return severity;
         }
         if let Some(parent) = kind.parent_kind() {
             if let Some(&severity) = self.0.get(&parent) {
+                return severity;
+            }
+        }
+        if let Some(alias) = kind.deprecated_alias() {
+            if let Some(&severity) = self.0.get(&alias) {
                 return severity;
             }
         }
@@ -157,6 +163,32 @@ mod tests {
         let config = ErrorDisplayConfig::new(HashMap::new());
         assert_eq!(
             config.severity(ErrorKind::BadOverrideMutableAttribute),
+            Severity::Error
+        );
+    }
+
+    #[test]
+    fn test_severity_deprecated_alias_fallback() {
+        // Setting bad-param-name-override (deprecated) should also apply to bad-override-param-name
+        let config = ErrorDisplayConfig::new(HashMap::from([(
+            ErrorKind::BadParamNameOverride,
+            Severity::Ignore,
+        )]));
+        assert_eq!(
+            config.severity(ErrorKind::BadOverrideParamName),
+            Severity::Ignore
+        );
+    }
+
+    #[test]
+    fn test_severity_explicit_overrides_deprecated_alias() {
+        // Explicit bad-override-param-name takes precedence over deprecated bad-param-name-override
+        let config = ErrorDisplayConfig::new(HashMap::from([
+            (ErrorKind::BadParamNameOverride, Severity::Ignore),
+            (ErrorKind::BadOverrideParamName, Severity::Error),
+        ]));
+        assert_eq!(
+            config.severity(ErrorKind::BadOverrideParamName),
             Severity::Error
         );
     }

@@ -248,3 +248,35 @@ fn test_hover_suppressed_error_subkind() {
 
     interaction.shutdown().unwrap();
 }
+
+#[test]
+fn test_hover_suppressed_error_deprecated_alias() {
+    let root = get_test_files_root();
+    let mut interaction = LspInteraction::new();
+    interaction.set_root(root.path().to_path_buf());
+    interaction
+        .initialize(InitializeSettings {
+            configuration: Some(None),
+            ..Default::default()
+        })
+        .unwrap();
+
+    interaction
+        .client
+        .did_open("suppression_deprecated_alias.py");
+
+    // bad-override-param-name error suppressed via the deprecated alias
+    // bad-param-name-override. Hovering should show the suppressed error
+    // with the new error code name.
+    interaction
+        .client
+        .hover("suppression_deprecated_alias.py", 12, 40)
+        .expect_response(json!({
+            "contents": {
+                "kind": "markdown",
+                "value": "**Suppressed Error**\n\n`bad-override-param-name`: Class member `B.f` overrides parent class `A` in an inconsistent manner\n  Got parameter name `x1`, expected `x`",
+            }
+        })).unwrap();
+
+    interaction.shutdown().unwrap();
+}

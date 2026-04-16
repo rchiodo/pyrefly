@@ -1524,3 +1524,27 @@ class ChildPropertyNarrowedSetter(Base):
         pass
  "#,
 );
+
+testcase!(
+    test_param_name_override_suppressed_by_parent_kind,
+    r#"
+class A:
+    def f(self, x: int):
+        pass
+class B(A):
+    def f(self, x1: int):  # pyrefly: ignore[bad-override]
+        pass
+ "#,
+);
+
+testcase!(
+    test_param_name_override_suppressed_by_deprecated_alias,
+    r#"
+class A:
+    def f(self, x: int):
+        pass
+class B(A):
+    def f(self, x1: int):  # pyrefly: ignore[bad-param-name-override]
+        pass
+ "#,
+);

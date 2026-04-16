@@ -3347,7 +3347,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 } =>
                 {
                     Some(OverrideError {
-                        kind: ErrorKind::BadParamNameOverride,
+                        kind: ErrorKind::BadOverrideParamName,
                         message: format!("Got parameter name `{child}`, expected `{parent}`"),
                         diff_lines: Vec::new(),
                     })
