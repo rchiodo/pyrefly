@@ -675,49 +675,37 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Maximum size for a union hint to `construct_class`. Hints wider than this are ignored.
+    /// Maximum size for a union hint in construction. Hints wider than this are ignored.
     /// Overly wide unions don't provide a useful hint (we actually get fewer errors on mypy_primer
-    /// when we cap the hint width) and lead to prohibitively expensive `construct_class` calls.
-    const MAX_CLASS_CONSTRUCTION_HINT_WIDTH: usize = 4;
+    /// when we cap the hint width) and lead to prohibitively expensive construction calls.
+    const MAX_CONSTRUCTION_HINT_WIDTH: usize = 4;
 
-    fn construct_class(
+    /// Handles union hint decomposition for class and TypedDict construction.
+    /// When the hint is a union, tries each member independently and keeps only
+    /// successful constructions, preferring those assignable to their hint member.
+    /// Falls back to constructing with no hint if all members produce errors or
+    /// the union is too wide.
+    fn construct_with_hint(
         &self,
-        cls: ClassType,
-        constructor_kind: ConstructorKind,
-        args: &[CallArg],
-        keywords: &[CallKeyword],
-        arguments_range: TextRange,
-        callee_range: Option<TextRange>,
         errors: &ErrorCollector,
-        context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
+        construct: impl Fn(&ErrorCollector, Option<HintRef>) -> (Type, bool),
     ) -> Type {
         if let Some(hint) = hint
             && let Type::Union(union) = hint.ty()
         {
-            if union.members.len() <= Self::MAX_CLASS_CONSTRUCTION_HINT_WIDTH {
+            if union.members.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH {
                 // For a union hint, try all members and keep only the successful matches.
                 let (rets_match_hint, rets_no_match_hint): (Vec<_>, Vec<_>) = union
                     .members
                     .iter()
                     .filter_map(|member_hint| {
                         let member_errors = self.error_collector();
-                        let ret = self.construct_class_inner(
-                            cls.clone(),
-                            constructor_kind.clone(),
-                            args,
-                            keywords,
-                            arguments_range,
-                            callee_range,
+                        let ret = construct(
                             &member_errors,
-                            context,
                             Some(HintRef::new(member_hint, hint.errors())),
                         );
-                        if member_errors.is_empty() {
-                            Some(ret)
-                        } else {
-                            None
-                        }
+                        member_errors.is_empty().then_some(ret)
                     })
                     .partition_map(|(ret, matched_hint)| {
                         if matched_hint {
@@ -738,6 +726,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             // If the hint is too wide or always produces errors, don't use it.
+            construct(errors, None).0
+        } else {
+            construct(errors, hint).0
+        }
+    }
+
+    fn construct_class(
+        &self,
+        cls: ClassType,
+        constructor_kind: ConstructorKind,
+        args: &[CallArg],
+        keywords: &[CallKeyword],
+        arguments_range: TextRange,
+        callee_range: Option<TextRange>,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+        hint: Option<HintRef>,
+    ) -> Type {
+        self.construct_with_hint(errors, hint, |errors, hint| {
             self.construct_class_inner(
                 cls.clone(),
                 constructor_kind.clone(),
@@ -747,23 +754,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 callee_range,
                 errors,
                 context,
-                None,
-            )
-            .0
-        } else {
-            self.construct_class_inner(
-                cls,
-                constructor_kind,
-                args,
-                keywords,
-                arguments_range,
-                callee_range,
-                errors,
-                context,
                 hint,
             )
-            .0
-        }
+        })
     }
 
     fn construct_class_inner(
