@@ -1031,7 +1031,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn construct_typed_dict(
         &self,
-        mut typed_dict: TypedDictInner,
+        typed_dict: TypedDictInner,
         args: &[CallArg],
         keywords: &[CallKeyword],
         arguments_range: TextRange,
@@ -1039,15 +1039,38 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> Type {
-        let vs = if let Some(hint) = hint {
+        self.construct_with_hint(errors, hint, |errors, hint| {
+            self.construct_typed_dict_inner(
+                typed_dict.clone(),
+                args,
+                keywords,
+                arguments_range,
+                errors,
+                context,
+                hint,
+            )
+        })
+    }
+
+    fn construct_typed_dict_inner(
+        &self,
+        mut typed_dict: TypedDictInner,
+        args: &[CallArg],
+        keywords: &[CallKeyword],
+        arguments_range: TextRange,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+        hint: Option<HintRef>,
+    ) -> (Type, bool) {
+        let (vs, matched_hint) = if let Some(hint) = hint {
             let vs = self
                 .solver()
                 .freshen_class_targs(typed_dict.targs_mut(), self.uniques);
-            self.is_subset_eq(&typed_dict.clone().to_type(self.heap), hint.ty());
+            let matched_hint = self.is_subset_eq(&typed_dict.clone().to_type(self.heap), hint.ty());
             self.solver().generalize_class_targs(typed_dict.targs_mut());
-            vs
+            (vs, matched_hint)
         } else {
-            QuantifiedHandle::empty()
+            (QuantifiedHandle::empty(), false)
         };
         let hint = None; // discard hint
         let init_method = self.get_typed_dict_dunder_init(&typed_dict);
@@ -1075,7 +1098,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             self.add_specialization_errors(e, arguments_range, errors, context);
         }
-        Type::TypedDict(TypedDict::TypedDict(typed_dict))
+        (
+            Type::TypedDict(TypedDict::TypedDict(typed_dict)),
+            matched_hint,
+        )
     }
 
     fn first_arg_type(&self, args: &[CallArg], errors: &ErrorCollector) -> Option<Type> {
