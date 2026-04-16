@@ -9,6 +9,8 @@ use std::iter;
 use std::sync::Arc;
 
 use dupe::Dupe;
+use itertools::Either;
+use itertools::Itertools;
 use pyrefly_python::dunder;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
@@ -673,7 +675,98 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    /// Maximum size for a union hint to `construct_class`. Hints wider than this are ignored.
+    /// Overly wide unions don't provide a useful hint (we actually get fewer errors on mypy_primer
+    /// when we cap the hint width) and lead to prohibitively expensive `construct_class` calls.
+    const MAX_CLASS_CONSTRUCTION_HINT_WIDTH: usize = 4;
+
     fn construct_class(
+        &self,
+        cls: ClassType,
+        constructor_kind: ConstructorKind,
+        args: &[CallArg],
+        keywords: &[CallKeyword],
+        arguments_range: TextRange,
+        callee_range: Option<TextRange>,
+        errors: &ErrorCollector,
+        context: Option<&dyn Fn() -> ErrorContext>,
+        hint: Option<HintRef>,
+    ) -> Type {
+        if let Some(hint) = hint
+            && let Type::Union(union) = hint.ty()
+        {
+            if union.members.len() <= Self::MAX_CLASS_CONSTRUCTION_HINT_WIDTH {
+                // For a union hint, try all members and keep only the successful matches.
+                let (rets_match_hint, rets_no_match_hint): (Vec<_>, Vec<_>) = union
+                    .members
+                    .iter()
+                    .filter_map(|member_hint| {
+                        let member_errors = self.error_collector();
+                        let ret = self.construct_class_inner(
+                            cls.clone(),
+                            constructor_kind.clone(),
+                            args,
+                            keywords,
+                            arguments_range,
+                            callee_range,
+                            &member_errors,
+                            context,
+                            Some(HintRef::new(member_hint, hint.errors())),
+                        );
+                        if member_errors.is_empty() {
+                            Some(ret)
+                        } else {
+                            None
+                        }
+                    })
+                    .partition_map(|(ret, matched_hint)| {
+                        if matched_hint {
+                            Either::Left(ret)
+                        } else {
+                            Either::Right(ret)
+                        }
+                    });
+                if !rets_match_hint.is_empty() {
+                    // Keep only the results that were assignable to their hints. This way, if the hint
+                    // is something like `X | None`, where `X` should contextually influence the type,
+                    // we filter out the type we get using `None` as a hint.
+                    return self.unions(rets_match_hint);
+                } else if !rets_no_match_hint.is_empty() {
+                    // Even if none of the results were assignable to their hints, we still keep the
+                    // contextually typed results if they didn't produce any errors.
+                    return self.unions(rets_no_match_hint);
+                }
+            }
+            // If the hint is too wide or always produces errors, don't use it.
+            self.construct_class_inner(
+                cls.clone(),
+                constructor_kind.clone(),
+                args,
+                keywords,
+                arguments_range,
+                callee_range,
+                errors,
+                context,
+                None,
+            )
+            .0
+        } else {
+            self.construct_class_inner(
+                cls,
+                constructor_kind,
+                args,
+                keywords,
+                arguments_range,
+                callee_range,
+                errors,
+                context,
+                hint,
+            )
+            .0
+        }
+    }
+
+    fn construct_class_inner(
         &self,
         mut cls: ClassType,
         constructor_kind: ConstructorKind,
@@ -684,18 +777,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
-    ) -> Type {
+    ) -> (Type, bool) {
         // Based on https://typing.readthedocs.io/en/latest/spec/constructors.html.
-        let vs = if let Some(hint) = hint {
+        let (vs, matched_hint) = if let Some(hint) = hint {
             let vs = self
                 .solver()
                 .freshen_class_targs(cls.targs_mut(), self.uniques);
 
-            self.is_subset_eq(&self.heap.mk_class_type(cls.clone()), hint.ty());
+            let matched_hint = self.is_subset_eq(&self.heap.mk_class_type(cls.clone()), hint.ty());
             self.solver().generalize_class_targs(cls.targs_mut());
-            vs
+            (vs, matched_hint)
         } else {
-            QuantifiedHandle::empty()
+            (QuantifiedHandle::empty(), false)
         };
         let hint = None; // discard hint
         let class_metadata = self.get_metadata_for_class(cls.class_object());
@@ -728,7 +821,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
-                return ret;
+                return (ret, matched_hint);
             }
             if !self.is_compatible_constructor_return(&ret, cls.class_object()) {
                 // Got something other than an instance of the class under construction.
@@ -738,7 +831,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
-                return ret;
+                return (ret, matched_hint);
             }
         }
         let mut dunder_new_ret = None;
@@ -798,7 +891,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     {
                         self.add_specialization_errors(e, arguments_range, errors, context);
                     }
-                    return ret.subst(&cls.targs().substitution_map());
+                    return (ret.subst(&cls.targs().substitution_map()), matched_hint);
                 }
                 (true, has_errors)
             } else {
@@ -875,13 +968,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && ct.targs().as_slice().len() == 1
         {
             let targ = ct.targs().as_slice()[0].clone();
-            self.heap.mk_unbounded_tuple(targ)
+            (self.heap.mk_unbounded_tuple(targ), matched_hint)
         } else if let Type::ClassType(ct) = result {
             // Check for init capture: if the class has a registered init capture,
             // extract constructor arg values and wrap in Type::NNModule.
-            self.maybe_wrap_nn_module(&ct.clone(), args, keywords, errors, Type::ClassType(ct))
+            (
+                self.maybe_wrap_nn_module(&ct.clone(), args, keywords, errors, Type::ClassType(ct)),
+                matched_hint,
+            )
         } else {
-            result
+            (result, matched_hint)
         }
     }
 

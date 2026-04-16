@@ -1050,11 +1050,24 @@ assert_type(process(Box({1: 1})), Box[int])
 );
 
 testcase!(
-    bug = "False positive",
     test_construct_list_with_union_input,
     r#"
 Y = list[int] | list[str] | str
 def f(x: str):
-    y: Y = list(x)  # E: `str` is not assignable to parameter `iterable` with type `Iterable[int]`
+    y: Y = list(x)
+    "#,
+);
+
+testcase!(
+    test_construct_list_from_iterator_with_parent_hint,
+    r#"
+from collections.abc import Iterator
+
+class ParentItem: ...
+class ChildItem(ParentItem): ...
+
+def f() -> Iterator[ChildItem]: ...
+def g() -> list[ParentItem] | None:
+    return list(f())
     "#,
 );

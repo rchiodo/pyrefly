@@ -734,3 +734,16 @@ def test_vec_concat(left: Vec[A], right: Vec[B]) -> None:
     _0: Vec[A | B] = concat_vecs(left, right)
     "#,
 );
+
+testcase!(
+    test_list_construction_with_union_hint,
+    r#"
+from typing import Protocol, TypeVar
+_T_co = TypeVar("_T_co", covariant=True)
+class Seq(Protocol[_T_co]):
+    def __getitem__(self, index: int, /) -> _T_co: ...
+U = Seq[str] | Seq[int]
+def f(x: U) -> None: ...
+f(list())
+    "#,
+);
