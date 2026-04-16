@@ -1418,3 +1418,34 @@ class Child(Parent):
         pass
     "#,
 );
+
+// Overriding a readwrite property with a plain attribute that narrows the type
+// is an error: the parent's setter accepts A, but the child's ReadWrite(B) only
+// accepts B.
+testcase!(
+    test_override_readwrite_property_to_attr_narrowed,
+    r#"
+class A: ...
+class B(A): ...
+
+class Base:
+    @property
+    def p(self) -> A:
+        return A()
+
+    @p.setter
+    def p(self, value: A) -> None:
+        pass
+
+class Child(Base):
+    p: B  # E: Class member `Child.p` overrides parent class `Base` in an inconsistent manner
+
+class ChildSameType(Base):
+    p: A  # OK, same type
+
+# Widening: p: object fails on the getter covariance check (object is not a
+# subtype of A), even though the setter check would pass.
+class ChildWidened(Base):
+    p: object  # E: Class member `ChildWidened.p` overrides parent class `Base` in an inconsistent manner
+ "#,
+);

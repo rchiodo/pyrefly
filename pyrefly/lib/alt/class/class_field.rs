@@ -4556,22 +4556,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     subset_error,
                 })?;
                 if let Some(want_setter) = want_setter {
-                    // Synthesize a setter method
-                    is_subset(
-                        want_setter,
-                        &self.heap.mk_callable_from_vec(
-                            vec![Param::PosOnly(None, got.clone(), Required::Required)],
-                            self.heap.mk_none(),
-                        ),
-                    )
-                    .map_err(|subset_error| {
-                        Box::new(AttrSubsetError::Contravariant {
-                            want: want_setter.clone(),
-                            got: got.clone(),
-                            got_is_property: true,
-                            subset_error,
+                    // Extract the setter's value param type (the first param
+                    // after self) and check setter_param <: got, i.e. the
+                    // child's ReadWrite type can accept everything the parent's
+                    // setter promises to accept.
+                    // Property setters are always a single function (never an
+                    // overload), so callable_signatures() returns exactly one.
+                    let setter_sigs = want_setter.callable_signatures();
+                    let mut owner = Owner::new();
+                    if let Some(setter_sig) = setter_sigs.first()
+                        && let Some((_, rest)) = setter_sig.split_first_param(&mut owner)
+                        && let Some(setter_value_type) = rest.get_first_param()
+                    {
+                        is_subset(&setter_value_type, got).map_err(|subset_error| {
+                            Box::new(AttrSubsetError::Contravariant {
+                                want: want_setter.clone(),
+                                got: got.clone(),
+                                got_is_property: false,
+                                subset_error,
+                            })
                         })
-                    })
+                    } else {
+                        Ok(())
+                    }
                 } else {
                     Ok(())
                 }
