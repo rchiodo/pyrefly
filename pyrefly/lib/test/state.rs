@@ -63,7 +63,7 @@ else:
 
     let f = |name: &str, sys_info: &SysInfo| {
         let name = ModuleName::from_str(name);
-        let path = find_import(&config_file, name, None, None)
+        let path = find_import(&config_file, name, None, None, None)
             .finding()
             .unwrap();
         Handle::new(name, path, sys_info.dupe())
@@ -96,7 +96,7 @@ fn test_cross_module_literal_promotion() {
     let state = State::new(test_env.config_finder(), TEST_THREAD_COUNT);
     let f = |name: &str| {
         let name = ModuleName::from_str(name);
-        let path = find_import(&config_file, name, None, None)
+        let path = find_import(&config_file, name, None, None, None)
             .finding()
             .unwrap();
         Handle::new(name, path, sys_info.dupe())

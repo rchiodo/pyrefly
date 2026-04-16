@@ -516,7 +516,7 @@ fn copy_timing_counters(t: &TransactionTimingCounters, stats: &mut TelemetryTran
 /// Stored on `Transaction` (not `TransactionData`) so they reset on each save/restore cycle,
 /// ensuring per-request deltas rather than cumulative totals.
 #[derive(Default)]
-pub(crate) struct TransactionTimingCounters {
+pub struct TransactionTimingCounters {
     // Per-step compute time (inside guard.compute())
     pub step_load_ns: AtomicU64,
     pub step_load_count: AtomicU64,
@@ -1021,7 +1021,7 @@ impl<'a> Transaction<'a> {
             Some(path) => FindingOrError::new_finding(path.dupe()),
             None => self
                 .get_cached_loader(&self.get_module(handle).config.read())
-                .find_import(module, Some(handle.path())),
+                .find_import(module, Some(handle.path()), Some(&self.timing)),
         };
         path.map(|path| Handle::new(module, path, handle.sys_info().dupe()))
     }
@@ -1037,7 +1037,7 @@ impl<'a> Transaction<'a> {
             Some(path) => FindingOrError::new_finding(path.dupe()),
             None => self
                 .get_cached_loader(&self.get_module(handle).config.read())
-                .find_import_prefer_executable(module, Some(handle.path())),
+                .find_import_prefer_executable(module, Some(handle.path()), Some(&self.timing)),
         };
         path.map(|path| Handle::new(module, path, handle.sys_info().dupe()))
     }
@@ -1090,8 +1090,11 @@ impl<'a> Transaction<'a> {
         if dirty.load()
             && let Some(old_load) = guard.get_load()
         {
-            let (file_contents, self_error) =
-                Load::load_from_path(module_data.handle.path(), &self.memory_lookup());
+            let (file_contents, self_error) = Load::load_from_path(
+                module_data.handle.path(),
+                &self.memory_lookup(),
+                Some(&self.timing),
+            );
             if self_error.is_some()
                 || match &file_contents {
                     FileContents::Source(code) => {
@@ -1140,7 +1143,11 @@ impl<'a> Transaction<'a> {
             // need `find_import` re-validation. The cached value is the same type
             // returned by `find_import`, so we just compare for equality.
             for (module_name, cached) in module_data.imports.read().iter() {
-                let fresh = loader.find_import(*module_name, Some(module_data.handle.path()));
+                let fresh = loader.find_import(
+                    *module_name,
+                    Some(module_data.handle.path()),
+                    Some(&self.timing),
+                );
                 if *cached != fresh {
                     is_dirty = true;
                     break;
@@ -1271,6 +1278,7 @@ impl<'a> Transaction<'a> {
                 recursion_limit_config: config.recursion_limit_config(),
                 pysa_context,
                 cinderx_enabled: self.data.cinderx_reporter.is_some(),
+                timing: Some(&self.timing),
             };
 
             // Compute the step. This stores the result and advances current_step,
@@ -1613,7 +1621,7 @@ impl<'a> Transaction<'a> {
                 let actual_name = alias.as_ref().unwrap_or(name);
                 let loader = self.get_cached_loader(&module_data.config.read());
                 let other_path = loader
-                    .find_import(*other_module, Some(handle.path()))
+                    .find_import(*other_module, Some(handle.path()), Some(&self.timing))
                     .finding()?;
                 let other_handle = Handle::new(*other_module, other_path, handle.sys_info().dupe());
                 self.lookup_export_location(&other_handle, actual_name)
@@ -1725,11 +1733,15 @@ impl<'a> Transaction<'a> {
             let v = Arc::new(Stdlib::new(
                 k.version(),
                 &|module, name| {
-                    let path = loader.find_import(module, None).finding()?;
+                    let path = loader
+                        .find_import(module, None, Some(&self.timing))
+                        .finding()?;
                     self.lookup_stdlib(&Handle::new(module, path, (*k).dupe()), name, &thread_state)
                 },
                 &|module, name| {
-                    let path = loader.find_import(module, None).finding()?;
+                    let path = loader
+                        .find_import(module, None, Some(&self.timing))
+                        .finding()?;
                     let handle = Handle::new(module, path, (*k).dupe());
                     self.lookup_export_location(&handle, name)
                 },
@@ -2229,6 +2241,7 @@ impl<'a> Transaction<'a> {
                 recursion_limit_config: config.recursion_limit_config(),
                 pysa_context: None,
                 cinderx_enabled: false,
+                timing: None,
             };
             while let Some(step) = alt.next_step() {
                 let start = Instant::now();
@@ -2423,7 +2436,11 @@ impl<'a> TransactionHandle<'a> {
                         let finding = self
                             .transaction
                             .get_cached_loader(&self.module_data.config.read())
-                            .find_import(module, Some(self.module_data.handle.path()));
+                            .find_import(
+                                module,
+                                Some(self.module_data.handle.path()),
+                                Some(self.transaction.timing()),
+                            );
                         let fi_ns = fi_start.elapsed().as_nanos() as u64;
                         self.transaction
                             .timing()
