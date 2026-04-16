@@ -199,6 +199,18 @@ pub struct TelemetryTransactionStats {
     pub cold_modules: usize,
     /// Number of modules cloned from committed state.
     pub warm_modules: usize,
+    /// Total filesystem stat calls (is_file, exists, is_dir in finder).
+    pub total_stat_count: usize,
+    /// Stat calls exceeding 1ms (likely EdenFS remote fetch).
+    pub slow_stat_count: usize,
+    /// Cumulative time of slow stat calls.
+    pub slow_stat_time: Duration,
+    /// Total filesystem read calls (read_to_string in load).
+    pub total_read_count: usize,
+    /// Read calls exceeding 1ms (likely EdenFS remote fetch).
+    pub slow_read_count: usize,
+    /// Cumulative time of slow read calls.
+    pub slow_read_time: Duration,
 }
 
 #[derive(Default)]

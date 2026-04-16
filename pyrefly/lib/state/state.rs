@@ -504,6 +504,12 @@ fn copy_timing_counters(t: &TransactionTimingCounters, stats: &mut TelemetryTran
     stats.demand_wait_count = t.demand_wait_count.load(Ordering::Relaxed) as usize;
     stats.cold_modules = t.cold_modules.load(Ordering::Relaxed) as usize;
     stats.warm_modules = t.warm_modules.load(Ordering::Relaxed) as usize;
+    stats.total_stat_count = t.total_stat_count.load(Ordering::Relaxed) as usize;
+    stats.slow_stat_count = t.slow_stat_count.load(Ordering::Relaxed) as usize;
+    stats.slow_stat_time = Duration::from_nanos(t.slow_stat_ns.load(Ordering::Relaxed));
+    stats.total_read_count = t.total_read_count.load(Ordering::Relaxed) as usize;
+    stats.slow_read_count = t.slow_read_count.load(Ordering::Relaxed) as usize;
+    stats.slow_read_time = Duration::from_nanos(t.slow_read_ns.load(Ordering::Relaxed));
 }
 
 /// Atomic nanosecond counters accumulated across worker threads during a transaction.
@@ -534,6 +540,14 @@ pub(crate) struct TransactionTimingCounters {
     // Module temperature
     pub cold_modules: AtomicU64,
     pub warm_modules: AtomicU64,
+    // Filesystem stat latency (is_file, exists, is_dir in finder)
+    pub total_stat_count: AtomicU64,
+    pub slow_stat_count: AtomicU64,
+    pub slow_stat_ns: AtomicU64,
+    // Filesystem read latency (read_to_string in load)
+    pub total_read_count: AtomicU64,
+    pub slow_read_count: AtomicU64,
+    pub slow_read_ns: AtomicU64,
 }
 
 /// `TransactionData` contains most of the information in `Transaction`, but it doesn't lock
