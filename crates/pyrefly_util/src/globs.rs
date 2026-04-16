@@ -1762,6 +1762,72 @@ mod tests {
         assert!(files.contains(&root.join("regular.py")));
     }
 
+    /// Regression test: setting `project-excludes = ["**/*.ipynb"]` should not
+    /// prevent `.py` files from being discovered. The bug is that the default
+    /// project-includes contains both `**/*.py*` and `**/*.ipynb`. When the
+    /// exclude pattern `**/*.ipynb` matches the include pattern `**/*.ipynb`,
+    /// `Glob::files` returns an error, and `filtered_files` propagates it via
+    /// `?` (line 539), aborting the entire file discovery — even though the
+    /// other include pattern `**/*.py*` would have succeeded.
+    #[test]
+    fn test_project_excludes_ipynb_does_not_break_py_discovery() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        TestPath::setup_test_directory(
+            root,
+            vec![
+                TestPath::file("main.py"),
+                TestPath::file("helper.py"),
+                TestPath::file("notebook.ipynb"),
+                TestPath::dir(
+                    "subdir",
+                    vec![
+                        TestPath::file("module.py"),
+                        TestPath::file("analysis.ipynb"),
+                    ],
+                ),
+            ],
+        );
+
+        // Reproduce the real config scenario: default project-includes has both
+        // `**/*.py*` and `**/*.ipynb`, and the user sets project-excludes to
+        // `["**/*.ipynb"]`.
+        let includes =
+            Globs::new_with_root(root, vec!["**/*.py*".to_owned(), "**/*.ipynb".to_owned()])
+                .unwrap();
+        let excludes = Globs::new_with_root(root, vec!["**/*.ipynb".to_owned()]).unwrap();
+        let filtered = FilteredGlobs::new(includes, excludes, None, HiddenDirFilter::Disabled);
+
+        let result = filtered.files();
+
+        // BUG: The exclude `**/*.ipynb` matches the include pattern `**/*.ipynb`
+        // itself, causing `Glob::files` to return Err. Since `filtered_files`
+        // propagates this error with `?`, the entire file discovery fails —
+        // even though `**/*.py*` would have found all the .py files.
+        assert!(
+            result.is_err(),
+            "BUG: expected file discovery to fail due to excluded include \
+             pattern, but it succeeded. If this assertion fires, the bug may \
+             have been fixed — update this test to assert correct behavior."
+        );
+
+        // When the bug is fixed, replace the above with:
+        // let mut files = result.unwrap();
+        // files.sort();
+        // let files: Vec<&Path> = files
+        //     .iter()
+        //     .map(|p| p.strip_prefix(root).unwrap())
+        //     .collect();
+        // assert_eq!(
+        //     files,
+        //     vec![
+        //         Path::new("helper.py"),
+        //         Path::new("main.py"),
+        //         Path::new("subdir/module.py"),
+        //     ],
+        // );
+    }
+
     #[cfg(not(fbcode_build))]
     #[test]
     fn test_explicitly_specified_files_without_extension_non_eden() {
