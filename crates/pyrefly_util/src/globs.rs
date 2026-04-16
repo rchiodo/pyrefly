@@ -33,6 +33,7 @@ use serde::de;
 use serde::de::Visitor;
 use starlark_map::small_set::SmallSet;
 use tracing::debug;
+use tracing::warn;
 
 use crate::absolutize::Absolutize as _;
 use crate::fs_anyhow;
@@ -527,6 +528,19 @@ impl Globs {
 
         let mut result = SmallSet::new();
         for pattern in &self.0 {
+            // Skip include patterns that are themselves excluded (e.g. the
+            // default `**/*.ipynb` include when the user sets
+            // `project-excludes = ["**/*.ipynb"]`). Warn so the user knows
+            // this pattern is not being used, but don't abort discovery.
+            if filter.is_excluded(pattern.as_path()) {
+                warn!(
+                    "Skipping include pattern `{}` because it is matched by \
+                     `project-excludes` or an ignore file.\n{}",
+                    pattern.as_str(),
+                    filter,
+                );
+                continue;
+            }
             let remaining_limit = if let Some(limit) = limit {
                 if limit > result.len() {
                     Some(limit - result.len())
@@ -1763,12 +1777,10 @@ mod tests {
     }
 
     /// Regression test: setting `project-excludes = ["**/*.ipynb"]` should not
-    /// prevent `.py` files from being discovered. The bug is that the default
-    /// project-includes contains both `**/*.py*` and `**/*.ipynb`. When the
-    /// exclude pattern `**/*.ipynb` matches the include pattern `**/*.ipynb`,
-    /// `Glob::files` returns an error, and `filtered_files` propagates it via
-    /// `?` (line 539), aborting the entire file discovery — even though the
-    /// other include pattern `**/*.py*` would have succeeded.
+    /// prevent `.py` files from being discovered. The default project-includes
+    /// contains both `**/*.py*` and `**/*.ipynb`. When the exclude pattern
+    /// `**/*.ipynb` matches the include pattern `**/*.ipynb`, that include is
+    /// skipped, but the remaining `**/*.py*` include should still find .py files.
     #[test]
     fn test_project_excludes_ipynb_does_not_break_py_discovery() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -1798,34 +1810,24 @@ mod tests {
         let excludes = Globs::new_with_root(root, vec!["**/*.ipynb".to_owned()]).unwrap();
         let filtered = FilteredGlobs::new(includes, excludes, None, HiddenDirFilter::Disabled);
 
-        let result = filtered.files();
-
-        // BUG: The exclude `**/*.ipynb` matches the include pattern `**/*.ipynb`
-        // itself, causing `Glob::files` to return Err. Since `filtered_files`
-        // propagates this error with `?`, the entire file discovery fails —
-        // even though `**/*.py*` would have found all the .py files.
-        assert!(
-            result.is_err(),
-            "BUG: expected file discovery to fail due to excluded include \
-             pattern, but it succeeded. If this assertion fires, the bug may \
-             have been fixed — update this test to assert correct behavior."
+        let mut files = filtered.files().expect(
+            "file discovery should succeed: the excluded **/*.ipynb include \
+             pattern should be skipped, not abort the entire search",
         );
-
-        // When the bug is fixed, replace the above with:
-        // let mut files = result.unwrap();
-        // files.sort();
-        // let files: Vec<&Path> = files
-        //     .iter()
-        //     .map(|p| p.strip_prefix(root).unwrap())
-        //     .collect();
-        // assert_eq!(
-        //     files,
-        //     vec![
-        //         Path::new("helper.py"),
-        //         Path::new("main.py"),
-        //         Path::new("subdir/module.py"),
-        //     ],
-        // );
+        files.sort();
+        let files: Vec<&Path> = files
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap())
+            .collect();
+        // Only .py files should be returned; .ipynb files are excluded.
+        assert_eq!(
+            files,
+            vec![
+                Path::new("helper.py"),
+                Path::new("main.py"),
+                Path::new("subdir/module.py"),
+            ],
+        );
     }
 
     #[cfg(not(fbcode_build))]
