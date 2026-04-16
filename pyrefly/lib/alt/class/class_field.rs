@@ -3354,6 +3354,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 Err(error) => {
                     let mut diff_lines = Vec::new();
+                    // Invariant = ReadWrite vs ReadWrite type mismatch.
+                    // Contravariant with got_is_property=false = ReadWrite
+                    // overriding a Property with setter (narrowed writable type).
+                    // Both are mutable attribute override violations.
+                    let is_mutable_attribute = matches!(
+                        &*error,
+                        AttrSubsetError::Invariant { .. }
+                            | AttrSubsetError::Contravariant {
+                                got_is_property: false,
+                                want_is_property: true,
+                                ..
+                            }
+                    );
                     if let AttrSubsetError::Covariant { got, want, .. }
                     | AttrSubsetError::Invariant { got, want, .. }
                     | AttrSubsetError::Contravariant { got, want, .. } = &*error
@@ -3387,7 +3400,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
 
                     Some(OverrideError {
-                        kind: ErrorKind::BadOverride,
+                        kind: if is_mutable_attribute {
+                            ErrorKind::BadOverrideMutableAttribute
+                        } else {
+                            ErrorKind::BadOverride
+                        },
                         message: error.to_error_msg(cls.name(), parent.name(), field_name),
                         diff_lines,
                     })

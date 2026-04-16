@@ -1419,9 +1419,72 @@ class Child(Parent):
     "#,
 );
 
+testcase!(
+    test_override_mutable_attribute,
+    r#"
+class A:
+    p: int | str
+
+class B(A):
+    p: int  # E: Class member `B.p` overrides parent class `A` in an inconsistent manner
+ "#,
+);
+
+testcase!(
+    test_override_mutable_attribute_suppressed_by_parent_kind,
+    r#"
+class A:
+    p: int | str
+
+class B(A):
+    p: int  # pyrefly: ignore[bad-override]
+ "#,
+);
+
+testcase!(
+    test_override_mutable_attribute_suppressed_by_own_kind,
+    r#"
+class A:
+    p: int | str
+
+class B(A):
+    p: int  # pyrefly: ignore[bad-override-mutable-attribute]
+ "#,
+);
+
+// When a decorator returns a scalar type (not a callable), the decorated method
+// becomes a plain mutable attribute. Overriding it with a narrowed type should
+// be bad-override-mutable-attribute (suppressible with bad-override), not a
+// generic bad-override.
+testcase!(
+    test_override_decorated_method_returning_scalar,
+    r#"
+from typing import Callable, TypeVar
+
+F = TypeVar("F", bound=Callable[..., object])
+
+def returns_int(f: F) -> int:
+    return 0
+
+class Base:
+    @returns_int
+    def x(self) -> str:
+        return ""
+
+class ChildSame(Base):
+    x: int  # OK, same type
+
+class ChildNarrowed(Base):
+    x: bool  # E: Class member `ChildNarrowed.x` overrides parent class `Base` in an inconsistent manner
+
+class ChildNarrowedSuppressed(Base):
+    x: bool  # pyrefly: ignore[bad-override-mutable-attribute]
+ "#,
+);
+
 // Overriding a readwrite property with a plain attribute that narrows the type
-// is an error: the parent's setter accepts A, but the child's ReadWrite(B) only
-// accepts B.
+// is a mutable attribute override error: the parent's setter accepts A, but the
+// child's ReadWrite(B) only accepts B.
 testcase!(
     test_override_readwrite_property_to_attr_narrowed,
     r#"
@@ -1439,6 +1502,9 @@ class Base:
 
 class ChildNarrowed(Base):
     p: B  # E: `ChildNarrowed.p` has type `B`, which is not assignable from `(self: ChildNarrowed, value: A) -> None`, the property setter for `Base.p`
+
+class ChildSuppressed(Base):
+    p: B  # pyrefly: ignore[bad-override-mutable-attribute]
 
 class ChildSameType(Base):
     p: A  # OK, same type

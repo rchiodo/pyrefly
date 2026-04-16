@@ -30,12 +30,19 @@ impl ErrorDisplayConfig {
     }
 
     /// Gets the severity for the given `ErrorKind`. If the value isn't
-    /// found, then assume it should be the default for that error kind.
+    /// found, check the parent kind (for sub-kinds like
+    /// `BadOverrideMutableAttribute` → `BadOverride`). If neither is
+    /// found, use the default severity for that error kind.
     pub fn severity(&self, kind: ErrorKind) -> Severity {
-        self.0
-            .get(&kind)
-            .copied()
-            .unwrap_or_else(|| kind.default_severity())
+        if let Some(&severity) = self.0.get(&kind) {
+            return severity;
+        }
+        if let Some(parent) = kind.parent_kind() {
+            if let Some(&severity) = self.0.get(&parent) {
+                return severity;
+            }
+        }
+        kind.default_severity()
     }
 
     pub fn set_error_severity(&mut self, kind: ErrorKind, severity: Severity) {
@@ -113,5 +120,44 @@ impl<'a> ErrorConfig<'a> {
             ignore_errors_in_generated_code,
             enabled_ignores,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_severity_parent_kind_fallback() {
+        // Setting bad-override to ignore should also ignore bad-override-mutable-attribute
+        let config =
+            ErrorDisplayConfig::new(HashMap::from([(ErrorKind::BadOverride, Severity::Ignore)]));
+        assert_eq!(
+            config.severity(ErrorKind::BadOverrideMutableAttribute),
+            Severity::Ignore
+        );
+    }
+
+    #[test]
+    fn test_severity_explicit_sub_kind_overrides_parent() {
+        // Explicit sub-kind severity takes precedence over parent
+        let config = ErrorDisplayConfig::new(HashMap::from([
+            (ErrorKind::BadOverride, Severity::Ignore),
+            (ErrorKind::BadOverrideMutableAttribute, Severity::Error),
+        ]));
+        assert_eq!(
+            config.severity(ErrorKind::BadOverrideMutableAttribute),
+            Severity::Error
+        );
+    }
+
+    #[test]
+    fn test_severity_parent_kind_not_set() {
+        // If neither sub-kind nor parent is set, use default severity
+        let config = ErrorDisplayConfig::new(HashMap::new());
+        assert_eq!(
+            config.severity(ErrorKind::BadOverrideMutableAttribute),
+            Severity::Error
+        );
     }
 }
