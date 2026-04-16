@@ -54,6 +54,14 @@ impl ErrorDisplayConfig {
     pub fn set_error_severity(&mut self, kind: ErrorKind, severity: Severity) {
         self.0.insert(kind, severity);
     }
+
+    /// Merge another config's error codes into this one.
+    /// Codes from `other` override codes in `self`.
+    pub fn merge_from(&mut self, other: &ErrorDisplayConfig) {
+        for (&kind, &severity) in &other.0 {
+            self.0.insert(kind, severity);
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for ErrorDisplayConfig {
