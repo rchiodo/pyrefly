@@ -1259,7 +1259,6 @@ def main(left: DataFrame, right: DataFrame) -> None:
 );
 
 testcase!(
-    bug = "https://github.com/facebook/pyrefly/issues/3047",
     test_bound_violation_in_union_member,
     r#"
 from typing import Iterable, Iterator, TypeVar
@@ -1268,11 +1267,16 @@ class DataFrame:
     def __iter__(self) -> Iterator[Series]: ...
 FrameType = TypeVar("FrameType", bound="DataFrame")
 def main(left: DataFrame, right: DataFrame) -> None:
-    def func(*a: FrameType | Iterable[FrameType]) -> None:
+
+    def func1(*a: FrameType | Iterable[FrameType]) -> None:
         return None
     # `DataFrame` is not assignable to `Iterable[FrameType]` because `Series` violates the upper
     # bound `DataFrame` of `FrameType`. However, this call should still succeed because we can
     # match `FrameType` instead.
-    func(left, right)  # E: `Series` is not assignable to upper bound `DataFrame`
+    func1(left, right)
+
+    def func2(*a: Iterable[FrameType] | None) -> None:
+        return None
+    func2(left, right)  # E: `Series` is not assignable to upper bound `DataFrame`
     "#,
 );

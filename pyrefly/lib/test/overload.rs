@@ -1865,7 +1865,6 @@ def test(value: int | float | None) -> str:
 );
 
 testcase!(
-    bug = "Incorrect overload selection due to buggy type variable solving",
     test_match_overload_with_unknown_type_from_missing_import,
     r#"
 from typing import Any, assert_type, overload, TypeVar, TypeAliasType
@@ -1889,7 +1888,7 @@ def f(a: object) -> object: ...
 x: list[int] = []
 # This agrees with pyright and ty. (Mypy says `Never`.)
 # Because of `Opaque`, we should match the first overload with `S` unsolved.
-assert_type(f(x), Any)  # E: assert_type(float, Any)
+assert_type(f(x), Any)
     "#,
 );
 

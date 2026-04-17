@@ -1029,15 +1029,13 @@ z: " T" = 1  # E: Expected a type form, got instance of `Literal[' T']`
 );
 
 testcase!(
-    test_no_backtracking,
+    test_backtracking,
     r#"
 from typing import assert_type
 def foo(x: tuple[list[int], list[int]] | tuple[list[str], list[str]]) -> None: ...
 def test(x: list[str]) -> None:
     y = ([], x)
-    # Because we pin down the `[]` first, we end up with a type error.
-    # If we had backtracking we wouldn't.
-    foo(y)  # E: Argument `tuple[list[int], list[str]]` is not assignable to parameter `x` with type `tuple[list[int], list[int]] | tuple[list[str], list[str]]`
+    foo(y)
 "#,
 );
 

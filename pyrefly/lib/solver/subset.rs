@@ -9,6 +9,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter;
 
+use itertools::Either;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
 use itertools::izip;
@@ -136,10 +137,8 @@ enum SubsetWithSnapshotResult {
     Ok,
     /// `is_subset_eq` call was successful aside from instantiation errors.
     /// Holds a snapshot of the vars with the instantiation errors.
-    #[expect(dead_code)]
     InstantiationErrors(VarSnapshot),
     /// `is_subset_eq` call failed.
-    #[expect(dead_code)]
     Err(SubsetError),
 }
 
@@ -1266,6 +1265,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         res
     }
 
+    /// Snapshots the given vars, calls `f`, and rolls back the vars if the call fails.
+    /// Note that this only rolls back the var state and not:
+    /// * `Ok` entries left in `subset_cache` (the rollback in `is_subset_eq_impl` only fires on
+    ///   `Err` from the speculative call, not on `Ok`-with-instantiation-errors), or
+    /// * `coinductive_assumptions_used`, which is one-way.
     fn with_snapshot(
         &mut self,
         vars: &[Var],
@@ -1495,12 +1499,48 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 // `type[T]`) before bare vars (e.g. `T`), so that more specific patterns are
                 // tried first. This prevents cases like `T | type[T]` from incorrectly matching
                 // bare `T` when `type[T]` would produce a better (bound-satisfying) solution.
-                let (vars, nonvars): (Vec<_>, Vec<_>) =
-                    us.iter().partition(|u| u.may_contain_placeholder_var());
-                let (bare_vars, wrapped_vars): (Vec<_>, Vec<_>) =
-                    vars.into_iter().partition(|u| matches!(u, Type::Var(_)));
+                let (vars, nonvars): (Vec<_>, Vec<_>) = us.iter().partition_map(|u| {
+                    let vs = u.collect_maybe_placeholder_vars();
+                    if !vs.is_empty() {
+                        Either::Left((u, vs))
+                    } else {
+                        Either::Right((u, vs))
+                    }
+                });
+                let (bare_vars, wrapped_vars): (Vec<_>, Vec<_>) = vars
+                    .into_iter()
+                    .partition(|(u, _)| matches!(u, Type::Var(_)));
                 let ordered_us = nonvars.into_iter().chain(wrapped_vars).chain(bare_vars);
-                any(ordered_us, |u| self.is_subset_eq(l, u))
+                let mut res_with_instantiation_errors = None;
+                let mut error = None;
+                let l_vs = l.collect_maybe_placeholder_vars();
+                // Take the first successful match.
+                for (u, vs) in ordered_us {
+                    let all_vs = l_vs.iter().copied().chain(vs).collect::<Vec<_>>();
+                    match self.with_snapshot(&all_vs, |me| me.is_subset_eq(l, u)) {
+                        SubsetWithSnapshotResult::Ok => return Ok(()),
+                        SubsetWithSnapshotResult::InstantiationErrors(snapshot) => {
+                            if res_with_instantiation_errors.is_none() {
+                                res_with_instantiation_errors = Some(snapshot);
+                            }
+                        }
+                        SubsetWithSnapshotResult::Err(e) => {
+                            if error.is_none() {
+                                error = Some(e);
+                            }
+                        }
+                    }
+                }
+                if let Some(snapshot) = res_with_instantiation_errors {
+                    // If there was no fully successful match, take the first match that was
+                    // successful aside from instantiation errors. This ensures that we get
+                    // specific [bad-specialization] errors when the only issue is a violation of a
+                    // type variable's upper bound, rather than generic "not assignable" errors.
+                    self.solver.restore_vars(snapshot);
+                    Ok(())
+                } else {
+                    Err(error.unwrap_or(SubsetError::Other))
+                }
             }
             (l, Type::Overload(overload)) => {
                 let has_any_args_kwargs = match l {
