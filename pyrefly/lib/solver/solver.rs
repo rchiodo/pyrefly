@@ -507,7 +507,9 @@ impl Solver {
                     errors.insert(var, e);
                 }
                 None => {
-                    errors.shift_remove(&var);
+                    if errors.contains_key(&var) {
+                        errors.shift_remove(&var);
+                    }
                 }
             }
         }
