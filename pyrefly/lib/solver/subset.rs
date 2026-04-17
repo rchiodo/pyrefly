@@ -45,6 +45,7 @@ use crate::solver::solver::Subset;
 use crate::solver::solver::SubsetCacheEntry;
 use crate::solver::solver::SubsetError;
 use crate::solver::solver::TypedDictSubsetError;
+use crate::solver::solver::VarSnapshot;
 use crate::types::callable::Function;
 use crate::types::callable::Param;
 use crate::types::callable::ParamList;
@@ -127,6 +128,25 @@ fn any<T>(
         }
     }
     Err(err.unwrap_or(SubsetError::Other))
+}
+
+/// Result of `with_snapshot`, which performs an `is_subset_eq` call with var snapshotting.
+enum SubsetWithSnapshotResult {
+    /// `is_subset_eq` call was successful.
+    Ok,
+    /// `is_subset_eq` call was successful aside from instantiation errors.
+    /// Holds a snapshot of the vars with the instantiation errors.
+    #[expect(dead_code)]
+    InstantiationErrors(VarSnapshot),
+    /// `is_subset_eq` call failed.
+    #[expect(dead_code)]
+    Err(SubsetError),
+}
+
+impl SubsetWithSnapshotResult {
+    fn is_ok(&self) -> bool {
+        matches!(self, SubsetWithSnapshotResult::Ok)
+    }
 }
 
 impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
@@ -1250,10 +1270,22 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         &mut self,
         vars: &[Var],
         f: impl FnOnce(&mut Subset<Ans>) -> Result<(), SubsetError>,
-    ) -> Result<(), SubsetError> {
+    ) -> SubsetWithSnapshotResult {
+        if vars.is_empty() {
+            // Fast path - no var snapshotting needed.
+            return f(self).map_or_else(SubsetWithSnapshotResult::Err, |_| {
+                SubsetWithSnapshotResult::Ok
+            });
+        }
         let snapshot = self.solver.snapshot_vars(vars);
-        let res = f(self);
-        if res.is_err() {
+        let res = match (f(self), self.solver.has_new_instantiation_errors(&snapshot)) {
+            (Ok(()), false) => SubsetWithSnapshotResult::Ok,
+            (Ok(()), true) => {
+                SubsetWithSnapshotResult::InstantiationErrors(self.solver.snapshot_vars(vars))
+            }
+            (Err(e), _) => SubsetWithSnapshotResult::Err(e),
+        };
+        if !res.is_ok() {
             self.solver.restore_vars(snapshot);
         }
         res
