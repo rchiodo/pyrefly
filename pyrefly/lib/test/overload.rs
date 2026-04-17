@@ -1909,3 +1909,20 @@ assert_type(f(1), int)
 assert_type(f(1, 2), tuple[int, int])
     "#,
 );
+
+testcase!(
+    test_reject_overload_with_specialization_error,
+    r#"
+from typing import overload
+
+@overload
+def f[T: str](x: T) -> T: ...
+@overload
+def f(x: int) -> int: ...
+def f(x):
+    return x
+
+def g(x: float):
+    f(x)  # E: No matching overload
+    "#,
+);

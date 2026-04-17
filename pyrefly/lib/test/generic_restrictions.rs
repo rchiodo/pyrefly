@@ -1042,7 +1042,6 @@ def go() -> None:
 );
 
 testcase!(
-    bug = "Fails to catch TypeVar bound violation",
     test_nested_call_of_overloaded_function_preserves_bound,
     r#"
 from typing import Any, overload
@@ -1057,7 +1056,7 @@ def bounded_str[T: str](x: T) -> T:
     return x
 
 def go() -> None:
-    bounded_str(unbounded(1, 2))  # Should error: `int` is not assignable to upper bound `str` of type variable `T`
+    bounded_str(unbounded(1, 2))  # E: `int` is not assignable to upper bound `str` of type variable `T`
     "#,
 );
 

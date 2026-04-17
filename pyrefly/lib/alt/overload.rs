@@ -38,6 +38,7 @@ use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::context::ErrorInfo;
+use crate::solver::solver::TypeVarSpecializationError;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
@@ -51,8 +52,15 @@ struct CalledOverload<'f> {
     res: Type,
     ctor_targs: Option<TArgs>,
     call_errors: ErrorCollector,
+    specialization_errors: Vec<TypeVarSpecializationError>,
     /// Maps each argument's source range to the parameter type it was matched against.
     expected_types: HashMap<TextRange, Type>,
+}
+
+impl CalledOverload<'_> {
+    fn num_errors(&self) -> usize {
+        self.call_errors.len() + self.specialization_errors.len()
+    }
 }
 
 /// Performs argument type expansion for arguments to an overloaded function.
@@ -266,6 +274,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     res: self.heap.mk_any_error(),
                     ctor_targs: None,
                     call_errors: self.error_collector(),
+                    specialization_errors: Vec::new(),
                     expected_types: HashMap::new(),
                 },
                 false,
@@ -317,12 +326,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         let func = first_overload.func;
                         let ctor_targs = first_overload.ctor_targs.clone();
                         let expected_types = first_overload.expected_types.clone();
+                        let specialization_errors = first_overload.specialization_errors.clone();
                         closest_overload = CalledOverload {
                             func,
                             ctor_targs,
                             expected_types,
                             res: self.unions(matched_overloads.into_map(|o| o.res)),
                             call_errors: self.error_collector(),
+                            specialization_errors,
                         };
                         matched = true;
                         break;
@@ -378,6 +389,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
             }
             errors.extend(closest_overload.call_errors);
+            if let Ok(specialization_errors) =
+                Vec1::try_from_vec(closest_overload.specialization_errors)
+            {
+                self.add_specialization_errors(
+                    specialization_errors,
+                    arguments_range,
+                    errors,
+                    None,
+                );
+            }
             (
                 closest_overload.res,
                 closest_overload.func.1.signature.clone(),
@@ -522,12 +543,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ctor_targs,
             );
             self.solver().restore_vars(snapshot);
-            if called_overload.call_errors.is_empty() {
+            let n_errors = called_overload.num_errors();
+            if n_errors == 0 {
                 matched_overloads.push(called_overload);
             } else {
                 match &closest_unmatched_overload {
-                    Some(overload)
-                        if overload.call_errors.len() <= called_overload.call_errors.len() => {}
+                    Some(overload) if overload.num_errors() <= n_errors => {}
                     _ => {
                         closest_unmatched_overload = Some(called_overload);
                     }
@@ -643,7 +664,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 &None,
                             );
                             self.solver().restore_vars(snapshot);
-                            res.call_errors.is_empty()
+                            res.num_errors() == 0
                         })
                         .map(|(split_point, _)| split_point + 1)
                 };
@@ -674,6 +695,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ctor_targs,
                 );
                 (
+                    // Intentionally check only `call_errors` and not `specialization_errors`. The
+                    // contextual pass re-runs with the hint and may legitimately introduce
+                    // specialization errors that the matched-overload step already accounted for,
+                    // so we only fall back to the no-hint version on hard call errors. See
+                    // `test::generic_restriction::test_nested_call_of_overloaded_function_preserves_bound`.
                     if contextual_overload.call_errors.is_empty() {
                         contextual_overload
                     } else {
@@ -817,15 +843,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             hint,
             overload_ctor_targs.as_mut(),
         );
-        if let Ok(errors) = Vec1::try_from_vec(specialization_errors) {
-            self.add_specialization_errors(errors, arguments_range, &call_errors, None);
-        }
 
         CalledOverload {
             func: callable,
             res,
             ctor_targs: overload_ctor_targs,
             call_errors,
+            specialization_errors,
             expected_types,
         }
     }
