@@ -31,6 +31,7 @@ use pyrefly_types::typed_dict::TypedDict;
 use pyrefly_types::typed_dict::TypedDictField;
 use pyrefly_types::types::Overload;
 use pyrefly_types::types::Union;
+use pyrefly_types::types::Var;
 use pyrefly_util::owner::Owner;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
@@ -1245,6 +1246,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         res
     }
 
+    fn with_snapshot(
+        &mut self,
+        vars: &[Var],
+        f: impl FnOnce(&mut Subset<Ans>) -> Result<(), SubsetError>,
+    ) -> Result<(), SubsetError> {
+        let snapshot = self.solver.snapshot_vars(vars);
+        let res = f(self);
+        if res.is_err() {
+            self.solver.restore_vars(snapshot);
+        }
+        res
+    }
+
     fn is_subset_eq_no_recursive_check(
         &mut self,
         got: &Type,
@@ -1323,15 +1337,23 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // Therefore try these quantified cases, but only pick them if they work.
             (Type::Quantified(q), u)
                 if let Restriction::Bound(bound) = q.restriction()
-                    && self.is_subset_eq(bound, u).is_ok() =>
+                    && self
+                        .with_snapshot(&u.collect_maybe_placeholder_vars(), |me| {
+                            me.is_subset_eq(bound, u)
+                        })
+                        .is_ok() =>
             {
                 Ok(())
             }
             (Type::Quantified(q), u)
                 if let Restriction::Constraints(constraints) = q.restriction()
-                    && constraints
-                        .iter()
-                        .all(|constraint| self.is_subset_eq(constraint, u).is_ok()) =>
+                    && self
+                        .with_snapshot(&u.collect_maybe_placeholder_vars(), |me| {
+                            all(constraints.iter(), |constraint| {
+                                me.is_subset_eq(constraint, u)
+                            })
+                        })
+                        .is_ok() =>
             {
                 Ok(())
             }
