@@ -977,6 +977,15 @@ impl Solver {
         vs.0.iter().any(|v| lock.contains_key(v))
     }
 
+    /// Have these vars picked up any new instantiation errors since they were snapshotted?
+    pub fn has_new_instantiation_errors(&self, snapshot: &VarSnapshot) -> bool {
+        let lock = self.instantiation_errors.read();
+        snapshot
+            .0
+            .iter()
+            .any(|(v, state)| state.error.is_none() && lock.contains_key(v))
+    }
+
     /// Returns true if the given type is a Var that points to a partial
     /// (PartialQuantified or PartialContained) variable.
     pub fn is_partial(&self, ty: &Type) -> bool {
