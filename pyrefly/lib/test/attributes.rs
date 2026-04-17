@@ -1161,6 +1161,30 @@ def test(stack: ThemeStack) -> None:
 );
 
 testcase!(
+    test_generic_function_as_closure_default_arg,
+    r#"
+import bisect
+
+class Worker:
+    def __init__(self) -> None:
+        self.heartbeats: list[float] = []
+        self.event = self._create_event_handler()
+
+    def _create_event_handler(self):
+        heartbeats = self.heartbeats
+
+        def event(
+            timestamp: float | None = None,
+            insort = bisect.insort,
+        ) -> None:
+            if timestamp is not None:
+                insort(heartbeats, timestamp)
+
+        return event
+"#,
+);
+
+testcase!(
     test_attr_unknown,
     r#"
 class Op:
