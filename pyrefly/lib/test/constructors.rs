@@ -729,9 +729,9 @@ class K:
 
 class C[T]:
     @overload
-    def __new__(cls: type[A], x: Literal[True]): ...  # E: `__new__` method cls type `type[A]` is not a superclass of class `C`  # E: Implementation signature `(cls: type[Self@C], x: Unknown) -> None` does not accept all arguments that overload signature `(cls: type[A], x: Literal[True]) -> None`
+    def __new__(cls: type[A], x: Literal[True]): ...  # E: `__new__` method cls type `type[A]` is not a superclass of class `C`  # E: Implementation signature `(cls: type[Self@C], x: Unknown) -> Self@C` does not accept all arguments that overload signature `(cls: type[A], x: Literal[True]) -> Self@C`
     @overload
-    def __new__(cls: type[B], x: Literal[False]): ...  # E: `__new__` method cls type `type[B]` is not a superclass of class `C`  # E: Implementation signature `(cls: type[Self@C], x: Unknown) -> None` does not accept all arguments that overload signature `(cls: type[B], x: Literal[False]) -> None` accepts
+    def __new__(cls: type[B], x: Literal[False]): ...  # E: `__new__` method cls type `type[B]` is not a superclass of class `C`  # E: Implementation signature `(cls: type[Self@C], x: Unknown) -> Self@C` does not accept all arguments that overload signature `(cls: type[B], x: Literal[False]) -> Self@C` accepts
     def __new__(cls, x):
         pass
 
@@ -991,7 +991,6 @@ C("5")  # E: Argument `Literal['5']` is not assignable to parameter `x` with typ
 
 // Regression test for a problem in networkx: https://github.com/facebook/pyrefly/issues/3121
 testcase!(
-    bug = "Following the typing spec, we may assume unannotated `__new__` returns Self, which would avoid bad behaviors in some complex, dynamically-typed codebases",
     test_return_type_inference_for_constructors,
     r#"
 from typing import assert_type
@@ -1003,11 +1002,15 @@ class A:
         else:
             return object.__new__(cls)
     
-    def __init__(cls):
+    def __init__(self):
         return "x"
 
+class B(A): ...
+
 a = A()
-assert_type(a, A)  # E: assert_type(A | Unknown, A)
+assert_type(a, A)
+b = B()
+assert_type(b, B)
 "#,
 );
 
@@ -1069,5 +1072,37 @@ class ChildItem(ParentItem): ...
 def f() -> Iterator[ChildItem]: ...
 def g() -> list[ParentItem] | None:
     return list(f())
+    "#,
+);
+
+// Overloaded __new__ where one overload has an explicit return annotation
+// and one doesn't. The unannotated overload should assume Self; the
+// annotated overload should keep its declared return type.
+testcase!(
+    test_overloaded_new_mixed_annotation,
+    r#"
+from typing import assert_type, overload
+
+class C:
+    @overload
+    def __new__(cls, x: int) -> "C": ...
+    @overload
+    def __new__(cls, x: str): ...
+    def __new__(cls, x: int | str):
+        return object.__new__(cls)
+
+class D(C): ...
+
+# int overload: explicit return annotation -> C (not D)
+c1 = C(1)
+assert_type(c1, C)
+d1 = D(1)
+assert_type(d1, C)
+
+# str overload: unannotated -> Self (D for D(), C for C())
+c2 = C("a")
+assert_type(c2, C)
+d2 = D("a")
+assert_type(d2, D)
     "#,
 );

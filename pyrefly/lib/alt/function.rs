@@ -683,6 +683,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
 
+        // Per the constructor typing spec, an unannotated `__new__` is assumed to return
+        // `Self`. We do this here (rather than in `get_dunder_new`) so that each overload is
+        // handled independently — mixed-annotation overloads get the correct treatment.
+        let ret = if is_dunder_new
+            && !has_return_annotation
+            && let Some(cls) = &def.defining_cls
+        {
+            self.heap.mk_self_type(self.as_class_type_unchecked(cls))
+        } else {
+            ret
+        };
+
         let callable = if let Some(q) = &def.paramspec {
             Callable::concatenate(
                 def.params
