@@ -628,7 +628,20 @@ impl ReportArgs {
                 _ => continue,
             };
             match binding {
-                BindingExport::AnnotatedForward(annot_idx, _) => {
+                BindingExport::AnnotatedForward(annot_idx, key_idx) => {
+                    // IMPLICIT: type aliases are type-level constructs with 0 slots.
+                    if matches!(
+                        bindings.get(*key_idx),
+                        Binding::TypeAlias(_) | Binding::TypeAliasRef(_)
+                    ) {
+                        variables.push(Variable {
+                            name: qualified_name,
+                            annotation: None,
+                            slots: SlotCounts::default(),
+                            location,
+                        });
+                        continue;
+                    }
                     let annotation_text = match bindings.get(*annot_idx) {
                         BindingAnnotation::AnnotateExpr(_, expr, _) => {
                             Some(module.code_at(expr.range()).to_owned())
@@ -652,8 +665,12 @@ impl ReportArgs {
                     match bindings.get(*idx) {
                         // Skip injected implicit globals
                         Binding::Global(_) => {}
-                        // IMPLICIT: special type forms have 0 slots
-                        Binding::TypeVar(_) | Binding::ParamSpec(_) | Binding::TypeVarTuple(_) => {
+                        // IMPLICIT: special type forms and type aliases have 0 slots
+                        Binding::TypeVar(_)
+                        | Binding::ParamSpec(_)
+                        | Binding::TypeVarTuple(_)
+                        | Binding::TypeAlias(_)
+                        | Binding::TypeAliasRef(_) => {
                             variables.push(Variable {
                                 name: qualified_name,
                                 annotation: None,
@@ -2428,5 +2445,13 @@ mod tests {
         assert_eq!(parts.len(), 2, "schema_version must be \"major.minor\"");
         assert!(parts[0].parse::<u32>().is_ok());
         assert!(parts[1].parse::<u32>().is_ok());
+    }
+
+    /// Type aliases (explicit `TypeAlias`, bare assignments, PEP 695, TypeAliasType)
+    /// are type-level constructs and should have 0 typable slots.
+    #[test]
+    fn test_report_type_aliases() {
+        let report = build_module_report_for_test("type_aliases.py");
+        compare_snapshot("type_aliases.expected.json", &report);
     }
 }
