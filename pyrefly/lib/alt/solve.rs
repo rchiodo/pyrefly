@@ -3989,11 +3989,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && self.is_coroutine(&result)
             && !self.extends_any(cls.class_object())
         {
+            let msg = if matches!(e, Expr::Await(_)) {
+                "Result of `await` is itself a coroutine that is silently discarded. Either `await` it again or pass it to a consumer, or if the `Coroutine[...]` return annotation was a mistake, simplify it to the inner type (e.g. `int` instead of `Coroutine[Any, Any, int]`).".to_owned()
+            } else {
+                "Result of async function call is unused. Did you forget to `await`?".to_owned()
+            };
             self.error(
                 errors,
                 e.range(),
                 ErrorInfo::Kind(ErrorKind::UnusedCoroutine),
-                "Result of async function call is unused. Did you forget to `await`?".to_owned(),
+                msg,
             );
         }
         result

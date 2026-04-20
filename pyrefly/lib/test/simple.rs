@@ -1858,7 +1858,6 @@ async def bar():
 );
 
 testcase!(
-    bug = "error message says 'Did you forget to await?' but the expression already has await",
     test_unused_coroutine_after_await,
     r#"
 from typing import Any, Coroutine
@@ -1868,7 +1867,7 @@ class Engine:
     async def call_flow_fn(self) -> Coroutine[Any, Any, int]:
         return inner()
 async def run(engine: Engine) -> None:
-    await engine.call_flow_fn()  # E: Result of async function call is unused. Did you forget to `await`?
+    await engine.call_flow_fn()  # E: Result of `await` is itself a coroutine that is silently discarded. Either `await` it again or pass it to a consumer, or if the `Coroutine[...]` return annotation was a mistake, simplify it to the inner type (e.g. `int` instead of `Coroutine[Any, Any, int]`).
 "#,
 );
 
