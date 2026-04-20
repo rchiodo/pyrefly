@@ -1858,6 +1858,21 @@ async def bar():
 );
 
 testcase!(
+    bug = "error message says 'Did you forget to await?' but the expression already has await",
+    test_unused_coroutine_after_await,
+    r#"
+from typing import Any, Coroutine
+async def inner() -> int:
+    return 1
+class Engine:
+    async def call_flow_fn(self) -> Coroutine[Any, Any, int]:
+        return inner()
+async def run(engine: Engine) -> None:
+    await engine.call_flow_fn()  # E: Result of async function call is unused. Did you forget to `await`?
+"#,
+);
+
+testcase!(
     test_loop_forever,
     r#"
 # Used to loop forever, https://github.com/facebook/pyrefly/issues/519
