@@ -1075,13 +1075,12 @@ assert_type(type(x6), type[dict])
 );
 
 testcase!(
-    bug = "type(x) where x: int | str should be equivalent to type[int | str]",
     test_builtins_type_constructor_union,
     r#"
 from typing import assert_type
 def f(x: int | str) -> None:
-    assert_type(type(x), type[int] | type[str])  # E: assert_type(type[int] | type[str], type[int | str]) failed
-    assert_type(type(x), type[int | str])  # E: assert_type(type[int] | type[str], type[int | str]) failed
+    assert_type(type(x), type[int] | type[str])
+    assert_type(type(x), type[int | str])
 "#,
 );
 

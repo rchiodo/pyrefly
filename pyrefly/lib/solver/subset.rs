@@ -1538,6 +1538,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     // type variable's upper bound, rather than generic "not assignable" errors.
                     self.solver.restore_vars(snapshot);
                     Ok(())
+                } else if let Type::Type(box Type::Union(box Union { members, .. })) = l {
+                    // type[A | B] <: X | Y: distribute into type[A] <: X | Y and
+                    // type[B] <: X | Y. This fires as a fallback after per-member matching
+                    // fails, because type[A | B] isn't a subtype of any single X or Y,
+                    // but each distributed type[A] and type[B] may match a member.
+                    all(members.iter(), |m| {
+                        self.is_subset_eq(&Type::type_of(m.clone()), want)
+                    })
                 } else {
                     Err(error.unwrap_or(SubsetError::Other))
                 }
