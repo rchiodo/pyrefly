@@ -787,6 +787,26 @@ assert_type(C.x, int)
 );
 
 testcase!(
+    test_metaclass_property_precedence,
+    r#"
+from typing import assert_type
+
+class Meta(type):
+    @property
+    def f(cls) -> str:
+        return "1"
+
+class C(metaclass=Meta):
+    @property
+    def f(self) -> str:
+        return type(self).f
+
+# C.f should resolve to the metaclass property, returning str
+assert_type(C.f, str)
+    "#,
+);
+
+testcase!(
     test_metaclass_method_cls_typetype,
     r#"
 from typing import assert_type
