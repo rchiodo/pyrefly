@@ -144,6 +144,53 @@ impl SlotCounts {
     }
 }
 
+/// Annotation quality for a single slot, ordered worst-to-best so that
+/// `min()` gives "worst-wins" semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum SlotRank {
+    Untyped,
+    Any,
+    Typed,
+    Skip,
+}
+
+impl SlotRank {
+    /// Map (has_annotation, is_type_known) to a rank.
+    fn classify(has_annotation: bool, is_type_known: bool) -> Self {
+        match (has_annotation, is_type_known) {
+            (false, _) => SlotRank::Untyped,
+            (true, true) => SlotRank::Typed,
+            (true, false) => SlotRank::Any,
+        }
+    }
+}
+
+impl From<&Parameter> for SlotRank {
+    fn from(param: &Parameter) -> Self {
+        SlotRank::classify(param.annotation.is_some(), param.is_type_known)
+    }
+}
+
+impl From<SlotRank> for SlotCounts {
+    fn from(rank: SlotRank) -> Self {
+        match rank {
+            SlotRank::Typed => SlotCounts::typed(),
+            SlotRank::Any => SlotCounts::any(),
+            SlotRank::Untyped => SlotCounts::untyped(),
+            SlotRank::Skip => SlotCounts::default(),
+        }
+    }
+}
+
+/// Parameter dedup key for overload merging.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum ParamKey {
+    Positional(usize),
+    Named(String),
+    VarPositional,
+    VarKeyword,
+}
+
 #[derive(Debug, Copy, Clone, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 struct Location {
     line: usize,
@@ -157,6 +204,9 @@ struct Parameter {
     annotation: Option<String>,
     /// Whether the resolved type contains no `Any`.
     is_type_known: bool,
+    /// Overload merge key (`None` for self/cls and implicit params).
+    #[serde(skip_serializing)]
+    merge_key: Option<ParamKey>,
     location: Location,
 }
 
@@ -330,18 +380,32 @@ impl ReportArgs {
         )
     }
 
-    fn extract_parameters(params: &Parameters) -> Vec<&ruff_python_ast::Parameter> {
-        let mut all_params = Vec::new();
-        all_params.extend(params.posonlyargs.iter().map(|p| &p.parameter));
-        all_params.extend(params.args.iter().map(|p| &p.parameter));
-        if let Some(vararg) = &params.vararg {
-            all_params.push(vararg);
+    /// All parameters with merge keys: positional-only → index, keyword-capable → name,
+    /// variadic → singleton, implicit receiver → `None`.
+    fn params_with_keys(
+        params: &Parameters,
+        has_implicit_receiver: bool,
+    ) -> Vec<(Option<ParamKey>, &ruff_python_ast::Parameter)> {
+        let mut result = Vec::new();
+        for (i, p) in params.posonlyargs.iter().enumerate() {
+            result.push((Some(ParamKey::Positional(i + 1)), &p.parameter));
         }
-        all_params.extend(params.kwonlyargs.iter().map(|p| &p.parameter));
-        if let Some(kwarg) = &params.kwarg {
-            all_params.push(kwarg);
+        for p in params.args.iter().chain(&params.kwonlyargs) {
+            result.push((
+                Some(ParamKey::Named(p.parameter.name.to_string())),
+                &p.parameter,
+            ));
         }
-        all_params
+        if let Some(v) = &params.vararg {
+            result.push((Some(ParamKey::VarPositional), v));
+        }
+        if let Some(v) = &params.kwarg {
+            result.push((Some(ParamKey::VarKeyword), v));
+        }
+        if has_implicit_receiver && let Some((key, _)) = result.first_mut() {
+            *key = None;
+        }
+        result
     }
 
     fn range_to_location(module: &Module, range: TextRange) -> Location {
@@ -413,14 +477,63 @@ impl ReportArgs {
         }
     }
 
-    /// Classify a single annotation slot: is it typed, any, or untyped?
-    fn classify_slot(has_annotation: bool, is_type_known: bool) -> SlotCounts {
-        if !has_annotation {
-            SlotCounts::untyped()
-        } else if is_type_known {
-            SlotCounts::typed()
-        } else {
-            SlotCounts::any()
+    /// Merge overloads with the same qualified name into one entry,
+    /// keeping the worst annotation quality per deduplicated slot.
+    fn merge_overloads(functions: &mut Vec<Function>) {
+        let mut groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, func) in functions.iter().enumerate() {
+            if func.property_role.is_none() {
+                groups.entry(func.name.clone()).or_default().push(i);
+            }
+        }
+
+        let mut to_remove: HashSet<usize> = HashSet::new();
+        for indices in groups.into_values().filter(|g| g.len() >= 2) {
+            let mut param_slots: HashMap<ParamKey, SlotRank> = HashMap::new();
+            let mut return_rank = SlotRank::Skip;
+
+            for &idx in &indices {
+                let func = &functions[idx];
+                let short_name = func.name.rsplit('.').next().unwrap_or(&func.name);
+                let has_annotation = func.return_annotation.is_some();
+                let ret = if !has_annotation && Self::is_implicit_dunder_return(short_name) {
+                    SlotRank::Skip
+                } else {
+                    SlotRank::classify(has_annotation, func.is_return_type_known)
+                };
+                return_rank = return_rank.min(ret);
+
+                for param in &func.parameters {
+                    if let Some(key) = &param.merge_key {
+                        let entry = param_slots.entry(key.clone()).or_insert(SlotRank::Skip);
+                        *entry = (*entry).min(param.into());
+                    }
+                }
+            }
+
+            // Fold deduplicated slots (Skip contributes zero counts).
+            let slots = std::iter::once(return_rank)
+                .chain(param_slots.values().copied())
+                .map(SlotCounts::from)
+                .fold(SlotCounts::default(), SlotCounts::merge);
+            let n_params = param_slots
+                .into_values()
+                .filter(|r| *r != SlotRank::Skip)
+                .count();
+
+            functions[indices[0]].slots = slots;
+            functions[indices[0]].n_params = n_params;
+            functions[indices[0]].is_type_known = slots.n_untyped == 0 && slots.n_any == 0;
+            to_remove.extend(&indices[1..]);
+        }
+
+        if !to_remove.is_empty() {
+            let mut i = 0;
+            functions.retain(|_| {
+                let keep = !to_remove.contains(&i);
+                i += 1;
+                keep
+            });
         }
     }
 
@@ -527,7 +640,7 @@ impl ReportArgs {
                             .get_idx(*annot_idx)
                             .and_then(|awt| awt.annotation.ty.as_ref().map(Self::is_type_known))
                             .unwrap_or(false);
-                    let slots = Self::classify_slot(annotation_text.is_some(), is_type_known);
+                    let slots = SlotRank::classify(annotation_text.is_some(), is_type_known).into();
                     variables.push(Variable {
                         name: qualified_name,
                         annotation: annotation_text,
@@ -722,7 +835,7 @@ impl ReportArgs {
                             .and_then(|awt| awt.annotation.ty.as_ref().map(Self::is_type_known))
                     })
                     .unwrap_or(false);
-            let slots = Self::classify_slot(annotation_text.is_some(), is_type_known);
+            let slots = SlotRank::classify(annotation_text.is_some(), is_type_known).into();
 
             attrs.push(Variable {
                 name: qualified_name,
@@ -832,7 +945,9 @@ impl ReportArgs {
                         .is_some_and(|t| Self::is_type_known(&t));
 
                 let mut parameters = Vec::new();
-                let all_params = Self::extract_parameters(&fun.def.parameters);
+                let implicit_receiver =
+                    Self::has_implicit_receiver(fun, answers, decorated.undecorated_idx);
+                let all_params = Self::params_with_keys(&fun.def.parameters, implicit_receiver);
                 let mut all_params_type_known = true;
 
                 let property_role = answers
@@ -841,10 +956,8 @@ impl ReportArgs {
                 let is_property_deleter =
                     matches!(property_role, Some(PropertyRole::DeleterDecorator));
 
-                // Compute slot counts: return + non-self/cls params.
-                // Some dunder methods have implicit return types that don't need
-                // annotation (__init__ → None, __bool__ → bool, __len__ → int, etc.).
-                // These are always excluded from coverage, even when explicitly annotated.
+                // Implicit dunder returns (e.g. __init__ → None) are always
+                // excluded from coverage, even when explicitly annotated.
                 //
                 // Property setters/deleters have a trivial `-> None` return that
                 // is not a meaningful typable, so skip it like implicit returns.
@@ -858,17 +971,15 @@ impl ReportArgs {
                 let return_slot = if skip_return {
                     SlotCounts::default()
                 } else {
-                    Self::classify_slot(return_annotation.is_some(), is_return_type_known)
+                    SlotRank::classify(return_annotation.is_some(), is_return_type_known).into()
                 };
                 let mut func_slots = return_slot;
                 let mut n_params = 0usize;
-                let fn_name = fun.def.name.as_str();
-                let implicit_receiver =
-                    Self::has_implicit_receiver(fun, answers, decorated.undecorated_idx);
+                let mut non_self_index = 0usize;
 
-                for (i, param) in all_params.iter().enumerate() {
+                for (merge_key, param) in &all_params {
                     let param_name = param.name.as_str();
-                    let is_self = i == 0 && implicit_receiver;
+                    let is_self = merge_key.is_none();
                     let param_annotation = param
                         .annotation
                         .as_ref()
@@ -888,21 +999,32 @@ impl ReportArgs {
                         false
                     };
 
-                    // Check if this non-self param has an implicit type for a dunder method.
-                    // These are always excluded from coverage, even when explicitly annotated.
+                    // Implicit dunder params are always excluded, even when annotated.
                     let is_implicit_param = !is_self
                         && fun.class_key.is_some()
-                        && Self::is_implicit_dunder_param(fn_name, i.saturating_sub(1));
+                        && Self::is_implicit_dunder_param(fun.def.name.as_str(), non_self_index);
 
-                    if !is_param_type_known && !is_self && !is_implicit_param {
+                    // self/cls and implicit params are excluded from slot counting.
+                    let effective_key = if is_self || is_implicit_param {
+                        None
+                    } else {
+                        merge_key.clone()
+                    };
+
+                    if !is_self {
+                        non_self_index += 1;
+                    }
+
+                    if !is_param_type_known && effective_key.is_some() {
                         all_params_type_known = false;
                     }
 
                     // Deleters have 0 typables; skip parameter slots entirely.
-                    if !is_self && !is_implicit_param && !is_property_deleter {
-                        let param_slot =
-                            Self::classify_slot(param_annotation.is_some(), is_param_type_known);
-                        func_slots = func_slots.merge(param_slot);
+                    if effective_key.is_some() && !is_property_deleter {
+                        func_slots = func_slots.merge(
+                            SlotRank::classify(param_annotation.is_some(), is_param_type_known)
+                                .into(),
+                        );
                         n_params += 1;
                     }
 
@@ -910,6 +1032,7 @@ impl ReportArgs {
                         name: param_name.to_owned(),
                         annotation: param_annotation,
                         is_type_known: is_param_type_known,
+                        merge_key: effective_key,
                         location: Self::range_to_location(module, param.range),
                     });
                 }
@@ -917,8 +1040,7 @@ impl ReportArgs {
                 let is_fully_annotated = return_annotation.is_some()
                     && parameters
                         .iter()
-                        .enumerate()
-                        .all(|(i, p)| (i == 0 && implicit_receiver) || p.annotation.is_some());
+                        .all(|p| p.merge_key.is_none() || p.annotation.is_some());
                 let is_type_known =
                     is_fully_annotated && is_return_type_known && all_params_type_known;
 
@@ -999,18 +1121,10 @@ impl ReportArgs {
             return false;
         }
 
-        let all_params = Self::extract_parameters(&fun.def.parameters);
         let implicit_receiver = Self::has_implicit_receiver(fun, answers, undecorated_idx);
-        for (i, param) in all_params.iter().enumerate() {
-            if i == 0 && implicit_receiver {
-                continue;
-            }
-            if param.annotation.is_none() {
-                return false;
-            }
-        }
-
-        true
+        Self::params_with_keys(&fun.def.parameters, implicit_receiver)
+            .iter()
+            .all(|(key, param)| key.is_none() || param.annotation.is_some())
     }
 
     /// Only a bare `Any` counts as unknown; container types like `list[Any]` are known.
@@ -1549,6 +1663,7 @@ impl ReportArgs {
                 let tco_classes = Self::collect_type_check_only_classes(&bindings);
                 let mut functions =
                     Self::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+                Self::merge_overloads(&mut functions);
                 let mut classes = Self::parse_classes(
                     &module,
                     &bindings,
@@ -1576,13 +1691,14 @@ impl ReportArgs {
                 {
                     let py_exports = transaction.get_exports(py_handle);
                     let py_tco_classes = Self::collect_type_check_only_classes(&py_bindings);
-                    let py_functions = Self::parse_functions(
+                    let mut py_functions = Self::parse_functions(
                         &py_module,
                         &py_bindings,
                         &py_answers,
                         &py_exports,
                         &py_tco_classes,
                     );
+                    Self::merge_overloads(&mut py_functions);
                     let py_classes = Self::parse_classes(
                         &py_module,
                         &py_bindings,
@@ -1727,8 +1843,9 @@ mod tests {
 
         let line_count = module.lined_buffer().line_index().line_count();
         let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
-        let functions =
+        let mut functions =
             ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+        ReportArgs::merge_overloads(&mut functions);
         let classes = ReportArgs::parse_classes(
             &module,
             &bindings,
@@ -1807,6 +1924,7 @@ mod tests {
         let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
         let mut functions =
             ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+        ReportArgs::merge_overloads(&mut functions);
         let mut classes = ReportArgs::parse_classes(
             &module,
             &bindings,
@@ -1840,13 +1958,14 @@ mod tests {
         let py_exports = py_txn.get_exports(&py_handle);
 
         let py_tco_classes = ReportArgs::collect_type_check_only_classes(&py_bindings);
-        let py_functions = ReportArgs::parse_functions(
+        let mut py_functions = ReportArgs::parse_functions(
             &py_module,
             &py_bindings,
             &py_answers,
             &py_exports,
             &py_tco_classes,
         );
+        ReportArgs::merge_overloads(&mut py_functions);
         let py_classes = ReportArgs::parse_classes(
             &py_module,
             &py_bindings,
@@ -2041,15 +2160,25 @@ mod tests {
                 is_return_type_known: has_return,
                 parameters: params
                     .into_iter()
-                    .map(|(param_name, annotated)| Parameter {
-                        name: param_name.to_owned(),
-                        annotation: if annotated {
-                            Some("str".to_owned())
-                        } else {
-                            None
-                        },
-                        is_type_known: annotated,
-                        location: Location { line: 1, column: 1 },
+                    .enumerate()
+                    .map(|(i, (param_name, annotated))| {
+                        let is_self =
+                            i == 0 && (matches!(param_name, "self" | "cls") || name == "__new__");
+                        Parameter {
+                            name: param_name.to_owned(),
+                            annotation: if annotated {
+                                Some("str".to_owned())
+                            } else {
+                                None
+                            },
+                            is_type_known: annotated,
+                            merge_key: if is_self {
+                                None
+                            } else {
+                                Some(ParamKey::Named(param_name.to_owned()))
+                            },
+                            location: Location { line: 1, column: 1 },
+                        }
                     })
                     .collect(),
                 is_type_known: false, // Not relevant for annotation-only tests
@@ -2065,11 +2194,10 @@ mod tests {
             if function.return_annotation.is_none() {
                 return false;
             }
-            let implicit_receiver = function.name == "__new__";
-            function.parameters.iter().enumerate().all(|(i, p)| {
-                (i == 0 && (p.name == "self" || p.name == "cls" || implicit_receiver))
-                    || p.annotation.is_some()
-            })
+            function
+                .parameters
+                .iter()
+                .all(|p| p.merge_key.is_none() || p.annotation.is_some())
         }
 
         // Fully annotated function
@@ -2172,6 +2300,13 @@ mod tests {
     fn test_report_overloads() {
         let report = build_module_report_for_test("overloads.py");
         compare_snapshot("overloads.expected.json", &report);
+    }
+
+    /// @overload merging: partial annotations, different param counts, non-overloaded.
+    #[test]
+    fn test_report_overloads_partial() {
+        let report = build_module_report_for_test("overloads_partial.py");
+        compare_snapshot("overloads_partial.expected.json", &report);
     }
 
     /// @dataclass, Enum, TypedDict, NamedTuple: schema class fields.
