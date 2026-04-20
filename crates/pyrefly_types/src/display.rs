@@ -1480,6 +1480,7 @@ pub mod tests {
     #[test]
     fn test_display() {
         let uniques = UniqueFactory::new();
+        let heap = TypeHeap::new();
         let foo1 = fake_class("foo", "mod.ule", 5);
         let foo2 = fake_class("foo", "mod.ule", 8);
         let foo3 = fake_class("foo", "ule", 3);
@@ -1491,16 +1492,15 @@ pub mod tests {
             "T",
             QuantifiedKind::TypeVarTuple,
         )]);
-        fn class_type(class: &Class, targs: TArgs) -> Type {
-            Type::ClassType(ClassType::new(class.dupe(), targs))
-        }
+        let class_type =
+            |class: &Class, targs: TArgs| heap.mk_class_type(ClassType::new(class.dupe(), targs));
 
         assert_eq!(
             class_type(
                 &tuple_param,
                 TArgs::new(
                     tuple_param_tparams.dupe(),
-                    vec![Type::concrete_tuple(vec![
+                    vec![heap.mk_concrete_tuple(vec![
                         class_type(&foo1, TArgs::default()),
                         class_type(&foo1, TArgs::default())
                     ])]
@@ -1514,7 +1514,7 @@ pub mod tests {
                 &tuple_param,
                 TArgs::new(
                     tuple_param_tparams.dupe(),
-                    vec![Type::concrete_tuple(Vec::new())]
+                    vec![heap.mk_concrete_tuple(Vec::new())]
                 )
             )
             .to_string(),
@@ -1525,7 +1525,7 @@ pub mod tests {
                 &tuple_param,
                 TArgs::new(
                     tuple_param_tparams.dupe(),
-                    vec![Type::unbounded_tuple(class_type(&foo1, TArgs::default()))]
+                    vec![heap.mk_unbounded_tuple(class_type(&foo1, TArgs::default()))]
                 )
             )
             .to_string(),
@@ -1536,17 +1536,16 @@ pub mod tests {
                 &tuple_param,
                 TArgs::new(
                     tuple_param_tparams.dupe(),
-                    vec![Type::Tuple(Tuple::Unpacked(Box::new((
+                    vec![heap.mk_unpacked_tuple(
                         vec![class_type(&foo1, TArgs::default())],
-                        Type::unbounded_tuple(class_type(&foo1, TArgs::default())),
+                        heap.mk_unbounded_tuple(class_type(&foo1, TArgs::default())),
                         vec![class_type(&foo1, TArgs::default())],
-                    ))))]
+                    )]
                 )
             )
             .to_string(),
             "TupleParam[foo, *tuple[foo, ...], foo]"
         );
-        let heap = TypeHeap::new();
         let shape_param = fake_tparam(&uniques, "Shape", QuantifiedKind::TypeVarTuple);
         assert_eq!(
             class_type(
@@ -1561,11 +1560,12 @@ pub mod tests {
         );
 
         assert_eq!(
-            Type::unbounded_tuple(class_type(&foo1, TArgs::default())).to_string(),
+            heap.mk_unbounded_tuple(class_type(&foo1, TArgs::default()))
+                .to_string(),
             "tuple[foo, ...]"
         );
         assert_eq!(
-            Type::concrete_tuple(vec![
+            heap.mk_concrete_tuple(vec![
                 class_type(&foo1, TArgs::default()),
                 class_type(
                     &bar,
@@ -1579,7 +1579,7 @@ pub mod tests {
             "tuple[foo, bar[foo]]"
         );
         assert_eq!(
-            Type::concrete_tuple(vec![
+            heap.mk_concrete_tuple(vec![
                 class_type(&foo1, TArgs::default()),
                 class_type(
                     &bar,
@@ -1593,14 +1593,14 @@ pub mod tests {
             "tuple[mod.ule.foo@1:6, bar[mod.ule.foo@1:9]]"
         );
         assert_eq!(
-            Type::concrete_tuple(vec![
+            heap.mk_concrete_tuple(vec![
                 class_type(&foo1, TArgs::default()),
                 class_type(&foo3, TArgs::default())
             ])
             .to_string(),
             "tuple[mod.ule.foo, ule.foo]"
         );
-        assert_eq!(Type::concrete_tuple(vec![]).to_string(), "tuple[()]");
+        assert_eq!(heap.mk_concrete_tuple(vec![]).to_string(), "tuple[()]");
 
         let t1 = class_type(&foo1, TArgs::default());
         let t2 = class_type(&foo2, TArgs::default());
@@ -2500,7 +2500,7 @@ def overloaded_func[T](
         )]);
         let heap = TypeHeap::new();
         let shape = fake_tparam(&uniques, "Shape", QuantifiedKind::TypeVarTuple);
-        let t = Type::ClassType(ClassType::new(
+        let t = heap.mk_class_type(ClassType::new(
             tuple_param,
             TArgs::new(tparams, vec![shape.to_type(&heap)]),
         ));
