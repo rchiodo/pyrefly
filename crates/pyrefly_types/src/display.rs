@@ -236,36 +236,37 @@ impl<'a> TypeDisplayContext<'a> {
         Fmt(|f| self.fmt_helper(t, f, false))
     }
 
-    fn fmt_targ(&self, param: &Quantified, arg: &Type, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if param.is_type_var_tuple()
-            && let Type::Tuple(tuple) = arg
-        {
-            match tuple {
-                Tuple::Concrete(elts) if !elts.is_empty() => write!(
-                    f,
-                    "{}",
-                    commas_iter(|| elts.iter().map(|elt| self.display_internal(elt)))
-                ),
-                Tuple::Unpacked(box (prefix, middle, suffix)) => {
-                    let unpacked_middle = Type::Unpack(Box::new(middle.clone()));
-                    write!(
-                        f,
-                        "{}",
-                        commas_iter(|| {
-                            prefix
-                                .iter()
-                                .chain(std::iter::once(&unpacked_middle))
-                                .chain(suffix.iter())
-                                .map(|elt| self.display_internal(elt))
-                        })
-                    )
-                }
-                _ => {
-                    write!(f, "*{}", self.display_internal(arg))
-                }
+    fn fmt_targ(
+        &self,
+        param: &Quantified,
+        arg: &Type,
+        output: &mut impl TypeOutput,
+    ) -> fmt::Result {
+        if !param.is_type_var_tuple() {
+            return self.fmt_helper_generic(arg, false, output);
+        }
+        match arg {
+            Type::Tuple(Tuple::Concrete(elts)) if !elts.is_empty() => {
+                self.fmt_type_sequence(elts.iter(), ", ", false, output)
             }
-        } else {
-            write!(f, "{}", self.display_internal(arg))
+            Type::Tuple(Tuple::Unpacked(box (prefix, middle, suffix))) => {
+                let unpacked_middle = Type::Unpack(Box::new(middle.clone()));
+                self.fmt_type_sequence(
+                    prefix
+                        .iter()
+                        .chain(std::iter::once(&unpacked_middle))
+                        .chain(suffix.iter()),
+                    ", ",
+                    false,
+                    output,
+                )
+            }
+            _ => {
+                if matches!(arg, Type::Tuple(_)) || arg.is_kind_type_var_tuple() {
+                    output.write_str("*")?;
+                }
+                self.fmt_helper_generic(arg, false, output)
+            }
         }
     }
 
@@ -290,20 +291,19 @@ impl<'a> TypeDisplayContext<'a> {
         Ok(())
     }
 
-    pub(crate) fn fmt_targs(&self, targs: &TArgs, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    pub(crate) fn fmt_targs(&self, targs: &TArgs, output: &mut impl TypeOutput) -> fmt::Result {
         let display_count = targs.display_count();
-        if display_count > 0 {
-            write!(
-                f,
-                "[{}]",
-                commas_iter(|| targs
-                    .iter_paired()
-                    .take(display_count)
-                    .map(|(param, arg)| Fmt(|f| self.fmt_targ(param, arg, f))))
-            )
-        } else {
-            Ok(())
+        if display_count == 0 {
+            return Ok(());
         }
+        output.write_str("[")?;
+        for (i, (param, arg)) in targs.iter_paired().take(display_count).enumerate() {
+            if i > 0 {
+                output.write_str(", ")?;
+            }
+            self.fmt_targ(param, arg, output)?;
+        }
+        output.write_str("]")
     }
 
     pub(crate) fn fmt_qname(&self, qname: &QName, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1546,6 +1546,19 @@ pub mod tests {
             .to_string(),
             "TupleParam[foo, *tuple[foo, ...], foo]"
         );
+        let heap = TypeHeap::new();
+        let shape_param = fake_tparam(&uniques, "Shape", QuantifiedKind::TypeVarTuple);
+        assert_eq!(
+            class_type(
+                &tuple_param,
+                TArgs::new(
+                    tuple_param_tparams.dupe(),
+                    vec![shape_param.clone().to_type(&heap)]
+                )
+            )
+            .to_string(),
+            "TupleParam[*Shape]"
+        );
 
         assert_eq!(
             Type::unbounded_tuple(class_type(&foo1, TArgs::default())).to_string(),
@@ -2471,6 +2484,29 @@ def overloaded_func[T](
 
         assert_output_contains(&parts, "TypeVarTuple");
         assert_part_has_location(&parts, "Ts", "test.module", 70);
+    }
+
+    #[test]
+    fn test_get_types_with_location_type_var_tuple_arg_in_class() {
+        // A TypeVarTuple bound to a TypeVarTuple parameter must render with a `*`
+        // prefix on the location-aware path too — otherwise quick-fix code generation
+        // emits invalid syntax like `TupleParam[Shape]` instead of `TupleParam[*Shape]`.
+        let uniques = UniqueFactory::new();
+        let tuple_param = fake_class("TupleParam", "mod.ule", 0);
+        let tparams = fake_tparams(vec![fake_tparam(
+            &uniques,
+            "T",
+            QuantifiedKind::TypeVarTuple,
+        )]);
+        let heap = TypeHeap::new();
+        let shape = fake_tparam(&uniques, "Shape", QuantifiedKind::TypeVarTuple);
+        let t = Type::ClassType(ClassType::new(
+            tuple_param,
+            TArgs::new(tparams, vec![shape.to_type(&heap)]),
+        ));
+        let parts = get_parts(&t);
+
+        assert_eq!(parts_to_string(&parts), "TupleParam[*Shape]");
     }
 
     #[test]
