@@ -477,6 +477,9 @@ impl Solver {
 
     /// Snapshot the current state of the given vars so they can be restored later.
     pub fn snapshot_vars(&self, vars: &[Var]) -> VarSnapshot {
+        if vars.is_empty() {
+            return VarSnapshot(Vec::new()); // avoid acquiring locks
+        }
         let variables = self.variables.lock();
         let errors = self.instantiation_errors.read();
         VarSnapshot(
@@ -497,6 +500,9 @@ impl Solver {
 
     /// Restore vars to a previously saved snapshot.
     pub fn restore_vars(&self, snapshot: VarSnapshot) {
+        if snapshot.0.is_empty() {
+            return; // avoid acquiring locks
+        }
         let variables = self.variables.lock();
         let mut errors = self.instantiation_errors.write();
         for (var, state) in snapshot.0 {
