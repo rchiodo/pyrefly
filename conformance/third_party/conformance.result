@@ -92,9 +92,7 @@
     "Line 57: Unexpected errors ['assert_type(str, int | str) failed']"
   ],
   "generics_base_class.py": [],
-  "generics_basic.py": [
-    "Line 44: Unexpected errors ['Argument `bytes` is not assignable to parameter `y` with type `str` in function `concat`']"
-  ],
+  "generics_basic.py": [],
   "generics_defaults.py": [],
   "generics_defaults_referential.py": [],
   "generics_defaults_specialization.py": [],

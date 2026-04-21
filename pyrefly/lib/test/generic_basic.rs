@@ -359,9 +359,7 @@ def test(m: MyStr, s: str):
 "#,
 );
 
-// https://github.com/facebook/pyrefly/issues/2370
 testcase!(
-    bug = "Any pinned to first matching constraint, rejecting valid second argument",
     test_constrained_typevar_any_does_not_pin_constraint,
     r#"
 from typing import Any, TypeVar, assert_type
@@ -373,7 +371,7 @@ def concat(x: AnyStr, y: AnyStr) -> AnyStr:
 
 def test(s: str, b: bytes, a: Any):
     concat(s, a)
-    concat(a, b)  # E: Argument `bytes` is not assignable to parameter `y` with type `str` in function `concat`
+    concat(a, b)
     concat(a, s)
     concat(a, a)
 "#,

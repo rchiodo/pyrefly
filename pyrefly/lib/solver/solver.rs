@@ -1910,6 +1910,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         ty: &Type,
         constraints: &'c [Type],
     ) -> Option<&'c Type> {
+        if ty.is_any() {
+            return None;
+        }
         let matching: Vec<&Type> = constraints
             .iter()
             .filter(|c| self.is_subset_eq(ty, c).is_ok())
