@@ -495,7 +495,6 @@ pub(super) fn reindent_statement(
 /// Resolves the definition at `position` to the single matching local definition
 /// (same module as `module_info`) whose symbol kind passes `kind_filter`.
 /// Returns `None` if no matching definition exists.
-#[expect(dead_code)]
 pub(super) fn find_local_definition(
     transaction: &Transaction<'_>,
     handle: &Handle,

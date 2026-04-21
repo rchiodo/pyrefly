@@ -24,6 +24,7 @@ use super::types::LocalRefactorCodeAction;
 use crate::state::lsp::FindPreference;
 use crate::state::lsp::IdentifierContext;
 use crate::state::lsp::Transaction;
+use crate::state::lsp::quick_fixes::extract_shared::find_local_definition;
 use crate::state::lsp::quick_fixes::extract_shared::reference_in_disallowed_scope;
 
 pub(crate) fn inline_variable_code_actions(
@@ -37,16 +38,8 @@ pub(crate) fn inline_variable_code_actions(
         return None;
     }
     let module_info = transaction.get_module_info(handle)?;
-    let defs = transaction
-        .find_definition(handle, position, FindPreference::default())
-        .map(Vec1::into_vec)
-        .unwrap_or_default();
-    let def = defs.into_iter().find(|def| {
-        def.module.path() == module_info.path()
-            && matches!(
-                def.metadata.symbol_kind(),
-                Some(SymbolKind::Variable | SymbolKind::Constant)
-            )
+    let def = find_local_definition(transaction, handle, position, &module_info, |k| {
+        matches!(k, Some(SymbolKind::Variable | SymbolKind::Constant))
     })?;
     let ast = transaction.get_ast(handle)?;
     let (assignment_range, value_expr) =
