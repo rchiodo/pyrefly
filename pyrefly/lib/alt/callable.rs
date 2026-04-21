@@ -1251,9 +1251,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // If we have a hint, we want to try to instantiate against it first, so we can contextually type
             // arguments. If we don't match the hint, we need to throw away any instantiations we might have made.
             // By invariant, hint will be None if we are calling a constructor.
-            if let Some(hint) = hint
-                && !self.solver().is_partial(hint.ty())
-            {
+            if let Some(hint) = hint {
                 let (qs, callable_) = self.instantiate_fresh_callable(tparams, callable.clone());
                 if self.is_subset_eq(&callable_.ret, hint.ty())
                     && !self.solver().has_instantiation_errors(&qs)
