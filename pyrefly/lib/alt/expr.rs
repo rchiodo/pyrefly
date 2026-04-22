@@ -71,7 +71,6 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
 use crate::alt::nn_module_specials::is_nn_module_dict;
 use crate::alt::solve::TypeFormContext;
-use crate::alt::unwrap::Hint;
 use crate::alt::unwrap::HintRef;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Key;
@@ -501,26 +500,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     );
                     self.heap.mk_class_type(self.stdlib.list(elem_ty))
                 } else {
-                    let elem_tys = self.elts_infer(&x.elts, elt_hint, errors);
+                    let elem_tys = self.elts_infer(
+                        &x.elts,
+                        elt_hint.as_ref().map(|hint| hint.as_ref()),
+                        errors,
+                    );
                     self.heap
                         .mk_class_type(self.stdlib.list(self.unions(elem_tys)))
                 }
             }
             Expr::Dict(x) => self.dict_infer(&x.items, hint, x.range, errors),
             Expr::Set(x) => {
-                let elem_hint = hint.and_then(|ty| self.decompose_set(ty));
+                let elem_hint = hint.and_then(|hint| self.decompose_set(hint.ty()));
                 if x.is_empty() {
-                    let elem_ty = elem_hint.map_or_else(
-                        || {
-                            self.solver()
-                                .fresh_partial_contained(self.uniques, x.range)
-                                .to_type(self.heap)
-                        },
-                        |hint| hint.to_type(),
-                    );
+                    let elem_ty = elem_hint.unwrap_or_else(|| {
+                        self.solver()
+                            .fresh_partial_contained(self.uniques, x.range)
+                            .to_type(self.heap)
+                    });
                     self.heap.mk_class_type(self.stdlib.set(elem_ty))
                 } else {
-                    let elem_tys = self.elts_infer(&x.elts, elem_hint, errors);
+                    let elem_tys = self.elts_infer(
+                        &x.elts,
+                        hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
+                        errors,
+                    );
                     self.heap
                         .mk_class_type(self.stdlib.set(self.unions(elem_tys)))
                 }
@@ -536,11 +540,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap.mk_class_type(self.stdlib.list(elem_ty))
             }
             Expr::SetComp(x) => {
-                let elem_hint = hint.and_then(|ty| self.decompose_set(ty));
+                let elem_hint = hint.and_then(|hint| self.decompose_set(hint.ty()));
                 self.ifs_infer(&x.generators, errors);
                 let elem_ty = self.expr_infer_with_hint_promote(
                     &x.elt,
-                    elem_hint.as_ref().map(|hint| hint.as_ref()),
+                    hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
                     errors,
                 );
                 self.heap.mk_class_type(self.stdlib.set(elem_ty))
@@ -1833,13 +1837,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn elts_infer(
         &self,
         elts: &[Expr],
-        elt_hint: Option<Hint>,
+        elt_hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Vec<Type> {
         let star_hint = LazyCell::new(|| {
-            elt_hint.as_ref().map(|hint| {
-                hint.as_ref()
-                    .map_ty(|ty| self.heap.mk_class_type(self.stdlib.iterable(ty.clone())))
+            elt_hint.map(|hint| {
+                hint.map_ty(|ty| self.heap.mk_class_type(self.stdlib.iterable(ty.clone())))
             })
         });
         elts.map(|x| match x {
@@ -1863,11 +1866,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     )
                 }
             }
-            _ => self.expr_infer_with_hint_promote(
-                x,
-                elt_hint.as_ref().map(|hint| hint.as_ref()),
-                errors,
-            ),
+            _ => self.expr_infer_with_hint_promote(x, elt_hint, errors),
         })
     }
 

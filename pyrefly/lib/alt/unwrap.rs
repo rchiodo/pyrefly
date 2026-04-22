@@ -285,13 +285,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn decompose_set<'b>(&self, hint: HintRef<'b, '_>) -> Option<Hint<'b>> {
+    pub fn decompose_set(&self, hint: &Type) -> Option<Type> {
         let elem = self.fresh_var();
         let set_type = self
             .heap
             .mk_class_type(self.stdlib.set(elem.to_type(self.heap)));
-        if self.is_subset_eq(&set_type, hint.ty()) {
-            hint.map_ty_opt(|ty| self.resolve_var_opt(ty, elem))
+        if self.is_subset_eq(&set_type, hint) {
+            self.resolve_var_opt(hint, elem)
         } else {
             None
         }
