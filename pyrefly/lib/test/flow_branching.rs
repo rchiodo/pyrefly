@@ -2486,3 +2486,17 @@ def f(a: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    bug = "false positive: b is always initialized when a is truthy",
+    test_guarded_initialization_repeated_use,
+    r#"
+def f(a: bool) -> None:
+    if a:
+        b = 3
+    if a:
+        print(b)  # E: `b` may be uninitialized
+    if a:
+        print(b)
+    "#,
+);
