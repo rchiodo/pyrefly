@@ -235,10 +235,7 @@ class MyClass:
     }
 
     #[test]
-    fn test_stubgen_unannotated_dunder_new_uses_incomplete() {
-        // TODO(stroxler): This documents undesirable current behavior. Once
-        // stubgen learns to render `SelfType` as `Self`, update the expectation
-        // to `Self` and remove this TODO.
+    fn test_stubgen_unannotated_dunder_new_uses_self() {
         let actual = run_stubgen(
             r#"
 class C:
@@ -248,10 +245,10 @@ class C:
         );
         pretty_assertions::assert_str_eq!(
             r#"
-from _typeshed import Incomplete
+from typing import Self
 
 class C:
-    def __new__(cls) -> Incomplete: ...
+    def __new__(cls) -> Self: ...
 "#
             .trim(),
             actual.trim(),

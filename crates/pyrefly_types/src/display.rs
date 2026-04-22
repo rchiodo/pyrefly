@@ -135,6 +135,7 @@ pub struct TypeDisplayContext<'a> {
     lsp_display_mode: LspDisplayMode,
     always_display_module_name: bool,
     always_display_expanded_unions: bool,
+    render_self_type_as_self: bool,
     /// Optional stdlib reference for resolving builtin type locations
     stdlib: Option<&'a Stdlib>,
     /// Stack of unique IDs of type variables currently bound by enclosing Foralls.
@@ -189,6 +190,10 @@ impl<'a> TypeDisplayContext<'a> {
 
     pub fn always_display_expanded_unions(&mut self) {
         self.always_display_expanded_unions = true;
+    }
+
+    pub fn render_self_type_as_self(&mut self) {
+        self.render_self_type_as_self = true;
     }
 
     /// Always display the module name, except for builtins.
@@ -558,8 +563,12 @@ impl<'a> TypeDisplayContext<'a> {
                 output.write_str("]")
             }
             Type::SelfType(cls) => {
-                self.maybe_fmt_with_module("typing", "Self@", output)?;
-                output.write_qname(cls.qname())
+                if self.render_self_type_as_self {
+                    self.maybe_fmt_with_module("typing", "Self", output)
+                } else {
+                    self.maybe_fmt_with_module("typing", "Self@", output)?;
+                    output.write_qname(cls.qname())
+                }
             }
 
             // Other things
