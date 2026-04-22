@@ -18,10 +18,8 @@ use ruff_python_ast::Stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
-use vec1::Vec1;
 
 use super::types::LocalRefactorCodeAction;
-use crate::state::lsp::FindPreference;
 use crate::state::lsp::IdentifierContext;
 use crate::state::lsp::Transaction;
 use crate::state::lsp::quick_fixes::extract_shared::find_local_definition;
