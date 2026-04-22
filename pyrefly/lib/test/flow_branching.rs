@@ -2513,3 +2513,16 @@ def f(a: bool, c: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    bug = "false positive: b is always initialized when a > 0 at both sites",
+    test_guarded_initialization_complex_condition,
+    r#"
+def f(a: int) -> int:
+    if a > 0:
+        b = 3
+    if a > 0:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
