@@ -21,28 +21,8 @@ use crate::types::types::Var;
 // match an expression against a hint, but fall back to the inferred type
 // without any errors if the hint is incompatible.
 // Soft type hints are used for `e1 or e1` expressions.
-#[derive(Debug)]
-pub struct Hint<'a>(Type, Option<&'a ErrorCollector>);
-
 #[derive(Clone, Copy, Debug)]
 pub struct HintRef<'a, 'b>(&'b Type, Option<&'a ErrorCollector>);
-
-impl<'a> Hint<'a> {
-    pub fn as_ref<'b>(&'a self) -> HintRef<'a, 'b>
-    where
-        'a: 'b,
-    {
-        HintRef(&self.0, self.1)
-    }
-
-    pub fn ty(&self) -> &Type {
-        &self.0
-    }
-
-    pub fn to_type(self) -> Type {
-        self.0
-    }
-}
 
 impl<'a, 'b> HintRef<'a, 'b> {
     pub fn new(hint: &'b Type, errors: Option<&'a ErrorCollector>) -> Self {
@@ -60,14 +40,6 @@ impl<'a, 'b> HintRef<'a, 'b> {
 
     pub fn errors(&self) -> Option<&ErrorCollector> {
         self.1
-    }
-
-    pub fn map_ty(&self, f: impl FnOnce(&Type) -> Type) -> Hint<'a> {
-        Hint(f(self.0), self.1)
-    }
-
-    pub fn map_ty_opt(&self, f: impl FnOnce(&Type) -> Option<Type>) -> Option<Hint<'a>> {
-        f(self.0).map(|ty| Hint(ty, self.1))
     }
 
     pub fn with_ty_opt(&self, ty: Option<&'b Type>) -> Option<Self> {
