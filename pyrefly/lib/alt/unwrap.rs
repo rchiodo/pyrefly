@@ -69,6 +69,10 @@ impl<'a, 'b> HintRef<'a, 'b> {
     pub fn map_ty_opt(&self, f: impl FnOnce(&Type) -> Option<Type>) -> Option<Hint<'a>> {
         f(self.0).map(|ty| Hint(ty, self.1))
     }
+
+    pub fn with_ty_opt(&self, ty: Option<&'b Type>) -> Option<Self> {
+        ty.map(|ty| Self(ty, self.1))
+    }
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
@@ -265,19 +269,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn decompose_dict<'b>(
-        &self,
-        hint: HintRef<'b, '_>,
-    ) -> (Option<Hint<'b>>, Option<Hint<'b>>) {
+    pub fn decompose_dict(&self, hint: &Type) -> (Option<Type>, Option<Type>) {
         let key = self.fresh_var();
         let value = self.fresh_var();
         let dict_type = self.heap.mk_class_type(
             self.stdlib
                 .dict(key.to_type(self.heap), value.to_type(self.heap)),
         );
-        if self.is_subset_eq(&dict_type, hint.ty()) {
-            let key = hint.map_ty_opt(|ty| self.resolve_var_opt(ty, key));
-            let value = hint.map_ty_opt(|ty| self.resolve_var_opt(ty, value));
+        if self.is_subset_eq(&dict_type, hint) {
+            let key = self.resolve_var_opt(hint, key);
+            let value = self.resolve_var_opt(hint, value);
             (key, value)
         } else {
             (None, None)

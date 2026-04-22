@@ -547,18 +547,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::DictComp(x) => {
                 let (key_hint, value_hint) =
-                    hint.map_or((None, None), |ty| self.decompose_dict(ty));
+                    hint.map_or((None, None), |hint| self.decompose_dict(hint.ty()));
+                let key_hint = hint.and_then(|hint| hint.with_ty_opt(key_hint.as_ref()));
+                let value_hint = hint.and_then(|hint| hint.with_ty_opt(value_hint.as_ref()));
                 self.ifs_infer(&x.generators, errors);
-                let key_ty = self.expr_infer_with_hint_promote(
-                    &x.key,
-                    key_hint.as_ref().map(|hint| hint.as_ref()),
-                    errors,
-                );
-                let value_ty = self.expr_infer_with_hint_promote(
-                    &x.value,
-                    value_hint.as_ref().map(|hint| hint.as_ref()),
-                    errors,
-                );
+                let key_ty = self.expr_infer_with_hint_promote(&x.key, key_hint, errors);
+                let value_ty = self.expr_infer_with_hint_promote(&x.value, value_hint, errors);
                 self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
             }
             Expr::Generator(x) => {
@@ -979,24 +973,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        let (key_hint, value_hint) = hint.map_or((None, None), |ty| self.decompose_dict(ty));
+        let (key_hint, value_hint) =
+            hint.map_or((None, None), |hint| self.decompose_dict(hint.ty()));
         if items.is_empty() {
-            let key_ty = key_hint.map_or_else(
-                || {
-                    self.solver()
-                        .fresh_partial_contained(self.uniques, range)
-                        .to_type(self.heap)
-                },
-                |ty| ty.to_type(),
-            );
-            let value_ty = value_hint.map_or_else(
-                || {
-                    self.solver()
-                        .fresh_partial_contained(self.uniques, range)
-                        .to_type(self.heap)
-                },
-                |ty| ty.to_type(),
-            );
+            let key_ty = key_hint.unwrap_or_else(|| {
+                self.solver()
+                    .fresh_partial_contained(self.uniques, range)
+                    .to_type(self.heap)
+            });
+            let value_ty = value_hint.unwrap_or_else(|| {
+                self.solver()
+                    .fresh_partial_contained(self.uniques, range)
+                    .to_type(self.heap)
+            });
             self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
         } else {
             // Use a map to track fields by name so later fields override earlier ones
@@ -1019,12 +1008,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(key) => {
                     let key_t = self.expr_infer_with_hint_promote(
                         key,
-                        key_hint.as_ref().map(|hint| hint.as_ref()),
+                        hint.and_then(|hint| hint.with_ty_opt(key_hint.as_ref())),
                         errors,
                     );
                     let value_t = self.expr_infer_with_hint_promote(
                         &x.value,
-                        value_hint.as_ref().map(|hint| hint.as_ref()),
+                        hint.and_then(|hint| hint.with_ty_opt(value_hint.as_ref())),
                         errors,
                     );
                     if !key_t.is_error() {
@@ -1075,18 +1064,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         can_create_anonymous_typed_dict = false;
                         if !key_t.is_error() {
                             if let Some(key_hint) = &key_hint
-                                && self.is_subset_eq(&key_t, key_hint.ty())
+                                && self.is_subset_eq(&key_t, key_hint)
                             {
-                                key_tys.push(key_hint.ty().clone());
+                                key_tys.push(key_hint.clone());
                             } else {
                                 key_tys.push(key_t);
                             }
                         }
                         if !value_t.is_error() {
                             if let Some(value_hint) = &value_hint
-                                && self.is_subset_eq(&value_t, value_hint.ty())
+                                && self.is_subset_eq(&value_t, value_hint)
                             {
-                                value_tys.push(value_hint.ty().clone());
+                                value_tys.push(value_hint.clone());
                             } else {
                                 value_tys.push(value_t);
                             }
