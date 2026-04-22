@@ -321,11 +321,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn decompose_lambda<'b>(
-        &self,
-        hint: HintRef<'b, '_>,
-        param_vars: &[(&Name, Var)],
-    ) -> Option<Hint<'b>> {
+    pub fn decompose_lambda(&self, hint: &Type, param_vars: &[(&Name, Var)]) -> Option<Type> {
         let return_ty = self.fresh_var();
         let params = param_vars
             .iter()
@@ -337,8 +333,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .heap
             .mk_callable_from_vec(params, return_ty.to_type(self.heap));
 
-        if self.is_subset_eq(&callable_ty, hint.ty()) {
-            hint.map_ty_opt(|ty| self.resolve_var_opt(ty, return_ty))
+        if self.is_subset_eq(&callable_ty, hint) {
+            self.resolve_var_opt(hint, return_ty)
         } else {
             None
         }

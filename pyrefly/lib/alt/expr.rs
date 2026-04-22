@@ -418,7 +418,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
                 // Pass any contextual information to the parameter bindings used in the lambda body as a side
                 // effect, by setting an answer for the vars created at binding time.
-                let return_hint = hint.and_then(|hint| self.decompose_lambda(hint, &param_vars));
+                let return_hint =
+                    hint.and_then(|hint| self.decompose_lambda(hint.ty(), &param_vars));
 
                 let mut params: Vec<Param> = if let Some(parameters) = &lambda.parameters {
                     param_vars
@@ -462,7 +463,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 let ret = self.expr_infer_type_no_trace(
                     &lambda.body,
-                    return_hint.as_ref().map(|hint| hint.as_ref()),
+                    hint.and_then(|hint| hint.with_ty_opt(return_hint.as_ref())),
                     errors,
                 );
                 let (yield_keys, yield_from_keys) = self.bindings().lambda_yield_keys(lambda.range);
