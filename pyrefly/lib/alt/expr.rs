@@ -558,12 +558,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
             }
             Expr::Generator(x) => {
-                let yield_hint = hint.and_then(|hint| self.decompose_generator_yield(hint));
+                let yield_hint = hint.and_then(|hint| self.decompose_generator_yield(hint.ty()));
                 self.ifs_infer(&x.generators, errors);
                 let yield_ty = self
                     .expr_infer_type_info_with_hint(
                         &x.elt,
-                        yield_hint.as_ref().map(|hint| hint.as_ref()),
+                        hint.and_then(|hint| hint.with_ty_opt(yield_hint.as_ref())),
                         errors,
                     )
                     .into_ty();
