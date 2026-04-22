@@ -2457,3 +2457,18 @@ def f(a: bool) -> int:
     return 0
     "#,
 );
+
+testcase!(
+    bug = "false positive: b is always initialized when a is truthy",
+    test_guarded_initialization_with_intermediate_statements,
+    r#"
+def f(a: bool) -> int:
+    if a:
+        b = 3
+    x = 5
+    y = x + 1
+    if a:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
