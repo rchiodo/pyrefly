@@ -3219,7 +3219,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// The `#[inline(never)]` annotation is intentional to reduce stack frame size.
     #[inline(never)]
     fn binding_to_type_return_type(&self, x: &ReturnType, errors: &ErrorCollector) -> Type {
-        match &x.kind {
+        let ty = match &x.kind {
             ReturnTypeKind::ShouldValidateAnnotation {
                 range,
                 annotation,
@@ -3334,6 +3334,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     return_ty
                 }
             }
+        };
+        if let Some(class_key) = x.implicit_dunder_new_self {
+            let class = &*self.get_idx(class_key);
+            let Some(cls) = &class.0 else {
+                unreachable!("implicit __new__ return type must point at a class");
+            };
+            self.heap.mk_self_type(self.as_class_type_unchecked(cls))
+        } else {
+            ty
         }
     }
 
