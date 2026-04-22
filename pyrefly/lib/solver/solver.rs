@@ -1478,14 +1478,7 @@ impl Solver {
     }
 
     /// Record a variable that is used recursively.
-    pub fn record_recursive<Ans: LookupAnswer>(
-        &self,
-        var: Var,
-        ty: Type,
-        type_order: TypeOrder<Ans>,
-        errors: &ErrorCollector,
-        range: TextRange,
-    ) -> Type {
+    pub fn record_recursive(&self, var: Var, ty: Type) -> Type {
         fn expand(
             t: Type,
             variables: &Variables,
@@ -1518,34 +1511,14 @@ impl Solver {
         let variable = lock.get(var);
         match &*variable {
             Variable::Answer(forced) => {
+                // An answer was already forced - use it, not the type from analysis.
+                //
+                // This can only happen in a fixpoint, and we'll catch it with a fixpoint non-convergence
+                // error if it does not eventually converge.
                 let forced = forced.clone();
                 drop(variable);
                 drop(lock);
-                // We got forced into choosing a type to satisfy a subset constraint, so check we are OK with that.
-                // Since we have already used `forced`, and will continue to do so, important that what we expect
-                // is more restrictive (so the `forced` is an over-approximation).
-                if self.is_subset_eq(&ty, &forced, type_order).is_err() {
-                    // Poor error message, but overall, this is a terrible experience for users.
-                    self.error(
-                        &ty,
-                        &forced,
-                        errors,
-                        range,
-                        &|| TypeCheckContext::of_kind(TypeCheckKind::CycleBreaking),
-                        SubsetError::Other,
-                    );
-                }
-                // In order to minimize the blast radius of poor cycle-handling, we currently produce
-                // inconsistent results - any other binding that saved an answer which depended on
-                // this one sees the forced type, but anything downstream of this sees the computed
-                // type.
-                //
-                // This is both highly unpredictable in terms of end user experience, and nondeterministic
-                // because we can definitely get non-idempotent errors in some cases.
-                //
-                // TODO(stroxler): Probably remove this - it regresses a CRTP example, so we should
-                // remove it in a dedicated diff.
-                ty
+                forced
             }
             _ => {
                 drop(variable);
