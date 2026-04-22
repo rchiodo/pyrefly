@@ -147,6 +147,13 @@ impl CallTargetLookup {
     }
 }
 
+/// Result of `construct_{class,typed_dict}_inner`
+struct ConstructedInstance {
+    ty: Type,
+    /// Does the type match the provided hint? False if no hint was provided
+    matched_hint: bool,
+}
+
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn error_call_target(
         &self,
@@ -689,7 +696,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         errors: &ErrorCollector,
         hint: Option<HintRef>,
-        construct: impl Fn(&ErrorCollector, Option<HintRef>) -> (Type, bool),
+        construct: impl Fn(&ErrorCollector, Option<HintRef>) -> ConstructedInstance,
     ) -> Type {
         if let Some(hint) = hint
             && let Type::Union(union) = hint.ty()
@@ -707,11 +714,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         );
                         member_errors.is_empty().then_some(ret)
                     })
-                    .partition_map(|(ret, matched_hint)| {
-                        if matched_hint {
-                            Either::Left(ret)
+                    .partition_map(|ret| {
+                        if ret.matched_hint {
+                            Either::Left(ret.ty)
                         } else {
-                            Either::Right(ret)
+                            Either::Right(ret.ty)
                         }
                     });
                 if !rets_match_hint.is_empty() {
@@ -726,9 +733,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             // If the hint is too wide or always produces errors, don't use it.
-            construct(errors, None).0
+            construct(errors, None).ty
         } else {
-            construct(errors, hint).0
+            construct(errors, hint).ty
         }
     }
 
@@ -770,7 +777,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
-    ) -> (Type, bool) {
+    ) -> ConstructedInstance {
         // Based on https://typing.readthedocs.io/en/latest/spec/constructors.html.
         let (vs, matched_hint) = if let Some(hint) = hint {
             let vs = self
@@ -814,7 +821,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
-                return (ret, matched_hint);
+                return ConstructedInstance {
+                    ty: ret,
+                    matched_hint,
+                };
             }
             if !self.is_compatible_constructor_return(&ret, cls.class_object()) {
                 // Got something other than an instance of the class under construction.
@@ -824,7 +834,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.add_specialization_errors(e, arguments_range, errors, context);
                 }
-                return (ret, matched_hint);
+                return ConstructedInstance {
+                    ty: ret,
+                    matched_hint,
+                };
             }
         }
         let mut dunder_new_ret = None;
@@ -884,7 +897,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     {
                         self.add_specialization_errors(e, arguments_range, errors, context);
                     }
-                    return (ret.subst(&cls.targs().substitution_map()), matched_hint);
+                    return ConstructedInstance {
+                        ty: ret.subst(&cls.targs().substitution_map()),
+                        matched_hint,
+                    };
                 }
                 (true, has_errors)
             } else {
@@ -961,16 +977,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             && ct.targs().as_slice().len() == 1
         {
             let targ = ct.targs().as_slice()[0].clone();
-            (self.heap.mk_unbounded_tuple(targ), matched_hint)
+            ConstructedInstance {
+                ty: self.heap.mk_unbounded_tuple(targ),
+                matched_hint,
+            }
         } else if let Type::ClassType(ct) = result {
             // Check for init capture: if the class has a registered init capture,
             // extract constructor arg values and wrap in Type::NNModule.
-            (
-                self.maybe_wrap_nn_module(&ct.clone(), args, keywords, errors, Type::ClassType(ct)),
+            ConstructedInstance {
+                ty: self.maybe_wrap_nn_module(
+                    &ct.clone(),
+                    args,
+                    keywords,
+                    errors,
+                    Type::ClassType(ct),
+                ),
                 matched_hint,
-            )
+            }
         } else {
-            (result, matched_hint)
+            ConstructedInstance {
+                ty: result,
+                matched_hint,
+            }
         }
     }
 
@@ -1061,7 +1089,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
-    ) -> (Type, bool) {
+    ) -> ConstructedInstance {
         let (vs, matched_hint) = if let Some(hint) = hint {
             let vs = self
                 .solver()
@@ -1098,10 +1126,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             self.add_specialization_errors(e, arguments_range, errors, context);
         }
-        (
-            Type::TypedDict(TypedDict::TypedDict(typed_dict)),
+        ConstructedInstance {
+            ty: Type::TypedDict(TypedDict::TypedDict(typed_dict)),
             matched_hint,
-        )
+        }
     }
 
     fn first_arg_type(&self, args: &[CallArg], errors: &ErrorCollector) -> Option<Type> {
