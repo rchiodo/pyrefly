@@ -3187,13 +3187,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             self.check_final_reassignment(annot, expr.range(), errors);
         }
-        let is_bare_annotated = matches!(expr, Expr::Name(_) | Expr::Attribute(_))
+        let is_bare_special_form = matches!(expr, Expr::Name(_) | Expr::Attribute(_))
             && matches!(
                 &ty,
-                Type::Type(inner)
-                    if matches!(inner.as_ref(), Type::SpecialForm(SpecialForm::Annotated))
+                Type::Type(inner) if matches!(inner.as_ref(), Type::SpecialForm(_))
             );
-        if !is_bare_annotated
+        if !is_bare_special_form
             && annot.is_none()
             && self.may_be_implicit_type_alias(&ty)
             && !is_in_function_scope
