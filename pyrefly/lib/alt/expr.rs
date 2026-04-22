@@ -488,21 +488,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::Tuple(x) => self.tuple_infer(x, hint, errors),
             Expr::List(x) => {
-                let elt_hint = hint.and_then(|ty| self.decompose_list(ty));
+                let elt_hint = hint.and_then(|hint| self.decompose_list(hint.ty()));
                 if x.is_empty() {
-                    let elem_ty = elt_hint.map_or_else(
-                        || {
-                            self.solver()
-                                .fresh_partial_contained(self.uniques, x.range)
-                                .to_type(self.heap)
-                        },
-                        |hint| hint.to_type(),
-                    );
+                    let elem_ty = elt_hint.unwrap_or_else(|| {
+                        self.solver()
+                            .fresh_partial_contained(self.uniques, x.range)
+                            .to_type(self.heap)
+                    });
                     self.heap.mk_class_type(self.stdlib.list(elem_ty))
                 } else {
                     let elem_tys = self.elts_infer(
                         &x.elts,
-                        elt_hint.as_ref().map(|hint| hint.as_ref()),
+                        hint.and_then(|hint| hint.with_ty_opt(elt_hint.as_ref())),
                         errors,
                     );
                     self.heap
@@ -530,11 +527,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             Expr::ListComp(x) => {
-                let elem_hint = hint.and_then(|ty| self.decompose_list(ty));
+                let elem_hint = hint.and_then(|hint| self.decompose_list(hint.ty()));
                 self.ifs_infer(&x.generators, errors);
                 let elem_ty = self.expr_infer_with_hint_promote(
                     &x.elt,
-                    elem_hint.as_ref().map(|hint| hint.as_ref()),
+                    hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
                     errors,
                 );
                 self.heap.mk_class_type(self.stdlib.list(elem_ty))
