@@ -2419,3 +2419,15 @@ def f(a: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    test_guarded_initialization_negated_condition,
+    r#"
+def f(a: bool) -> int:
+    if a:
+        b = 3
+    if not a:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
