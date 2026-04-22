@@ -720,7 +720,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
-        construct: impl Fn(Option<HintRef>) -> ConstructedInstance,
+        construct: impl Fn(Option<&Type>) -> ConstructedInstance,
     ) -> Type {
         if let Some(hint) = hint
             && let hints = (match hint.ty() {
@@ -731,7 +731,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             let mut ret_no_match_hint = None;
             for member_hint in hints.iter() {
-                let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
+                let ret = construct(Some(member_hint));
                 if !ret.errors.is_empty() {
                     continue;
                 }
@@ -791,7 +791,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arguments_range: TextRange,
         callee_range: Option<TextRange>,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRef>,
+        hint: Option<&Type>,
     ) -> ConstructedInstance {
         // Based on https://typing.readthedocs.io/en/latest/spec/constructors.html.
         let (vs, matched_hint) = if let Some(hint) = hint {
@@ -799,7 +799,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .solver()
                 .freshen_class_targs(cls.targs_mut(), self.uniques);
 
-            let matched_hint = self.is_subset_eq(&self.heap.mk_class_type(cls.clone()), hint.ty());
+            let matched_hint = self.is_subset_eq(&self.heap.mk_class_type(cls.clone()), hint);
             self.solver().generalize_class_targs(cls.targs_mut());
             (vs, matched_hint)
         } else {
@@ -1112,13 +1112,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         keywords: &[CallKeyword],
         arguments_range: TextRange,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRef>,
+        hint: Option<&Type>,
     ) -> ConstructedInstance {
         let (vs, matched_hint) = if let Some(hint) = hint {
             let vs = self
                 .solver()
                 .freshen_class_targs(typed_dict.targs_mut(), self.uniques);
-            let matched_hint = self.is_subset_eq(&typed_dict.clone().to_type(self.heap), hint.ty());
+            let matched_hint = self.is_subset_eq(&typed_dict.clone().to_type(self.heap), hint);
             self.solver().generalize_class_targs(typed_dict.targs_mut());
             (vs, matched_hint)
         } else {
