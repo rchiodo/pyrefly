@@ -6,6 +6,7 @@
  */
 
 use std::iter;
+use std::slice;
 use std::sync::Arc;
 
 use dupe::Dupe;
@@ -724,48 +725,46 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         construct: impl Fn(Option<HintRef>) -> ConstructedInstance,
     ) -> Type {
         if let Some(hint) = hint
-            && let Type::Union(union) = hint.ty()
+            && let hints = (match hint.ty() {
+                Type::Union(u) => u.members.as_slice(),
+                t => slice::from_ref(t),
+            })
+            && hints.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH
         {
-            if union.members.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH {
-                // For a union hint, try all members and keep only the successful matches.
-                let (rets_match_hint, rets_no_match_hint): (Vec<_>, Vec<_>) = union
-                    .members
-                    .iter()
-                    .filter_map(|member_hint| {
-                        let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
-                        ret.errors.is_empty().then_some(ret)
-                    })
-                    .partition_map(|ret| {
-                        if ret.matched_hint && ret.specialization_errors.is_none() {
-                            Either::Left(ret)
-                        } else {
-                            Either::Right(ret)
-                        }
-                    });
-                if !rets_match_hint.is_empty() {
-                    // Keep only the results that were assignable to their hints. This way, if the hint
-                    // is something like `X | None`, where `X` should contextually influence the type,
-                    // we filter out the type we get using `None` as a hint.
-                    return self.unions(
-                        rets_match_hint
-                            .into_map(|ret| ret.take(arguments_range, errors, context, self)),
-                    );
-                } else if !rets_no_match_hint.is_empty() {
-                    // Even if none of the results were assignable to their hints, we still keep the
-                    // contextually typed results if they only produced specialization errors.
-                    return self.unions(
-                        rets_no_match_hint
-                            .into_map(|ret| ret.take(arguments_range, errors, context, self)),
-                    );
-                }
+            // Try all hints and keep only the successful matches.
+            let (rets_match_hint, rets_no_match_hint): (Vec<_>, Vec<_>) = hints
+                .iter()
+                .filter_map(|member_hint| {
+                    let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
+                    ret.errors.is_empty().then_some(ret)
+                })
+                .partition_map(|ret| {
+                    if ret.matched_hint && ret.specialization_errors.is_none() {
+                        Either::Left(ret)
+                    } else {
+                        Either::Right(ret)
+                    }
+                });
+            if !rets_match_hint.is_empty() {
+                // Keep only the results that were assignable to their hints. This way, if the hint
+                // is something like `X | None`, where `X` should contextually influence the type,
+                // we filter out the type we get using `None` as a hint.
+                return self.unions(
+                    rets_match_hint
+                        .into_map(|ret| ret.take(arguments_range, errors, context, self)),
+                );
+            } else if !rets_no_match_hint.is_empty() {
+                // Even if none of the results were assignable to their hints, we still keep the
+                // contextually typed results if they only produced specialization errors.
+                return self.unions(
+                    rets_no_match_hint
+                        .into_map(|ret| ret.take(arguments_range, errors, context, self)),
+                );
             }
-            // If the hint is too wide or always produces errors, don't use it.
-            let ret = construct(None);
-            ret.take(arguments_range, errors, context, self)
-        } else {
-            let ret = construct(hint);
-            ret.take(arguments_range, errors, context, self)
         }
+        // If the hint is too wide or always produces errors, don't use it.
+        let ret = construct(None);
+        ret.take(arguments_range, errors, context, self)
     }
 
     fn construct_class(

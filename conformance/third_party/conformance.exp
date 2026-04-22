@@ -7129,8 +7129,8 @@
     {
       "code": -2,
       "column": 34,
-      "concise_description": "Argument `Height` is not assignable to parameter `shape` with type `tuple[Height, Width]` in function `Array.__init__`",
-      "description": "Argument `Height` is not assignable to parameter `shape` with type `tuple[Height, Width]` in function `Array.__init__`",
+      "concise_description": "Argument `Height` is not assignable to parameter `shape` with type `tuple[*@_]` in function `Array.__init__`",
+      "description": "Argument `Height` is not assignable to parameter `shape` with type `tuple[*@_]` in function `Array.__init__`",
       "line": 42,
       "name": "bad-argument-type",
       "severity": "error",
@@ -7139,25 +7139,25 @@
     },
     {
       "code": -2,
-      "column": 41,
-      "concise_description": "Argument `tuple[Batch, Width]` is not assignable to parameter `shape` with type `tuple[Batch, Height, Width]` in function `Array.__init__`",
-      "description": "Argument `tuple[Batch, Width]` is not assignable to parameter `shape` with type `tuple[Batch, Height, Width]` in function `Array.__init__`",
+      "column": 35,
+      "concise_description": "`Array[Batch, Width]` is not assignable to `Array[Batch, Height, Width]`",
+      "description": "`Array[Batch, Width]` is not assignable to `Array[Batch, Height, Width]`",
       "line": 43,
-      "name": "bad-argument-type",
+      "name": "bad-assignment",
       "severity": "error",
-      "stop_column": 61,
+      "stop_column": 62,
       "stop_line": 43
     },
     {
       "code": -2,
-      "column": 5,
-      "concise_description": "Argument `tuple[Time, Batch, Width, Height]` is not assignable to parameter `shape` with type `tuple[Time, Batch, Height, Width]` in function `Array.__init__`",
-      "description": "Argument `tuple[Time, Batch, Width, Height]` is not assignable to parameter `shape` with type `tuple[Time, Batch, Height, Width]` in function `Array.__init__`",
-      "line": 45,
-      "name": "bad-argument-type",
+      "column": 41,
+      "concise_description": "`Array[Time, Batch, Width, Height]` is not assignable to `Array[Time, Batch, Height, Width]`",
+      "description": "`Array[Time, Batch, Width, Height]` is not assignable to `Array[Time, Batch, Height, Width]`",
+      "line": 44,
+      "name": "bad-assignment",
       "severity": "error",
-      "stop_column": 45,
-      "stop_line": 45
+      "stop_column": 2,
+      "stop_line": 46
     },
     {
       "code": -2,
@@ -7995,13 +7995,24 @@
     },
     {
       "code": -2,
-      "column": 51,
-      "concise_description": "Argument `str` is not assignable to parameter `value` with type `LiteralString` in function `Container.__init__`",
-      "description": "Argument `str` is not assignable to parameter `value` with type `LiteralString` in function `Container.__init__`",
+      "column": 41,
+      "concise_description": "`Container[str]` is not assignable to `Container[LiteralString]`",
+      "description": "`Container[str]` is not assignable to `Container[LiteralString]`",
       "line": 133,
-      "name": "bad-argument-type",
+      "name": "bad-assignment",
       "severity": "error",
-      "stop_column": 52,
+      "stop_column": 53,
+      "stop_line": 133
+    },
+    {
+      "code": -2,
+      "column": 50,
+      "concise_description": "`str` is not assignable to upper bound `LiteralString` of type variable `T`",
+      "description": "`str` is not assignable to upper bound `LiteralString` of type variable `T`",
+      "line": 133,
+      "name": "bad-specialization",
+      "severity": "error",
+      "stop_column": 53,
       "stop_line": 133
     },
     {
