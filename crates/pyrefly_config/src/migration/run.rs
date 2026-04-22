@@ -50,12 +50,21 @@ pub enum MigrationSource {
 
 /// Migrate the config file at a given location (pyproject, mypy, pyright etc), producing a new file.
 /// In some cases, e.g. pyproject, we will modify the original file in-place.
-pub fn config_migration(path: &Path, migrate_from: MigrationSource) -> anyhow::Result<PathBuf> {
+///
+/// When `dry_run` is true, no files are created or modified: the migrated config
+/// is computed and printed to the log, and the returned `PathBuf` is the path
+/// where the config *would* have been written.
+pub fn config_migration(
+    path: &Path,
+    migrate_from: MigrationSource,
+    dry_run: bool,
+) -> anyhow::Result<PathBuf> {
     // TODO: This code is written in a fairly weird style. Give it a nicer interface
     //       without bothering to refactor the internals just yet.
     Args {
         original_config_path: path.to_owned(),
         migrate_from,
+        dry_run,
     }
     .run()
 }
@@ -69,6 +78,8 @@ struct Args {
     original_config_path: PathBuf,
     /// Which type checker config to migrate from.
     migrate_from: MigrationSource,
+    /// When true, do not write any files; just print what would be written.
+    dry_run: bool,
 }
 
 impl Args {
@@ -188,26 +199,43 @@ impl Args {
                 original_config_path.with_file_name(ConfigFile::PYREFLY_FILE_NAME)
             }
         };
-        if !pyrefly_config_path
-            .parent()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not check if parent directories of `{}` exist",
-                    pyrefly_config_path.display()
-                )
-            })?
-            .exists()
+        if !self.dry_run
+            && !pyrefly_config_path
+                .parent()
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Could not check if parent directories of `{}` exist",
+                        pyrefly_config_path.display()
+                    )
+                })?
+                .exists()
         {
             std::fs::create_dir_all(pyrefly_config_path.parent().unwrap())
                 .with_context(|| "While trying to write the migrated config file")?;
         }
         if pyrefly_config_path.ends_with(ConfigFile::PYPROJECT_FILE_NAME) {
-            PyProject::update(&pyrefly_config_path, config)?;
-            info!("Config written to `{}`", pyrefly_config_path.display());
+            if self.dry_run {
+                info!(
+                    "Dry run: would insert [tool.pyrefly] section into `{}`:\n{}",
+                    pyrefly_config_path.display(),
+                    toml::to_string_pretty(&config)?
+                );
+            } else {
+                PyProject::update(&pyrefly_config_path, config)?;
+                info!("Config written to `{}`", pyrefly_config_path.display());
+            }
         } else {
             let serialized = toml::to_string_pretty(&config)?;
-            fs_anyhow::write(&pyrefly_config_path, serialized)?;
-            info!("New config written to `{}`", pyrefly_config_path.display());
+            if self.dry_run {
+                info!(
+                    "Dry run: would write new config to `{}`:\n{}",
+                    pyrefly_config_path.display(),
+                    serialized
+                );
+            } else {
+                fs_anyhow::write(&pyrefly_config_path, serialized)?;
+                info!("New config written to `{}`", pyrefly_config_path.display());
+            }
         }
         Ok(pyrefly_config_path)
     }
@@ -248,7 +276,8 @@ mod tests {
 "#;
         fs_anyhow::write(&original_config_path, pyr)?;
 
-        let pyrefly_config_path = config_migration(&original_config_path, MigrationSource::Auto)?;
+        let pyrefly_config_path =
+            config_migration(&original_config_path, MigrationSource::Auto, false)?;
         let output = fs_anyhow::read_to_string(&pyrefly_config_path)?; // We're not going to check the whole output because most of it will be default values, which may change.
         // We only actually care about the includes.
         let output_lines = output.lines().collect::<Vec<_>>();
@@ -284,7 +313,8 @@ check_untyped_defs = True
 "#;
         fs_anyhow::write(&original_config_path, mypy)?;
 
-        let pyrefly_config_path = config_migration(&original_config_path, MigrationSource::Auto)?;
+        let pyrefly_config_path =
+            config_migration(&original_config_path, MigrationSource::Auto, false)?;
 
         // We care about the config getting serialized in a way that can be checked-in to a repo,
         // i.e. without absolutized paths. So we need to check the raw file.
@@ -315,7 +345,8 @@ check_untyped_defs = True
 files = ["a.py"]
 "#;
         fs_anyhow::write(&original_config_path, pyproject)?;
-        let pyrefly_config_path = config_migration(&original_config_path, MigrationSource::Auto)?;
+        let pyrefly_config_path =
+            config_migration(&original_config_path, MigrationSource::Auto, false)?;
         assert_eq!(pyrefly_config_path, original_config_path);
         let pyproject = fs_anyhow::read_to_string(&original_config_path)?;
         assert_eq!(pyproject.lines().next().unwrap(), "[tool.mypy]");
@@ -331,7 +362,7 @@ files = ["a.py"]
 include = ["a.py"]
 "#;
         fs_anyhow::write(&original_config_path, pyproject)?;
-        config_migration(&original_config_path, MigrationSource::Auto)?;
+        config_migration(&original_config_path, MigrationSource::Auto, false)?;
         let pyproject = fs_anyhow::read_to_string(&original_config_path)?;
         assert_eq!(pyproject.lines().next().unwrap(), "[tool.pyright]");
         assert!(pyproject.contains("[tool.pyrefly]"));
@@ -349,7 +380,7 @@ version = "0.1.0"
 description = "A test project"
 "#;
         fs_anyhow::write(&original_config_path, pyproject)?;
-        assert!(config_migration(&original_config_path, MigrationSource::Auto).is_err());
+        assert!(config_migration(&original_config_path, MigrationSource::Auto, false).is_err());
         let content = fs_anyhow::read_to_string(&original_config_path)?;
         assert_eq!(content, pyproject);
         Ok(())
@@ -366,7 +397,7 @@ include = ["a.py"]
 files = 1
 "#;
         fs_anyhow::write(&original_config_path, pyproject)?;
-        config_migration(&original_config_path, MigrationSource::Auto)?;
+        config_migration(&original_config_path, MigrationSource::Auto, false)?;
         Ok(())
     }
 
@@ -456,7 +487,7 @@ files = ["mypy.py"]
         let bottom = tmp.path().join("a/b/c/");
         std::fs::create_dir_all(&bottom)?;
         fs_anyhow::write(&tmp.path().join("a/mypy.ini"), b"[mypy]\n")?;
-        config_migration(&bottom, MigrationSource::Auto)?;
+        config_migration(&bottom, MigrationSource::Auto, false)?;
         assert!(tmp.path().join("a/pyrefly.toml").try_exists()?);
         Ok(())
     }
@@ -467,7 +498,7 @@ files = ["mypy.py"]
         let original_config_path = tmp.path().join("mypy.ini");
         let pyrefly_config_path = tmp.path().join("pyrefly.toml");
         fs_anyhow::write(&original_config_path, b"[mypy]\nfake_option = True\n")?;
-        config_migration(&original_config_path, MigrationSource::Auto)?;
+        config_migration(&original_config_path, MigrationSource::Auto, false)?;
         let output = fs_anyhow::read_to_string(&pyrefly_config_path)?;
         // mutable-override is disabled by default when migrating from mypy
         assert_eq!(
@@ -491,7 +522,7 @@ files = ["mypy.py"]
             &original_config_path,
             b"[mypy]\ndisable_error_code = override\n\n[mypy-app.models]\ndisable_error_code = name-defined\n",
         )?;
-        config_migration(&original_config_path, MigrationSource::Auto)?;
+        config_migration(&original_config_path, MigrationSource::Auto, false)?;
         let output = fs_anyhow::read_to_string(&pyrefly_config_path)?;
 
         // Parse the generated config and verify
@@ -529,9 +560,35 @@ files = ["mypy.py"]
         let original_config_path = tmp.path().join("pyrightconfig.json");
         let pyrefly_config_path = tmp.path().join("pyrefly.toml");
         fs_anyhow::write(&original_config_path, b"{}")?;
-        config_migration(&original_config_path, MigrationSource::Auto)?;
+        config_migration(&original_config_path, MigrationSource::Auto, false)?;
         let output = fs_anyhow::read_to_string(&pyrefly_config_path)?;
         assert_eq!(output, "infer-with-first-use = false\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_dry_run_does_not_write_pyrefly_toml() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let original_config_path = tmp.path().join("mypy.ini");
+        let pyrefly_config_path = tmp.path().join("pyrefly.toml");
+        fs_anyhow::write(&original_config_path, b"[mypy]\nfiles = abc\n")?;
+
+        let returned = config_migration(&original_config_path, MigrationSource::Auto, true)?;
+        assert_eq!(returned, pyrefly_config_path);
+        assert!(!pyrefly_config_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_dry_run_does_not_modify_pyproject_toml() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let original_config_path = tmp.path().join("pyproject.toml");
+        let pyproject = "[tool.mypy]\nfiles = [\"a.py\"]\n";
+        fs_anyhow::write(&original_config_path, pyproject)?;
+
+        config_migration(&original_config_path, MigrationSource::Auto, true)?;
+        let unchanged = fs_anyhow::read_to_string(&original_config_path)?;
+        assert_eq!(unchanged, pyproject);
         Ok(())
     }
 }
