@@ -233,4 +233,28 @@ class MyClass:
             "Class docstring should not appear with include_docstrings=false:\n{without}"
         );
     }
+
+    #[test]
+    fn test_stubgen_unannotated_dunder_new_uses_incomplete() {
+        // TODO(stroxler): This documents undesirable current behavior. Once
+        // stubgen learns to render `SelfType` as `Self`, update the expectation
+        // to `Self` and remove this TODO.
+        let actual = run_stubgen(
+            r#"
+class C:
+    def __new__(cls):
+        return super().__new__(cls)
+"#,
+        );
+        pretty_assertions::assert_str_eq!(
+            r#"
+from _typeshed import Incomplete
+
+class C:
+    def __new__(cls) -> Incomplete: ...
+"#
+            .trim(),
+            actual.trim(),
+        );
+    }
 }

@@ -811,6 +811,30 @@ def foo():
     }
 
     #[test]
+    fn test_unannotated_dunder_new_return_is_not_inserted() -> anyhow::Result<()> {
+        // TODO(stroxler): This documents undesirable current behavior. Once
+        // infer learns to render `SelfType` as `Self`, update the expectation
+        // to add `-> Self` plus the import and remove this TODO.
+        let mut flags = InferFlags::default();
+        flags.parameter_types = Some(false);
+
+        assert_annotations(
+            r#"
+class C:
+    def __new__(cls):
+        return super().__new__(cls)
+"#,
+            r#"
+class C:
+    def __new__(cls):
+        return super().__new__(cls)
+"#,
+            Some(flags),
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_imports() -> anyhow::Result<()> {
         let file_one = r#"
         from file_two import get_a
