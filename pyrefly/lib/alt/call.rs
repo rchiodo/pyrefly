@@ -733,25 +733,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .iter()
                     .filter_map(|member_hint| {
                         let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
-                        (ret.errors.is_empty() && ret.specialization_errors.is_none())
-                            .then_some(ret)
+                        ret.errors.is_empty().then_some(ret)
                     })
                     .partition_map(|ret| {
-                        if ret.matched_hint {
-                            Either::Left(ret.ty)
+                        if ret.matched_hint && ret.specialization_errors.is_none() {
+                            Either::Left(ret)
                         } else {
-                            Either::Right(ret.ty)
+                            Either::Right(ret)
                         }
                     });
                 if !rets_match_hint.is_empty() {
                     // Keep only the results that were assignable to their hints. This way, if the hint
                     // is something like `X | None`, where `X` should contextually influence the type,
                     // we filter out the type we get using `None` as a hint.
-                    return self.unions(rets_match_hint);
+                    return self.unions(
+                        rets_match_hint
+                            .into_map(|ret| ret.take(arguments_range, errors, context, self)),
+                    );
                 } else if !rets_no_match_hint.is_empty() {
                     // Even if none of the results were assignable to their hints, we still keep the
-                    // contextually typed results if they didn't produce any errors.
-                    return self.unions(rets_no_match_hint);
+                    // contextually typed results if they only produced specialization errors.
+                    return self.unions(
+                        rets_no_match_hint
+                            .into_map(|ret| ret.take(arguments_range, errors, context, self)),
+                    );
                 }
             }
             // If the hint is too wide or always produces errors, don't use it.
