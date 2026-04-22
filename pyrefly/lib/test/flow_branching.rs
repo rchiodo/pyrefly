@@ -2443,3 +2443,17 @@ def f(a: bool, c: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    bug = "false positive: b and c are always initialized when a is truthy",
+    test_guarded_initialization_multiple_variables,
+    r#"
+def f(a: bool) -> int:
+    if a:
+        b = 3
+        c = 4
+    if a:
+        return b + c  # E: `b` may be uninitialized  # E: `c` may be uninitialized
+    return 0
+    "#,
+);
