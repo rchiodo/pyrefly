@@ -2431,3 +2431,15 @@ def f(a: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    test_guarded_initialization_unrelated_condition,
+    r#"
+def f(a: bool, c: bool) -> int:
+    if a:
+        b = 3
+    if c:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
