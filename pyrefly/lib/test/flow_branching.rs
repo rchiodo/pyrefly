@@ -2500,3 +2500,16 @@ def f(a: bool) -> None:
         print(b)
     "#,
 );
+
+testcase!(
+    test_guarded_initialization_guard_reassigned,
+    r#"
+def f(a: bool, c: bool) -> int:
+    if a:
+        b = 3
+    a = c
+    if a:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
