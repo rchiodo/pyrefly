@@ -10,8 +10,6 @@ use std::slice;
 use std::sync::Arc;
 
 use dupe::Dupe;
-use itertools::Either;
-use itertools::Itertools;
 use pyrefly_python::dunder;
 use pyrefly_types::literal::Literal;
 use pyrefly_types::quantified::Quantified;
@@ -731,38 +729,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             })
             && hints.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH
         {
-            // Try all hints and keep only the successful matches.
-            let (rets_match_hint, rets_no_match_hint): (Vec<_>, Vec<_>) = hints
-                .iter()
-                .filter_map(|member_hint| {
-                    let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
-                    ret.errors.is_empty().then_some(ret)
-                })
-                .partition_map(|ret| {
-                    if ret.matched_hint && ret.specialization_errors.is_none() {
-                        Either::Left(ret)
-                    } else {
-                        Either::Right(ret)
-                    }
-                });
-            if !rets_match_hint.is_empty() {
-                // Keep only the results that were assignable to their hints. This way, if the hint
-                // is something like `X | None`, where `X` should contextually influence the type,
-                // we filter out the type we get using `None` as a hint.
-                return self.unions(
-                    rets_match_hint
-                        .into_map(|ret| ret.take(arguments_range, errors, context, self)),
-                );
-            } else if !rets_no_match_hint.is_empty() {
+            let mut ret_no_match_hint = None;
+            for member_hint in hints.iter() {
+                let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
+                if !ret.errors.is_empty() {
+                    continue;
+                }
+                if ret.matched_hint && ret.specialization_errors.is_none() {
+                    // Take the first successful match. We require the result to be assignable to the
+                    // hint so that, in a case like `x: list[X] | None = [XChild()]`, we choose the
+                    // `list[X]` branch with contextually typed results.
+                    return ret.take(arguments_range, errors, context, self);
+                }
+                if ret_no_match_hint.is_none() {
+                    ret_no_match_hint = Some(ret);
+                }
+            }
+            if let Some(ret) = ret_no_match_hint {
                 // Even if none of the results were assignable to their hints, we still keep the
-                // contextually typed results if they only produced specialization errors.
-                return self.unions(
-                    rets_no_match_hint
-                        .into_map(|ret| ret.take(arguments_range, errors, context, self)),
-                );
+                // first contextually typed result if it only produced specialization errors.
+                return ret.take(arguments_range, errors, context, self);
             }
         }
-        // If the hint is too wide or always produces errors, don't use it.
+        // If the hint is too wide or always produces non-specialization errors, don't use it.
         let ret = construct(None);
         ret.take(arguments_range, errors, context, self)
     }
