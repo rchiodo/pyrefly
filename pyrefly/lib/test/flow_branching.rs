@@ -2472,3 +2472,17 @@ def f(a: bool) -> int:
     return 9
     "#,
 );
+
+testcase!(
+    bug = "false positive: b is always initialized when a is truthy",
+    test_guarded_initialization_annotation_then_guarded_assign,
+    r#"
+def f(a: bool) -> int:
+    b: int
+    if a:
+        b = 3
+    if a:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
