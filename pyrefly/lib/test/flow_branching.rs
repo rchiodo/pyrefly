@@ -2402,3 +2402,20 @@ for x in range(10):
     assert_type(z, int)
     "#,
 );
+
+// When a variable is defined inside `if a:` and used inside a subsequent
+// `if a:`, the variable is guaranteed to be initialized because the same
+// condition guards both the definition and the use.
+testcase!(
+    bug = "false positive: b is always initialized when a is truthy",
+    test_guarded_initialization_basic,
+    r#"
+def f(a: bool) -> int:
+    if a:
+        b = 3
+    c = 5
+    if a:
+        return b  # E: `b` may be uninitialized
+    return 9
+    "#,
+);
