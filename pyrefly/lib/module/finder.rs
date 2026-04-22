@@ -435,13 +435,18 @@ where
     }
 }
 
-/// Determines whether to use a bundled stub based on the search results.
+/// Determines whether to use a bundled typeshed third-party stub based on the search results.
 ///
-/// Returns `Some(result)` if we should use the bundled stub (possibly with an error attached).
-/// Returns `None` if we should continue to the normal result handling - this happens when:
-/// - No bundled stub was provided, OR
-/// - A `-stubs` package was found (higher priority), OR
-/// - Using a real config file with no source package installed
+/// Decision tree:
+/// - With a real Pyrefly config file: never return the bundled stub. Fall through to
+///   `combine_normal_and_stub_results`, which yields:
+///     * package + user stubs installed → use user stubs
+///     * package installed, no user stubs → source + `UntypedImport` error
+///     * package missing → `None` → eventually `MissingImport`
+/// - Without a real config file (synthetic/marker): bundled typeshed stubs are usable:
+///     * package installed → use bundled stub
+///     * package missing → bundled stub + `MissingSourceForStubs` error
+/// In either mode, if a higher-priority `-stubs` package is found, fall through.
 fn resolve_third_party_stub(
     module: ModuleName,
     stub_result: Option<&FindResult>,
@@ -449,49 +454,20 @@ fn resolve_third_party_stub(
     bundled_stub: Option<FindingOrError<ModulePath>>,
     from_real_config_file: bool,
 ) -> Option<FindingOrError<ModulePath>> {
-    // This is the case where we do have a config file, the package is installed, but there are no stubs
-    // available besides the bundled stubs. In this case
-    // return the stub but with the error attached telling the user to install stubs.
-    if let Some(ref bundled) = bundled_stub
-        && from_real_config_file
-        && normal_result.is_some()
-        && stub_result.is_none()
-    {
-        if let Some(pip_package) = recommended_stubs_package(module) {
-            return Some(bundled.clone().with_error(FindError::UntypedImport(
-                module,
-                pip_package.to_string().into(),
-            )));
-        } else {
-            // If we do not have a stub package that we recommend, just return the bundled stub without
-            // the error
-            return Some(bundled.clone());
-        }
+    if from_real_config_file {
+        return None;
     }
 
-    // If we do have a bundled stub and we also do not find a
-    // higher priority stub from the site packages, then we should use the
-    // bundled stub. However, if we also don't find the actual
-    // package (normal_result), we should attach a MissingSource error.
     if let Some(bundled) = bundled_stub
         && stub_result.is_none()
     {
         if normal_result.is_none() {
-            // If we have a real config file, don't return stubs when package is missing.
-            // Return None to continue search, which will eventually hit NotFound error.
-            if from_real_config_file {
-                return None;
-            } else {
-                // Keep existing behavior for non-real config files
-                return Some(bundled.with_error(FindError::MissingSourceForStubs(module)));
-            }
-        } else {
-            // We have both typeshed third party stubs and the actual package
-            return Some(bundled);
+            return Some(bundled.with_error(FindError::MissingSourceForStubs(module)));
         }
+        return Some(bundled);
     }
 
-    None // No typeshed stub precedence applies, continue to normal handling
+    None
 }
 
 /// Combines stub and normal search results into a final FindingOrError.
