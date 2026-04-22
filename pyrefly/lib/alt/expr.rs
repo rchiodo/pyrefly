@@ -1839,14 +1839,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Vec<Type> {
         let star_hint = LazyCell::new(|| {
             elt_hint.map(|hint| {
-                hint.map_ty(|ty| self.heap.mk_class_type(self.stdlib.iterable(ty.clone())))
+                self.heap
+                    .mk_class_type(self.stdlib.iterable(hint.ty().clone()))
             })
         });
         elts.map(|x| match x {
             Expr::Starred(ExprStarred { value, .. }) => {
                 let unpacked_ty = self.expr_infer_with_hint_promote(
                     value,
-                    star_hint.as_ref().map(|hint| hint.as_ref()),
+                    elt_hint.and_then(|hint| hint.with_ty_opt(star_hint.as_ref())),
                     errors,
                 );
                 if let Some(iterable_ty) = self.unwrap_iterable(&unpacked_ty) {
