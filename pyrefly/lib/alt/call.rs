@@ -152,6 +152,7 @@ struct ConstructedInstance {
     ty: Type,
     /// Does the type match the provided hint? False if no hint was provided
     matched_hint: bool,
+    errors: ErrorCollector,
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
@@ -696,7 +697,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         errors: &ErrorCollector,
         hint: Option<HintRef>,
-        construct: impl Fn(&ErrorCollector, Option<HintRef>) -> ConstructedInstance,
+        construct: impl Fn(Option<HintRef>) -> ConstructedInstance,
     ) -> Type {
         if let Some(hint) = hint
             && let Type::Union(union) = hint.ty()
@@ -707,12 +708,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .members
                     .iter()
                     .filter_map(|member_hint| {
-                        let member_errors = self.error_collector();
-                        let ret = construct(
-                            &member_errors,
-                            Some(HintRef::new(member_hint, hint.errors())),
-                        );
-                        member_errors.is_empty().then_some(ret)
+                        let ret = construct(Some(HintRef::new(member_hint, hint.errors())));
+                        ret.errors.is_empty().then_some(ret)
                     })
                     .partition_map(|ret| {
                         if ret.matched_hint {
@@ -733,9 +730,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             // If the hint is too wide or always produces errors, don't use it.
-            construct(errors, None).ty
+            let ret = construct(None);
+            errors.extend(ret.errors);
+            ret.ty
         } else {
-            construct(errors, hint).ty
+            let ret = construct(hint);
+            errors.extend(ret.errors);
+            ret.ty
         }
     }
 
@@ -751,7 +752,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> Type {
-        self.construct_with_hint(errors, hint, |errors, hint| {
+        self.construct_with_hint(errors, hint, |hint| {
             self.construct_class_inner(
                 cls.clone(),
                 constructor_kind.clone(),
@@ -759,7 +760,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 keywords,
                 arguments_range,
                 callee_range,
-                errors,
                 context,
                 hint,
             )
@@ -774,7 +774,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         keywords: &[CallKeyword],
         arguments_range: TextRange,
         callee_range: Option<TextRange>,
-        errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> ConstructedInstance {
@@ -795,9 +794,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Tracks whether we've already recorded a trace for IDE features.
         // Priority: metaclass __call__ > overridden __new__ > __init__.
         let mut recorded_trace = false;
-        if let Some(ret) =
-            self.call_metaclass(&cls, arguments_range, args, keywords, errors, context, hint)
-        {
+        let errors = self.error_collector();
+        if let Some(ret) = self.call_metaclass(
+            &cls,
+            arguments_range,
+            args,
+            keywords,
+            &errors,
+            context,
+            hint,
+        ) {
             if let Some(metaclass_dunder_call) = self.get_metaclass_dunder_call(&cls) {
                 if let Some(callee_range) = callee_range
                     && let Some(metaclass) = class_metadata.custom_metaclass()
@@ -819,11 +825,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .solver()
                     .finish_quantified(vs, self.solver().infer_with_first_use)
                 {
-                    self.add_specialization_errors(e, arguments_range, errors, context);
+                    self.add_specialization_errors(e, arguments_range, &errors, context);
                 }
                 return ConstructedInstance {
                     ty: ret,
                     matched_hint,
+                    errors,
                 };
             }
             if !self.is_compatible_constructor_return(&ret, cls.class_object()) {
@@ -832,11 +839,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .solver()
                     .finish_quantified(vs, self.solver().infer_with_first_use)
                 {
-                    self.add_specialization_errors(e, arguments_range, errors, context);
+                    self.add_specialization_errors(e, arguments_range, &errors, context);
                 }
                 return ConstructedInstance {
                     ty: ret,
                     matched_hint,
+                    errors,
                 };
             }
         }
@@ -858,7 +866,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         new_method.clone(),
                         CallStyle::Method(&dunder::NEW),
                         arguments_range,
-                        errors,
+                        &errors,
                         context,
                     ),
                     &full_args,
@@ -895,11 +903,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .solver()
                         .finish_quantified(vs, self.solver().infer_with_first_use)
                     {
-                        self.add_specialization_errors(e, arguments_range, errors, context);
+                        self.add_specialization_errors(e, arguments_range, &errors, context);
                     }
                     return ConstructedInstance {
                         ty: ret.subst(&cls.targs().substitution_map()),
                         matched_hint,
+                        errors,
                     };
                 }
                 (true, has_errors)
@@ -917,7 +926,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     init_method.clone(),
                     CallStyle::Method(&dunder::INIT),
                     arguments_range,
-                    errors,
+                    &errors,
                     context,
                 ),
                 args,
@@ -951,7 +960,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 dataclass,
                 args,
                 keywords,
-                errors,
+                &errors,
             );
         }
         self.solver()
@@ -960,7 +969,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .solver()
             .finish_quantified(vs, self.solver().infer_with_first_use)
         {
-            self.add_specialization_errors(e, arguments_range, errors, context);
+            self.add_specialization_errors(e, arguments_range, &errors, context);
         }
         let result = if let Some(mut ret) = dunder_new_ret {
             ret.subst_mut(&cls.targs().substitution_map());
@@ -980,6 +989,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ConstructedInstance {
                 ty: self.heap.mk_unbounded_tuple(targ),
                 matched_hint,
+                errors,
             }
         } else if let Type::ClassType(ct) = result {
             // Check for init capture: if the class has a registered init capture,
@@ -989,15 +999,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     &ct.clone(),
                     args,
                     keywords,
-                    errors,
+                    &errors,
                     Type::ClassType(ct),
                 ),
                 matched_hint,
+                errors,
             }
         } else {
             ConstructedInstance {
                 ty: result,
                 matched_hint,
+                errors,
             }
         }
     }
@@ -1067,13 +1079,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> Type {
-        self.construct_with_hint(errors, hint, |errors, hint| {
+        self.construct_with_hint(errors, hint, |hint| {
             self.construct_typed_dict_inner(
                 typed_dict.clone(),
                 args,
                 keywords,
                 arguments_range,
-                errors,
                 context,
                 hint,
             )
@@ -1086,7 +1097,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         args: &[CallArg],
         keywords: &[CallKeyword],
         arguments_range: TextRange,
-        errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> ConstructedInstance {
@@ -1102,18 +1112,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         let hint = None; // discard hint
         let init_method = self.get_typed_dict_dunder_init(&typed_dict);
+        let errors = self.error_collector();
         self.call_infer(
             self.as_call_target_or_error(
                 init_method,
                 CallStyle::Method(&dunder::INIT),
                 arguments_range,
-                errors,
+                &errors,
                 context,
             ),
             args,
             keywords,
             arguments_range,
-            errors,
+            &errors,
             context,
             hint,
             Some(typed_dict.targs_mut()),
@@ -1124,11 +1135,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .solver()
             .finish_quantified(vs, self.solver().infer_with_first_use)
         {
-            self.add_specialization_errors(e, arguments_range, errors, context);
+            self.add_specialization_errors(e, arguments_range, &errors, context);
         }
         ConstructedInstance {
             ty: Type::TypedDict(TypedDict::TypedDict(typed_dict)),
             matched_hint,
+            errors,
         }
     }
 
