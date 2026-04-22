@@ -36,6 +36,7 @@ const MAX_ERRORS_TO_PROMPT_SUPPRESSION: usize = 100;
 #[command(after_help = "Examples:
    `pyrefly init`: Create a new pyrefly.toml config in the current directory
    `pyrefly init --dry-run`: Print the config that would be written, without modifying any files
+   `pyrefly init --dry-run --print-config`: Emit the would-be config TOML to stdout for downstream tooling
  ")]
 pub struct InitArgs {
     /// The path to the project to initialize. Optional. If not present, will create a new pyrefly.toml config in the current directory.
@@ -55,6 +56,13 @@ pub struct InitArgs {
     /// and the error-suppression prompt.
     #[arg(long)]
     dry_run: bool,
+    /// Emit the would-be config TOML to stdout. Independent of `--dry-run`:
+    /// combine with `--dry-run` for a pure preview, or use alone to also write
+    /// the file. Output is the raw TOML body (the `[tool.pyrefly]` section
+    /// contents when targeting a pyproject.toml), suitable for piping into
+    /// downstream tooling.
+    #[arg(long)]
+    print_config: bool,
 }
 
 impl InitArgs {
@@ -64,6 +72,7 @@ impl InitArgs {
             non_interactive: false,
             migrate_from: MigrationSource::Auto,
             dry_run: false,
+            print_config: false,
         }
     }
 
@@ -73,6 +82,7 @@ impl InitArgs {
             non_interactive: false,
             migrate_from: MigrationSource::Auto,
             dry_run: false,
+            print_config: false,
         }
     }
 
@@ -110,7 +120,12 @@ impl InitArgs {
             // suppression prompt (which writes `pyrefly: ignore` comments into
             // .py files) would either be misleading or itself violate the
             // "don't write" contract.
-            Ok((status, _)) if self.dry_run => Ok(status),
+            //
+            // Print-config: stdout is reserved for the machine-readable TOML.
+            // The follow-on suppression prompt would write a y/N question to
+            // stdout and block on stdin, breaking the contract for the
+            // automation use case the flag exists to support.
+            Ok((status, _)) if self.dry_run || self.print_config => Ok(status),
             Ok((_, config_path)) => {
                 // 2. Run pyrefly check
                 let check_result =
@@ -219,13 +234,14 @@ impl InitArgs {
         if let Some(dir) = dir
             && ConfigFileKind::Pyrefly.check_for_existing_config(dir)?
         {
-            // In dry-run, mirror the non-interactive real run: the y/N prompt
-            // would default to declining, so report UserError rather than
-            // claiming a successful preview that the real command wouldn't
-            // produce.
-            if self.dry_run {
+            // For --dry-run and --print-config, skip the y/N overwrite prompt:
+            // dry-run mirrors the non-interactive real run (declining), and
+            // print-config must keep stdout clean for the TOML stream rather
+            // than emitting a prompt and blocking on stdin. In both cases we
+            // return UserError so callers know the project wasn't fresh.
+            if self.dry_run || self.print_config {
                 info!(
-                    "Dry run: project at `{}` is already initialized for pyrefly. Init would prompt to overwrite; declining leaves the existing config untouched.",
+                    "Project at `{}` is already initialized for pyrefly. Re-initialization requires confirmation, which is incompatible with --dry-run/--print-config.",
                     dir.display()
                 );
                 return Ok((CommandExitStatus::UserError, None));
@@ -248,7 +264,12 @@ impl InitArgs {
             info!("Found an existing type checking configuration - setting up pyrefly ...");
             return Ok((
                 CommandExitStatus::Success,
-                Some(config_migration(&path, self.migrate_from, self.dry_run)?),
+                Some(config_migration(
+                    &path,
+                    self.migrate_from,
+                    self.dry_run,
+                    self.print_config,
+                )?),
             ));
         }
 
@@ -274,12 +295,22 @@ impl InitArgs {
                     error!("Path `{}` does not exist", parent.display());
                     return Ok((CommandExitStatus::UserError, None));
                 }
+                let serialized = toml::to_string_pretty(&cfg)?;
                 info!(
                     "Dry run: would insert [tool.pyrefly] section into `{}`:\n{}",
                     config_path.display(),
-                    toml::to_string_pretty(&cfg)?
+                    serialized
                 );
+                if self.print_config {
+                    print!("{serialized}");
+                    std::io::stdout().flush().ok();
+                }
                 return Ok((CommandExitStatus::Success, None));
+            }
+            if self.print_config {
+                let serialized = toml::to_string_pretty(&cfg)?;
+                print!("{serialized}");
+                std::io::stdout().flush().ok();
             }
             PyProject::update(&config_path, cfg)?;
             info!("Config written to `{}`", config_path.display());
@@ -301,6 +332,7 @@ impl InitArgs {
             );
             return Ok((CommandExitStatus::UserError, None));
         };
+        let serialized = toml::to_string_pretty(&cfg)?;
         if self.dry_run {
             if let Some(parent) = config_path.parent()
                 && !parent.as_os_str().is_empty()
@@ -312,11 +344,18 @@ impl InitArgs {
             info!(
                 "Dry run: would write new config to `{}`:\n{}",
                 config_path.display(),
-                toml::to_string_pretty(&cfg)?
+                serialized
             );
+            if self.print_config {
+                print!("{serialized}");
+                std::io::stdout().flush().ok();
+            }
             return Ok((CommandExitStatus::Success, None));
         }
-        let serialized = toml::to_string_pretty(&cfg)?;
+        if self.print_config {
+            print!("{serialized}");
+            std::io::stdout().flush().ok();
+        }
         fs_anyhow::write(&config_path, serialized)?;
         info!("New config written to `{}`", config_path.display());
         Ok((CommandExitStatus::Success, Some(config_path)))
@@ -375,6 +414,7 @@ mod test {
             non_interactive: true,
             migrate_from: MigrationSource::Auto,
             dry_run: false,
+            print_config: false,
         };
         args.run(None, TEST_THREAD_COUNT)
     }
@@ -385,6 +425,7 @@ mod test {
             non_interactive: true,
             migrate_from: MigrationSource::Auto,
             dry_run: true,
+            print_config: false,
         };
         args.run(None, TEST_THREAD_COUNT)
     }
@@ -762,6 +803,7 @@ files = [\"from_mypy.py\"]
             non_interactive: true,
             migrate_from: MigrationSource::Pyright,
             dry_run: false,
+            print_config: false,
         };
         let status = args.run(None, TEST_THREAD_COUNT)?;
         assert_success(status);
@@ -801,6 +843,7 @@ files = [\"from_mypy.py\"]
             non_interactive: true,
             migrate_from: MigrationSource::Auto,
             dry_run: true,
+            print_config: false,
         };
         let status = args.run(None, TEST_THREAD_COUNT)?;
         assert_user_error(status);
@@ -815,6 +858,7 @@ files = [\"from_mypy.py\"]
             non_interactive: true,
             migrate_from: MigrationSource::Auto,
             dry_run: true,
+            print_config: false,
         };
         let status = args.run(None, TEST_THREAD_COUNT)?;
         assert_user_error(status);
@@ -841,6 +885,56 @@ files = [\"from_mypy.py\"]
         let status = run_init_dry_run(&tmp)?;
         assert_success(status);
         assert!(!tmp.path().join("pyrefly.toml").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_config_with_dry_run_writes_nothing() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let args = InitArgs {
+            path: tmp.path().to_path_buf(),
+            non_interactive: true,
+            migrate_from: MigrationSource::Auto,
+            dry_run: true,
+            print_config: true,
+        };
+        let status = args.run(None, TEST_THREAD_COUNT)?;
+        assert_success(status);
+        assert!(!tmp.path().join("pyrefly.toml").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_config_without_dry_run_still_writes() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        let args = InitArgs {
+            path: tmp.path().to_path_buf(),
+            non_interactive: true,
+            migrate_from: MigrationSource::Auto,
+            dry_run: false,
+            print_config: true,
+        };
+        let status = args.run(None, TEST_THREAD_COUNT)?;
+        assert_success(status);
+        assert!(tmp.path().join("pyrefly.toml").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn test_print_config_with_existing_pyrefly_config_returns_user_error() -> anyhow::Result<()> {
+        let tmp = tempfile::tempdir()?;
+        create_file_in(tmp.path(), "pyrefly.toml", Some(b"# sentinel\n"))?;
+        let args = InitArgs {
+            path: tmp.path().to_path_buf(),
+            non_interactive: true,
+            migrate_from: MigrationSource::Auto,
+            dry_run: false,
+            print_config: true,
+        };
+        let status = args.run(None, TEST_THREAD_COUNT)?;
+        assert_user_error(status);
+        let unchanged = fs_anyhow::read_to_string(&tmp.path().join("pyrefly.toml"))?;
+        assert_eq!(unchanged, "# sentinel\n");
         Ok(())
     }
 }
