@@ -152,7 +152,9 @@
   "protocols_generic.py": [],
   "protocols_merging.py": [],
   "protocols_modules.py": [],
-  "protocols_recursive.py": [],
+  "protocols_recursive.py": [
+    "Line 72: Unexpected errors ['`method2` method cls type `type[ProtoB[object, T]]` is not a superclass of class `ImplB`']"
+  ],
   "protocols_runtime_checkable.py": [],
   "protocols_self.py": [],
   "protocols_subtyping.py": [],

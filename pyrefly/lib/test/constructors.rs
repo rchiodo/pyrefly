@@ -244,12 +244,11 @@ class Child(Base[int]):
 // and metaclass __call__ cls param is not actually `type[Self]`; (2) instantiating `T=str`
 // may be reasonable here.
 testcase!(
-    bug = "Missing check that self/cls param is a supertype of the defining class",
     test_metaclass_call_cls_param_does_not_instantiate,
     r#"
 from typing import assert_type
 class Meta(type):
-    def __call__(cls: 'type[C[str]]', *args, **kwargs): ... # TODO: error because annot is not supertype of Meta
+    def __call__(cls: 'type[C[str]]', *args, **kwargs): ...  # E: `__call__` method self type `type[C[str]]` is not a superclass of class `Meta`
 class C[T](metaclass=Meta):
     def __init__(self, x: T):
         pass
