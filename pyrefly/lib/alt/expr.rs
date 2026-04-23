@@ -71,6 +71,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
 use crate::alt::nn_module_specials::is_nn_module_dict;
 use crate::alt::solve::TypeFormContext;
+use crate::alt::unwrap::HintRef;
 use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Key;
@@ -923,46 +924,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let flattened_items = Ast::flatten_dict_items(items);
-        let hints = hint.as_ref().map_or(Vec::new(), |hint| match hint.ty() {
-            Type::Union(box Union { members: ts, .. }) => ts
-                .iter()
-                .map(|ty| HintRefOld::new(ty, hint.errors()))
-                .collect(),
-            _ => vec![*hint],
-        });
-        for hint in hints.iter() {
-            let (typed_dict, is_update) = match hint.ty() {
-                Type::TypedDict(td) => (td, false),
-                Type::PartialTypedDict(td) => (td, true),
-                _ => continue,
-            };
-            let check_errors = self.error_collector();
-            let item_errors = self.error_collector();
-            self.check_dict_items_against_typed_dict(
-                &flattened_items,
-                typed_dict,
-                is_update,
-                range,
-                &check_errors,
-                &item_errors,
-            );
+        let old_hint = hint;
+        let hint = hint.map(HintRef::from_old);
+        if let Some(hint) = hint {
+            for hint_ty in hint.types() {
+                let (typed_dict, is_update) = match hint_ty {
+                    Type::TypedDict(td) => (td, false),
+                    Type::PartialTypedDict(td) => (td, true),
+                    _ => continue,
+                };
+                let check_errors = self.error_collector();
+                let item_errors = self.error_collector();
+                self.check_dict_items_against_typed_dict(
+                    &flattened_items,
+                    typed_dict,
+                    is_update,
+                    range,
+                    &check_errors,
+                    &item_errors,
+                );
 
-            // We use the TypedDict hint if it successfully matched or if there is only one hint, unless
-            // this is a "soft" type hint, in which case we don't want to raise any check errors.
-            if check_errors.is_empty()
-                || hints.len() == 1
-                    && hint
-                        .errors()
-                        .inspect(|errors| errors.extend(check_errors))
-                        .is_some()
-            {
-                errors.extend(item_errors);
-                return (*hint.ty()).clone();
+                // We use the TypedDict hint if it successfully matched or if there is only one hint, unless
+                // this is a "soft" type hint, in which case we don't want to raise any check errors.
+                if check_errors.is_empty()
+                    || hint.types().len() == 1
+                        && hint
+                            .errors()
+                            .inspect(|errors| errors.extend(check_errors))
+                            .is_some()
+                {
+                    errors.extend(item_errors);
+                    return hint_ty.clone();
+                }
             }
         }
         // Note that we don't need to filter out the TypedDict options here; any non-`dict` options
         // are ignored when decomposing the hint.
-        self.dict_items_infer(range, flattened_items, hint, errors)
+        self.dict_items_infer(range, flattened_items, old_hint, errors)
     }
 
     /// Infers a type for a dictionary literal with the specified items & an optional contextual hint
