@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::slice;
+
 use ruff_python_ast::name::Name;
 
 use crate::alt::answers::LookupAnswer;
@@ -44,6 +46,36 @@ impl<'a, 'b> HintRefOld<'a, 'b> {
 
     pub fn with_ty_opt(&self, ty: Option<&'b Type>) -> Option<Self> {
         ty.map(|ty| Self(ty, self.1))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HintRef<'a, 'b>(&'b [Type], Option<&'a ErrorCollector>);
+
+impl<'a, 'b> HintRef<'a, 'b> {
+    /// Construct a "soft" type hint that doesn't report an error when the hint is incompatible.
+    pub fn soft(hint: &'b Type) -> Self {
+        Self(Self::split(hint), None)
+    }
+
+    /// Temporary helper to aid with incremental migration from HintRefOld to HintRef.
+    pub fn from_old(hint: HintRefOld<'a, 'b>) -> Self {
+        Self(Self::split(hint.0), hint.1)
+    }
+
+    fn split(t: &'b Type) -> &'b [Type] {
+        match t {
+            Type::Union(u) => u.members.as_slice(),
+            _ => slice::from_ref(t),
+        }
+    }
+
+    pub fn types(&self) -> &'b [Type] {
+        self.0
+    }
+
+    pub fn errors(&self) -> Option<&ErrorCollector> {
+        self.1
     }
 }
 
