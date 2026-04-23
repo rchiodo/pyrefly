@@ -9658,19 +9658,7 @@
       "stop_line": 49
     }
   ],
-  "protocols_recursive.py": [
-    {
-      "code": -2,
-      "column": 9,
-      "concise_description": "`method2` method cls type `type[ProtoB[object, T]]` is not a superclass of class `ImplB`",
-      "description": "`method2` method cls type `type[ProtoB[object, T]]` is not a superclass of class `ImplB`",
-      "line": 72,
-      "name": "invalid-annotation",
-      "severity": "error",
-      "stop_column": 16,
-      "stop_line": 72
-    }
-  ],
+  "protocols_recursive.py": [],
   "protocols_runtime_checkable.py": [
     {
       "code": -2,

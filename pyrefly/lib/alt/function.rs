@@ -2263,7 +2263,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             match self_ty {
                 Type::ClassType(cls_ty) => {
                     // The self type must be the defining class itself or a superclass of it.
-                    if !self.type_order().has_superclass(cls, cls_ty.class_object()) {
+                    // Skipping validation for protocols is on par with Pyright's behavior.
+                    // TODO: we could consider checking structural subtyping here.
+                    if !self.type_order().has_superclass(cls, cls_ty.class_object())
+                        && !self.type_order().is_protocol(cls_ty.class_object())
+                    {
                         errors.add(
                             range,
                             ErrorInfo::Kind(ErrorKind::InvalidAnnotation),
@@ -2304,9 +2308,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
                 // type[ClassType] where the ClassType is not a superclass is invalid.
+                // Protocol types are exempt because they use structural subtyping.
                 Type::Type(inner) => {
                     if let Type::ClassType(cls_ty) = &**inner
                         && !self.type_order().has_superclass(cls, cls_ty.class_object())
+                        && !self.type_order().is_protocol(cls_ty.class_object())
                     {
                         errors.add(
                             range,
@@ -2340,10 +2346,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let cls_name = cls.name();
             match cls_ty {
                 Type::Type(box Type::ClassType(inner_cls)) => {
+                    // Skipping validation for protocols is on par with Pyright's behavior.
+                    // TODO: we could consider checking structural subtyping here.
                     if inner_cls.name() != cls_name
                         && !self
                             .type_order()
                             .has_superclass(cls, inner_cls.class_object())
+                        && !self.type_order().is_protocol(inner_cls.class_object())
                     {
                         errors.add(
                             range,

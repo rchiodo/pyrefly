@@ -695,12 +695,9 @@ class D:
 );
 
 testcase!(
-    bug = "Protocol types in self/cls annotations should not be flagged as invalid",
     test_protocol_self_annotation,
     r#"
-from typing import Protocol, TypeVar
-
-T = TypeVar("T")
+from typing import Protocol
 
 class Proto(Protocol):
     def method(self) -> int: ...
@@ -710,10 +707,29 @@ class Impl:
         return 0
 
     @classmethod
-    def create(cls: type[Proto]) -> Proto:  # E: `create` method cls type `type[Proto]` is not a superclass of class `Impl`
+    def create(cls: type[Proto]) -> Proto:  # No error: Proto is a protocol
         return cls()
 
-    def update(self: Proto) -> None:  # E: `update` method self type `Proto` is not a superclass of class `Impl`
+    def update(self: Proto) -> None:  # No error: Proto is a protocol
+        pass
+    "#,
+);
+
+testcase!(
+    bug = "Should ideally check structural subtyping for protocol self/cls annotations",
+    test_protocol_self_annotation_not_satisfied,
+    r#"
+from typing import Protocol
+
+class Proto(Protocol):
+    def method(self) -> int: ...
+
+class NotImpl:
+    @classmethod
+    def create(cls: type[Proto]) -> Proto:  # No error, but NotImpl does not satisfy Proto
+        return cls()
+
+    def update(self: Proto) -> None:  # No error, but NotImpl does not satisfy Proto
         pass
     "#,
 );
