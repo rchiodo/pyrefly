@@ -36,7 +36,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::call::CallStyle;
 use crate::alt::callable::CallArg;
 use crate::alt::expr::MAX_TUPLE_LENGTH;
-use crate::alt::unwrap::HintRef;
+use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::KeyAnnotation;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
@@ -353,7 +353,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn binop_infer(
         &self,
         x: &ExprBinOp,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         let lhs;

@@ -71,7 +71,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
 use crate::alt::nn_module_specials::is_nn_module_dict;
 use crate::alt::solve::TypeFormContext;
-use crate::alt::unwrap::HintRef;
+use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::Binding;
 use crate::binding::binding::Key;
 use crate::binding::binding::KeyYield;
@@ -264,7 +264,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn expr_infer_with_hint(
         &self,
         x: &Expr,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         self.expr_infer_type_info_with_hint(x, hint, errors)
@@ -275,7 +275,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn expr_infer_type_info_with_hint(
         &self,
         x: &Expr,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> TypeInfo {
         if let Some(self_type_annotation) = self.intercept_typing_self_use(x) {
@@ -361,7 +361,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some((hint, hint_errors, tcc)) if !hint.is_any() => {
                 let got = self.expr_infer_type_info_with_hint(
                     x,
-                    Some(HintRef::new(hint, Some(hint_errors))),
+                    Some(HintRefOld::new(hint, Some(hint_errors))),
                     errors,
                 );
                 self.check_and_return_type_info(got, hint, x.range(), hint_errors, tcc)
@@ -376,7 +376,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn expr_infer_type_no_trace(
         &self,
         x: &Expr,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         match x {
@@ -682,7 +682,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn expr_infer_with_hint_promote(
         &self,
         x: &Expr,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         let ty = self.expr_infer_with_hint(x, hint, errors);
@@ -712,7 +712,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    fn tuple_infer(&self, x: &ExprTuple, hint: Option<HintRef>, errors: &ErrorCollector) -> Type {
+    fn tuple_infer(
+        &self,
+        x: &ExprTuple,
+        hint: Option<HintRefOld>,
+        errors: &ErrorCollector,
+    ) -> Type {
         let owner = Owner::new();
         let has_hint = hint.is_some();
         let (hint_ts, default_hint) = if let Some(hint) = &hint {
@@ -898,12 +903,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ts: Vec1<&'b Type>,
         errors: Option<&'b ErrorCollector>,
         owner: &'b Owner<Type>,
-    ) -> HintRef<'b, 'b> {
+    ) -> HintRefOld<'b, 'b> {
         if ts.len() == 1 {
             let (t, _) = ts.split_off_first();
-            HintRef::new(t, errors)
+            HintRefOld::new(t, errors)
         } else {
-            HintRef::new(
+            HintRefOld::new(
                 owner.push(self.unions(ts.into_iter().cloned().collect())),
                 errors,
             )
@@ -913,7 +918,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn dict_infer(
         &self,
         items: &[DictItem],
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
@@ -921,7 +926,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let hints = hint.as_ref().map_or(Vec::new(), |hint| match hint.ty() {
             Type::Union(box Union { members: ts, .. }) => ts
                 .iter()
-                .map(|ty| HintRef::new(ty, hint.errors()))
+                .map(|ty| HintRefOld::new(ty, hint.errors()))
                 .collect(),
             _ => vec![*hint],
         });
@@ -971,7 +976,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         range: TextRange,
         items: Vec<&DictItem>,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         let (key_hint, value_hint) =
@@ -1221,7 +1226,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         values: &[Expr],
         op: BoolOp,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
         // `target` is the truthiness that causes short-circuiting: `and` short-circuits on
@@ -1247,7 +1252,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         for (i, value) in values.iter().enumerate() {
             // If there isn't a hint for the overall expression, use the preceding branches as a "soft" hint
             // for the next one. Most useful for expressions like `optional_list or []`.
-            let hint = hint.or_else(|| hint_acc.as_ref().map(HintRef::soft));
+            let hint = hint.or_else(|| hint_acc.as_ref().map(HintRefOld::soft));
             let mut t = self.expr_infer_with_hint(value, hint, errors);
             self.expand_vars_mut(&mut t);
             // If this is not the last entry, we have to make a type-dependent decision and also narrow the
@@ -1834,7 +1839,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn elts_infer(
         &self,
         elts: &[Expr],
-        elt_hint: Option<HintRef>,
+        elt_hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Vec<Type> {
         let star_hint = LazyCell::new(|| {

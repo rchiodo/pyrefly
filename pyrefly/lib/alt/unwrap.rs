@@ -22,9 +22,9 @@ use crate::types::types::Var;
 // without any errors if the hint is incompatible.
 // Soft type hints are used for `e1 or e1` expressions.
 #[derive(Clone, Copy, Debug)]
-pub struct HintRef<'a, 'b>(&'b Type, Option<&'a ErrorCollector>);
+pub struct HintRefOld<'a, 'b>(&'b Type, Option<&'a ErrorCollector>);
 
-impl<'a, 'b> HintRef<'a, 'b> {
+impl<'a, 'b> HintRefOld<'a, 'b> {
     pub fn new(hint: &'b Type, errors: Option<&'a ErrorCollector>) -> Self {
         Self(hint, errors)
     }

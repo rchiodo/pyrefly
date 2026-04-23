@@ -38,7 +38,7 @@ use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
-use crate::alt::unwrap::HintRef;
+use crate::alt::unwrap::HintRefOld;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -1230,7 +1230,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRef>,
+        hint: Option<HintRefOld>,
         mut ctor_targs: Option<&mut TArgs>,
     ) -> (
         Type,
