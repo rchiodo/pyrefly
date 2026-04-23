@@ -7,7 +7,6 @@
 
 use lsp_types::Url;
 use lsp_types::WorkspaceSymbolResponse;
-use lsp_types::request::WorkspaceSymbolRequest;
 use serde_json::json;
 
 use crate::object_model::InitializeSettings;
@@ -33,11 +32,7 @@ fn test_workspace_symbol() {
 
     interaction
         .client
-        .send_request::<WorkspaceSymbolRequest>(
-            json!({
-                "query": "this_is_a_very_long_function_name_so_we_can"
-            }),
-        )
+        .send_workspace_symbol("this_is_a_very_long_function_name_so_we_can")
         .expect_response(json!([
             {
                 "kind": 12,
@@ -88,7 +83,7 @@ fn test_workspace_symbol_prefers_non_init_result() {
 
     interaction
         .client
-        .send_request::<WorkspaceSymbolRequest>(json!({ "query": symbol_name }))
+        .send_workspace_symbol(symbol_name)
         .expect_response_with(|result| {
             let Some(WorkspaceSymbolResponse::Flat(symbols)) = result else {
                 panic!("Unexpected workspace symbol response: {result:?}");
@@ -140,9 +135,7 @@ fn test_workspace_symbol_multibyte_no_panic() {
 
     interaction
         .client
-        .send_request::<WorkspaceSymbolRequest>(
-            json!({ "query": "workspace_symbol_multibyte_repro" }),
-        )
+        .send_workspace_symbol("workspace_symbol_multibyte_repro")
         .expect_response_with(|result| {
             let Some(WorkspaceSymbolResponse::Flat(symbols)) = result else {
                 panic!("Unexpected workspace symbol response: {result:?}");
