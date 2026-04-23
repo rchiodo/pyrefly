@@ -6,7 +6,6 @@
  */
 
 use std::iter;
-use std::slice;
 use std::sync::Arc;
 
 use dupe::Dupe;
@@ -41,6 +40,7 @@ use crate::alt::callable::CallWithTypes;
 use crate::alt::class::class_field::DescriptorBase;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::nn_module_specials::is_nn_sequential;
+use crate::alt::unwrap::HintRef;
 use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::Key;
 use crate::config::error_kind::ErrorKind;
@@ -722,11 +722,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRefOld>,
         construct: impl Fn(Option<&Type>) -> ConstructedInstance,
     ) -> Type {
+        let hint = hint.map(HintRef::from_old);
         if let Some(hint) = hint
-            && let hints = (match hint.ty() {
-                Type::Union(u) => u.members.as_slice(),
-                t => slice::from_ref(t),
-            })
+            && let hints = hint.types()
             && hints.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH
         {
             let mut ret_no_match_hint = None;
