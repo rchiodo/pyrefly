@@ -30,7 +30,6 @@ use ruff_python_ast::AnyNodeRef;
 use ruff_python_ast::ExprContext;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::ModModule;
-use ruff_python_ast::StmtClassDef;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
@@ -838,24 +837,6 @@ impl Transaction<'_> {
         }
     }
 
-    fn enclosing_class_def_for_completion<'a>(
-        covering_nodes: &'a [AnyNodeRef<'a>],
-    ) -> Option<(&'a StmtClassDef, bool)> {
-        let mut saw_function = false;
-        for node in covering_nodes.iter() {
-            match node {
-                AnyNodeRef::StmtFunctionDef(_) => {
-                    saw_function = true;
-                }
-                AnyNodeRef::StmtClassDef(class_def) => {
-                    return Some((class_def, saw_function));
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
     fn add_attribute_completions_for_type(
         &self,
         handle: &Handle,
@@ -910,41 +891,6 @@ impl Transaction<'_> {
                     });
                 });
         });
-    }
-
-    fn add_class_body_override_completions(
-        &self,
-        handle: &Handle,
-        covering_nodes: &[AnyNodeRef],
-        identifier: &Identifier,
-        allow_inside_function: bool,
-        completions: &mut Vec<RankedCompletion>,
-    ) {
-        let Some((class_def, saw_function)) =
-            Self::enclosing_class_def_for_completion(covering_nodes)
-        else {
-            return;
-        };
-        if saw_function && !allow_inside_function {
-            return;
-        }
-        let key = Key::Definition(ShortIdentifier::new(&class_def.name));
-        let Some(class_type) = self.get_type(handle, &key) else {
-            return;
-        };
-        let mut attribute_completions = Vec::new();
-        self.add_attribute_completions_for_type(
-            handle,
-            class_type,
-            None,
-            &mut attribute_completions,
-        );
-        let prefix = identifier.as_str();
-        completions.extend(
-            attribute_completions
-                .into_iter()
-                .filter(|item| item.item.label.starts_with(prefix)),
-        );
     }
 
     /// Core completion implementation returning items and incomplete flag.
@@ -1107,6 +1053,7 @@ impl Transaction<'_> {
                 identifier,
                 context,
             }) => {
+                let is_method_def = matches!(context, IdentifierContext::MethodDef { .. });
                 let expected_type = if matches!(
                     context,
                     IdentifierContext::Expr(ExprContext::Load | ExprContext::Invalid)
@@ -1121,20 +1068,37 @@ impl Transaction<'_> {
                 ) {
                     allow_function_call_parens = true;
                 }
-                if matches!(context, IdentifierContext::MethodDef { .. }) {
+                if is_method_def {
                     Self::add_magic_method_completions(&identifier, &mut result);
                 }
-                if (matches!(context, IdentifierContext::MethodDef { .. })
-                    || matches!(context, IdentifierContext::Expr(ExprContext::Store)))
+                if (is_method_def || matches!(context, IdentifierContext::Expr(ExprContext::Store)))
                     && let Some(covering_nodes) = covering_nodes.as_deref()
                 {
-                    self.add_class_body_override_completions(
-                        handle,
-                        covering_nodes,
-                        &identifier,
-                        matches!(context, IdentifierContext::MethodDef { .. }),
-                        &mut result,
-                    );
+                    let mut saw_function = false;
+                    let mut enclosing_class = None;
+                    for node in covering_nodes.iter() {
+                        match node {
+                            AnyNodeRef::StmtFunctionDef(_) => saw_function = true,
+                            AnyNodeRef::StmtClassDef(class_def) => {
+                                enclosing_class = Some(class_def);
+                                break;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if let Some(class_def) = enclosing_class
+                        && (!saw_function || is_method_def)
+                    {
+                        let key = Key::Definition(ShortIdentifier::new(&class_def.name));
+                        if let Some(class_type) = self.get_type(handle, &key) {
+                            self.add_attribute_completions_for_type(
+                                handle,
+                                class_type,
+                                None,
+                                &mut result,
+                            );
+                        }
+                    }
                 }
                 self.add_kwargs_completions(handle, position, &mut result);
                 Self::add_keyword_completions(handle, &mut result);
