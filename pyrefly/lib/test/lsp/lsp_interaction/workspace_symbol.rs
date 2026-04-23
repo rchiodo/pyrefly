@@ -117,7 +117,6 @@ fn test_workspace_symbol_prefers_non_init_result() {
 
 // Regression test for https://github.com/facebook/pyrefly/issues/3041
 #[test]
-#[should_panic]
 fn test_workspace_symbol_multibyte_no_panic() {
     let root = get_test_files_root();
     let root_path = root.path().join("tests_requiring_config");
