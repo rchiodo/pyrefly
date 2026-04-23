@@ -114,3 +114,47 @@ fn test_workspace_symbol_prefers_non_init_result() {
 
     interaction.shutdown().unwrap();
 }
+
+// Regression test for https://github.com/facebook/pyrefly/issues/3041
+#[test]
+#[should_panic]
+fn test_workspace_symbol_multibyte_no_panic() {
+    let root = get_test_files_root();
+    let root_path = root.path().join("tests_requiring_config");
+    let scope_uri = Url::from_file_path(root_path.clone()).unwrap();
+    let mut interaction = LspInteraction::new();
+    interaction.set_root(root_path.clone());
+    interaction
+        .initialize(InitializeSettings {
+            workspace_folders: Some(vec![("test".to_owned(), scope_uri)]),
+            configuration: Some(Some(json!([{ "indexing_mode": "lazy_blocking"}]))),
+            ..Default::default()
+        })
+        .unwrap();
+
+    interaction
+        .client
+        .did_open("workspace_symbol_multibyte/__init__.py");
+    interaction
+        .client
+        .did_open("workspace_symbol_multibyte/impl_mod.py");
+
+    interaction
+        .client
+        .send_request::<WorkspaceSymbolRequest>(
+            json!({ "query": "workspace_symbol_multibyte_repro" }),
+        )
+        .expect_response_with(|result| {
+            let Some(WorkspaceSymbolResponse::Flat(symbols)) = result else {
+                panic!("Unexpected workspace symbol response: {result:?}");
+            };
+            assert!(
+                !symbols.is_empty(),
+                "Expected at least one result for workspace_symbol_multibyte_repro"
+            );
+            true
+        })
+        .unwrap();
+
+    interaction.shutdown().unwrap();
+}
