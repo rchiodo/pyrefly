@@ -633,3 +633,31 @@ class C:
     def clone(self, x) -> Self: ...
     "#,
 );
+
+testcase!(
+    bug = "Should raise error when receiver has non-superclass type (for non constructors)",
+    test_method_bad_receiver,
+    r#"
+class A: ...
+class D:
+    def __init__(self: A): pass  # E: `__init__` method self type `A` is not a superclass of class `D`
+    def f(self: A): pass # Should error here
+    def g(self: type[A]): pass # Should error here
+    def h(self: D): pass # Ok
+    "#,
+);
+
+testcase!(
+    bug = "Should raise error when classmethod receiver has non-superclass type",
+    test_classmethod_bad_receiver,
+    r#"
+class A: ...
+class D:
+    @classmethod
+    def f(cls: A): pass # Should error here
+    @classmethod
+    def g(cls: type[A]): pass # Should error here
+    @classmethod
+    def h(cls: type[D]): pass # Ok
+"#,
+);

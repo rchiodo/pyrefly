@@ -1001,7 +1001,7 @@ class A:
             return cls.__new__(cls, 5)
         else:
             return object.__new__(cls)
-    
+
     def __init__(self):
         return "x"
 
