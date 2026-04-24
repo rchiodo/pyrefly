@@ -881,10 +881,10 @@ def apply_einsum(output_map: list[list[int]], check_pairs: list[list[int]], inpu
         raise Error("einsum: inconsistent dimensions for repeated index")
     return Tensor(shape=[inputs[inp].shape[dim] for inp, dim in output_map])
 
-def einsum_ir(spec: str, inputs: list[Tensor] | None = None) -> Tensor:
-    if inputs != None:
+def einsum_ir(spec: str, operands: list[Tensor] | None = None) -> Tensor:
+    if operands != None:
         output_map, check_pairs = torch_shapes.parse_einsum_equation(spec)
-        return apply_einsum(output_map, check_pairs, inputs)
+        return apply_einsum(output_map, check_pairs, operands)
     return Unknown
 
 def eigvals_ir(self: Tensor) -> Tensor:
