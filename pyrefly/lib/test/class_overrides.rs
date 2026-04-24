@@ -1242,8 +1242,12 @@ class B(A):
 "#,
 );
 
+// Explicit `-> Never` is a real user annotation: the override-relaxation
+// only fires when the parent's return was inferred from the placeholder
+// body, so an annotated `-> Never` parent vs. a child returning a concrete
+// type is still a real override violation.
 testcase!(
-    test_explicit_never_annotation_allows_override,
+    test_explicit_never_annotation_checked_for_override,
     r#"
 from typing import Never, assert_type
 
@@ -1254,7 +1258,7 @@ class A:
 assert_type(A().foo(), Never)
 
 class B(A):
-    def foo(self) -> int:
+    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
         return 1
     "#,
 );
@@ -1356,8 +1360,12 @@ class B(A):
     "#,
 );
 
+// Explicit `-> Never` is a real user annotation: the override-relaxation only
+// fires when the parent's return was inferred from the placeholder body, so
+// an annotated `-> Never` parent vs. a child returning a concrete type is
+// still a real override violation.
 testcase!(
-    test_property_explicit_never_annotation_allows_override,
+    test_property_explicit_never_annotation_checked_for_override,
     r#"
 from typing import Never
 
@@ -1368,13 +1376,13 @@ class A:
 
 class B(A):
     @property
-    def foo(self) -> int:
+    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
         return 1
     "#,
 );
 
 testcase!(
-    test_async_def_explicit_never_annotation_allows_override,
+    test_async_def_explicit_never_annotation_checked_for_override,
     r#"
 from typing import Never
 
@@ -1383,7 +1391,44 @@ class A:
         raise NotImplementedError()
 
 class B(A):
-    async def aload(self) -> int:
+    async def aload(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+        return 1
+    "#,
+);
+
+// Override-consistency is a structural subset check on the attribute type.
+// Async-ness is encoded in the return shape (`Coroutine[Any, Any, T]`), so
+// the relaxation must preserve the async wrapper — collapsing an inferred
+// async-placeholder return to bare `Any` would silently let a sync child
+// override an async parent, which is a real shape mismatch.
+testcase!(
+    test_async_def_placeholder_parent_sync_child_checked_for_override,
+    r#"
+class A:
+    async def aload(self):
+        raise NotImplementedError()
+
+class B(A):
+    def aload(self):  # E: overrides parent class `A` in an inconsistent manner
+        return {}
+    "#,
+);
+
+// Unannotated `__new__` is special-cased to return `Self`, not the body-
+// inferred `Never`. The placeholder relaxation must not fire here, otherwise
+// a child `__new__` with an incompatible return would be silently accepted.
+testcase!(
+    test_dunder_new_placeholder_parent_checked_for_override,
+    r#"
+from typing import override
+
+class A:
+    def __new__(cls):
+        raise NotImplementedError()
+
+class B(A):
+    @override
+    def __new__(cls) -> int:  # E: overrides parent class `A` in an inconsistent manner
         return 1
     "#,
 );

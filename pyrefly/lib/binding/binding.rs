@@ -1767,6 +1767,10 @@ pub struct BindingUndecoratedFunction {
     /// `Some` if the function body is a single placeholder statement
     /// (`raise NotImplementedError(...)` or `return NotImplemented`); `None` otherwise.
     pub placeholder_body_kind: Option<PlaceholderBodyKind>,
+    /// `true` when the return type has no user-supplied annotation and will be
+    /// inferred from the body (i.e. the corresponding `ReturnType` binding will
+    /// use `ReturnTypeKind::ShouldInferType`).
+    pub is_return_inferred: bool,
     pub class_key: Option<Idx<KeyClass>>,
     pub legacy_tparams: Box<[Idx<KeyLegacyTypeParam>]>,
     pub decorators: Box<[Idx<KeyDecorator>]>,

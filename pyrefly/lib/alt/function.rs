@@ -440,6 +440,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         def_index: FuncDefIndex,
         stub_or_impl: FunctionStubOrImpl,
         placeholder_body_kind: Option<PlaceholderBodyKind>,
+        is_return_inferred: bool,
         class_key: Option<&Idx<KeyClass>>,
         decorators: &[Idx<KeyDecorator>],
         legacy_tparams: &[Idx<KeyLegacyTypeParam>],
@@ -465,6 +466,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_classmethod: is_dunder_init_subclass,
             is_async: def.is_async,
             placeholder_body_kind,
+            is_return_inferred,
             ..Default::default()
         };
         let mut found_class_property = false;

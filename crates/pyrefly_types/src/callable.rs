@@ -595,6 +595,13 @@ pub struct FuncFlags {
     /// ordinary function bodies, and also for trivial bodies (`pass`, `...`,
     /// or empty) — those are tracked separately as stubs, not placeholders.
     pub placeholder_body_kind: Option<PlaceholderBodyKind>,
+    /// Set when the function's return type has no user-supplied annotation and
+    /// was inferred from the body (corresponds to
+    /// `ReturnTypeKind::ShouldInferType`). Used to distinguish a return type
+    /// the user wrote (e.g. an explicit `-> Never`) from one Pyrefly inferred,
+    /// which lets override-consistency logic relax inferred placeholder returns
+    /// without overriding what the user explicitly declared.
+    pub is_return_inferred: bool,
     /// A function decorated with `typing.dataclass_transform(...)`, turning it into a
     /// `dataclasses.dataclass`-like decorator. Stores the keyword values passed to the
     /// `dataclass_transform` call. See
