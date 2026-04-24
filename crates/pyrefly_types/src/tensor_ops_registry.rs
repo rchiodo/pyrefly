@@ -197,6 +197,7 @@ impl TensorOpsRegistry {
         registry.register("torch.ones", dsl_fn(&fn_lookup, "randn_ir"));
         registry.register("torch.empty", dsl_fn(&fn_lookup, "randn_ir"));
         registry.register("torch.full", dsl_fn(&fn_lookup, "randn_ir"));
+        registry.register("torch.randint", dsl_fn(&fn_lookup, "randint_ir"));
         registry.register("torch.arange", dsl_fn(&fn_lookup, "arange_ir"));
         registry.register("torch.linspace", dsl_fn(&fn_lookup, "linspace_ir"));
         registry.register("torch.eye", dsl_fn(&fn_lookup, "eye_ir"));
@@ -800,6 +801,9 @@ def cosine_similarity_ir(x1: Tensor, x2: Tensor, dim: int = 1) -> Tensor:
     return Tensor(shape=reduce_single(s, normalize_dim(len(s), dim), False))
 
 def randn_ir(size: list[int | symint]) -> Tensor:
+    return Tensor(shape=size)
+
+def randint_ir(low: int, high: int, size: list[int | symint]) -> Tensor:
     return Tensor(shape=size)
 
 def linspace_ir(steps: int | symint) -> Tensor:
