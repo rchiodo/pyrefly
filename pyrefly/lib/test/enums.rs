@@ -1115,3 +1115,35 @@ def f() -> None:
     _ = [x for x in xs if x != E.A]
     "#,
 );
+
+// When enum.Enum is combined with a conflicting metaclass (common in
+// TYPE_CHECKING stubs like equinox's Enumeration), members should still
+// be recognized as enum members, not plain values.
+testcase!(
+    bug = "Metaclass conflict with EnumMeta causes enum members to be typed as plain values instead of enum literals",
+    test_enum_with_conflicting_metaclass,
+    r#"
+from typing import assert_type, Literal, Self
+from enum import Enum
+
+class MyMeta(type):
+    def __getitem__(cls, item) -> str: ...
+    def __len__(cls) -> int: ...
+
+class Base(Enum, metaclass=MyMeta):  # E: Class `Base` has metaclass `MyMeta` which is not a subclass of metaclass `EnumMeta` from base class `Enum`
+    @classmethod
+    def where(cls, pred: bool, a: Self, b: Self) -> Self: ...
+
+class A(Base):
+    x = "foo"
+    y = "bar"
+
+assert_type(A.x, Literal[A.x])  # E: assert_type(str, Unknown) failed  # E: `A.x` is not a valid enum member
+assert_type(A.y, Literal[A.y])  # E: assert_type(str, Unknown) failed  # E: `A.y` is not a valid enum member
+
+def f() -> A:
+    return A.x  # E: Returned type `str` is not assignable to declared return type `A`
+
+A.where(True, A.x, A.y)  # E: Argument `str` is not assignable to parameter `a` with type `A` in function `Base.where`  # E: Argument `str` is not assignable to parameter `b` with type `A` in function `Base.where`
+    "#,
+);
