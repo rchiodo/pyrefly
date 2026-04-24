@@ -1284,6 +1284,187 @@ class B(A):
     "#,
 );
 
+// The next block tests override consistency for placeholder bodies (i.e. function
+// bodies that consist of nothing but `raise NotImplementedError(...)`) in three
+// decorated forms (`@property`, `async def`, `@cached_property`) plus negative
+// discriminator cases. The plain-method form is covered by
+// `test_raise_not_implemented_infers_never_but_allows_override` above.
+
+testcase!(
+    bug = "FP: parent property body raises NotImplementedError, child override flagged",
+    test_property_raise_not_implemented_allows_override,
+    r#"
+class A:
+    @property
+    def foo(self):
+        raise NotImplementedError()
+
+class B(A):
+    @property
+    def foo(self):  # E: overrides parent class `A` in an inconsistent manner
+        return "azure"
+    "#,
+);
+
+testcase!(
+    bug = "FP: parent async def body raises NotImplementedError, child override flagged",
+    test_async_def_raise_not_implemented_allows_override,
+    r#"
+class A:
+    async def aload(self):
+        raise NotImplementedError()
+
+class B(A):
+    async def aload(self):  # E: overrides parent class `A` in an inconsistent manner
+        return {}
+    "#,
+);
+
+testcase!(
+    bug = "FP: parent property setter body raises NotImplementedError, child override flagged",
+    test_property_setter_raise_not_implemented_allows_override,
+    r#"
+class A:
+    @property
+    def foo(self) -> int:
+        raise NotImplementedError()
+    @foo.setter
+    def foo(self, value: int):
+        raise NotImplementedError()
+
+class B(A):
+    @property
+    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+        return 1
+    @foo.setter
+    def foo(self, value: int):
+        pass
+    "#,
+);
+
+testcase!(
+    bug = "FP: parent cached_property body raises NotImplementedError, child override flagged",
+    test_cached_property_raise_not_implemented_allows_override,
+    r#"
+from functools import cached_property
+
+class A:
+    @cached_property
+    def dtype(self):
+        raise NotImplementedError()
+
+class B(A):
+    @cached_property
+    def dtype(self):  # E: overrides parent class `A` in an inconsistent manner
+        return "float64"
+    "#,
+);
+
+testcase!(
+    bug = "FP: parent property explicitly returns Never, child override flagged",
+    test_property_explicit_never_annotation_allows_override,
+    r#"
+from typing import Never
+
+class A:
+    @property
+    def foo(self) -> Never:
+        raise NotImplementedError()
+
+class B(A):
+    @property
+    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+        return 1
+    "#,
+);
+
+testcase!(
+    bug = "FP: parent async def explicitly returns Never, child override flagged",
+    test_async_def_explicit_never_annotation_allows_override,
+    r#"
+from typing import Never
+
+class A:
+    async def aload(self) -> Never:
+        raise NotImplementedError()
+
+class B(A):
+    async def aload(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+        return 1
+    "#,
+);
+
+testcase!(
+    test_annotated_int_raise_not_implemented_checked_for_override,
+    r#"
+class A:
+    def foo(self) -> int:
+        raise NotImplementedError()
+
+class B(A):
+    def foo(self) -> str:  # E: overrides parent class `A` in an inconsistent manner
+        return ""
+    "#,
+);
+
+testcase!(
+    test_property_annotated_int_raise_not_implemented_checked_for_override,
+    r#"
+class A:
+    @property
+    def foo(self) -> int:
+        raise NotImplementedError()
+
+class B(A):
+    @property
+    def foo(self) -> str:  # E: overrides parent class `A` in an inconsistent manner
+        return ""
+    "#,
+);
+
+testcase!(
+    test_annotated_return_not_implemented_checked_for_override,
+    r#"
+class A:
+    def foo(self) -> int:
+        return NotImplemented
+
+class B(A):
+    def foo(self) -> str:  # E: overrides parent class `A` in an inconsistent manner
+        return ""
+    "#,
+);
+
+testcase!(
+    test_property_annotated_return_not_implemented_checked_for_override,
+    r#"
+class A:
+    @property
+    def foo(self) -> int:
+        return NotImplemented
+
+class B(A):
+    @property
+    def foo(self) -> str:  # E: overrides parent class `A` in an inconsistent manner
+        return ""
+    "#,
+);
+
+testcase!(
+    test_sync_def_coroutine_never_return_checked_for_override_consistency,
+    r#"
+from typing import Any, Coroutine, Never
+
+class A:
+    def f(self) -> Coroutine[Any, Any, Never]:
+        raise NotImplementedError()
+
+class B(A):
+    def f(self) -> Coroutine[Any, Any, int]:  # E: overrides parent class `A` in an inconsistent manner
+        ...
+    "#,
+);
+
 testcase!(
     test_override_method_without_self,
     r#"
