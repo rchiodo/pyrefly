@@ -1007,6 +1007,24 @@ class ParameterList[T](Module):
     def __iter__(self) -> Iterator[T]: ...
     def __len__(self) -> int: ...
 
+class LazyLinear[OUT](Module):
+    """Linear layer with lazy in_features initialization.
+
+    out_features is known at construction; in_features is inferred at first forward.
+    """
+
+    weight: Tensor
+    bias: Tensor | None
+
+    def __init__(
+        self,
+        out_features: _Dim[OUT],
+        bias: bool = True,
+        device: Any = None,
+        dtype: Any = None,
+    ) -> None: ...
+    def forward[*Bs](self, input: Tensor[*Bs, Any]) -> Tensor[*Bs, OUT]: ...
+
 class Flatten(Module):
     """Flattens a contiguous range of dims.
 
@@ -1160,6 +1178,7 @@ __all__ = [
     "GRUCell",
     # Misc modules
     "ParameterList",
+    "LazyLinear",
     "Flatten",
     "Unflatten",
     "ReflectionPad2d",
