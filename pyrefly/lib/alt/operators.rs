@@ -446,11 +446,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Without loss of generality, consider e1 + e2 where e1 has type int and e2 has type Any.
                 // Then e1 + e2 should have a return type of Any since e2's __radd__  signature could be
                 // inconsistent with the signature of e1 __add__.
-                if let Type::Any(style) = &rhs {
-                    style.propagate()
-                } else if let Type::Any(style) = &lhs {
-                    style.propagate()
-                } else if x.op == Operator::BitOr
+                //
+                // Exception: when one operand is a shaped Tensor, fall through
+                // to dunder dispatch. Tensor's arithmetic dunders accept any
+                // numeric type and return Self, so the shape is preserved
+                // regardless of the other operand's type. Without this, e.g.
+                // Tensor[B, 1] / (2**n - 1.0) loses shape because 2**n is Any.
+                if (lhs.is_any() || rhs.is_any())
+                    && !matches!(lhs, Type::Tensor(_))
+                    && !matches!(rhs, Type::Tensor(_))
+                {
+                    if let Type::Any(style) = &rhs {
+                        return style.propagate();
+                    } else if let Type::Any(style) = &lhs {
+                        return style.propagate();
+                    }
+                }
+                if x.op == Operator::BitOr
                     && let Some(l) = self.untype_opt(lhs.clone(), x.left.range(), errors)
                     && let Some(r) = self.untype_opt(rhs.clone(), x.right.range(), errors)
                 {
