@@ -493,6 +493,13 @@ class Conv2d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
 
     Type parameters S, P, D are bound from constructor arguments via _Dim[T].
     PEP 696 defaults (S=1, P=0, D=1) apply when arguments are omitted.
+
+    kernel_size, stride, padding, and dilation also accept tuple[int, int]
+    for per-axis values.  When a tuple is passed the corresponding type
+    parameter is unbound and the spatial formula produces Unknown — this
+    is expected since a single K can't represent (Kh, Kw).  Proper per-axis
+    tracking would require DSL-based inference, but nn.Sequential currently
+    dispatches via stub signatures, not DSL.
     """
 
     weight: Tensor[OutC, InC, K, K]
@@ -501,10 +508,10 @@ class Conv2d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
         self,
         in_channels: _Dim[InC],
         out_channels: _Dim[OutC],
-        kernel_size: _Dim[K],
-        stride: _Dim[S] = 1,
-        padding: _Dim[P] = 0,
-        dilation: _Dim[D] = 1,
+        kernel_size: _Dim[K] | tuple[int, int],
+        stride: _Dim[S] | tuple[int, int] = 1,
+        padding: _Dim[P] | tuple[int, int] | str = 0,
+        dilation: _Dim[D] | tuple[int, int] = 1,
         groups: int = 1,
         bias: bool = True,
         padding_mode: str = "zeros",
