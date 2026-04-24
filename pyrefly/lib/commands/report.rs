@@ -2454,4 +2454,34 @@ mod tests {
         let report = build_module_report_for_test("type_aliases.py");
         compare_snapshot("type_aliases.expected.json", &report);
     }
+
+    /// Regression test: `report` panics on @no_type_check decorated functions.
+    ///
+    /// The binding pass skips creating KeyAnnotation entries for parameters of
+    /// @no_type_check functions (since their bodies are not analyzed), but
+    /// `parse_functions` looks them up unconditionally via `key_to_idx`.
+    #[test]
+    #[should_panic(expected = "Internal error: key not found")]
+    fn test_report_no_type_check_panic() {
+        let code = r#"
+from typing import no_type_check
+
+@no_type_check
+def f(x: int):
+    pass
+"#;
+        let (state, handle_fn) = TestEnv::one("test", code)
+            .with_default_require_level(Require::Everything)
+            .to_state();
+        let handle = handle_fn("test");
+        let transaction = state.transaction();
+
+        let module = transaction.get_module_info(&handle).unwrap();
+        let bindings = transaction.get_bindings(&handle).unwrap();
+        let answers = transaction.get_answers(&handle).unwrap();
+        let exports = transaction.get_exports(&handle);
+
+        let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
+        ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+    }
 }
