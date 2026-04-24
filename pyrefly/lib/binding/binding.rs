@@ -20,6 +20,7 @@ use pyrefly_python::module_path::ModuleStyle;
 use pyrefly_python::nesting_context::NestingContext;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_python::symbol_kind::SymbolKind;
+use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::heap::TypeHeap;
 use pyrefly_types::special_form::SpecialForm;
 use pyrefly_types::type_alias::TypeAlias;
@@ -1763,6 +1764,9 @@ pub struct BindingUndecoratedFunction {
     pub def_index: FuncDefIndex,
     pub def: FunctionDefData,
     pub stub_or_impl: FunctionStubOrImpl,
+    /// `Some` if the function body is a single placeholder statement
+    /// (`raise NotImplementedError(...)` or `return NotImplemented`); `None` otherwise.
+    pub placeholder_body_kind: Option<PlaceholderBodyKind>,
     pub class_key: Option<Idx<KeyClass>>,
     pub legacy_tparams: Box<[Idx<KeyLegacyTypeParam>]>,
     pub decorators: Box<[Idx<KeyDecorator>]>,

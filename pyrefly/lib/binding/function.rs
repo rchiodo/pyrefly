@@ -15,6 +15,7 @@ use pyrefly_python::dunder;
 use pyrefly_python::nesting_context::NestingContext;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_python::sys_info::SysInfo;
+use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Decorator;
@@ -605,7 +606,11 @@ impl<'a> BindingsBuilder<'a> {
         parent: &NestingContext,
         undecorated_idx: Idx<KeyUndecoratedFunction>,
         class_key: Option<Idx<KeyClass>>,
-    ) -> (FunctionStubOrImpl, Option<SelfAssignments>) {
+    ) -> (
+        FunctionStubOrImpl,
+        Option<PlaceholderBodyKind>,
+        Option<SelfAssignments>,
+    ) {
         // If the first statement in the body is a docstring, remove it
         let body_no_docstring = if let Some(s) = body.first()
             && is_docstring(s)
@@ -624,22 +629,26 @@ impl<'a> BindingsBuilder<'a> {
                 [Stmt::Pass(_)] => true,
                 _ => false,
             });
-        let body_is_not_implemented = match body_no_docstring {
+        let placeholder_body_kind = match body_no_docstring {
             // raise NotImplementedError(...)
             [
                 Stmt::Raise(StmtRaise {
                     exc: Some(box (Expr::Call(ExprCall { box func, .. }) | func)),
                     ..
                 }),
-            ] if self.as_special_export(func) == Some(SpecialExport::NotImplementedError) => true,
+            ] if self.as_special_export(func) == Some(SpecialExport::NotImplementedError) => {
+                Some(PlaceholderBodyKind::RaiseNotImplementedError)
+            }
             // return NotImplemented
             [
                 Stmt::Return(StmtReturn {
                     value: Some(box val),
                     ..
                 }),
-            ] if self.as_special_export(val) == Some(SpecialExport::NotImplemented) => true,
-            _ => false,
+            ] if self.as_special_export(val) == Some(SpecialExport::NotImplemented) => {
+                Some(PlaceholderBodyKind::ReturnNotImplemented)
+            }
+            _ => None,
         };
         // A `...` body is always interpreted as a stub function.
         // Functions with other trivial bodies are interpreted as stubs in some contexts.
@@ -655,7 +664,7 @@ impl<'a> BindingsBuilder<'a> {
         };
         let should_report_unused_parameters = stub_or_impl == FunctionStubOrImpl::Impl
             && !body_is_trivial
-            && !body_is_not_implemented
+            && placeholder_body_kind.is_none()
             && !decorators.is_overload
             && !decorators.is_override
             && !decorators.is_abstract_method;
@@ -748,7 +757,7 @@ impl<'a> BindingsBuilder<'a> {
             self_assignments
         };
 
-        (stub_or_impl, self_assignments)
+        (stub_or_impl, placeholder_body_kind, self_assignments)
     }
 
     pub fn function_def(&mut self, mut x: StmtFunctionDef, parent: &NestingContext) {
@@ -782,7 +791,7 @@ impl<'a> BindingsBuilder<'a> {
         let decorators = self.decorators(mem::take(&mut x.decorator_list), def_idx.usage());
 
         let docstring_range = Docstring::range_from_stmts(x.body.as_slice());
-        let (stub_or_impl, self_assignments) = self.function_body(
+        let (stub_or_impl, placeholder_body_kind, self_assignments) = self.function_body(
             &mut x.parameters,
             mem::take(&mut x.body),
             &decorators,
@@ -807,6 +816,7 @@ impl<'a> BindingsBuilder<'a> {
                 def_index: func_def_index,
                 def: FunctionDefData::new(x),
                 stub_or_impl,
+                placeholder_body_kind,
                 class_key,
                 decorators: decorators.decorators,
                 legacy_tparams: legacy_tparams.into_boxed_slice(),

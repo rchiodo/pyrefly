@@ -533,6 +533,26 @@ pub enum PropertyRole {
     DeleterDecorator,
 }
 
+/// Shape of a function body that consists of a single placeholder statement.
+/// The two variants share the surface form of "trivial body" but have very
+/// different semantics: `RaiseNotImplementedError` is an "abstract-ish"
+/// placeholder that never returns at runtime, while `ReturnNotImplemented`
+/// returns the singleton `NotImplemented` value (a real runtime value used by
+/// the dunder protocol). The type checker keeps them separate so it can relax
+/// override-consistency only for the abstract-style form, without conflating
+/// it with the dunder-protocol form.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Visit, VisitMut, TypeEq
+)]
+pub enum PlaceholderBodyKind {
+    /// Body is exactly `raise NotImplementedError(...)`. This is the canonical
+    /// "abstract-ish" placeholder; concrete subclasses override it.
+    RaiseNotImplementedError,
+    /// Body is exactly `return NotImplemented`. This is the dunder-protocol
+    /// signal to defer to the other operand and is not an override placeholder.
+    ReturnNotImplemented,
+}
+
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Visit, VisitMut, TypeEq
 )]
@@ -564,6 +584,17 @@ pub struct FuncFlags {
     pub lacks_implementation: bool,
     /// Is the function definition in a `.pyi` file
     pub defined_in_stub_file: bool,
+    /// Set when the function was declared with `async def` (NOT when a regular
+    /// `def` happens to return a `Coroutine[...]`-typed value). Used to
+    /// distinguish async-def placeholders from sync functions explicitly
+    /// annotated to return a coroutine, which look identical at the type level
+    /// once the async-wrapping into `Coroutine[Any, Any, T]` has happened.
+    pub is_async: bool,
+    /// Set when the function body is a single placeholder statement (see
+    /// `PlaceholderBodyKind`), ignoring a leading docstring. `None` for
+    /// ordinary function bodies, and also for trivial bodies (`pass`, `...`,
+    /// or empty) — those are tracked separately as stubs, not placeholders.
+    pub placeholder_body_kind: Option<PlaceholderBodyKind>,
     /// A function decorated with `typing.dataclass_transform(...)`, turning it into a
     /// `dataclasses.dataclass`-like decorator. Stores the keyword values passed to the
     /// `dataclass_transform` call. See

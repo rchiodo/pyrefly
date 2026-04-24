@@ -16,6 +16,7 @@ use pyrefly_python::dunder;
 use pyrefly_python::module_path::ModuleStyle;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::callable::Params;
+use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::dimension::SizeExpr;
@@ -438,6 +439,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         def: &FunctionDefData,
         def_index: FuncDefIndex,
         stub_or_impl: FunctionStubOrImpl,
+        placeholder_body_kind: Option<PlaceholderBodyKind>,
         class_key: Option<&Idx<KeyClass>>,
         decorators: &[Idx<KeyDecorator>],
         legacy_tparams: &[Idx<KeyLegacyTypeParam>],
@@ -461,6 +463,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut flags = FuncFlags {
             is_staticmethod: is_dunder_new,
             is_classmethod: is_dunder_init_subclass,
+            is_async: def.is_async,
+            placeholder_body_kind,
             ..Default::default()
         };
         let mut found_class_property = false;

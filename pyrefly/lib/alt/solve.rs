@@ -4987,6 +4987,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             &x.def,
             x.def_index,
             x.stub_or_impl,
+            x.placeholder_body_kind,
             x.class_key.as_ref(),
             &x.decorators,
             &x.legacy_tparams,
