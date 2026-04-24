@@ -890,6 +890,11 @@ impl ReportArgs {
                 if Self::has_type_check_only_decorator(&fun.decorators, bindings) {
                     continue;
                 }
+                // Skip @no_type_check decorated functions — their bodies are
+                // not analyzed, so coverage metrics are meaningless.
+                if Self::has_no_type_check_decorator(&fun.decorators, bindings) {
+                    continue;
+                }
                 // Skip methods of @type_check_only decorated classes.
                 if fun.class_key.is_some_and(|ck| tco_classes.contains(&ck)) {
                     continue;
@@ -1234,13 +1239,13 @@ impl ReportArgs {
         )
     }
 
-    /// Check whether a decorator expression matches `type_check_only`.
-    /// Handles `@type_check_only`, `@typing.type_check_only`, and call forms.
-    fn is_type_check_only_expr(expr: &Expr) -> bool {
+    /// Check whether a decorator expression matches the given name.
+    /// Handles `@name`, `@module.name`, and call forms like `@name(...)`.
+    fn is_decorator_named(expr: &Expr, name: &str) -> bool {
         match expr {
-            Expr::Name(name) => name.id.as_str() == "type_check_only",
-            Expr::Attribute(attr) => attr.attr.as_str() == "type_check_only",
-            Expr::Call(call) => Self::is_type_check_only_expr(&call.func),
+            Expr::Name(n) => n.id.as_str() == name,
+            Expr::Attribute(attr) => attr.attr.as_str() == name,
+            Expr::Call(call) => Self::is_decorator_named(&call.func, name),
             _ => false,
         }
     }
@@ -1250,9 +1255,23 @@ impl ReportArgs {
         decorators: &[Idx<KeyDecorator>],
         bindings: &Bindings,
     ) -> bool {
+        Self::has_decorator_named(decorators, bindings, "type_check_only")
+    }
+
+    /// Check if any decorator in the list is `@no_type_check`.
+    fn has_no_type_check_decorator(decorators: &[Idx<KeyDecorator>], bindings: &Bindings) -> bool {
+        Self::has_decorator_named(decorators, bindings, "no_type_check")
+    }
+
+    /// Check if any decorator in the list matches the given name.
+    fn has_decorator_named(
+        decorators: &[Idx<KeyDecorator>],
+        bindings: &Bindings,
+        name: &str,
+    ) -> bool {
         decorators.iter().any(|&dec_idx| {
             let decorator = bindings.get(dec_idx);
-            Self::is_type_check_only_expr(&decorator.expr)
+            Self::is_decorator_named(&decorator.expr, name)
         })
     }
 
@@ -2459,15 +2478,19 @@ mod tests {
         compare_snapshot("type_aliases.expected.json", &report);
     }
 
-    /// Regression test for panic when running `report` on @no_type_check decorated functions.
+    /// @no_type_check functions should be excluded from coverage reporting
+    /// entirely, since their bodies are not analyzed.
     #[test]
-    fn test_report_no_type_check_panic() {
+    fn test_report_no_type_check_excluded() {
         let code = r#"
 from typing import no_type_check
 
 @no_type_check
 def f(x: int):
     pass
+
+def g(x: int) -> int:
+    return x
 "#;
         let (state, handle_fn) = TestEnv::one("test", code)
             .with_default_require_level(Require::Everything)
@@ -2484,12 +2507,8 @@ def f(x: int):
         let functions =
             ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
 
+        // Only g should be reported; f is excluded due to @no_type_check.
         assert_eq!(functions.len(), 1);
-        assert_eq!(functions[0].name, "test.f");
-        assert_eq!(functions[0].parameters.len(), 1);
-        assert_eq!(functions[0].parameters[0].name, "x");
-        assert!(!functions[0].parameters[0].is_type_known);
-        assert_eq!(functions[0].slots.n_any, 1);
-        assert_eq!(functions[0].slots.n_untyped, 1);
+        assert_eq!(functions[0].name, "test.g");
     }
 }
