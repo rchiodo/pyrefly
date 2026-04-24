@@ -804,11 +804,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Option<EnumMetadata> {
         let is_django = is_django_choices_subclass(bases_with_metadata);
 
-        if let Some(metaclass) = metaclass
-            && self
-                .as_superclass(metaclass, self.stdlib.enum_meta().class_object())
+        let metaclass_is_enum = metaclass.is_some_and(|m| {
+            self.as_superclass(m, self.stdlib.enum_meta().class_object())
                 .is_some()
-        {
+        });
+        let base_is_enum = bases_with_metadata.iter().any(|(_, meta)| meta.is_enum());
+
+        if metaclass_is_enum || base_is_enum {
             // NOTE(grievejia): This may create potential cycle if metaclass is generic. Need to look into
             // whether it can be removed or not.
             if !self.get_class_tparams(cls).is_empty() {

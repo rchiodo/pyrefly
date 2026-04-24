@@ -1120,7 +1120,6 @@ def f() -> None:
 // TYPE_CHECKING stubs like equinox's Enumeration), members should still
 // be recognized as enum members, not plain values.
 testcase!(
-    bug = "Metaclass conflict with EnumMeta causes enum members to be typed as plain values instead of enum literals",
     test_enum_with_conflicting_metaclass,
     r#"
 from typing import assert_type, Literal, Self
@@ -1138,12 +1137,33 @@ class A(Base):
     x = "foo"
     y = "bar"
 
-assert_type(A.x, Literal[A.x])  # E: assert_type(str, Unknown) failed  # E: `A.x` is not a valid enum member
-assert_type(A.y, Literal[A.y])  # E: assert_type(str, Unknown) failed  # E: `A.y` is not a valid enum member
+assert_type(A.x, Literal[A.x])
+assert_type(A.y, Literal[A.y])
 
 def f() -> A:
-    return A.x  # E: Returned type `str` is not assignable to declared return type `A`
+    return A.x
 
-A.where(True, A.x, A.y)  # E: Argument `str` is not assignable to parameter `a` with type `A` in function `Base.where`  # E: Argument `str` is not assignable to parameter `b` with type `A` in function `Base.where`
+A.where(True, A.x, A.y)
+    "#,
+);
+
+testcase!(
+    test_enum_conflicting_metaclass_no_iter,
+    r#"
+from typing import reveal_type
+from enum import Enum
+
+class MyMeta(type):
+    pass
+
+class E(Enum, metaclass=MyMeta):  # E: Class `E` has metaclass `MyMeta` which is not a subclass of metaclass `EnumMeta` from base class `Enum`
+    A = 1
+    B = 2
+    C = 3
+
+reveal_type(E.A)  # E: revealed type: Literal[E.A]
+
+for x in E:  # E: Type `type[E]` is not iterable
+    reveal_type(x)  # E: revealed type: Unknown
     "#,
 );
