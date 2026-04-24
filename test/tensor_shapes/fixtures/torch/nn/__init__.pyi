@@ -1000,6 +1000,13 @@ class CTCLoss(Module):
 # Misc Modules
 # ==============================================================================
 
+class ParameterList[T](Module):
+    """Holds parameters in a list."""
+    def __init__(self, parameters: Iterable[T] | None = None) -> None: ...
+    def __getitem__(self, idx: int) -> T: ...
+    def __iter__(self) -> Iterator[T]: ...
+    def __len__(self) -> int: ...
+
 class Flatten(Module):
     """Flattens a contiguous range of dims.
 
@@ -1152,6 +1159,7 @@ __all__ = [
     "LSTMCell",
     "GRUCell",
     # Misc modules
+    "ParameterList",
     "Flatten",
     "Unflatten",
     "ReflectionPad2d",
