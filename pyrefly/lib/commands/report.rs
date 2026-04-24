@@ -33,6 +33,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use serde::Serialize;
+use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
@@ -1007,9 +1008,12 @@ impl ReportArgs {
                     } else if param.annotation.is_some() {
                         let annot_key =
                             KeyAnnotation::Annotation(ShortIdentifier::new(&param.name));
-                        let annot_idx = bindings.key_to_idx(&annot_key);
-                        answers
-                            .get_idx(annot_idx)
+                        // Use fallible lookup to handle @no_type_check functions gracefully.
+                        // The binding pass skips creating KeyAnnotation entries for parameters
+                        // of @no_type_check functions since their bodies are not analyzed.
+                        bindings
+                            .key_to_idx_hashed_opt(Hashed::new(&annot_key))
+                            .and_then(|annot_idx| answers.get_idx(annot_idx))
                             .and_then(|awt| awt.annotation.ty.as_ref().map(Self::is_type_known))
                             .unwrap_or(false)
                     } else {
@@ -2455,13 +2459,8 @@ mod tests {
         compare_snapshot("type_aliases.expected.json", &report);
     }
 
-    /// Regression test: `report` panics on @no_type_check decorated functions.
-    ///
-    /// The binding pass skips creating KeyAnnotation entries for parameters of
-    /// @no_type_check functions (since their bodies are not analyzed), but
-    /// `parse_functions` looks them up unconditionally via `key_to_idx`.
+    /// Regression test for panic when running `report` on @no_type_check decorated functions.
     #[test]
-    #[should_panic(expected = "Internal error: key not found")]
     fn test_report_no_type_check_panic() {
         let code = r#"
 from typing import no_type_check
@@ -2482,6 +2481,15 @@ def f(x: int):
         let exports = transaction.get_exports(&handle);
 
         let tco_classes = ReportArgs::collect_type_check_only_classes(&bindings);
-        ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+        let functions =
+            ReportArgs::parse_functions(&module, &bindings, &answers, &exports, &tco_classes);
+
+        assert_eq!(functions.len(), 1);
+        assert_eq!(functions[0].name, "test.f");
+        assert_eq!(functions[0].parameters.len(), 1);
+        assert_eq!(functions[0].parameters[0].name, "x");
+        assert!(!functions[0].parameters[0].is_type_known);
+        assert_eq!(functions[0].slots.n_any, 1);
+        assert_eq!(functions[0].slots.n_untyped, 1);
     }
 }
