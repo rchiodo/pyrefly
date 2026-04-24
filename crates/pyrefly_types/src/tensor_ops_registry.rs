@@ -476,6 +476,12 @@ impl TensorOpsRegistry {
         );
         registry.register_init_forward(
             &fn_lookup,
+            "torch.nn.GRU",
+            "nn_gru_forward_ir",
+            &["input_size", "hidden_size", "num_layers", "bidirectional"],
+        );
+        registry.register_init_forward(
+            &fn_lookup,
             "torch.nn.LSTMCell",
             "nn_lstmcell_forward_ir",
             &["input_size", "hidden_size"],
@@ -1014,6 +1020,12 @@ def nn_lstm_forward_ir(input: Tensor, input_size: symint, hidden_size: symint, n
     h_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
     c_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
     return [output, h_n, c_n]
+
+def nn_gru_forward_ir(input: Tensor, input_size: symint, hidden_size: symint, num_layers: symint = 1, bidirectional: bool = False) -> [Tensor, Tensor]:
+    nd = 2 if bidirectional else 1
+    output = Tensor(shape=[input.shape[0], input.shape[1], hidden_size * nd])
+    h_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
+    return [output, h_n]
 
 def nn_lstmcell_forward_ir(input: Tensor, input_size: symint, hidden_size: symint) -> [Tensor, Tensor]:
     h = Tensor(shape=[input.shape[0], hidden_size])

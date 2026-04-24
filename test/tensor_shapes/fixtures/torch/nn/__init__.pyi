@@ -845,6 +845,35 @@ class LSTMCell(Module):
         self, input: Tensor, hx: tuple[Tensor, Tensor] | None = None
     ) -> tuple[Tensor, Tensor]: ...
 
+class GRU(Module):
+    """Gated Recurrent Unit RNN.
+
+    Input:  Tensor[B, T, InputSize]  (batch_first=True assumed)
+    Output: (Tensor[B, T, HiddenSize * ND],
+             Tensor[NL * ND, B, HiddenSize])
+
+    ND (num_directions) = 1 for unidirectional, 2 for bidirectional.
+
+    Shape inference via DSL + NNModule init capture.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_layers: int = 1,
+        bias: bool = True,
+        batch_first: bool = False,
+        dropout: float = 0.0,
+        bidirectional: bool = False,
+    ) -> None: ...
+    def flatten_parameters(self) -> None:
+        """Reset parameter data pointer for CUDA contiguous memory. No-op on CPU."""
+        ...
+    def forward(
+        self, input: Tensor, hx: Tensor | None = None
+    ) -> tuple[Tensor, Tensor]: ...
+
 class GRUCell(Module):
     """Gated Recurrent Unit cell.
 
@@ -1175,6 +1204,7 @@ __all__ = [
     # RNN cells
     "LSTM",
     "LSTMCell",
+    "GRU",
     "GRUCell",
     # Misc modules
     "ParameterList",
