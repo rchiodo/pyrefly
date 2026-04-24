@@ -1291,7 +1291,6 @@ class B(A):
 // `test_raise_not_implemented_infers_never_but_allows_override` above.
 
 testcase!(
-    bug = "FP: parent property body raises NotImplementedError, child override flagged",
     test_property_raise_not_implemented_allows_override,
     r#"
 class A:
@@ -1301,13 +1300,12 @@ class A:
 
 class B(A):
     @property
-    def foo(self):  # E: overrides parent class `A` in an inconsistent manner
+    def foo(self):
         return "azure"
     "#,
 );
 
 testcase!(
-    bug = "FP: parent async def body raises NotImplementedError, child override flagged",
     test_async_def_raise_not_implemented_allows_override,
     r#"
 class A:
@@ -1315,13 +1313,12 @@ class A:
         raise NotImplementedError()
 
 class B(A):
-    async def aload(self):  # E: overrides parent class `A` in an inconsistent manner
+    async def aload(self):
         return {}
     "#,
 );
 
 testcase!(
-    bug = "FP: parent property setter body raises NotImplementedError, child override flagged",
     test_property_setter_raise_not_implemented_allows_override,
     r#"
 class A:
@@ -1334,7 +1331,7 @@ class A:
 
 class B(A):
     @property
-    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+    def foo(self) -> int:
         return 1
     @foo.setter
     def foo(self, value: int):
@@ -1343,7 +1340,6 @@ class B(A):
 );
 
 testcase!(
-    bug = "FP: parent cached_property body raises NotImplementedError, child override flagged",
     test_cached_property_raise_not_implemented_allows_override,
     r#"
 from functools import cached_property
@@ -1355,13 +1351,12 @@ class A:
 
 class B(A):
     @cached_property
-    def dtype(self):  # E: overrides parent class `A` in an inconsistent manner
+    def dtype(self):
         return "float64"
     "#,
 );
 
 testcase!(
-    bug = "FP: parent property explicitly returns Never, child override flagged",
     test_property_explicit_never_annotation_allows_override,
     r#"
 from typing import Never
@@ -1373,13 +1368,12 @@ class A:
 
 class B(A):
     @property
-    def foo(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+    def foo(self) -> int:
         return 1
     "#,
 );
 
 testcase!(
-    bug = "FP: parent async def explicitly returns Never, child override flagged",
     test_async_def_explicit_never_annotation_allows_override,
     r#"
 from typing import Never
@@ -1389,7 +1383,7 @@ class A:
         raise NotImplementedError()
 
 class B(A):
-    async def aload(self) -> int:  # E: overrides parent class `A` in an inconsistent manner
+    async def aload(self) -> int:
         return 1
     "#,
 );

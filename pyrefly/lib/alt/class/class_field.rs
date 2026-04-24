@@ -22,6 +22,7 @@ use pyrefly_types::callable::FuncId;
 use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::callable::ParamList;
 use pyrefly_types::callable::Params;
+use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::heap::TypeHeap;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::quantified::QuantifiedKind;
@@ -3274,21 +3275,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // Substitute `Self` with derived class to support contravariant occurrences of `Self`
                     &Instance::of_protocol(parent, self.instantiate(cls)),
                 );
-                if !want_class_field.has_explicit_annotation() {
-                    match &mut attr {
-                        ClassAttribute::ReadOnly(ty, _) | ClassAttribute::ReadWrite(ty)
-                            if ty.has_toplevel_func_metadata() =>
-                        {
-                            // If parent return type was Never (for example a method that only raises),
-                            // skip override consistency checks on the return type so we don't produce noisy bad-override diagnostics.
-                            ty.transform_toplevel_callable(&mut |callable: &mut Callable| {
-                                if callable.ret.is_never() {
-                                    callable.ret = Type::any_implicit();
-                                }
-                            });
-                        }
-                        _ => {}
+                // Relax the parent return type for the override-consistency check when the parent
+                // function's body is a `raise NotImplementedError(...)` placeholder. For sync
+                // functions whose return inferred (or annotated) as `Never`, rewrite the return to
+                // `Any`. For `async def` placeholders, the return is wrapped as
+                // `Coroutine[_, _, Never]`; rewrite the inner `Never` to `Any` so the same policy
+                // applies to async forms. We do *not* relax `return NotImplemented` (different
+                // semantics — that's the dunder-protocol "defer to other operand" signal), and we
+                // do *not* relax sync `def -> Coroutine[_, _, Never]` (the user explicitly typed
+                // the coroutine return; `is_async` distinguishes this from a real async def).
+                let relax_ty = |ty: &mut Type| {
+                    let (placeholder_kind, is_async) = ty.visit_toplevel_func_metadata(&|meta| {
+                        (meta.flags.placeholder_body_kind, meta.flags.is_async)
+                    });
+                    if placeholder_kind != Some(PlaceholderBodyKind::RaiseNotImplementedError) {
+                        return;
                     }
+                    let coroutine_object = self.stdlib.coroutine_object();
+                    ty.transform_toplevel_callable(&mut |callable: &mut Callable| {
+                        if callable.ret.is_never() {
+                            callable.ret = Type::any_implicit();
+                        } else if is_async
+                            && let Type::ClassType(class_type) = &mut callable.ret
+                            && class_type.class_object() == coroutine_object
+                            && class_type.targs().as_slice().len() == 3
+                            && class_type.targs().as_slice()[2].is_never()
+                        {
+                            class_type.targs_mut().as_mut()[2] = Type::any_implicit();
+                        }
+                    });
+                };
+                match &mut attr {
+                    ClassAttribute::ReadOnly(ty, _) | ClassAttribute::ReadWrite(ty)
+                        if ty.has_toplevel_func_metadata() =>
+                    {
+                        relax_ty(ty);
+                    }
+                    ClassAttribute::Property(getter, setter, _) => {
+                        relax_ty(getter);
+                        if let Some(setter) = setter {
+                            relax_ty(setter);
+                        }
+                    }
+                    _ => {}
                 }
                 attr
             };
