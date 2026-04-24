@@ -602,10 +602,13 @@ ERROR Cannot broadcast tensor shapes: Cannot broadcast concrete dims with variad
 244 |     return x + y  # ERROR: Cannot broadcast concrete dims with variadic shape
     |            ^^^^^
     |
-ERROR Cannot broadcast tensor shapes: Cannot broadcast variadic shapes: incompatible middles *Ts vs *Us [unsupported-operation]
+ERROR Returned type `Tensor[*tuple[Unknown, ...], 3]` is not assignable to declared return type `Tensor[*Ts, 3]` [bad-return]
    --> *test_tensor_arithmetic.py:278:12 (glob)
     |
-278 |     return x + y  # ERROR: incompatible middles
+276 | ) -> Tensor[*Ts, 3]:
+    |      -------------- declared return type
+277 |     """ERROR: Different TypeVarTuples degrade to shapeless batch dims"""
+278 |     return x + y  # ERROR: result is Tensor[*tuple[Unknown, ...], 3], not Tensor[*Ts, 3]
     |            ^^^^^
     |
 [1]

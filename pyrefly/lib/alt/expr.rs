@@ -2753,6 +2753,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::TypeVarTuple(_) => Some(ty.clone()),
             Type::Quantified(q) if q.kind() == QuantifiedKind::TypeVarTuple => Some(ty.clone()),
             Type::Unpack(inner) => Self::unwrap_type_var_tuple(inner),
+            // Allow unbounded tuples like tuple[Any, ...] as variadic middles.
+            // These represent "unknown number of batch dims" and are already
+            // handled by the broadcast and shape-tracking logic.
+            Type::Tuple(Tuple::Unbounded(_)) => Some(ty.clone()),
             _ => None,
         }
     }
