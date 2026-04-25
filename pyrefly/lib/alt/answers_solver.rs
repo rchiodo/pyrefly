@@ -27,8 +27,11 @@ use pyrefly_graph::index::Idx;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_types::heap::TypeHeap;
+use pyrefly_types::quantified::AnchorIndex;
 use pyrefly_types::quantified::Quantified;
+use pyrefly_types::quantified::QuantifiedIdentity;
 use pyrefly_types::quantified::QuantifiedKind;
+use pyrefly_types::quantified::QuantifiedOrigin;
 use pyrefly_types::type_alias::TypeAlias;
 use pyrefly_types::type_alias::TypeAliasData;
 use pyrefly_types::type_var::PreInferenceVariance;
@@ -1762,19 +1765,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn get_or_create_jaxtyping_dim(&self, name: Name, kind: QuantifiedKind) -> Quantified {
         let mut dims = self.jaxtyping_dims.borrow_mut();
         dims.entry(name.clone())
-            .or_insert_with(|| match kind {
-                QuantifiedKind::TypeVar => Quantified::type_var(
-                    name,
-                    self.uniques.fresh(),
-                    None,
-                    Restriction::Unrestricted,
-                    PreInferenceVariance::Invariant,
-                ),
-                QuantifiedKind::TypeVarTuple => {
-                    Quantified::type_var_tuple(name, self.uniques.fresh(), None)
-                }
-                QuantifiedKind::ParamSpec => {
-                    unreachable!("jaxtyping dimensions cannot be ParamSpec")
+            .or_insert_with(|| {
+                // Jaxtyping dims have no real source location. Use a hash of the name
+                // as ordinal to distinguish different dims in the same module.
+                // The slot discriminates from other synthetic quantifieds at the same anchor.
+                let ordinal = {
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    name.hash(&mut h);
+                    h.finish() as u32
+                };
+                let identity = QuantifiedIdentity::new(
+                    self.module().name(),
+                    AnchorIndex::new(TextRange::default(), ordinal),
+                    QuantifiedOrigin::SyntheticCallableResidual,
+                );
+                match kind {
+                    QuantifiedKind::TypeVar => Quantified::type_var(
+                        name,
+                        identity,
+                        None,
+                        Restriction::Unrestricted,
+                        PreInferenceVariance::Invariant,
+                    ),
+                    QuantifiedKind::TypeVarTuple => {
+                        Quantified::type_var_tuple(name, identity, None)
+                    }
+                    QuantifiedKind::ParamSpec => {
+                        unreachable!("jaxtyping dimensions cannot be ParamSpec")
+                    }
                 }
             })
             .clone()

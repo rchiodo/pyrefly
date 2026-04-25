@@ -143,8 +143,11 @@ use crate::types::display::TypeDisplayContext;
 use crate::types::literal::Lit;
 use crate::types::module::ModuleType;
 use crate::types::param_spec::ParamSpec;
+use crate::types::quantified::AnchorIndex;
 use crate::types::quantified::Quantified;
+use crate::types::quantified::QuantifiedIdentity;
 use crate::types::quantified::QuantifiedKind;
+use crate::types::quantified::QuantifiedOrigin;
 use crate::types::special_form::SpecialForm;
 use crate::types::tuple::Tuple;
 use crate::types::type_alias::TypeAlias;
@@ -246,13 +249,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         binding: &BindingLegacyTypeParam,
     ) -> Arc<LegacyTypeParameterLookup> {
-        // Use the binding's memory address as a globally-stable cache key.
-        // Bindings live in Arc<Bindings> shared across all threads, so every
-        // thread sees the same address for the same binding. The global cache
-        // in UniqueFactory ensures all threads produce the same Unique for a
-        // given binding, preventing Quantified identity mismatches when
-        // different threads commit different SCC members.
-        let cache_key = binding as *const BindingLegacyTypeParam as usize;
         let maybe_parameter = match binding {
             BindingLegacyTypeParam::ParamKeyed(k) => self.get_idx(*k),
             BindingLegacyTypeParam::ModuleKeyed(k, attr) => {
@@ -269,25 +265,45 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .into()
             }
         };
+        // NOTE(commit-1-placeholder): For legacy type parameters, we use the TypeVar's own
+        // declaration range as anchor and ordinal=0. This is a placeholder — commit 2 will
+        // replace this with a ScopedQuantifiedFactory that anchors to the *scope owner's*
+        // range and assigns per-scope ordinals, which is required for correctness when the
+        // same TypeVar is reused across multiple scopes. For now the identity is still
+        // more deterministic than Unique (it is anchored to a source location), but it
+        // will collapse two scopes that reuse the same TypeVar. Commit 2 fixes that.
+        let module = self.module().name();
         match maybe_parameter.ty() {
             Type::TypeVar(x) => {
-                let unique = self.uniques.get_or_fresh(cache_key);
-                let q = Quantified::from_type_var(x, unique);
+                let identity = QuantifiedIdentity::new(
+                    module,
+                    AnchorIndex::first(x.qname().range()),
+                    QuantifiedOrigin::ScopedLegacy,
+                );
+                let q = Quantified::from_type_var(x, identity);
                 Arc::new(LegacyTypeParameterLookup::Parameter(q))
             }
             Type::TypeVarTuple(x) => {
-                let unique = self.uniques.get_or_fresh(cache_key);
+                let identity = QuantifiedIdentity::new(
+                    module,
+                    AnchorIndex::first(x.qname().range()),
+                    QuantifiedOrigin::ScopedLegacy,
+                );
                 let q = Quantified::type_var_tuple(
                     x.qname().id().clone(),
-                    unique,
+                    identity,
                     x.default().cloned(),
                 );
                 Arc::new(LegacyTypeParameterLookup::Parameter(q))
             }
             Type::ParamSpec(x) => {
-                let unique = self.uniques.get_or_fresh(cache_key);
+                let identity = QuantifiedIdentity::new(
+                    module,
+                    AnchorIndex::first(x.qname().range()),
+                    QuantifiedOrigin::ScopedLegacy,
+                );
                 let q =
-                    Quantified::param_spec(x.qname().id().clone(), unique, x.default().cloned());
+                    Quantified::param_spec(x.qname().id().clone(), identity, x.default().cloned());
                 Arc::new(LegacyTypeParameterLookup::Parameter(q))
             }
             ty => Arc::new(LegacyTypeParameterLookup::NotParameter(ty.clone())),
@@ -973,7 +989,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                         Entry::Vacant(e) => {
-                            let q = Quantified::from_type_var(&ty_var, self.uniques.fresh());
+                            let identity = QuantifiedIdentity::new(
+                                self.module().name(),
+                                AnchorIndex::first(ty_var.qname().range()),
+                                QuantifiedOrigin::ScopedLegacy,
+                            );
+                            let q = Quantified::from_type_var(&ty_var, identity);
                             e.insert(q.clone());
                             tparams.push(q.clone());
                         }
@@ -990,9 +1011,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                         Entry::Vacant(e) => {
+                            let identity = QuantifiedIdentity::new(
+                                self.module().name(),
+                                AnchorIndex::first(ty_var_tuple.qname().range()),
+                                QuantifiedOrigin::ScopedLegacy,
+                            );
                             let q = Quantified::type_var_tuple(
                                 ty_var_tuple.qname().id().clone(),
-                                self.uniques.fresh(),
+                                identity,
                                 ty_var_tuple.default().cloned(),
                             );
                             e.insert(q.clone());
@@ -1011,9 +1037,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                         Entry::Vacant(e) => {
+                            let identity = QuantifiedIdentity::new(
+                                self.module().name(),
+                                AnchorIndex::first(param_spec.qname().range()),
+                                QuantifiedOrigin::ScopedLegacy,
+                            );
                             let q = Quantified::param_spec(
                                 param_spec.qname().id().clone(),
-                                self.uniques.fresh(),
+                                identity,
                                 param_spec.default().cloned(),
                             );
                             e.insert(q.clone());
@@ -1142,7 +1173,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let q = match seen_type_vars.entry(ty_var.dupe()) {
                     Entry::Occupied(e) => e.get().clone(),
                     Entry::Vacant(e) => {
-                        let q = Quantified::from_type_var(ty_var, self.uniques.fresh());
+                        let identity = QuantifiedIdentity::new(
+                            self.module().name(),
+                            AnchorIndex::first(ty_var.qname().range()),
+                            QuantifiedOrigin::ScopedLegacy,
+                        );
+                        let q = Quantified::from_type_var(ty_var, identity);
                         e.insert(q.clone());
                         tparams.push((ty_var.qname().range(), q.clone()));
                         q
@@ -1154,9 +1190,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let q = match seen_type_var_tuples.entry(ty_var_tuple.dupe()) {
                     Entry::Occupied(e) => e.get().clone(),
                     Entry::Vacant(e) => {
+                        let identity = QuantifiedIdentity::new(
+                            self.module().name(),
+                            AnchorIndex::first(ty_var_tuple.qname().range()),
+                            QuantifiedOrigin::ScopedLegacy,
+                        );
                         let q = Quantified::type_var_tuple(
                             ty_var_tuple.qname().id().clone(),
-                            self.uniques.fresh(),
+                            identity,
                             ty_var_tuple.default().cloned(),
                         );
                         e.insert(q.clone());
@@ -1170,9 +1211,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let q = match seen_param_specs.entry(param_spec.dupe()) {
                     Entry::Occupied(e) => e.get().clone(),
                     Entry::Vacant(e) => {
+                        let identity = QuantifiedIdentity::new(
+                            self.module().name(),
+                            AnchorIndex::first(param_spec.qname().range()),
+                            QuantifiedOrigin::ScopedLegacy,
+                        );
                         let q = Quantified::param_spec(
                             param_spec.qname().id().clone(),
-                            self.uniques.fresh(),
+                            identity,
                             param_spec.default().cloned(),
                         );
                         e.insert(q.clone());
@@ -1805,7 +1851,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ));
         }
         let q = Quantified::new(
-            tp.unique,
+            tp.identity.clone(),
             tp.name.clone(),
             tp.kind,
             default_ty,
@@ -4544,13 +4590,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut seen_type_vars = SmallMap::new();
         let mut tparams = Vec::new();
         let heap = self.heap;
+        let module = self.module().name();
         callable.visit_mut(&mut |ty| {
             ty.transform_raw_legacy_type_variables(&mut |ty| {
                 if let Type::TypeVar(tv) = ty {
                     let q = seen_type_vars
                         .entry(tv.dupe())
                         .or_insert_with(|| {
-                            let q = Quantified::from_type_var(tv, self.uniques.fresh());
+                            let identity = QuantifiedIdentity::new(
+                                module,
+                                AnchorIndex::first(tv.qname().range()),
+                                QuantifiedOrigin::ScopedLegacy,
+                            );
+                            let q = Quantified::from_type_var(tv, identity);
                             tparams.push(q.clone());
                             q
                         })

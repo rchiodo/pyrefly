@@ -105,7 +105,10 @@ use crate::table;
 use crate::table_for_each;
 use crate::table_try_for_each;
 use crate::types::globals::ImplicitGlobal;
+use crate::types::quantified::AnchorIndex;
+use crate::types::quantified::QuantifiedIdentity;
 use crate::types::quantified::QuantifiedKind;
+use crate::types::quantified::QuantifiedOrigin;
 use crate::types::types::AnyStyle;
 
 /// The result of looking up a name. Similar to `NameReadInfo`, but
@@ -250,6 +253,10 @@ pub struct BindingsBuilder<'a> {
     await_context: AwaitContext,
     errors: &'a ErrorCollector,
     solver: &'a Solver,
+    #[expect(
+        dead_code,
+        reason = "UniqueFactory removed from Quantified identity in commit 1; field removal follows in commit 2"
+    )]
     uniques: &'a UniqueFactory,
     pub has_docstring: bool,
     pub scopes: Scopes,
@@ -1713,11 +1720,18 @@ impl<'a> BindingsBuilder<'a> {
                 }
             };
             self.scopes.add_parameter_to_current_static(&name, None);
+            // PEP 695 type parameters use the parameter's own definition range as anchor,
+            // which is unique within the module by construction (no two syntax nodes share a range).
+            let identity = QuantifiedIdentity::new(
+                self.module_info.name(),
+                AnchorIndex::first(name.range),
+                QuantifiedOrigin::Pep695,
+            );
             self.bind_definition(
                 &name,
                 Binding::TypeParameter(Box::new(TypeParameter {
                     name: name.id.clone(),
-                    unique: self.uniques.fresh(),
+                    identity,
                     kind,
                     default,
                     bound,

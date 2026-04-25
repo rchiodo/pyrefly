@@ -86,7 +86,10 @@ use crate::types::display::LspDisplayMode;
 use crate::types::display::TypeDisplayContext;
 use crate::types::keywords::DataclassFieldKeywords;
 use crate::types::literal::Lit;
+use crate::types::quantified::AnchorIndex;
 use crate::types::quantified::Quantified;
+use crate::types::quantified::QuantifiedIdentity;
+use crate::types::quantified::QuantifiedOrigin;
 use crate::types::read_only::ReadOnlyReason;
 use crate::types::stdlib::Stdlib;
 use crate::types::typed_dict::TypedDict;
@@ -2591,10 +2594,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Creates a Quantified for a class's "self" type.
-    fn get_self_quantified(&self, class_name: &Name, instance_type: Type) -> Quantified {
+    fn get_self_quantified(&self, class: &Class, instance_type: Type) -> Quantified {
+        let identity = QuantifiedIdentity::new(
+            self.module().name(),
+            AnchorIndex::first(class.range()),
+            QuantifiedOrigin::SyntheticSelf,
+        );
         Quantified::new(
-            self.uniques.fresh(),
-            Name::new(format!("Self@{class_name}")),
+            identity,
+            Name::new(format!("Self@{}", class.name())),
             QuantifiedKind::TypeVar,
             None,
             Restriction::Bound(instance_type),
@@ -2665,7 +2673,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // special case because it's not legal to use `Self` in other static methods.
         let self_quantified =
             if field_name == &dunder::NEW && matches!(instance.kind, InstanceKind::ClassType) {
-                Some(self.get_self_quantified(instance.class.name(), instance.to_type(self.heap)))
+                Some(self.get_self_quantified(instance.class, instance.to_type(self.heap)))
             } else {
                 None
             };
@@ -2793,10 +2801,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let self_quantified = if field_name == &dunder::NEW
             && let ClassBase::ClassDef(cls) = cls
         {
-            Some(self.get_self_quantified(
-                cls.class_object().name(),
-                self.heap.mk_class_type(cls.clone()),
-            ))
+            Some(self.get_self_quantified(cls.class_object(), self.heap.mk_class_type(cls.clone())))
         } else {
             None
         };

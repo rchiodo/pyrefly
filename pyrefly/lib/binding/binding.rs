@@ -30,7 +30,6 @@ use pyrefly_util::assert_words;
 use pyrefly_util::display::DisplayWith;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::display::intersperse_iter;
-use pyrefly_util::uniques::Unique;
 use pyrefly_util::visit::VisitMut;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprAttribute;
@@ -81,6 +80,7 @@ use crate::types::class::Class;
 use crate::types::class::ClassDefIndex;
 use crate::types::equality::TypeEq;
 use crate::types::globals::ImplicitGlobal;
+use crate::types::quantified::QuantifiedIdentity;
 use crate::types::quantified::QuantifiedKind;
 use crate::types::stdlib::Stdlib;
 use crate::types::type_info::JoinStyle;
@@ -1918,7 +1918,7 @@ pub enum AnnotationStyle {
 #[derive(Clone, Debug)]
 pub struct TypeParameter {
     pub name: Name,
-    pub unique: Unique,
+    pub identity: QuantifiedIdentity,
     pub kind: QuantifiedKind,
     pub bound: Option<Expr>,
     pub default: Option<Expr>,
@@ -2284,7 +2284,7 @@ impl DisplayWith<Bindings> for Binding {
             Self::Any(style) => write!(f, "Any({style:?})"),
             Self::Global(g) => write!(f, "Global({})", g.name()),
             Self::TypeParameter(tp) => {
-                write!(f, "TypeParameter({}, {}, ..)", tp.unique, tp.kind)
+                write!(f, "TypeParameter({}, {}, ..)", tp.identity, tp.kind)
             }
             Self::PossibleLegacyTParam(k, _) => {
                 write!(f, "PossibleLegacyTParam({})", ctx.display(*k))

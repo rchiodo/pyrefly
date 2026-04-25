@@ -1271,10 +1271,11 @@ pub fn unexpected_keyword(error: &dyn Fn(String), func: &str, keyword: &Keyword)
 
 #[cfg(test)]
 mod tests {
-    use pyrefly_util::uniques::UniqueFactory;
+    use pyrefly_python::module_name::ModuleName;
     use pyrefly_util::visit::Visit;
     use pyrefly_util::visit::VisitMut;
     use ruff_python_ast::name::Name;
+    use ruff_text_size::TextRange;
 
     use crate::callable::Callable;
     use crate::callable::DefaultValue;
@@ -1282,8 +1283,11 @@ mod tests {
     use crate::callable::ParamList;
     use crate::callable::PrefixParam;
     use crate::callable::Required;
+    use crate::quantified::AnchorIndex;
     use crate::quantified::Quantified;
+    use crate::quantified::QuantifiedIdentity;
     use crate::quantified::QuantifiedKind;
+    use crate::quantified::QuantifiedOrigin;
     use crate::type_var::PreInferenceVariance;
     use crate::type_var::Restriction;
     use crate::types::Type;
@@ -1420,9 +1424,12 @@ mod tests {
 
     #[test]
     fn test_default_value_visit_delegates_to_ty() {
-        let uniques = UniqueFactory::new();
         let q = Quantified::new(
-            uniques.fresh(),
+            QuantifiedIdentity::new(
+                ModuleName::from_str("__test__"),
+                AnchorIndex::first(TextRange::default()),
+                QuantifiedOrigin::Pep695,
+            ),
             Name::new("T"),
             QuantifiedKind::TypeVar,
             None,
@@ -1440,9 +1447,12 @@ mod tests {
 
     #[test]
     fn test_default_value_visit_mut_delegates_to_ty() {
-        let uniques = UniqueFactory::new();
         let q = Quantified::new(
-            uniques.fresh(),
+            QuantifiedIdentity::new(
+                ModuleName::from_str("__test__"),
+                AnchorIndex::new(TextRange::default(), 1),
+                QuantifiedOrigin::Pep695,
+            ),
             Name::new("T"),
             QuantifiedKind::TypeVar,
             None,
