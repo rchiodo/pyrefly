@@ -452,4 +452,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
     }
+
+    pub fn decompose_hint<'b, D>(
+        &self,
+        hint: HintRef<'_, 'b>,
+        decompose: impl Fn(&'b Type) -> Option<D>,
+    ) -> Vec<D> {
+        hint.types()
+            .iter()
+            .filter_map(|hint| {
+                // Decomposing a hint should not have any side effects.
+                let snapshot = self
+                    .solver()
+                    .snapshot_vars(&hint.collect_maybe_placeholder_vars());
+                let ret = decompose(hint);
+                self.solver().restore_vars(snapshot);
+                ret
+            })
+            .collect()
+    }
 }
