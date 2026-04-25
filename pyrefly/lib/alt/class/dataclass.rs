@@ -617,6 +617,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         alias: &mut Option<Name>,
         converter_param: &mut Option<Type>,
     ) {
+        // Class-based field specifiers (e.g. `field_specifiers=(CustomField,)`) need to be
+        // resolved to their constructor callable so that we can read keyword defaults from
+        // `__init__`. This mirrors how Pyright handles `field_specifiers` per PEP 681.
+        let constructor_callable = self.constructor_to_callable_distributed(func);
+        let func = constructor_callable.as_ref().unwrap_or(func);
         let sigs = func.callable_signatures();
         let sig = if sigs.len() == 1 {
             sigs[0].clone()
