@@ -74,7 +74,6 @@ impl ConfigOptionMigrater for ErrorCodes {
         // The PyrightConfig struct already has a method to convert these to an ErrorDisplayConfig
         let error_config = pyright_cfg
             .errors
-            .clone()
             .to_config()
             .ok_or_else(|| anyhow::anyhow!("No error settings found in pyright config"))?;
 
