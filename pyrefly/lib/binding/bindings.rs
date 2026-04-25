@@ -28,7 +28,6 @@ use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_types::type_info::JoinStyle;
 use pyrefly_util::display::DisplayWithCtx;
 use pyrefly_util::gas::Gas;
-use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ExprAttribute;
 use ruff_python_ast::Identifier;
@@ -253,11 +252,6 @@ pub struct BindingsBuilder<'a> {
     await_context: AwaitContext,
     errors: &'a ErrorCollector,
     solver: &'a Solver,
-    #[expect(
-        dead_code,
-        reason = "UniqueFactory removed from Quantified identity in commit 1; field removal follows in commit 2"
-    )]
-    uniques: &'a UniqueFactory,
     pub has_docstring: bool,
     pub scopes: Scopes,
     table: BindingTable,
@@ -529,7 +523,6 @@ impl Bindings {
         lookup: &dyn LookupExport,
         sys_info: SysInfo,
         errors: &ErrorCollector,
-        uniques: &UniqueFactory,
         enable_trace: bool,
         check_unannotated_defs: bool,
         analyze_unannotated_for_ide: bool,
@@ -541,7 +534,6 @@ impl Bindings {
             sys_info,
             errors,
             solver,
-            uniques,
             metadata: BindingsMetadata::new(),
             func_count: 0,
             type_alias_count: 0,

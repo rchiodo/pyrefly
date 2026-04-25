@@ -496,10 +496,13 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyLegacyTypeParam {
     fn solve(
         answers: &AnswersSolver<Ans>,
         binding: &BindingLegacyTypeParam,
-        _range: TextRange,
+        range: TextRange,
         _errors: &ErrorCollector,
     ) -> Arc<LegacyTypeParameterLookup> {
-        answers.solve_legacy_tparam(binding)
+        // `range` is the KeyLegacyTypeParam's own range (first occurrence of the TypeVar
+        // name in this scope), which is unique per (scope, TypeVar) pair and serves as
+        // the scope anchor for deterministic Quantified identity.
+        answers.solve_legacy_tparam(binding, range)
     }
 
     fn promote_recursive(heap: &TypeHeap, _: Var) -> Self::Answer {

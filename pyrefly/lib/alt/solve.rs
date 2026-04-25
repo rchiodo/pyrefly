@@ -101,6 +101,7 @@ use crate::binding::binding::KeyExport;
 use crate::binding::binding::KeyLegacyTypeParam;
 use crate::binding::binding::KeyTypeAlias;
 use crate::binding::binding::KeyUndecoratedFunction;
+use crate::binding::binding::Keyed;
 use crate::binding::binding::LastStmt;
 use crate::binding::binding::LinkedKey;
 use crate::binding::binding::NoneIfRecursive;
@@ -245,9 +246,18 @@ pub enum Iterable {
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
+    /// Solve a `BindingLegacyTypeParam`, producing a `LegacyTypeParameterLookup` that tells the
+    /// caller whether the name is a type parameter and, if so, which `Quantified` to use.
+    ///
+    /// The `scope_anchor` is the range of the `KeyLegacyTypeParam` key itself — the first
+    /// occurrence of the TypeVar name in this scope. It is unique per (scope, TypeVar) pair:
+    /// two functions that both use an imported `T` will have different first-occurrence ranges,
+    /// so their `Quantified`s will have different identities even though they share the same
+    /// module-level `TypeVar` declaration.
     pub fn solve_legacy_tparam(
         &self,
         binding: &BindingLegacyTypeParam,
+        scope_anchor: TextRange,
     ) -> Arc<LegacyTypeParameterLookup> {
         let maybe_parameter = match binding {
             BindingLegacyTypeParam::ParamKeyed(k) => self.get_idx(*k),
@@ -265,19 +275,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .into()
             }
         };
-        // NOTE(commit-1-placeholder): For legacy type parameters, we use the TypeVar's own
-        // declaration range as anchor and ordinal=0. This is a placeholder — commit 2 will
-        // replace this with a ScopedQuantifiedFactory that anchors to the *scope owner's*
-        // range and assigns per-scope ordinals, which is required for correctness when the
-        // same TypeVar is reused across multiple scopes. For now the identity is still
-        // more deterministic than Unique (it is anchored to a source location), but it
-        // will collapse two scopes that reuse the same TypeVar. Commit 2 fixes that.
+        // Use the scope_anchor (the KeyLegacyTypeParam's own range, i.e. the first occurrence
+        // of this TypeVar name in the enclosing function/class/alias scope) as the identity
+        // anchor. This gives each (scope, TypeVar) pair a distinct Quantified even when multiple
+        // scopes import and reuse the same module-level TypeVar declaration.
         let module = self.module().name();
         match maybe_parameter.ty() {
             Type::TypeVar(x) => {
                 let identity = QuantifiedIdentity::new(
                     module,
-                    AnchorIndex::first(x.qname().range()),
+                    AnchorIndex::first(scope_anchor),
                     QuantifiedOrigin::ScopedLegacy,
                 );
                 let q = Quantified::from_type_var(x, identity);
@@ -286,7 +293,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::TypeVarTuple(x) => {
                 let identity = QuantifiedIdentity::new(
                     module,
-                    AnchorIndex::first(x.qname().range()),
+                    AnchorIndex::first(scope_anchor),
                     QuantifiedOrigin::ScopedLegacy,
                 );
                 let q = Quantified::type_var_tuple(
@@ -299,7 +306,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::ParamSpec(x) => {
                 let identity = QuantifiedIdentity::new(
                     module,
-                    AnchorIndex::first(x.qname().range()),
+                    AnchorIndex::first(scope_anchor),
                     QuantifiedOrigin::ScopedLegacy,
                 );
                 let q =
@@ -989,9 +996,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                         Entry::Vacant(e) => {
+                            // Use `range` (the alias expression range) as anchor so that two
+                            // TypeAliasType aliases at different positions get distinct Quantifieds
+                            // even when they use the same module-level TypeVar.
                             let identity = QuantifiedIdentity::new(
                                 self.module().name(),
-                                AnchorIndex::first(ty_var.qname().range()),
+                                AnchorIndex::new(range, u32::from(ty_var.qname().range().start())),
                                 QuantifiedOrigin::ScopedLegacy,
                             );
                             let q = Quantified::from_type_var(&ty_var, identity);
@@ -1013,7 +1023,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         Entry::Vacant(e) => {
                             let identity = QuantifiedIdentity::new(
                                 self.module().name(),
-                                AnchorIndex::first(ty_var_tuple.qname().range()),
+                                AnchorIndex::new(
+                                    range,
+                                    u32::from(ty_var_tuple.qname().range().start()),
+                                ),
                                 QuantifiedOrigin::ScopedLegacy,
                             );
                             let q = Quantified::type_var_tuple(
@@ -1039,7 +1052,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         Entry::Vacant(e) => {
                             let identity = QuantifiedIdentity::new(
                                 self.module().name(),
-                                AnchorIndex::first(param_spec.qname().range()),
+                                AnchorIndex::new(
+                                    range,
+                                    u32::from(param_spec.qname().range().start()),
+                                ),
                                 QuantifiedOrigin::ScopedLegacy,
                             );
                             let q = Quantified::param_spec(
@@ -1067,9 +1083,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .into_iter()
             .map(|param| (param.name().clone(), param))
             .collect::<SmallMap<_, _>>();
-        // `legacy_params` contains the tparams (with the correct `Unique` ids) actually used in
-        // the alias. If we find a tparam in `tparams` but not in `legacy_tparams`, that means it's
-        // declared and not used, which is pointless but legal.
+        // `legacy_params` contains the tparams (built via solve_legacy_tparam, anchored to the
+        // KeyLegacyTypeParam's scope range) actually used in the alias. If we find a tparam in
+        // `tparams` but not in `legacy_tparams`, that means it's declared and not used, which is
+        // pointless but legal.
         let tparams =
             tparams.into_map(|param| legacy_params.shift_remove(param.name()).unwrap_or(param));
         // Conversely, if we find a tparam in `legacy_tparams` but not `tparams`, that means it's
@@ -1092,9 +1109,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         tparams
     }
 
+    /// Walk `ty`, replacing each legacy TypeVar/ParamSpec/TypeVarTuple occurrence with a
+    /// `Type::Quantified`, and recording discovered type parameters in `tparams`.
+    ///
+    /// `alias_anchor` is the source range of the enclosing alias name (or expression). It is
+    /// used as the `anchor` in `QuantifiedIdentity` so that two aliases at different source
+    /// positions that both use the same module-level TypeVar get distinct `Quantified`s.
+    /// The `ordinal` is set to the declaration-range start of each TypeVar, which is unique
+    /// per TypeVar within a module and deterministic across runs.
     fn tvars_to_tparams_for_type_alias(
         &self,
         ty: &mut Type,
+        alias_anchor: TextRange,
         seen_type_vars: &mut SmallMap<TypeVar, Quantified>,
         seen_type_var_tuples: &mut SmallMap<TypeVarTuple, Quantified>,
         seen_param_specs: &mut SmallMap<ParamSpec, Quantified>,
@@ -1105,6 +1131,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 for t in ts.iter_mut() {
                     self.tvars_to_tparams_for_type_alias(
                         t,
+                        alias_anchor,
                         seen_type_vars,
                         seen_type_var_tuples,
                         seen_param_specs,
@@ -1116,6 +1143,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 for t in cls.targs_mut().as_mut() {
                     self.tvars_to_tparams_for_type_alias(
                         t,
+                        alias_anchor,
                         seen_type_vars,
                         seen_type_var_tuples,
                         seen_param_specs,
@@ -1131,6 +1159,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let mut visit = |t: &mut Type| {
                     self.tvars_to_tparams_for_type_alias(
                         t,
+                        alias_anchor,
                         seen_type_vars,
                         seen_type_var_tuples,
                         seen_param_specs,
@@ -1143,6 +1172,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 for t in prefix {
                     self.tvars_to_tparams_for_type_alias(
                         t.ty_mut(),
+                        alias_anchor,
                         seen_type_vars,
                         seen_type_var_tuples,
                         seen_param_specs,
@@ -1151,6 +1181,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 self.tvars_to_tparams_for_type_alias(
                     pspec,
+                    alias_anchor,
                     seen_type_vars,
                     seen_type_var_tuples,
                     seen_param_specs,
@@ -1161,6 +1192,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let mut visit = |t: &mut Type| {
                     self.tvars_to_tparams_for_type_alias(
                         t,
+                        alias_anchor,
                         seen_type_vars,
                         seen_type_var_tuples,
                         seen_param_specs,
@@ -1173,9 +1205,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let q = match seen_type_vars.entry(ty_var.dupe()) {
                     Entry::Occupied(e) => e.get().clone(),
                     Entry::Vacant(e) => {
+                        // Use alias_anchor so two aliases using the same TypeVar get
+                        // different Quantifieds. The ordinal is the TypeVar's declaration
+                        // range start, which is unique per TypeVar within a module.
                         let identity = QuantifiedIdentity::new(
                             self.module().name(),
-                            AnchorIndex::first(ty_var.qname().range()),
+                            AnchorIndex::new(
+                                alias_anchor,
+                                u32::from(ty_var.qname().range().start()),
+                            ),
                             QuantifiedOrigin::ScopedLegacy,
                         );
                         let q = Quantified::from_type_var(ty_var, identity);
@@ -1192,7 +1230,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Entry::Vacant(e) => {
                         let identity = QuantifiedIdentity::new(
                             self.module().name(),
-                            AnchorIndex::first(ty_var_tuple.qname().range()),
+                            AnchorIndex::new(
+                                alias_anchor,
+                                u32::from(ty_var_tuple.qname().range().start()),
+                            ),
                             QuantifiedOrigin::ScopedLegacy,
                         );
                         let q = Quantified::type_var_tuple(
@@ -1213,7 +1254,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Entry::Vacant(e) => {
                         let identity = QuantifiedIdentity::new(
                             self.module().name(),
-                            AnchorIndex::first(param_spec.qname().range()),
+                            AnchorIndex::new(
+                                alias_anchor,
+                                u32::from(param_spec.qname().range().start()),
+                            ),
                             QuantifiedOrigin::ScopedLegacy,
                         );
                         let q = Quantified::param_spec(
@@ -1230,6 +1274,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Type::Unpack(t) => self.tvars_to_tparams_for_type_alias(
                 t,
+                alias_anchor,
                 seen_type_vars,
                 seen_type_var_tuples,
                 seen_param_specs,
@@ -1237,6 +1282,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             ),
             Type::Type(t) | Type::Annotated(t, _) => self.tvars_to_tparams_for_type_alias(
                 t,
+                alias_anchor,
                 seen_type_vars,
                 seen_type_var_tuples,
                 seen_param_specs,
@@ -1440,11 +1486,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut seen_type_var_tuples = SmallMap::new();
         let mut seen_param_specs = SmallMap::new();
 
+        // `range` (the alias expression range) serves as the anchor for Quantified identity.
+        // This ensures that two aliases at different source positions that use the same
+        // module-level TypeVar produce distinct Quantifieds.
+        let alias_anchor = range;
         let tvars_to_tparams_for_type_alias =
             |ty, seen_type_vars, seen_type_var_tuples, seen_param_specs| {
                 let mut tparams_with_ranges = Vec::new();
                 self.tvars_to_tparams_for_type_alias(
                     ty,
+                    alias_anchor,
                     seen_type_vars,
                     seen_type_var_tuples,
                     seen_param_specs,
@@ -1519,11 +1570,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Create TParams for a recursive reference to a type alias. This is essentially a
     /// slimmed-down version of `wrap_type_alias` that skips most validation (because the
     /// validation will be done by `wrap_type_alias`).
-    pub fn create_type_alias_params_recursive(&self, tparams: &TypeAliasParams) -> Arc<TParams> {
+    pub fn create_type_alias_params_recursive(
+        &self,
+        tparams: &TypeAliasParams,
+        anchor: TextRange,
+    ) -> Arc<TParams> {
         let mut seen_type_vars = SmallMap::new();
         let mut seen_type_var_tuples = SmallMap::new();
         let mut seen_param_specs = SmallMap::new();
-        let range = TextRange::default();
         let errors = self.error_swallower();
         let params = match tparams {
             TypeAliasParams::TypeAliasType {
@@ -1535,14 +1589,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 &mut seen_type_vars,
                 &mut seen_type_var_tuples,
                 &mut seen_param_specs,
-                range,
+                anchor,
                 &errors,
             ),
             TypeAliasParams::Legacy(Some(tparams)) => self.create_legacy_type_params(tparams),
             TypeAliasParams::Legacy(None) => Vec::new(),
             TypeAliasParams::Scoped(tparams) => self.scoped_type_params(tparams.as_ref(), &errors),
         };
-        self.validated_tparams(range, params, TParamsSource::TypeAlias, &errors)
+        self.validated_tparams(anchor, params, TParamsSource::TypeAlias, &errors)
     }
 
     fn create_legacy_type_params(&self, keys: &[Idx<KeyLegacyTypeParam>]) -> Vec<Quantified> {
@@ -4983,7 +5037,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     module_path: self.module().path().clone(),
                     index,
                 };
-                let tparams = self.create_type_alias_params_recursive(&x.tparams);
+                let anchor = KeyTypeAlias::range_with(x.key_type_alias, self.bindings());
+                let tparams = self.create_type_alias_params_recursive(&x.tparams, anchor);
                 Forallable::TypeAlias(TypeAliasData::Ref(r)).forall(tparams)
             }
             Binding::LambdaParameter(id, owner) => self
