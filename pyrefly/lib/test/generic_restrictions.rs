@@ -1276,6 +1276,6 @@ def main(left: DataFrame, right: DataFrame) -> None:
 
     def func2(*a: Iterable[FrameType] | None) -> None:
         return None
-    func2(left, right)  # E: `Series` is not assignable to upper bound `DataFrame`
+    func2(left, right)  # E: `DataFrame` is not assignable to parameter `*a` with type `Iterable[@_] | None`  # E: `DataFrame` is not assignable to parameter `*a` with type `Iterable[@_] | None`
     "#,
 );
