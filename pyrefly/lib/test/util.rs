@@ -152,9 +152,9 @@ impl TestEnv {
         }
     }
 
-    pub fn new_with_site_package_path(path: &str) -> Self {
+    pub fn new_with_site_package_paths(paths: &[&str]) -> Self {
         let mut res = Self::new();
-        res.site_package_path = vec![PathBuf::from(path)];
+        res.site_package_path = paths.iter().map(PathBuf::from).collect();
         res
     }
 
