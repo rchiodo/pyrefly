@@ -950,6 +950,39 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         got: &TypedDict,
         want: &TypedDict,
     ) -> Result<(), SubsetError> {
+        let cacheable = Self::typed_dict_is_cacheable(got) && Self::typed_dict_is_cacheable(want);
+        if cacheable && let Some(result) = self.solver.check_typed_dict_cache(got, want) {
+            return result;
+        }
+        // Save coinductive state so we can detect if any coinductive assumptions
+        // were used during field comparisons (e.g., a field with a protocol type
+        // that recursively references this TypedDict).
+        let prev_coinductive = self.coinductive_assumptions_used;
+        self.coinductive_assumptions_used = false;
+        let res = self.is_subset_typed_dict_inner(got, want);
+        let used_coinductive = self.coinductive_assumptions_used;
+        if cacheable && !used_coinductive {
+            self.solver
+                .store_typed_dict_cache(got.clone(), want.clone(), res.clone());
+        }
+        self.coinductive_assumptions_used = prev_coinductive || used_coinductive;
+        res
+    }
+
+    /// Only cache non-generic class-based TypedDicts. Generic TypedDicts could
+    /// contain Vars whose meaning depends on the subset context.
+    fn typed_dict_is_cacheable(td: &TypedDict) -> bool {
+        match td {
+            TypedDict::TypedDict(inner) => inner.targs().is_empty(),
+            TypedDict::Anonymous(_) => false,
+        }
+    }
+
+    fn is_subset_typed_dict_inner(
+        &mut self,
+        got: &TypedDict,
+        want: &TypedDict,
+    ) -> Result<(), SubsetError> {
         let got_name = got.name();
         let want_name = want.name();
         let (got_fields, want_fields) = {

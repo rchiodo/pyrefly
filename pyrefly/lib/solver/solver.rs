@@ -62,6 +62,7 @@ use crate::types::module::ModuleType;
 use crate::types::simplify::simplify_tuples;
 use crate::types::simplify::unions;
 use crate::types::simplify::unions_with_literals;
+use crate::types::typed_dict::TypedDict;
 use crate::types::types::TParams;
 use crate::types::types::Type;
 use crate::types::types::Var;
@@ -352,6 +353,9 @@ pub struct Solver {
     /// Only caches results for types that contain no Vars, to ensure
     /// soundness across different subset contexts.
     protocol_cache: Mutex<HashMap<(Type, Type), Result<(), SubsetError>>>,
+    /// Cross-call cache for TypedDict subset results.
+    /// Like protocol_cache, only caches Var-free types.
+    typed_dict_cache: Mutex<HashMap<(TypedDict, TypedDict), Result<(), SubsetError>>>,
     pub infer_with_first_use: bool,
     pub heap: TypeHeap,
     pub tensor_shapes: bool,
@@ -392,6 +396,7 @@ impl Solver {
             variables: Default::default(),
             instantiation_errors: Default::default(),
             protocol_cache: Default::default(),
+            typed_dict_cache: Default::default(),
             infer_with_first_use,
             heap: TypeHeap::new(),
             tensor_shapes,
@@ -415,6 +420,26 @@ impl Solver {
     /// Store a protocol conformance result.
     pub fn store_protocol_cache(&self, got: Type, want: Type, result: Result<(), SubsetError>) {
         self.protocol_cache.lock().insert((got, want), result);
+    }
+
+    pub fn check_typed_dict_cache(
+        &self,
+        got: &TypedDict,
+        want: &TypedDict,
+    ) -> Option<Result<(), SubsetError>> {
+        self.typed_dict_cache
+            .lock()
+            .get(&(got.clone(), want.clone()))
+            .cloned()
+    }
+
+    pub fn store_typed_dict_cache(
+        &self,
+        got: TypedDict,
+        want: TypedDict,
+        result: Result<(), SubsetError>,
+    ) {
+        self.typed_dict_cache.lock().insert((got, want), result);
     }
 
     /// Force all non-recursive Vars in `vars`.
