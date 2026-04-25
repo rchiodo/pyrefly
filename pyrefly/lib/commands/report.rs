@@ -6,6 +6,7 @@
  */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -274,6 +275,8 @@ enum SymbolReport {
         name: String,
         #[serde(flatten)]
         slots: SlotCounts,
+        #[serde(skip)]
+        n_params: usize,
         location: Location,
     },
     #[serde(rename = "class")]
@@ -290,6 +293,35 @@ enum SymbolReport {
         slots: SlotCounts,
         location: Location,
     },
+}
+
+impl SymbolReport {
+    fn name(&self) -> &str {
+        match self {
+            Self::Attr { name, .. }
+            | Self::Function { name, .. }
+            | Self::Class { name, .. }
+            | Self::Property { name, .. } => name,
+        }
+    }
+
+    fn name_mut(&mut self) -> &mut String {
+        match self {
+            Self::Attr { name, .. }
+            | Self::Function { name, .. }
+            | Self::Class { name, .. }
+            | Self::Property { name, .. } => name,
+        }
+    }
+
+    fn slots(&self) -> &SlotCounts {
+        match self {
+            Self::Attr { slots, .. }
+            | Self::Function { slots, .. }
+            | Self::Class { slots, .. }
+            | Self::Property { slots, .. } => slots,
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -362,6 +394,10 @@ pub struct ReportArgs {
     /// from its filesystem layout.
     #[clap(long)]
     module: Option<String>,
+
+    /// Only report symbols reachable from public modules via re-export chains.
+    #[clap(long)]
+    public_only: bool,
 }
 
 impl ReportArgs {
@@ -371,12 +407,18 @@ impl ReportArgs {
         thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         self.config_override.validate()?;
+
+        if self.public_only && self.module.is_some() {
+            anyhow::bail!("--module and --public-only cannot be combined");
+        }
+
         let (files_to_check, config_finder) = self.files.resolve(self.config_override, wrapper)?;
         Self::run_inner(
             files_to_check,
             config_finder,
             self.prefer_stubs,
             self.module,
+            self.public_only,
             thread_count,
         )
     }
@@ -544,9 +586,148 @@ impl ReportArgs {
         !name.starts_with('_') || name.ends_with("__")
     }
 
+    /// A module is public when every dotted-path component is public.
+    fn is_public_module(module: ModuleName) -> bool {
+        module.as_str().split('.').all(Self::is_public_name)
+    }
+
+    /// True if `fqn` or a class-level prefix is public, and every segment below the module is
+    /// itself a public name (no private nested leaks).
+    fn is_public_fqn(fqn: &str, module_prefix: &str, public_fqns: &HashSet<String>) -> bool {
+        if let Some(relative) = fqn.strip_prefix(module_prefix)
+            && !relative.split('.').all(Self::is_public_name)
+        {
+            return false;
+        }
+
+        public_fqns.contains(fqn)
+            || std::iter::successors(fqn.rsplit_once('.').map(|(prefix, _)| prefix), |prefix| {
+                prefix.rsplit_once('.').map(|(parent, _)| parent)
+            })
+            .take_while(|prefix| prefix.starts_with(module_prefix))
+            .any(|prefix| public_fqns.contains(prefix))
+    }
+
     /// Module-level dunders that typestats always excludes from the report.
     const EXCLUDED_MODULE_DUNDERS: &'static [&'static str] =
         &["__all__", "__dir__", "__doc__", "__getattr__"];
+
+    /// Walk re-exports to the defining module's FQN, `None` on cycle/miss.
+    fn trace_export_origin(
+        handle: &Handle,
+        mut cur_name: Name,
+        transaction: &Transaction,
+    ) -> Option<String> {
+        let mut seen = SmallSet::new();
+        let mut cur_handle = handle.clone();
+
+        loop {
+            let module_name = cur_handle.module();
+            if !seen.insert((module_name, cur_name.clone())) {
+                return None;
+            }
+
+            match transaction.get_exports(&cur_handle).get(&cur_name) {
+                Some(ExportLocation::ThisModule(_)) | None => {
+                    return Some(format!("{module_name}.{cur_name}"));
+                }
+                Some(ExportLocation::OtherModule(other_module, alias)) => {
+                    if let Some(alias) = alias {
+                        cur_name = alias.clone();
+                    }
+                    cur_handle = transaction
+                        .import_handle(&cur_handle, *other_module, None)
+                        .finding()?;
+                }
+            }
+        }
+    }
+
+    /// Collect origin FQNs of all publicly exported names across public modules.
+    fn compute_public_fqns(handles: &[Handle], transaction: &Transaction) -> HashSet<String> {
+        handles
+            .iter()
+            .filter(|h| Self::is_public_module(h.module()))
+            .flat_map(|handle| {
+                let exports_data = transaction.get_exports_data(handle);
+                let exports = transaction.get_exports(handle);
+
+                // prioritize `__all__` if present, otherwise local defs + `import x as x`
+                let names: Vec<Name> =
+                    if let Some(all_iter) = exports_data.get_explicit_dunder_all_names_iter() {
+                        all_iter.cloned().collect()
+                    } else {
+                        exports
+                            .iter()
+                            .filter_map(|(name, loc)| {
+                                let is_local = matches!(loc, ExportLocation::ThisModule(_));
+                                let is_reexport = exports_data.is_explicit_reexport(name);
+                                (Self::is_public_name(name.as_str()) && (is_local || is_reexport))
+                                    .then_some(name.clone())
+                            })
+                            .collect()
+                    };
+
+                // emit both the local FQN and the traced origin FQN so a file-scoped run matches
+                // whichever module was requested
+                names
+                    .into_iter()
+                    .filter(|n| !Self::EXCLUDED_MODULE_DUNDERS.contains(&n.as_str()))
+                    .flat_map(move |name| {
+                        let local = format!("{}.{}", handle.module(), name);
+                        let origin = Self::trace_export_origin(handle, name, transaction);
+                        std::iter::once(local).chain(origin)
+                    })
+            })
+            .collect()
+    }
+
+    /// Retain only publicly reachable symbols and recalculate aggregates.
+    fn filter_module_report_to_public(report: &mut ModuleReport, public_fqns: &HashSet<String>) {
+        let module_prefix = format!("{}.", report.name);
+
+        report
+            .symbol_reports
+            .retain(|sym| Self::is_public_fqn(sym.name(), &module_prefix, public_fqns));
+        report
+            .names
+            .retain(|n| Self::is_public_fqn(n, &module_prefix, public_fqns));
+
+        // recompute all aggregates in a single pass
+        report.slots = SlotCounts::default();
+        report.n_methods = 0;
+        report.n_functions = 0;
+        report.n_method_params = 0;
+        report.n_function_params = 0;
+        report.n_classes = 0;
+        report.n_attrs = 0;
+        report.n_properties = 0;
+        // `n_type_ignores` is not affected by public filtering since type ignores are always
+        // attached to the module itself, not individual symbols, so we don't need to recalculate
+        // it here.
+
+        for sym in &report.symbol_reports {
+            report.slots = report.slots.merge(*sym.slots());
+            match sym {
+                SymbolReport::Function { name, n_params, .. }
+                    if Self::is_method(name, &module_prefix) =>
+                {
+                    report.n_methods += 1;
+                    report.n_method_params += *n_params;
+                }
+                SymbolReport::Function { n_params, .. } => {
+                    report.n_functions += 1;
+                    report.n_function_params += *n_params;
+                }
+                SymbolReport::Class { .. } => report.n_classes += 1,
+                SymbolReport::Attr { .. } => report.n_attrs += 1,
+                SymbolReport::Property { .. } => report.n_properties += 1,
+            }
+        }
+
+        report.coverage = report.slots.coverage();
+        report.strict_coverage = report.slots.strict_coverage();
+    }
 
     /// True if the first parameter is the implicit receiver (`self`/`cls`),
     /// excluded from slot counting. `__new__` is a staticmethod but still takes cls.
@@ -1554,6 +1735,7 @@ impl ReportArgs {
                 symbol_reports.push(SymbolReport::Function {
                     name: func.name.clone(),
                     slots: func.slots,
+                    n_params: func.n_params,
                     location: func.location,
                 });
             }
@@ -1638,6 +1820,7 @@ impl ReportArgs {
         config_finder: ConfigFinder,
         prefer_stubs: bool,
         module_name_override: Option<String>,
+        public_only: bool,
         thread_count: ThreadCount,
     ) -> anyhow::Result<CommandExitStatus> {
         let expanded_file_list = config_finder.checkpoint(files_to_check.files())?;
@@ -1792,12 +1975,7 @@ impl ReportArgs {
                         }
                     }
                     for sym in &mut module_report.symbol_reports {
-                        let sym_name = match sym {
-                            SymbolReport::Attr { name, .. }
-                            | SymbolReport::Function { name, .. }
-                            | SymbolReport::Class { name, .. }
-                            | SymbolReport::Property { name, .. } => name,
-                        };
+                        let sym_name = sym.name_mut();
                         if let Some(rest) = sym_name.strip_prefix(&old_prefix) {
                             *sym_name = format!("{new_prefix}{rest}");
                         }
@@ -1805,6 +1983,14 @@ impl ReportArgs {
                 }
                 module_reports.push(module_report);
             }
+        }
+
+        if public_only {
+            let public_fqns = Self::compute_public_fqns(&handles, transaction);
+            for report in &mut module_reports {
+                Self::filter_module_report_to_public(report, &public_fqns);
+            }
+            module_reports.retain(|r| !r.symbol_reports.is_empty());
         }
 
         let summary = Self::calculate_summary(&module_reports);
@@ -1822,6 +2008,7 @@ impl ReportArgs {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::path::PathBuf;
 
     use dupe::Dupe;
@@ -1930,12 +2117,7 @@ mod tests {
             }
         }
         for sym in &mut report.symbol_reports {
-            let sym_name = match sym {
-                SymbolReport::Attr { name, .. }
-                | SymbolReport::Function { name, .. }
-                | SymbolReport::Class { name, .. }
-                | SymbolReport::Property { name, .. } => name,
-            };
+            let sym_name = sym.name_mut();
             if let Some(rest) = sym_name.strip_prefix(&old_prefix) {
                 *sym_name = format!("{new_prefix}{rest}");
             }
@@ -2510,5 +2692,207 @@ def g(x: int) -> int:
         // Only g should be reported; f is excluded due to @no_type_check.
         assert_eq!(functions.len(), 1);
         assert_eq!(functions[0].name, "test.g");
+    }
+
+    // ──── --public-only tests ────
+
+    #[test]
+    fn test_is_public_module() {
+        let public = |s| ReportArgs::is_public_module(ModuleName::from_str(s));
+        assert!(public("pkg"));
+        assert!(public("pkg.sub"));
+        assert!(!public("pkg._internal"));
+        assert!(!public("_pkg"));
+        assert!(!public("pkg._internal.sub"));
+    }
+
+    #[test]
+    fn test_is_fqn_public() {
+        let fqns: HashSet<String> = ["pkg.Foo", "pkg.bar"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let public = |s| ReportArgs::is_public_fqn(s, "pkg.", &fqns);
+        assert!(public("pkg.Foo"));
+        assert!(public("pkg.bar"));
+        assert!(public("pkg.Foo.method")); // class member of a public class
+        assert!(public("pkg.Foo.Inner.attr"));
+        assert!(!public("other.Foo"));
+        assert!(!public("pkg.Baz"));
+        assert!(!public("pkg.Baz.method"));
+        // Private nested members do not leak through a public parent.
+        assert!(!public("pkg.Foo._private"));
+        assert!(!public("pkg.Foo._Inner.attr"));
+        assert!(!public("pkg._Hidden.Foo"));
+    }
+
+    #[test]
+    fn test_filter_module_report_to_public() {
+        let loc = |line| Location { line, column: 1 };
+        let mut report = ModuleReport {
+            name: "pkg".to_owned(),
+            names: vec!["pkg.Foo".into(), "pkg.bar".into(), "pkg._private".into()],
+            line_count: 10,
+            symbol_reports: vec![
+                SymbolReport::Class {
+                    name: "pkg.Foo".into(),
+                    slots: SlotCounts::default(),
+                    location: loc(1),
+                },
+                SymbolReport::Function {
+                    name: "pkg.Foo.method".into(),
+                    slots: SlotCounts::typed(),
+                    n_params: 2,
+                    location: loc(2),
+                },
+                SymbolReport::Function {
+                    name: "pkg.bar".into(),
+                    slots: SlotCounts::untyped(),
+                    n_params: 1,
+                    location: loc(3),
+                },
+                SymbolReport::Attr {
+                    name: "pkg._private".into(),
+                    slots: SlotCounts::typed(),
+                    location: loc(4),
+                },
+            ],
+            type_ignores: vec![],
+            slots: SlotCounts::default(),
+            coverage: 100.0,
+            strict_coverage: 100.0,
+            n_functions: 2,
+            n_methods: 0,
+            n_function_params: 123,
+            n_method_params: 456,
+            n_classes: 1,
+            n_attrs: 1,
+            n_properties: 0,
+            n_type_ignores: 0,
+        };
+
+        let public_fqns: HashSet<String> = ["pkg.Foo", "pkg.bar"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        ReportArgs::filter_module_report_to_public(&mut report, &public_fqns);
+
+        assert_eq!(report.names, vec!["pkg.Foo", "pkg.bar"]);
+        assert_eq!(report.symbol_reports.len(), 3); // Foo, Foo.method, bar
+        assert_eq!(report.n_functions, 1);
+        assert_eq!(report.n_methods, 1);
+        assert_eq!(report.n_function_params, 1);
+        assert_eq!(report.n_method_params, 2);
+        assert_eq!(report.n_classes, 1);
+        assert_eq!(report.n_attrs, 0);
+    }
+
+    #[test]
+    fn test_compute_public_fqns() {
+        let compute = |modules: &[(&str, &str, &str)], handle_names: &[&str]| -> HashSet<String> {
+            let mut env = TestEnv::new();
+            for &(name, path, source) in modules {
+                env.add_with_path(name, path, source);
+            }
+            let env = env.with_default_require_level(Require::Everything);
+            let (state, handle_fn) = env.to_state();
+            let transaction = state.transaction();
+            let handles: Vec<_> = handle_names.iter().map(|n| handle_fn(n)).collect();
+            ReportArgs::compute_public_fqns(&handles, &transaction)
+        };
+
+        // Re-export from a private module keeps both the local alias and the
+        // traced origin, so reports covering either module stay non-empty.
+        let fqns = compute(
+            &[
+                (
+                    "pkg",
+                    "pkg/__init__.py",
+                    "from pkg._internal import Foo\n__all__ = [\"Foo\"]\n",
+                ),
+                (
+                    "pkg._internal",
+                    "pkg/_internal.py",
+                    "class Foo:\n    x: int = 1\n",
+                ),
+            ],
+            &["pkg", "pkg._internal"],
+        );
+        assert!(fqns.contains("pkg.Foo"));
+        assert!(fqns.contains("pkg._internal.Foo"));
+
+        // Without __all__, non-underscore local names are exported
+        let fqns = compute(
+            &[(
+                "pkg",
+                "pkg/__init__.py",
+                "def foo() -> int: ...\ndef _private(): ...\n",
+            )],
+            &["pkg"],
+        );
+        assert!(fqns.contains("pkg.foo"));
+        assert!(!fqns.contains("pkg._private"));
+
+        // Regular imports (not `import x as x`) are not re-exports
+        let fqns = compute(
+            &[
+                (
+                    "pkg",
+                    "pkg/__init__.py",
+                    "from pkg._internal import helper\ndef local_fn() -> int: ...\n",
+                ),
+                (
+                    "pkg._internal",
+                    "pkg/_internal.py",
+                    "def helper() -> int: ...\n",
+                ),
+            ],
+            &["pkg", "pkg._internal"],
+        );
+        assert!(fqns.contains("pkg.local_fn"));
+        assert!(!fqns.contains("pkg._internal.helper"));
+
+        // `import x as x` is an implicit re-export when there is no __all__
+        let fqns = compute(
+            &[
+                (
+                    "pkg",
+                    "pkg/__init__.py",
+                    "from pkg._internal import helper as helper\n",
+                ),
+                (
+                    "pkg._internal",
+                    "pkg/_internal.py",
+                    "def helper() -> int: ...\n",
+                ),
+            ],
+            &["pkg", "pkg._internal"],
+        );
+        assert!(fqns.contains("pkg._internal.helper"));
+
+        // __all__ takes precedence over `import x as x`
+        let fqns = compute(
+            &[
+                (
+                    "pkg",
+                    "pkg/__init__.py",
+                    concat!(
+                        "from pkg._internal import foo as foo\n",
+                        "from pkg._internal import bar\n",
+                        "baz: int = 1\n",
+                        "__all__ = [\"bar\"]\n",
+                    ),
+                ),
+                (
+                    "pkg._internal",
+                    "pkg/_internal.py",
+                    "def foo() -> int: ...\ndef bar() -> int: ...\n",
+                ),
+            ],
+            &["pkg", "pkg._internal"],
+        );
+        assert!(fqns.contains("pkg._internal.bar"));
+        assert!(!fqns.contains("pkg._internal.foo"));
+        assert!(!fqns.contains("pkg.baz"));
     }
 }
