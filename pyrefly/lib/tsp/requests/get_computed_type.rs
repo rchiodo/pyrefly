@@ -34,6 +34,6 @@ impl<T: TspInterface> TspServer<T> {
         let ty = self
             .inner
             .get_type_at_position(params.uri(), position.line, position.character);
-        Ok(ty.map(|t| self.convert_type(&t)))
+        Ok(ty.map(|t| self.convert_type(&t, Some(params.uri()))))
     }
 }

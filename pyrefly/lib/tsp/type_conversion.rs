@@ -32,6 +32,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
+use std::path::PathBuf;
 
 use lsp_types::Url;
 use pyrefly_types::callable::Callable;
@@ -80,34 +81,38 @@ fn next_id() -> i32 {
 /// `FuncDefIndex`, avoiding the need to store ranges on every `FuncId`.
 pub type FuncRangeResolver<'a> = dyn Fn(&FuncId) -> Option<TextRange> + 'a;
 
-/// Convert a pyrefly `Type` to a TSP protocol `Type`.
-///
-/// Function declarations will have zero-range nodes since no binding
-/// resolver is available. Use [`convert_type_with_resolver`] when source
-/// locations are needed.
-#[cfg(test)]
-pub fn convert_type(ty: &PyreflyType) -> TspType {
+/// Callback that resolves a module name (e.g. `pkg.subpkg`) to a canonical
+/// file URI for that module (preferably package `__init__.py[i]` for packages).
+pub type ModuleUriResolver<'a> = dyn Fn(&str) -> Option<String> + 'a;
+
+/// Convert a pyrefly `Type` to a TSP protocol `Type` using optional
+/// source-range and module-URI resolvers.
+pub fn convert_type_with_resolvers<'a>(
+    ty: &PyreflyType,
+    func_range_resolver: Option<&'a FuncRangeResolver<'a>>,
+    module_uri_resolver: Option<&'a ModuleUriResolver<'a>>,
+) -> TspType {
     TypeConverter {
-        resolve_func_range: None,
+        resolve_func_range: func_range_resolver,
+        resolve_module_uri: module_uri_resolver,
     }
     .convert(ty)
 }
 
-/// Convert a pyrefly `Type` to a TSP protocol `Type`, using `resolver` to
-/// look up function declaration source ranges from `FuncDefIndex`.
-pub fn convert_type_with_resolver<'a>(
-    ty: &PyreflyType,
-    resolver: &'a FuncRangeResolver<'a>,
-) -> TspType {
-    TypeConverter {
-        resolve_func_range: Some(resolver),
-    }
-    .convert(ty)
+/// Convert a pyrefly `Type` to a TSP protocol `Type`.
+///
+/// Function declarations will have zero-range nodes since no binding
+/// resolver is available. Use [`convert_type_with_resolvers`] when source
+/// locations are needed.
+#[cfg(test)]
+pub fn convert_type(ty: &PyreflyType) -> TspType {
+    convert_type_with_resolvers(ty, None, None)
 }
 
 /// Holds an optional range resolver and drives recursive type conversion.
 struct TypeConverter<'a> {
     resolve_func_range: Option<&'a FuncRangeResolver<'a>>,
+    resolve_module_uri: Option<&'a ModuleUriResolver<'a>>,
 }
 
 impl TypeConverter<'_> {
@@ -166,14 +171,21 @@ impl TypeConverter<'_> {
             }
 
             // --- Modules ---
-            PyreflyType::Module(m) => TspType::Module(TspModuleType {
-                flags: TypeFlags::NONE,
-                id: next_id(),
-                kind: TypeKind::Module,
-                module_name: m.to_string(),
-                type_alias_info: None,
-                uri: String::new(),
-            }),
+            PyreflyType::Module(m) => {
+                let module_name = m.to_string();
+                let uri = self
+                    .resolve_module_uri
+                    .and_then(|resolve| resolve(module_name.as_str()))
+                    .unwrap_or_default();
+                TspType::Module(TspModuleType {
+                    flags: TypeFlags::NONE,
+                    id: next_id(),
+                    kind: TypeKind::Module,
+                    module_name,
+                    type_alias_info: None,
+                    uri,
+                })
+            }
 
             // --- TypedDicts are instances of their class ---
             PyreflyType::TypedDict(td) | PyreflyType::PartialTypedDict(td) => {
@@ -510,15 +522,7 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
             };
             if let Some(lv) = literal_value {
                 TspType::Class(TspClassType {
-                    declaration: Declaration::Regular(RegularDeclaration {
-                        kind: DeclarationKind::Regular,
-                        category: DeclarationCategory::Class,
-                        name: Some(class_name.to_owned()),
-                        node: Node {
-                            range: zero_range(),
-                            uri: String::new(),
-                        },
-                    }),
+                    declaration: Declaration::Regular(make_builtin_class_declaration(class_name)),
                     flags: TypeFlags::INSTANCE.with_literal(),
                     id: next_id(),
                     kind: TypeKind::Class,
@@ -542,6 +546,22 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
                 })
             }
         }
+    }
+}
+
+/// Build a declaration for a class in `builtins.pyi`.
+fn make_builtin_class_declaration(name: &str) -> RegularDeclaration {
+    let module_path = pyrefly_python::module_path::ModulePath::bundled_typeshed(PathBuf::from(
+        "builtins.pyi",
+    ));
+    RegularDeclaration {
+        kind: DeclarationKind::Regular,
+        category: DeclarationCategory::Class,
+        name: Some(name.to_owned()),
+        node: Node {
+            range: zero_range(),
+            uri: path_to_uri(&module_path),
+        },
     }
 }
 
@@ -646,6 +666,8 @@ fn builtin(name: &str) -> TspType {
 
 #[cfg(test)]
 mod tests {
+    use pyrefly_python::module_name::ModuleName;
+    use pyrefly_types::module::ModuleType;
     use pyrefly_types::types::AnyStyle;
     use pyrefly_types::types::NeverStyle;
     use pyrefly_types::types::Type as PyreflyType;
@@ -954,6 +976,59 @@ mod tests {
         match tsp {
             TspType::BuiltInType(b) => assert_eq!(b.name, "any"),
             other => panic!("expected BuiltInType pass-through, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_module_without_resolver_has_empty_uri() {
+        let ty = PyreflyType::Module(ModuleType::new_as(ModuleName::from_str("pkg")));
+        let tsp = convert_type(&ty);
+        match tsp {
+            TspType::Module(m) => {
+                assert_eq!(m.module_name, "pkg");
+                assert_eq!(m.uri, "");
+            }
+            other => panic!("expected ModuleType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_module_with_resolver_sets_uri() {
+        let ty = PyreflyType::Module(ModuleType::new_as(ModuleName::from_str("pkg")));
+        let module_uri_resolver = |module_name: &str| {
+            if module_name == "pkg" {
+                Some("file:///repo/pkg/__init__.pyi".to_owned())
+            } else {
+                None
+            }
+        };
+        let tsp = convert_type_with_resolvers(&ty, None, Some(&module_uri_resolver));
+        match tsp {
+            TspType::Module(m) => {
+                assert_eq!(m.module_name, "pkg");
+                assert_eq!(m.uri, "file:///repo/pkg/__init__.pyi");
+            }
+            other => panic!("expected ModuleType, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_literal_int_uses_builtins_uri() {
+        let ty = PyreflyType::Literal(pyrefly_types::literal::Literal::int(7));
+        let tsp = convert_type(&ty);
+        match tsp {
+            TspType::Class(c) => {
+                let Declaration::Regular(decl) = c.declaration else {
+                    panic!("expected RegularDeclaration");
+                };
+                assert_eq!(decl.name.as_deref(), Some("int"));
+                assert!(
+                    decl.node.uri.contains("builtins.pyi"),
+                    "expected builtins URI, got {}",
+                    decl.node.uri
+                );
+            }
+            other => panic!("expected Class type, got {other:?}"),
         }
     }
 }
