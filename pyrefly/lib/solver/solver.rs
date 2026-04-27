@@ -384,6 +384,20 @@ enum NewBound {
     AddBound(Type),
 }
 
+/// Result of `with_snapshot`, which performs an `is_subset_eq` call with var snapshotting.
+pub enum SubsetWithSnapshotResult {
+    /// `is_subset_eq` call was successful.
+    Ok,
+    /// `is_subset_eq` call failed.
+    Err(SubsetError),
+}
+
+impl SubsetWithSnapshotResult {
+    pub fn is_ok(&self) -> bool {
+        matches!(self, SubsetWithSnapshotResult::Ok)
+    }
+}
+
 impl Solver {
     /// Create a new solver.
     pub fn new(
@@ -544,6 +558,34 @@ impl Solver {
                 }
             }
         }
+    }
+
+    /// Snapshots the given vars, calls `f`, and rolls back the vars if the call fails.
+    /// Note that this only rolls back the var state and not:
+    /// * `Ok` entries left in `subset_cache` (the rollback in `is_subset_eq_impl` only fires on
+    ///   `Err` from the speculative call, not on `Ok`-with-instantiation-errors), or
+    /// * `coinductive_assumptions_used`, which is one-way.
+    pub fn with_snapshot(
+        &self,
+        vars: &[Var],
+        f: impl FnOnce() -> Result<(), SubsetError>,
+    ) -> SubsetWithSnapshotResult {
+        if vars.is_empty() {
+            // Fast path - no var snapshotting needed.
+            return f().map_or_else(SubsetWithSnapshotResult::Err, |_| {
+                SubsetWithSnapshotResult::Ok
+            });
+        }
+        let snapshot = self.snapshot_vars(vars);
+        let res = match (f(), self.has_new_instantiation_errors(&snapshot)) {
+            (Ok(()), false) => SubsetWithSnapshotResult::Ok,
+            (Ok(()), true) => SubsetWithSnapshotResult::Err(SubsetError::Other),
+            (Err(e), _) => SubsetWithSnapshotResult::Err(e),
+        };
+        if !res.is_ok() {
+            self.restore_vars(snapshot);
+        }
+        res
     }
 
     /// Finish the type returned from a function call. This entails expanding solved variables,
