@@ -665,6 +665,8 @@ fn builtin(name: &str) -> TspType {
 
 #[cfg(test)]
 mod tests {
+    use pyrefly_types::lit_int::LitInt;
+    use pyrefly_types::literal::Lit;
     use pyrefly_python::module_name::ModuleName;
     use pyrefly_types::module::ModuleType;
     use pyrefly_types::types::AnyStyle;
@@ -1013,7 +1015,7 @@ mod tests {
 
     #[test]
     fn test_convert_literal_int_uses_builtins_uri() {
-        let ty = PyreflyType::Literal(pyrefly_types::literal::Literal::int(7));
+        let ty = Lit::Int(LitInt::new(7)).to_implicit_type();
         let tsp = convert_type(&ty);
         match tsp {
             TspType::Class(c) => {
