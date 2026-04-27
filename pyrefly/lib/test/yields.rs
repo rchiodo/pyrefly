@@ -681,3 +681,12 @@ def f2() -> A | Generator[A]:
     yield A()
     "#,
 );
+
+testcase!(
+    test_async_generator_union,
+    r#"
+from typing import AsyncGenerator
+async def f() -> AsyncGenerator[int] | AsyncGenerator[str]:
+    yield ""
+    "#,
+);

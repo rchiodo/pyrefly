@@ -5126,22 +5126,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             BindingYield::Yield(annot, x) => {
                 // TODO: Keep track of whether the function is async in the binding, decompose hint
                 // appropriately instead of just trying both.
-                let annot = annot.map(|k| self.get_idx(k));
-                let hint = annot
-                    .as_ref()
-                    .and_then(|x| x.ty(self.heap, self.stdlib))
-                    .and_then(|ty| {
-                        if let Some((yield_ty, send_ty, _)) = self.decompose_generator(&ty) {
+                let annot = annot
+                    .map(|k| self.get_idx(k))
+                    .and_then(|x| x.ty(self.heap, self.stdlib));
+                let hints = annot.as_ref().map(HintRef::soft).and_then(|hint| {
+                    let hints = self.decompose_hint(hint, |ty| {
+                        if let Some((yield_ty, send_ty, _)) = self.decompose_generator(ty) {
                             Some((yield_ty, send_ty))
                         } else {
-                            self.decompose_async_generator(&ty)
+                            self.decompose_async_generator(ty)
                         }
                     });
-                if let Some((yield_hint, send_ty)) = hint {
+                    (!hints.is_empty()).then_some(hints)
+                });
+                if let Some(hints) = hints {
+                    let (yield_hints, send_tys) = hints.into_iter().unzip();
                     let yield_ty = if let Some(expr) = x.value.as_ref() {
                         self.expr(
                             expr,
-                            Some((&yield_hint, &|| {
+                            Some((&self.unions(yield_hints), &|| {
                                 TypeCheckContext::of_kind(TypeCheckKind::YieldValue)
                             })),
                             errors,
@@ -5149,13 +5152,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     } else {
                         self.check_and_return_type(
                             self.heap.mk_none(),
-                            &yield_hint,
+                            &self.unions(yield_hints),
                             x.range,
                             errors,
                             &|| TypeCheckContext::of_kind(TypeCheckKind::UnexpectedBareYield),
                         )
                     };
-                    Arc::new(YieldResult { yield_ty, send_ty })
+                    Arc::new(YieldResult {
+                        yield_ty,
+                        send_ty: self.unions(send_tys),
+                    })
                 } else {
                     let yield_ty = if let Some(expr) = x.value.as_ref() {
                         self.expr_infer(expr, errors)
