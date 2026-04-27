@@ -4722,12 +4722,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
             }
         } else if is_generator {
-            if let Some((_, _, return_ty)) = self.decompose_generator(annotation) {
-                self.check_type(implicit_return.ty(), &return_ty, range, errors, &|| {
-                    TypeCheckContext::of_kind(TypeCheckKind::ImplicitFunctionReturn(
-                        has_explicit_returns,
-                    ))
-                });
+            let hint = HintRef::soft(annotation);
+            let return_tys = self.decompose_hint(hint, |hint| {
+                self.decompose_generator(hint).map(|(_, _, r)| r)
+            });
+            if !return_tys.is_empty() {
+                self.check_type(
+                    implicit_return.ty(),
+                    &self.unions(return_tys),
+                    range,
+                    errors,
+                    &|| {
+                        TypeCheckContext::of_kind(TypeCheckKind::ImplicitFunctionReturn(
+                            has_explicit_returns,
+                        ))
+                    },
+                );
             } else {
                 self.error(
                     errors,

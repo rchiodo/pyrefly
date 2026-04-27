@@ -655,8 +655,29 @@ testcase!(
     test_return_is_incompatible_with_generator,
     r#"
 from typing import Generator
-def f() -> Generator[int, None, str] | int:  # E: Generator function should return `Generator`
+def f() -> Generator[int, None, str] | int:
     yield 1
     return 42  # E: `Literal[42]` is not assignable to declared return type `str`
+    "#,
+);
+
+testcase!(
+    test_generator_return_annotation,
+    r#"
+def f() -> int:  # E: Generator function should return `Generator`
+    yield 0
+    "#,
+);
+
+testcase!(
+    test_generator_nongenerator_union,
+    r#"
+from typing import Generator
+class A: ...
+# This is a silly return type, but it's technically valid.
+def f1() -> A | Generator[A]:
+    return A()
+def f2() -> A | Generator[A]:
+    yield A()
     "#,
 );
