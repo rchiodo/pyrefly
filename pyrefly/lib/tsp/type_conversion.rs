@@ -82,19 +82,21 @@ fn next_id() -> i32 {
 pub type FuncRangeResolver<'a> = dyn Fn(&FuncId) -> Option<TextRange> + 'a;
 
 /// Callback that resolves a module name (e.g. `pkg.subpkg`) to a canonical
-/// file URI for that module (preferably package `__init__.py[i]` for packages).
-pub type ModuleUriResolver<'a> = dyn Fn(&pyrefly_types::module::ModuleType) -> Option<String> + 'a;
+/// filesystem path for that module (preferably package `__init__.py[i]` for
+/// packages).
+pub type ModulePathResolver<'a> =
+    dyn Fn(&pyrefly_types::module::ModuleType) -> Option<PathBuf> + 'a;
 
 /// Convert a pyrefly `Type` to a TSP protocol `Type` using optional
 /// source-range and module-URI resolvers.
 pub fn convert_type_with_resolvers<'a>(
     ty: &PyreflyType,
     func_range_resolver: Option<&'a FuncRangeResolver<'a>>,
-    module_uri_resolver: Option<&'a ModuleUriResolver<'a>>,
+    module_path_resolver: Option<&'a ModulePathResolver<'a>>,
 ) -> TspType {
     TypeConverter {
         resolve_func_range: func_range_resolver,
-        resolve_module_uri: module_uri_resolver,
+        resolve_module_path: module_path_resolver,
     }
     .convert(ty)
 }
@@ -112,7 +114,7 @@ pub fn convert_type(ty: &PyreflyType) -> TspType {
 /// Holds an optional range resolver and drives recursive type conversion.
 struct TypeConverter<'a> {
     resolve_func_range: Option<&'a FuncRangeResolver<'a>>,
-    resolve_module_uri: Option<&'a ModuleUriResolver<'a>>,
+    resolve_module_path: Option<&'a ModulePathResolver<'a>>,
 }
 
 impl TypeConverter<'_> {
@@ -174,8 +176,9 @@ impl TypeConverter<'_> {
             PyreflyType::Module(m) => {
                 let module_name = m.to_string();
                 let uri = self
-                    .resolve_module_uri
+                    .resolve_module_path
                     .and_then(|resolve| resolve(m))
+                    .map(|path| path_buf_to_uri(&path))
                     .unwrap_or_default();
                 TspType::Module(TspModuleType {
                     flags: TypeFlags::NONE,
@@ -622,6 +625,12 @@ fn path_to_uri(module_path: &pyrefly_python::module_path::ModulePath) -> String 
     }
 }
 
+/// Convert a local filesystem path to a URI string.
+fn path_buf_to_uri(path: &std::path::Path) -> String {
+    Url::from_file_path(path)
+        .map_or_else(|()| path.to_string_lossy().to_string(), |u| u.to_string())
+}
+
 /// Convert an `lsp_types::Range` to a TSP `Range`.
 fn lsp_range_to_tsp(r: lsp_types::Range) -> TspRange {
     TspRange {
@@ -996,18 +1005,18 @@ mod tests {
     #[test]
     fn test_convert_module_with_resolver_sets_uri() {
         let ty = PyreflyType::Module(ModuleType::new_as(ModuleName::from_str("pkg")));
-        let module_uri_resolver = |module: &ModuleType| {
+        let module_path_resolver = |module: &ModuleType| {
             if module.to_string() == "pkg" {
-                Some("file:///repo/pkg/__init__.pyi".to_owned())
+                Some(PathBuf::from("/repo/pkg/__init__.pyi"))
             } else {
                 None
             }
         };
-        let tsp = convert_type_with_resolvers(&ty, None, Some(&module_uri_resolver));
+        let tsp = convert_type_with_resolvers(&ty, None, Some(&module_path_resolver));
         match tsp {
             TspType::Module(m) => {
                 assert_eq!(m.module_name, "pkg");
-                assert_eq!(m.uri, "file:///repo/pkg/__init__.pyi");
+                assert!(m.uri.contains("/repo/pkg/__init__.pyi"));
             }
             other => panic!("expected ModuleType, got {other:?}"),
         }

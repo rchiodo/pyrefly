@@ -60,10 +60,10 @@ impl<T: TspInterface> TspServer<T> {
     ) -> tsp_types::Type {
         let resolver =
             |func_id: &pyrefly_types::callable::FuncId| self.inner.resolve_func_def_range(func_id);
-        let module_uri_resolver = |module: &pyrefly_types::module::ModuleType| {
+        let module_path_resolver = |module: &pyrefly_types::module::ModuleType| {
             source_uri.and_then(|uri| self.inner.resolve_module_uri(uri, module))
         };
-        convert_type_with_resolvers(ty, Some(&resolver), Some(&module_uri_resolver))
+        convert_type_with_resolvers(ty, Some(&resolver), Some(&module_path_resolver))
     }
 
     pub fn process_event<'a>(

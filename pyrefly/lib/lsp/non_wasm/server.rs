@@ -475,7 +475,7 @@ pub trait TspInterface: Send + Sync {
         func_id: &pyrefly_types::callable::FuncId,
     ) -> Option<TextRange>;
 
-    /// Resolve an importable module to its backing file URI using the
+    /// Resolve an importable module to its backing filesystem path using the
     /// import-resolution context of `source_uri`.
     ///
     /// Returns `None` when the source URI is invalid, cannot be mapped to a
@@ -484,7 +484,7 @@ pub trait TspInterface: Send + Sync {
         &self,
         source_uri: &str,
         module: &pyrefly_types::module::ModuleType,
-    ) -> Option<String>;
+    ) -> Option<PathBuf>;
 
     /// Resolve a URI to a filesystem path.
     ///
@@ -6327,7 +6327,7 @@ impl TspInterface for Server {
         &self,
         source_uri: &str,
         module: &pyrefly_types::module::ModuleType,
-    ) -> Option<String> {
+    ) -> Option<PathBuf> {
         let url = Url::parse(source_uri)
             .ok()
             .or_else(|| Url::from_file_path(source_uri).ok())?;
@@ -6341,9 +6341,7 @@ impl TspInterface for Server {
             .finding()?;
 
         let path = to_real_path(finding.path())?;
-        Url::from_file_path(path.canonicalize().unwrap_or(path))
-            .ok()
-            .map(|u| u.to_string())
+        Some(path.canonicalize().unwrap_or(path))
     }
 
     fn resolve_uri_to_path(&self, uri: &Url) -> Option<PathBuf> {
