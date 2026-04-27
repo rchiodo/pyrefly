@@ -83,7 +83,7 @@ pub type FuncRangeResolver<'a> = dyn Fn(&FuncId) -> Option<TextRange> + 'a;
 
 /// Callback that resolves a module name (e.g. `pkg.subpkg`) to a canonical
 /// file URI for that module (preferably package `__init__.py[i]` for packages).
-pub type ModuleUriResolver<'a> = dyn Fn(&str) -> Option<String> + 'a;
+pub type ModuleUriResolver<'a> = dyn Fn(&pyrefly_types::module::ModuleType) -> Option<String> + 'a;
 
 /// Convert a pyrefly `Type` to a TSP protocol `Type` using optional
 /// source-range and module-URI resolvers.
@@ -175,7 +175,7 @@ impl TypeConverter<'_> {
                 let module_name = m.to_string();
                 let uri = self
                     .resolve_module_uri
-                    .and_then(|resolve| resolve(module_name.as_str()))
+                    .and_then(|resolve| resolve(m))
                     .unwrap_or_default();
                 TspType::Module(TspModuleType {
                     flags: TypeFlags::NONE,
@@ -996,8 +996,8 @@ mod tests {
     #[test]
     fn test_convert_module_with_resolver_sets_uri() {
         let ty = PyreflyType::Module(ModuleType::new_as(ModuleName::from_str("pkg")));
-        let module_uri_resolver = |module_name: &str| {
-            if module_name == "pkg" {
+        let module_uri_resolver = |module: &ModuleType| {
+            if module.to_string() == "pkg" {
                 Some("file:///repo/pkg/__init__.pyi".to_owned())
             } else {
                 None

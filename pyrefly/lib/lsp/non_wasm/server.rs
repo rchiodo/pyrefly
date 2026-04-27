@@ -475,12 +475,16 @@ pub trait TspInterface: Send + Sync {
         func_id: &pyrefly_types::callable::FuncId,
     ) -> Option<TextRange>;
 
-    /// Resolve an importable module name to its backing file URI using the
+    /// Resolve an importable module to its backing file URI using the
     /// import-resolution context of `source_uri`.
     ///
     /// Returns `None` when the source URI is invalid, cannot be mapped to a
     /// path, or the target module cannot be resolved.
-    fn resolve_module_uri(&self, source_uri: &str, module_name: &str) -> Option<String>;
+    fn resolve_module_uri(
+        &self,
+        source_uri: &str,
+        module: &pyrefly_types::module::ModuleType,
+    ) -> Option<String>;
 
     /// Resolve a URI to a filesystem path.
     ///
@@ -6319,7 +6323,11 @@ impl TspInterface for Server {
         Some(bindings.get(idx).0.range())
     }
 
-    fn resolve_module_uri(&self, source_uri: &str, module_name: &str) -> Option<String> {
+    fn resolve_module_uri(
+        &self,
+        source_uri: &str,
+        module: &pyrefly_types::module::ModuleType,
+    ) -> Option<String> {
         let url = Url::parse(source_uri)
             .ok()
             .or_else(|| Url::from_file_path(source_uri).ok())?;
@@ -6327,7 +6335,7 @@ impl TspInterface for Server {
 
         let source_handle = make_open_handle(&self.state, &source_path);
         let transaction = self.state.transaction();
-        let module_name = ModuleName::from_str(module_name);
+        let module_name = ModuleName::from_str(&module.to_string());
         let finding = transaction
             .import_handle(&source_handle, module_name, None)
             .finding()?;
