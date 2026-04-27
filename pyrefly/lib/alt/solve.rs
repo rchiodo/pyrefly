@@ -63,6 +63,7 @@ use crate::alt::types::decorated_function::UndecoratedFunction;
 use crate::alt::types::legacy_lookup::LegacyTypeParameterLookup;
 use crate::alt::types::yields::YieldFromResult;
 use crate::alt::types::yields::YieldResult;
+use crate::alt::unwrap::HintRef;
 use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::AnnAssignHasValue;
 use crate::binding::binding::AnnotationStyle;
@@ -5192,11 +5193,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         "Invalid `yield from` in async function".to_owned(),
                     );
                 }
-                let annot = annot.map(|k| self.get_idx(k));
-                let want = annot
-                    .as_ref()
-                    .and_then(|x| x.ty(self.heap, self.stdlib))
-                    .and_then(|ty| self.decompose_generator(&ty));
 
                 let mut ty = self.expr_infer(&x.value, errors);
                 let res = if let Some(generator) = self.unwrap_generator(&ty) {
@@ -5233,13 +5229,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     };
                     YieldFromResult::any_error(self.heap)
                 };
-                if let Some((want_yield, want_send, _)) = want {
-                    // We don't need to be compatible with the expected generator return type.
-                    let want = self.heap.mk_class_type(self.stdlib.generator(
-                        want_yield,
-                        want_send,
-                        self.heap.mk_any_implicit(),
-                    ));
+
+                let annot = annot
+                    .map(|k| self.get_idx(k))
+                    .and_then(|x| x.ty(self.heap, self.stdlib));
+                let want = annot.as_ref().map(HintRef::soft).and_then(|hint| {
+                    let hints = self.decompose_hint(hint, |hint| {
+                        self.decompose_generator(hint)
+                            .map(|(want_yield, want_send, _)| {
+                                // We don't need to be compatible with the expected generator return type.
+                                self.heap.mk_class_type(self.stdlib.generator(
+                                    want_yield,
+                                    want_send,
+                                    self.heap.mk_any_implicit(),
+                                ))
+                            })
+                    });
+                    (!hints.is_empty()).then(|| self.unions(hints))
+                });
+                if let Some(want) = want {
                     self.check_type(&ty, &want, x.range, errors, &|| {
                         TypeCheckContext::of_kind(TypeCheckKind::YieldFrom)
                     });

@@ -630,3 +630,23 @@ reveal_type(bar1)  # E: revealed type: () -> Iterator[dict[str, Any]] | Iterator
 reveal_type(bar2)  # E: revealed type: () -> Iterator[tuple[Any, ...]]
 "#,
 );
+
+testcase!(
+    test_union_of_generators_return_type,
+    r#"
+from typing import Generator
+def f() -> Generator[str, int]: ...
+def g() -> Generator[int, None] | Generator[str, int]:
+    yield from f()
+    "#,
+);
+
+testcase!(
+    test_yield_from_union_of_iterator,
+    r#"
+from typing import Iterator
+def f() -> Iterator[list[int]] | Iterator[list[str]]: ...
+def g() -> Iterator[list[int]] | Iterator[list[str]]:
+    yield from f()
+    "#,
+);
