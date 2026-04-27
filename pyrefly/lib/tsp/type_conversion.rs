@@ -29,10 +29,10 @@
 //! All `Type` variants are explicitly handled; no types fall through to a
 //! generic `SynthesizedType` stub.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering;
-use std::path::PathBuf;
 
 use lsp_types::Url;
 use pyrefly_types::callable::Callable;
@@ -551,9 +551,8 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
 
 /// Build a declaration for a class in `builtins.pyi`.
 fn make_builtin_class_declaration(name: &str) -> RegularDeclaration {
-    let module_path = pyrefly_python::module_path::ModulePath::bundled_typeshed(PathBuf::from(
-        "builtins.pyi",
-    ));
+    let module_path =
+        pyrefly_python::module_path::ModulePath::bundled_typeshed(PathBuf::from("builtins.pyi"));
     RegularDeclaration {
         kind: DeclarationKind::Regular,
         category: DeclarationCategory::Class,
