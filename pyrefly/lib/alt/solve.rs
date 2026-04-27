@@ -3478,7 +3478,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap.mk_none()
             }
         } else if x.is_generator {
-            let hint = hint.and_then(|ty| self.decompose_generator(&ty).map(|(_, _, r)| r));
+            let hint = hint.as_ref().map(HintRef::soft).and_then(|hint| {
+                let hints = self.decompose_hint(hint, |hint| {
+                    self.decompose_generator(hint).map(|(_, _, r)| r)
+                });
+                (!hints.is_empty()).then(|| self.unions(hints))
+            });
             let annot_range = x.annot.and_then(|k| self.annotation_range(k));
             let tcc: &dyn Fn() -> TypeCheckContext = &|| {
                 TypeCheckContext::of_kind(TypeCheckKind::ExplicitFunctionReturn)

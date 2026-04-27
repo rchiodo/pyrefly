@@ -650,3 +650,13 @@ def g() -> Iterator[list[int]] | Iterator[list[str]]:
     yield from f()
     "#,
 );
+
+testcase!(
+    test_return_is_incompatible_with_generator,
+    r#"
+from typing import Generator
+def f() -> Generator[int, None, str] | int:  # E: Generator function should return `Generator`
+    yield 1
+    return 42  # E: `Literal[42]` is not assignable to declared return type `str`
+    "#,
+);
