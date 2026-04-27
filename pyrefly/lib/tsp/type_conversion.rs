@@ -665,9 +665,9 @@ fn builtin(name: &str) -> TspType {
 
 #[cfg(test)]
 mod tests {
+    use pyrefly_python::module_name::ModuleName;
     use pyrefly_types::lit_int::LitInt;
     use pyrefly_types::literal::Lit;
-    use pyrefly_python::module_name::ModuleName;
     use pyrefly_types::module::ModuleType;
     use pyrefly_types::types::AnyStyle;
     use pyrefly_types::types::NeverStyle;
