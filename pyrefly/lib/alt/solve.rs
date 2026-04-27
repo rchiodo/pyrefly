@@ -5208,11 +5208,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // with a `None` send type.
                     // TODO: This might cause confusing type errors.
                     let none = self.heap.mk_none();
-                    ty = self.heap.mk_class_type(self.stdlib.generator(
-                        yield_ty.clone(),
-                        none.clone(),
-                        none,
-                    ));
+                    ty = self.distribute_over_union(&yield_ty, |yield_ty: &Type| {
+                        self.heap.mk_class_type(self.stdlib.generator(
+                            yield_ty.clone(),
+                            none.clone(),
+                            none.clone(),
+                        ))
+                    });
                     YieldFromResult::from_iterable(self.heap, yield_ty)
                 } else {
                     ty = if is_async.is_async() {
