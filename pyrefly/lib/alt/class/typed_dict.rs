@@ -184,6 +184,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         range,
                         tcc,
                         subset_error,
+                        None,
                     );
                 }
             }

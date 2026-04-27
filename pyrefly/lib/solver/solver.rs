@@ -1468,6 +1468,7 @@ impl Solver {
         loc: TextRange,
         tcc: &dyn Fn() -> TypeCheckContext,
         subset_error: SubsetError,
+        note: Option<String>,
     ) {
         let tcc = tcc();
         let msg = tcc.kind.format_error(
@@ -1478,6 +1479,9 @@ impl Solver {
         let mut msg_lines = vec1![msg];
         if let Some(subset_error_msg) = subset_error.to_error_msg() {
             msg_lines.push(subset_error_msg);
+        }
+        if let Some(note) = note {
+            msg_lines.push(note);
         }
         let extra_annotations = tcc.annotations;
         match tcc.context {

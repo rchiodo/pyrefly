@@ -3040,7 +3040,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         match self.is_subset_eq_with_reason(got, want) {
             Ok(()) => true,
             Err(error) => {
-                self.solver().error(got, want, errors, loc, tcc, error);
+                let note = self
+                    .suggest_enum_member_for_value(got, want)
+                    .map(|s| format!("Did you mean `{s}`?"));
+                self.solver()
+                    .error(got, want, errors, loc, tcc, error, note);
                 false
             }
         }
