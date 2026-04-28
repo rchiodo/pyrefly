@@ -649,23 +649,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
             Expr::Generator(x) => {
-                let yield_hint = hint.and_then(|hint| self.decompose_generator_yield(hint.ty()));
-                self.ifs_infer(&x.generators, errors);
-                let yield_ty = self
-                    .expr_infer_type_info_with_hint(
-                        &x.elt,
-                        hint.and_then(|hint| hint.with_ty_opt(yield_hint.as_ref())),
-                        errors,
-                    )
-                    .into_ty();
-                if self.generator_expr_is_async(x) {
-                    self.heap
-                        .mk_class_type(self.stdlib.async_generator(yield_ty, self.heap.mk_none()))
-                } else {
-                    let none = self.heap.mk_none();
-                    self.heap
-                        .mk_class_type(self.stdlib.generator(yield_ty, none.clone(), none))
-                }
+                let old_hint = hint;
+                let hint = hint.map(HintRef::from_old);
+                self.infer_with_decomposed_hint(
+                    hint,
+                    |hint| self.decompose_generator_yield(hint),
+                    |yield_hint| {
+                        self.ifs_infer(&x.generators, errors);
+                        let yield_ty = self
+                            .expr_infer_type_info_with_hint(
+                                &x.elt,
+                                old_hint.and_then(|hint| hint.with_ty_opt(yield_hint.as_ref())),
+                                errors,
+                            )
+                            .into_ty();
+                        if self.generator_expr_is_async(x) {
+                            self.heap.mk_class_type(
+                                self.stdlib.async_generator(yield_ty, self.heap.mk_none()),
+                            )
+                        } else {
+                            let none = self.heap.mk_none();
+                            self.heap.mk_class_type(self.stdlib.generator(
+                                yield_ty,
+                                none.clone(),
+                                none,
+                            ))
+                        }
+                    },
+                )
             }
             Expr::Await(x) => {
                 let awaiting_ty = self.expr_infer(&x.value, errors);

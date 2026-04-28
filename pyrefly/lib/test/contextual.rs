@@ -281,6 +281,18 @@ x4: Generator[int, None, int] = (1 for _ in [1]) # E: `Generator[Literal[1]]` is
 );
 
 testcase!(
+    test_generator_union,
+    r#"
+from typing import Generator
+class A: ...
+class B: ...
+class B2(B): ...
+def f():
+    x: Generator[A] | Generator[list[B]] = ([B2()] for _ in range(10))
+    "#,
+);
+
+testcase!(
     test_context_if_expr,
     r#"
 class A: ...
