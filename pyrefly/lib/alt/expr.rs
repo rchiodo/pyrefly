@@ -1939,17 +1939,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         elt_hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Vec<Type> {
+        let old_hint = elt_hint;
+        let elt_hint = elt_hint.map(HintRef::from_old);
         let star_hint = LazyCell::new(|| {
             elt_hint.map(|hint| {
-                self.heap
-                    .mk_class_type(self.stdlib.iterable(hint.ty().clone()))
+                Type::union(
+                    hint.types()
+                        .map(|hint| self.heap.mk_class_type(self.stdlib.iterable(hint.clone()))),
+                )
             })
         });
         elts.map(|x| match x {
             Expr::Starred(ExprStarred { value, .. }) => {
                 let unpacked_ty = self.expr_infer_with_hint_promote(
                     value,
-                    elt_hint.and_then(|hint| hint.with_ty_opt(star_hint.as_ref())),
+                    old_hint.and_then(|hint| hint.with_ty_opt(star_hint.as_ref())),
                     errors,
                 );
                 if let Some(iterable_ty) = self.unwrap_iterable(&unpacked_ty) {
@@ -1966,7 +1970,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     )
                 }
             }
-            _ => self.expr_infer_with_hint_promote(x, elt_hint, errors),
+            _ => self.expr_infer_with_hint_promote(x, old_hint, errors),
         })
     }
 
