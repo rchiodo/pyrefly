@@ -473,6 +473,29 @@ def test(x: int | str):
 );
 
 testcase!(
+    test_context_return_union,
+    r#"
+class A: ...
+class B: ...
+class B2(B): ...
+
+def f[T](x: T) -> T:
+    return x
+
+x: list[A] | list[B] = f([B2()])
+    "#,
+);
+
+testcase!(
+    test_context_return_union_literal_hint,
+    r#"
+from typing import Literal
+def f[T](x: T) -> Literal[1, 2] | T: ...
+x: Literal[1, 2] = f(1)
+    "#,
+);
+
+testcase!(
     test_context_ctor_return,
     r#"
 class A: ...

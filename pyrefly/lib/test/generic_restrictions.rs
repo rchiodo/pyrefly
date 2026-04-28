@@ -1322,3 +1322,17 @@ x = C([1j])
 assert_type(x, C[complex])
     "#,
 );
+
+testcase!(
+    test_call_with_typevar_union,
+    r#"
+from typing import TypeVar
+
+class C: ...
+T = TypeVar("T", bound=C)
+
+def f(x: T | None) -> T | int: ...
+def g(x: T | None) -> T | int:
+    return f(x)
+    "#,
+);
