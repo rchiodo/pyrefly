@@ -12,6 +12,8 @@ use ruff_python_ast::name::Name;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::error::collector::ErrorCollector;
+use crate::solver::solver::SubsetError;
+use crate::solver::solver::SubsetWithSnapshotResult;
 use crate::types::callable::Param;
 use crate::types::callable::Required;
 use crate::types::class::ClassType;
@@ -450,5 +452,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ret
             })
             .collect()
+    }
+
+    pub fn infer_with_decomposed_hint<'b, D>(
+        &self,
+        hint: Option<HintRef<'_, 'b>>,
+        decompose: impl Fn(&'b Type) -> Option<D>,
+        infer: impl Fn(Option<D>) -> Type,
+    ) -> Type {
+        if let Some(hint) = hint {
+            for (hint, vs) in self.solver().partial_sort_by_vars(hint.types()) {
+                let mut ret = None;
+                match self.solver().with_snapshot(&vs, || {
+                    let d = decompose(hint);
+                    if d.is_none() {
+                        return Err(SubsetError::Other);
+                    }
+                    ret = Some(infer(d));
+                    self.is_subset_eq_with_reason(ret.as_ref().unwrap(), hint)
+                }) {
+                    SubsetWithSnapshotResult::Ok => return ret.unwrap(),
+                    SubsetWithSnapshotResult::Err(_) => {}
+                }
+            }
+        }
+        infer(None)
     }
 }
