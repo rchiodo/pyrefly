@@ -148,7 +148,8 @@ testcase!(
 class A: ...
 class B: ...
 class B2(B): ...
-x: set[A] | set[B] = {B2()}
+x1: set[A] | set[B] = {B2()}
+x2: set[A] | set[B] = {B2() for _ in range(10)}
     "#,
 );
 
