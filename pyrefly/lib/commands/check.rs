@@ -722,16 +722,14 @@ impl CheckArgs {
             ));
         }
 
-        let holder = Forgetter::new(State::new(config_finder, thread_count), true);
+        let state = Forgetter::new(State::new(config_finder, thread_count), true);
         let handles = Handles::new(expanded_file_list);
         let require_levels = self.get_required_levels();
         let mut transaction = Forgetter::new(
-            holder
-                .as_ref()
-                .new_transaction(require_levels.default, None),
+            state.as_ref().new_transaction(require_levels.default, None),
             true,
         );
-        let (loaded_handles, _, sourcedb_errors) = handles.all(holder.as_ref().config_finder());
+        let (loaded_handles, _, sourcedb_errors) = handles.all(state.as_ref().config_finder());
 
         // Project-level output settings can come from config when CLI flags are absent.
         if (self.output.baseline.is_none()
@@ -739,7 +737,7 @@ impl CheckArgs {
             || self.output.min_severity.is_none())
             && let Some(handle) = loaded_handles.first()
         {
-            let config = holder.as_ref().config_finder().python_file(
+            let config = state.as_ref().config_finder().python_file(
                 ModuleNameWithKind::guaranteed(handle.module()),
                 handle.path(),
             );
