@@ -25,6 +25,9 @@ use crate::types::types::Var;
 /// Overly wide unions don't provide a useful hint and lead to prohibitively expensive calls.
 pub const MAX_CALL_HINT_WIDTH: usize = 4;
 
+/// Maximum size for a union hint to `infer_with_decomposed_hint`.
+pub const MAX_DECOMPOSE_HINT_WIDTH: usize = 8;
+
 // The error collector is None for a "soft" type hint, where we try to
 // match an expression against a hint, but fall back to the inferred type
 // without any errors if the hint is incompatible.
@@ -429,7 +432,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         decompose: impl Fn(&'b Type) -> Option<D>,
         infer: impl Fn(Option<D>) -> Type,
     ) -> Type {
-        if let Some(hint) = hint {
+        if let Some(hint) = hint
+            && hint.types().len() <= MAX_DECOMPOSE_HINT_WIDTH
+        {
             for (hint, vs) in self.solver().partial_sort_by_vars(hint.types()) {
                 let mut ret = None;
                 match self.solver().with_snapshot(&vs, || {
