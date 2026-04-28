@@ -9,7 +9,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter;
 
-use itertools::Either;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
 use itertools::izip;
@@ -1481,23 +1480,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             },
             (l, Type::Intersect(u)) => all(u.0.iter(), |u| self.is_subset_eq(l, u)),
             (l, Type::Union(box Union { members: us, .. })) => {
-                // Check non-var elements before var elements, so that if we match a non-var, we
-                // don't pin the vars. Within var-containing members, try wrapped vars (e.g.
-                // `type[T]`) before bare vars (e.g. `T`), so that more specific patterns are
-                // tried first. This prevents cases like `T | type[T]` from incorrectly matching
-                // bare `T` when `type[T]` would produce a better (bound-satisfying) solution.
-                let (vars, nonvars): (Vec<_>, Vec<_>) = us.iter().partition_map(|u| {
-                    let vs = u.collect_maybe_placeholder_vars();
-                    if !vs.is_empty() {
-                        Either::Left((u, vs))
-                    } else {
-                        Either::Right((u, vs))
-                    }
-                });
-                let (bare_vars, wrapped_vars): (Vec<_>, Vec<_>) = vars
-                    .into_iter()
-                    .partition(|(u, _)| matches!(u, Type::Var(_)));
-                let ordered_us = nonvars.into_iter().chain(wrapped_vars).chain(bare_vars);
+                let ordered_us = self.solver.partial_sort_by_vars(us);
                 let mut error = None;
                 let l_vs = l.collect_maybe_placeholder_vars();
                 // Take the first successful match.

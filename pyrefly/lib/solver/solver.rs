@@ -14,6 +14,8 @@ use std::fmt;
 use std::fmt::Display;
 use std::mem;
 
+use itertools::Either;
+use itertools::Itertools;
 use pyrefly_types::dimension::ShapeError;
 use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::heap::TypeHeap;
@@ -586,6 +588,30 @@ impl Solver {
             self.restore_vars(snapshot);
         }
         res
+    }
+
+    // Partially sort a list of types for matching (is_subset_eq).
+    // Sort non-var elements before var elements, so that if we match a non-var, we
+    // don't pin the vars. Within var-containing members, try wrapped vars (e.g.
+    // `type[T]`) before bare vars (e.g. `T`), so that more specific patterns are
+    // tried first. This prevents cases like `T | type[T]` from incorrectly matching
+    // bare `T` when `type[T]` would produce a better (bound-satisfying) solution.
+    pub fn partial_sort_by_vars<'a>(
+        &self,
+        ts: &'a [Type],
+    ) -> impl Iterator<Item = (&'a Type, Vec<Var>)> {
+        let (vars, nonvars): (Vec<_>, Vec<_>) = ts.iter().partition_map(|t| {
+            let vs = t.collect_maybe_placeholder_vars();
+            if !vs.is_empty() {
+                Either::Left((t, vs))
+            } else {
+                Either::Right((t, vs))
+            }
+        });
+        let (bare_vars, wrapped_vars): (Vec<_>, Vec<_>) = vars
+            .into_iter()
+            .partition(|(t, _)| matches!(t, Type::Var(_)));
+        nonvars.into_iter().chain(wrapped_vars).chain(bare_vars)
     }
 
     /// Finish the type returned from a function call. This entails expanding solved variables,
