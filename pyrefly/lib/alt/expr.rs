@@ -416,119 +416,89 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Vec::new()
                 };
                 let old_hint = hint;
-                let hint = hint.map(HintRef::from_old);
-                let owner = Owner::new();
-                let hints = {
-                    let mut hints = hint.map(|hint| hint.types().map(Some)).unwrap_or_default();
-                    // This `None` hint serves two purposes:
-                    // - When hint=None, we try the call once with no hint.
-                    // - If the hint is non-None and we hit `None`, that means no individual hint matched,
-                    //   in which case we'll try a combined union hint.
-                    if hint.is_none_or(|hint| hint.types().len() > 1) {
-                        hints.push(None);
-                    }
-                    hints
-                };
-                let mut callable_with_error = None;
-                for mut cur_hint in hints {
-                    if cur_hint.is_none()
-                        && let Some(hint) = hint
-                    {
-                        let combined_hint = Type::union(hint.types().to_vec());
-                        cur_hint = Some(owner.push(combined_hint));
-                    }
-                    let param_vars = self.allocate_lambda_param_vars(&param_ids);
+                self.callable_infer_with_hint(
+                    hint,
+                    errors,
+                    |cur_hint, callable_errors| {
+                        let param_vars = self.allocate_lambda_param_vars(&param_ids);
 
-                    // Pass any contextual information to the parameter bindings used in the lambda body as a side
-                    // effect, by setting an answer for the vars created at binding time.
-                    let return_hint =
-                        cur_hint.and_then(|hint| self.decompose_lambda(hint, &param_vars));
+                        // Pass any contextual information to the parameter bindings used in the lambda body as a side
+                        // effect, by setting an answer for the vars created at binding time.
+                        let return_hint =
+                            cur_hint.and_then(|hint| self.decompose_lambda(hint, &param_vars));
 
-                    let mut params: Vec<Param> = if let Some(parameters) = &lambda.parameters {
-                        param_vars
-                            .into_iter()
-                            .zip(parameters.iter_non_variadic_params())
-                            .map(|((name, var), param)| {
-                                let required = if param.default.is_some() {
-                                    Required::Optional(None)
-                                } else {
-                                    Required::Required
-                                };
-                                Param::Pos(name.clone(), self.solver().force_var(var), required)
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    if let Some(parameters) = &lambda.parameters {
-                        params.extend(parameters.vararg.iter().map(|x| {
-                            let var = self.solver().fresh_unwrap(self.uniques);
-                            self.set_lambda_param_var(
-                                self.bindings().get_lambda_param_id(&x.name),
-                                var,
-                            );
-                            Param::Varargs(Some(x.name.id.clone()), self.solver().force_var(var))
-                        }));
-                        params.extend(parameters.kwarg.iter().map(|x| {
-                            let var = self.solver().fresh_unwrap(self.uniques);
-                            self.set_lambda_param_var(
-                                self.bindings().get_lambda_param_id(&x.name),
-                                var,
-                            );
-                            Param::Kwargs(Some(x.name.id.clone()), self.solver().force_var(var))
-                        }));
-                    }
-                    let params = Params::List(ParamList::new(params));
-                    if let Some(hint) = cur_hint {
-                        // Ensure no param vars are pinned to unfinished Variable::Quantified.
-                        // Since lambda parameters are unannotated, the specialization errors can be ignored.
-                        let _specialization_errors = self.solver().finish_all_quantified(hint);
-                    }
-                    let callable_errors = self.error_collector();
-                    let ret = self.expr_infer_type_no_trace(
-                        &lambda.body,
-                        old_hint.and_then(|hint| hint.with_ty_opt(return_hint.as_ref())),
-                        &callable_errors,
-                    );
-                    let (yield_keys, yield_from_keys) =
-                        self.bindings().lambda_yield_keys(lambda.range);
-                    let ret = if !(yield_keys.is_empty() && yield_from_keys.is_empty()) {
-                        let yield_ty = self.unions(
-                            yield_keys
-                                .iter()
-                                .map(|idx| self.get_idx(*idx).yield_ty.clone())
-                                .chain(
-                                    yield_from_keys
-                                        .iter()
-                                        .map(|idx| self.get_idx(*idx).yield_ty.clone()),
+                        let mut params: Vec<Param> = if let Some(parameters) = &lambda.parameters {
+                            param_vars
+                                .into_iter()
+                                .zip(parameters.iter_non_variadic_params())
+                                .map(|((name, var), param)| {
+                                    let required = if param.default.is_some() {
+                                        Required::Optional(None)
+                                    } else {
+                                        Required::Required
+                                    };
+                                    Param::Pos(name.clone(), self.solver().force_var(var), required)
+                                })
+                                .collect()
+                        } else {
+                            Vec::new()
+                        };
+                        if let Some(parameters) = &lambda.parameters {
+                            params.extend(parameters.vararg.iter().map(|x| {
+                                let var = self.solver().fresh_unwrap(self.uniques);
+                                self.set_lambda_param_var(
+                                    self.bindings().get_lambda_param_id(&x.name),
+                                    var,
+                                );
+                                Param::Varargs(
+                                    Some(x.name.id.clone()),
+                                    self.solver().force_var(var),
                                 )
-                                .collect(),
+                            }));
+                            params.extend(parameters.kwarg.iter().map(|x| {
+                                let var = self.solver().fresh_unwrap(self.uniques);
+                                self.set_lambda_param_var(
+                                    self.bindings().get_lambda_param_id(&x.name),
+                                    var,
+                                );
+                                Param::Kwargs(Some(x.name.id.clone()), self.solver().force_var(var))
+                            }));
+                        }
+                        let params = Params::List(ParamList::new(params));
+                        if let Some(hint) = cur_hint {
+                            // Ensure no param vars are pinned to unfinished Variable::Quantified.
+                            // Since lambda parameters are unannotated, the specialization errors can be ignored.
+                            let _specialization_errors = self.solver().finish_all_quantified(hint);
+                        }
+                        let ret = self.expr_infer_type_no_trace(
+                            &lambda.body,
+                            old_hint.and_then(|hint| hint.with_ty_opt(return_hint.as_ref())),
+                            callable_errors,
                         );
-                        self.stdlib
-                            .generator(yield_ty, self.heap.mk_any_implicit(), ret)
-                            .to_type()
-                    } else {
-                        ret
-                    };
-                    let callable = self.heap.mk_callable(params, ret);
-                    if callable_errors.is_empty()
-                        && cur_hint.is_none_or(|hint| {
-                            let snapshot = self
-                                .solver()
-                                .snapshot_vars(&hint.collect_maybe_placeholder_vars());
-                            let res = self.is_subset_eq(&callable, hint);
-                            self.solver().restore_vars(snapshot);
-                            res
-                        })
-                    {
-                        return callable;
-                    } else if callable_with_error.is_none() {
-                        callable_with_error = Some((callable, callable_errors));
-                    }
-                }
-                let (callable, callable_errors) = callable_with_error.unwrap();
-                errors.extend(callable_errors);
-                callable
+                        let (yield_keys, yield_from_keys) =
+                            self.bindings().lambda_yield_keys(lambda.range);
+                        let ret = if !(yield_keys.is_empty() && yield_from_keys.is_empty()) {
+                            let yield_ty = self.unions(
+                                yield_keys
+                                    .iter()
+                                    .map(|idx| self.get_idx(*idx).yield_ty.clone())
+                                    .chain(
+                                        yield_from_keys
+                                            .iter()
+                                            .map(|idx| self.get_idx(*idx).yield_ty.clone()),
+                                    )
+                                    .collect(),
+                            );
+                            self.stdlib
+                                .generator(yield_ty, self.heap.mk_any_implicit(), ret)
+                                .to_type()
+                        } else {
+                            ret
+                        };
+                        self.heap.mk_callable(params, ret)
+                    },
+                    |callable| callable,
+                )
             }
             Expr::Tuple(x) => self.tuple_infer(x, hint, errors),
             Expr::List(x) => {

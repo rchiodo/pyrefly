@@ -1206,6 +1206,57 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         expected_types
     }
 
+    /// Helper used by `callable_infer` and Expr::Lambda inference to distribute over hints.
+    pub fn callable_infer_with_hint<R>(
+        &self,
+        hint: Option<HintRefOld>,
+        errors: &ErrorCollector,
+        mut inner: impl FnMut(Option<&Type>, &ErrorCollector) -> R,
+        result_type: impl Fn(&R) -> &Type,
+    ) -> R {
+        let hint = hint.map(HintRef::from_old);
+        let owner = Owner::new();
+        let hints = {
+            let mut hints = hint.map(|hint| hint.types().map(Some)).unwrap_or_default();
+            // This `None` hint serves two purposes:
+            // - When hint=None, we try the call once with no hint.
+            // - If the hint is non-None and we hit `None`, that means no individual hint matched,
+            //   in which case we'll try a combined union hint.
+            if hint.is_none_or(|hint| hint.types().len() > 1) {
+                hints.push(None);
+            }
+            hints
+        };
+        let mut ret_with_error = None;
+        for mut cur_hint in hints {
+            if cur_hint.is_none()
+                && let Some(hint) = hint
+            {
+                let combined_hint = Type::union(hint.types().to_vec());
+                cur_hint = Some(owner.push(combined_hint));
+            }
+            let cur_errors = self.error_collector();
+            let ret = inner(cur_hint, &cur_errors);
+            if cur_errors.is_empty()
+                && cur_hint.is_none_or(|hint| {
+                    let snapshot = self
+                        .solver()
+                        .snapshot_vars(&hint.collect_maybe_placeholder_vars());
+                    let res = self.is_subset_eq(result_type(&ret), hint);
+                    self.solver().restore_vars(snapshot);
+                    res
+                })
+            {
+                return ret;
+            } else if ret_with_error.is_none() {
+                ret_with_error = Some((ret, cur_errors));
+            }
+        }
+        let (ret, cur_errors) = ret_with_error.unwrap();
+        errors.extend(cur_errors);
+        ret
+    }
+
     // Call a function with the given arguments. The arguments are contextually typed, if possible.
     // We pass two error collectors into this function and return specialization errors separately:
     // * arg_errors is used to infer the types of arguments, before passing them to the function.
@@ -1238,60 +1289,27 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Vec<TypeVarSpecializationError>,
         HashMap<TextRange, Type>,
     ) {
-        let hint = hint.map(HintRef::from_old);
-        let owner = Owner::new();
-        let hints = {
-            let mut hints = hint.map(|hint| hint.types().map(Some)).unwrap_or_default();
-            // This `None` hint serves two purposes:
-            // - When hint=None, we try the call once with no hint.
-            // - If the hint is non-None and we hit `None`, that means no individual hint matched,
-            //   in which case we'll try a combined union hint.
-            if hint.is_none_or(|hint| hint.types().len() > 1) {
-                hints.push(None);
-            }
-            hints
-        };
-        let mut ret_with_error = None;
-        for mut cur_hint in hints {
-            if cur_hint.is_none()
-                && let Some(hint) = hint
-            {
-                let combined_hint = Type::union(hint.types().to_vec());
-                cur_hint = Some(owner.push(combined_hint));
-            }
-            let cur_call_errors = self.error_collector();
-            let ret = self.callable_infer_inner(
-                callable.clone(),
-                callable_name,
-                tparams,
-                self_obj.clone(),
-                args,
-                keywords,
-                arguments_range,
-                arg_errors,
-                &cur_call_errors,
-                context,
-                cur_hint,
-                &mut ctor_targs,
-            );
-            if cur_call_errors.is_empty()
-                && cur_hint.is_none_or(|hint| {
-                    let snapshot = self
-                        .solver()
-                        .snapshot_vars(&hint.collect_maybe_placeholder_vars());
-                    let res = self.is_subset_eq(&ret.0, hint);
-                    self.solver().restore_vars(snapshot);
-                    res
-                })
-            {
-                return ret;
-            } else if ret_with_error.is_none() {
-                ret_with_error = Some((ret, cur_call_errors));
-            }
-        }
-        let (ret, cur_call_errors) = ret_with_error.unwrap();
-        call_errors.extend(cur_call_errors);
-        ret
+        self.callable_infer_with_hint(
+            hint,
+            call_errors,
+            |cur_hint, cur_call_errors| {
+                self.callable_infer_inner(
+                    callable.clone(),
+                    callable_name,
+                    tparams,
+                    self_obj.clone(),
+                    args,
+                    keywords,
+                    arguments_range,
+                    arg_errors,
+                    cur_call_errors,
+                    context,
+                    cur_hint,
+                    &mut ctor_targs,
+                )
+            },
+            |ret| &ret.0,
+        )
     }
 
     fn callable_infer_inner(
