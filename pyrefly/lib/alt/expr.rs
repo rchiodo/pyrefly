@@ -653,7 +653,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let hint = hint.map(HintRef::from_old);
                 self.infer_with_decomposed_hint(
                     hint,
-                    |hint| self.decompose_generator_yield(hint),
+                    |hint| self.decompose_generator(hint).map(|(y, _, _)| y),
                     |yield_hint| {
                         self.ifs_infer(&x.generators, errors);
                         let yield_ty = self

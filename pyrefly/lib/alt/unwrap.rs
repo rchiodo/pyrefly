@@ -346,20 +346,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn decompose_generator_yield(&self, hint: &Type) -> Option<Type> {
-        let yield_ty = self.fresh_var();
-        let generator_ty = self.heap.mk_class_type(self.stdlib.generator(
-            yield_ty.to_type(self.heap),
-            self.fresh_var().to_type(self.heap),
-            self.fresh_var().to_type(self.heap),
-        ));
-        if self.is_subset_eq(&generator_ty, hint) {
-            self.resolve_var_opt(hint, yield_ty)
-        } else {
-            None
-        }
-    }
-
     pub fn decompose_generator(&self, ty: &Type) -> Option<(Type, Type, Type)> {
         let yield_ty = self.fresh_var();
         let send_ty = self.fresh_var();
