@@ -701,7 +701,15 @@
           "spans": [
             {
               "length": 4,
+              "start": 113
+            },
+            {
+              "length": 4,
               "start": 120
+            },
+            {
+              "length": 4,
+              "start": 152
             }
           ],
           "target": {
@@ -762,12 +770,35 @@
           "spans": [
             {
               "length": 8,
+              "start": 143
+            },
+            {
+              "length": 8,
               "start": 19
             }
           ],
           "target": {
             "id": 0,
             "key": "typing.Optional"
+          }
+        }
+      },
+      {
+        "id": 0,
+        "key": {
+          "file": {
+            "id": 0,
+            "key": "attr_annotation.py"
+          },
+          "spans": [
+            {
+              "length": 8,
+              "start": 143
+            }
+          ],
+          "target": {
+            "id": 0,
+            "key": "attr_annotation.Optional"
           }
         }
       }
@@ -803,6 +834,22 @@
             {
               "source": {
                 "length": 4,
+                "start": 113
+              },
+              "target": {
+                "file": {
+                  "id": 0,
+                  "key": "attr_annotation.py"
+                },
+                "name": {
+                  "id": 0,
+                  "key": "attr_annotation.Node"
+                }
+              }
+            },
+            {
+              "source": {
+                "length": 4,
                 "start": 120
               },
               "target": {
@@ -829,6 +876,22 @@
                 "name": {
                   "id": 0,
                   "key": "attr_annotation.Container.setup.<locals>.self"
+                }
+              }
+            },
+            {
+              "source": {
+                "length": 4,
+                "start": 152
+              },
+              "target": {
+                "file": {
+                  "id": 0,
+                  "key": "attr_annotation.py"
+                },
+                "name": {
+                  "id": 0,
+                  "key": "attr_annotation.Node"
                 }
               }
             },
@@ -869,6 +932,38 @@
                 "name": {
                   "id": 0,
                   "key": "typing"
+                }
+              }
+            },
+            {
+              "source": {
+                "length": 8,
+                "start": 143
+              },
+              "target": {
+                "file": {
+                  "id": 0,
+                  "key": "attr_annotation.py"
+                },
+                "name": {
+                  "id": 0,
+                  "key": "attr_annotation.Optional"
+                }
+              }
+            },
+            {
+              "source": {
+                "length": 8,
+                "start": 143
+              },
+              "target": {
+                "file": {
+                  "id": 0,
+                  "key": "typing.pyi"
+                },
+                "name": {
+                  "id": 0,
+                  "key": "typing.Optional"
                 }
               }
             },
@@ -917,6 +1012,16 @@
             {
               "source": {
                 "length": 4,
+                "start": 113
+              },
+              "target": {
+                "id": 0,
+                "key": "attr_annotation.Node"
+              }
+            },
+            {
+              "source": {
+                "length": 4,
                 "start": 120
               },
               "target": {
@@ -932,6 +1037,16 @@
               "target": {
                 "id": 0,
                 "key": "attr_annotation.Container.setup.<locals>.self"
+              }
+            },
+            {
+              "source": {
+                "length": 4,
+                "start": 152
+              },
+              "target": {
+                "id": 0,
+                "key": "attr_annotation.Node"
               }
             },
             {
@@ -962,6 +1077,26 @@
               "target": {
                 "id": 0,
                 "key": "typing"
+              }
+            },
+            {
+              "source": {
+                "length": 8,
+                "start": 143
+              },
+              "target": {
+                "id": 0,
+                "key": "attr_annotation.Optional"
+              }
+            },
+            {
+              "source": {
+                "length": 8,
+                "start": 143
+              },
+              "target": {
+                "id": 0,
+                "key": "typing.Optional"
               }
             },
             {
