@@ -924,7 +924,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let flattened_items = Ast::flatten_dict_items(items);
-        let old_hint = hint;
         let hint = hint.map(HintRef::from_old);
         if let Some(hint) = hint {
             for hint_ty in hint.types() {
@@ -960,7 +959,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         // Note that we don't need to filter out the TypedDict options here; any non-`dict` options
         // are ignored when decomposing the hint.
-        self.dict_items_infer(range, flattened_items, old_hint, errors)
+        self.dict_items_infer(range, flattened_items, hint, errors)
     }
 
     /// Infers a type for a dictionary literal with the specified items & an optional contextual hint
@@ -974,19 +973,31 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         range: TextRange,
         items: Vec<&DictItem>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        let (key_hint, value_hint) =
-            hint.map_or((None, None), |hint| self.decompose_dict(hint.ty()));
-        self.dict_items_infer_inner(range, items, hint, key_hint, value_hint, errors)
+        self.infer_with_decomposed_hint(
+            hint,
+            |hint| {
+                let (key_hint, value_hint) = self.decompose_dict(hint);
+                if key_hint.is_none() && value_hint.is_none() {
+                    None
+                } else {
+                    Some((key_hint, value_hint))
+                }
+            },
+            |hints| {
+                let (key_hint, value_hint) = hints.unwrap_or_default();
+                self.dict_items_infer_inner(range, &items, hint, key_hint, value_hint, errors)
+            },
+        )
     }
 
     fn dict_items_infer_inner(
         &self,
         range: TextRange,
-        items: Vec<&DictItem>,
-        hint: Option<HintRefOld>,
+        items: &[&DictItem],
+        hint: Option<HintRef>,
         key_hint: Option<Type>,
         value_hint: Option<Type>,
         errors: &ErrorCollector,
@@ -1024,12 +1035,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(key) => {
                     let key_t = self.expr_infer_with_hint_promote(
                         key,
-                        hint.and_then(|hint| hint.with_ty_opt(key_hint.as_ref())),
+                        key_hint.as_ref().and_then(|key_hint| {
+                            hint.as_ref()
+                                .map(|hint| HintRefOld::new(key_hint, hint.errors()))
+                        }),
                         errors,
                     );
                     let value_t = self.expr_infer_with_hint_promote(
                         &x.value,
-                        hint.and_then(|hint| hint.with_ty_opt(value_hint.as_ref())),
+                        value_hint.as_ref().and_then(|value_hint| {
+                            hint.as_ref()
+                                .map(|hint| HintRefOld::new(value_hint, hint.errors()))
+                        }),
                         errors,
                     );
                     if !key_t.is_error() {

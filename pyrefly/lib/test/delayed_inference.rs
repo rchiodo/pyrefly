@@ -426,7 +426,7 @@ assert_type(x, list[int])  # E: assert_type(list[Literal[1]], list[int])
 
 y = dict({})
 y['k'] = 3
-assert_type(y, dict[str, int])  # E: assert_type(dict[Literal['k'], Literal[3]], dict[str, int])
+assert_type(y, dict[str, int])
     "#,
 );
 

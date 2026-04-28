@@ -134,6 +134,13 @@ y: list[B] | list[C] = [B2()]
 );
 
 testcase!(
+    test_dict_union,
+    r#"
+d: dict[int, int] | dict[str, list[int]] = {"x": [True]}
+    "#,
+);
+
+testcase!(
     bug = "Unpacked assignments do not currently use contextual typing",
     test_context_assign_unpacked_list,
     r#"
