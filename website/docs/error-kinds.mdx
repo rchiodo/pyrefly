@@ -486,7 +486,29 @@ z = 10 % 0   # error: division by zero
 
 ## implicit-abstract-class
 
-Pyrefly emits this error when a class defines abstract members but is not declared abstract (for example, it does not inherit from `abc.ABC` or use `abc.ABCMeta`). Such classes cannot be instantiated because they have unimplemented abstract methods. Add `ABC` as a base class, adjust the metaclass, or provide concrete implementations to resolve the issue.
+Pyrefly emits this error when a class that inherits from an abstract class but is not itself explicitly abstract (for example, it does not directly inherit from `abc.ABC` or use `abc.ABCMeta`) has unimplemented abstract members. Such classes cannot be instantiated at runtime. To resolve the issue, explicitly declare the class as abstract or provide concrete implementations.
+
+```python
+from abc import ABC, abstractmethod
+class A(ABC):
+    @abstractmethod
+    def f(self) -> int: ...
+class B(A): ...  # Error: `B` cannot be instantiated due to unimplemented abstract method `f`.
+```
+
+Two possible fixes:
+
+```python
+# 1. If `B` is not meant to be instantiable, explicitly declare it as abstract.
+class B(A, ABC): ...
+```
+
+```python
+# 2. Or, implement `f` to make `B` instantiable.
+class B(A):
+    def f(self) -> int:
+        return 0
+```
 
 The default severity of this diagnostic is `ignore`.
 
