@@ -543,14 +543,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
             Expr::ListComp(x) => {
-                let elem_hint = hint.and_then(|hint| self.decompose_list(hint.ty()));
-                self.ifs_infer(&x.generators, errors);
-                let elem_ty = self.expr_infer_with_hint_promote(
-                    &x.elt,
-                    hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
-                    errors,
-                );
-                self.heap.mk_class_type(self.stdlib.list(elem_ty))
+                let old_hint = hint;
+                let hint = hint.map(HintRef::from_old);
+                self.infer_with_decomposed_hint(
+                    hint,
+                    |hint| self.decompose_list(hint),
+                    |elem_hint| {
+                        self.ifs_infer(&x.generators, errors);
+                        let elem_ty = self.expr_infer_with_hint_promote(
+                            &x.elt,
+                            old_hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
+                            errors,
+                        );
+                        self.heap.mk_class_type(self.stdlib.list(elem_ty))
+                    },
+                )
             }
             Expr::SetComp(x) => {
                 let old_hint = hint;

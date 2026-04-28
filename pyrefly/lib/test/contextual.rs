@@ -129,6 +129,7 @@ class C: ...
 
 x: list[A] | list[B] = [B2()]
 y: list[B] | list[C] = [B2()]
+z: list[A] | list[B] = [B2() for _ in range(10)]
 "#,
 );
 
