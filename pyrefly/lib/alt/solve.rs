@@ -4713,7 +4713,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) {
         if is_async && is_generator {
-            if self.decompose_async_generator(annotation).is_none() {
+            let hints = self.decompose_hint(HintRef::soft(annotation), |hint| {
+                self.decompose_async_generator(hint)
+            });
+            if hints.is_empty() {
                 self.error(
                     errors,
                     range,

@@ -690,3 +690,24 @@ async def f() -> AsyncGenerator[int] | AsyncGenerator[str]:
     yield ""
     "#,
 );
+
+testcase!(
+    test_async_generator_return_annotation,
+    r#"
+async def f() -> int:  # E: Async generator function should return `AsyncGenerator`
+    yield 0
+    "#,
+);
+
+testcase!(
+    test_async_generator_nongenerator_union,
+    r#"
+from typing import AsyncGenerator
+class A: ...
+# This is a silly return type, but it's technically valid.
+async def f1() -> A | AsyncGenerator[A]:
+    return A()
+async def f2() -> A | AsyncGenerator[A]:
+    yield A()
+    "#,
+);
