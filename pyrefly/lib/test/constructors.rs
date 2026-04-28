@@ -1105,3 +1105,35 @@ d2 = D("a")
 assert_type(d2, D)
     "#,
 );
+
+// Regression test for https://github.com/facebook/pyrefly/issues/3236
+testcase!(
+    test_construct_with_hint_and_overloads,
+    r#"
+from typing import Generic, Never, overload, Protocol, TypeVar
+
+_T = TypeVar("_T")
+_T_co = TypeVar("_T_co", covariant=True)
+_AddWithT_contra = TypeVar("_AddWithT_contra", contravariant=True)
+_ResultT_co = TypeVar("_ResultT_co", covariant=True)
+_AddWithT = TypeVar("_AddWithT")
+_ResultT = TypeVar("_ResultT")
+
+class CanAdd(Protocol[_AddWithT_contra, _ResultT_co]):
+    def __add__(self, other: _AddWithT_contra, /) -> _ResultT_co: ...
+
+class H(Generic[_T_co]):
+    @overload
+    def __init__(self: "H[Never]", init_val: dict[Never, int], /) -> None: ...
+    @overload
+    def __init__(self: "H[_T]", init_val: dict[_T, int], /) -> None: ...
+    @overload
+    def __init__(self: "H[int]", init_val: int, /) -> None: ...
+    def __init__(self, init_val: object, /) -> None: ...
+
+def explode_n(source: "H[CanAdd[_AddWithT, _ResultT]]") -> "H[_ResultT]":
+    raise NotImplementedError
+
+result: "H[int]" = explode_n(H(10))
+    "#,
+);
