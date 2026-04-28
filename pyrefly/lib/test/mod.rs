@@ -14,6 +14,7 @@ mod attribute_narrow;
 mod attributes;
 mod attrs;
 mod callable;
+mod callable_residuals;
 mod calls;
 mod cinderx;
 mod class_keywords;
