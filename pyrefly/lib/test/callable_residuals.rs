@@ -7,6 +7,22 @@
 
 use crate::testcase;
 
+// Make sure no residual type leaks into user output, when a residual
+// winds up directly in a return type
+testcase!(
+    test_no_projection_leak_in_reveal_type,
+    r#"
+from typing import Callable, reveal_type
+def identity[**P, R](x: Callable[P, R]) -> tuple[Callable[P, R], R]:
+    ...
+def foo[T](x: T) -> T:
+    return x
+f_out, r_out = identity(foo)
+reveal_type(f_out)  # E: revealed type: (x: Unknown) -> Unknown
+reveal_type(r_out)  # E: revealed type: Unknown
+"#,
+);
+
 testcase!(
     bug = "Generic functions don't work with ParamSpec",
     test_param_spec_generic_function,
