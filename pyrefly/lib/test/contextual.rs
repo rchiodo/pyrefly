@@ -352,9 +352,19 @@ testcase!(
     r#"
 from typing import Callable
 class A: ...
-class B(A): ...
-f: Callable[[], list[A]] = lambda: [B()]
+class B: ...
+class B2(B): ...
+f1: Callable[[], list[B]] = lambda: [B2()]
+f2: Callable[[], list[A]] | Callable[[], list[B]] = lambda: [B2()]
 "#,
+);
+
+testcase!(
+    test_use_lambda_annotation_in_body,
+    r#"
+from typing import Callable
+f: Callable[[int], int] | Callable[[str], str] = lambda x: x + "1"
+    "#,
 );
 
 // We want to contextually type lambda params even when there is an arity mismatch.
