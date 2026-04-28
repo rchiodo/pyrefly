@@ -758,13 +758,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let ty = self.expr_infer_with_hint(x, hint, errors);
-        if let Some(want) = hint
-            && self.is_subset_eq(&ty, want.ty())
-        {
-            want.ty().clone()
-        } else {
-            ty.promote_implicit_literals(self.stdlib)
+        let hint = hint.map(HintRef::from_old);
+        if let Some(want) = hint {
+            // Optimization: delay Type cloning until absolutely necessary.
+            if let &[want] = &want.types() {
+                if self.is_subset_eq(&ty, want) {
+                    return want.clone();
+                }
+            } else {
+                let want = Type::union(want.types().to_vec());
+                if self.is_subset_eq(&ty, &want) {
+                    return want;
+                }
+            }
         }
+        ty.promote_implicit_literals(self.stdlib)
     }
 
     /// Check whether a type corresponds to a deprecated function or method, and if so, log a deprecation warning.
