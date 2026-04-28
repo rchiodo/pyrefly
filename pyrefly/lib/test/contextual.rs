@@ -154,6 +154,17 @@ x2: set[A] | set[B] = {B2() for _ in range(10)}
 );
 
 testcase!(
+    test_nontuple_union_hint_for_tuple_value,
+    r#"
+from typing import Sequence
+class A: ...
+class B: ...
+class B2(B): ...
+x: Sequence[A] | Sequence[list[B]] = ([B2()],)
+    "#,
+);
+
+testcase!(
     bug = "Unpacked assignments do not currently use contextual typing",
     test_context_assign_unpacked_list,
     r#"
@@ -727,6 +738,7 @@ f(([B()],))  # E: `tuple[list[B]]` is not assignable to upper bound `Sequence[li
 // Contrast this with test_sequence_hint_in_typevar_bound.
 // Because we don't need to filter out wrapped Vars, we are able to use their restrictions as hints.
 testcase!(
+    bug = "Bad Var-Var interaction in `decompose_tuple`",
     test_list_hint_in_typevar_bound,
     r#"
 from typing import Sequence
@@ -743,7 +755,10 @@ f2(([B()],))
 
 def f3[T: list[A]](x: Sequence[T]) -> T:
     return x[0]
-f3(([B()],))
+# `decompose_tuple` accidentally drops the relationship between the Unwrap var we create to collect
+# the hint and the Quantified var created from T because `is_subset_eq_var` unifies the latter
+# into the former, losing the information that the Unwrap var has collected a bound.
+f3(([B()],))  # E: `list[B]` is not assignable to upper bound `list[A]`
     "#,
 );
 

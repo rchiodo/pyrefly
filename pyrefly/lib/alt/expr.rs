@@ -793,11 +793,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             if !nontuples.is_empty() {
                 // The non-tuple options may contain a type like Sequence[T] that provides an additional default hint.
-                // We filter out Vars to prevent them from being polluted with `tuple[hint, ...]`
-                // types by the `decompose_tuple` call. Note that this technically causes us to
-                // lose an opportunity for contextual typing: if the var was created from a
-                // Quantified with an upper bound, we could use the upper bound as a hint. However,
-                // none of the other type checkers do this.
+                // The Var filter is needed for performance, not correctness. Without it, we get a
+                // significant slowdown in pytorch incremental edit time. Note that this filtering
+                // technically causes us to lose an opportunity for contextual typing: if the var
+                // was created from a Quantified with an upper bound, we could use the upper bound
+                // as a hint. However, no other type checker does this.
                 let nontuple_hint = self.unions(
                     nontuples
                         .into_iter()
@@ -805,8 +805,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .cloned()
                         .collect(),
                 );
-                let nontuple_element_hint = self.decompose_tuple(&nontuple_hint);
-                if let Some(nontuple_element_hint) = nontuple_element_hint {
+                let nontuple_element_hints = self
+                    .decompose_hint(HintRef::soft(&nontuple_hint), |hint| {
+                        self.decompose_tuple(hint)
+                    });
+                for nontuple_element_hint in nontuple_element_hints {
                     let nontuple_element_hint = owner.push(nontuple_element_hint);
                     for ts in element_hints.iter_mut() {
                         ts.push(nontuple_element_hint);
