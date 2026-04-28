@@ -549,14 +549,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.heap.mk_class_type(self.stdlib.set(elem_ty))
             }
             Expr::DictComp(x) => {
-                let (key_hint, value_hint) =
-                    hint.map_or((None, None), |hint| self.decompose_dict(hint.ty()));
-                let key_hint = hint.and_then(|hint| hint.with_ty_opt(key_hint.as_ref()));
-                let value_hint = hint.and_then(|hint| hint.with_ty_opt(value_hint.as_ref()));
-                self.ifs_infer(&x.generators, errors);
-                let key_ty = self.expr_infer_with_hint_promote(&x.key, key_hint, errors);
-                let value_ty = self.expr_infer_with_hint_promote(&x.value, value_hint, errors);
-                self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
+                let hint = hint.map(HintRef::from_old);
+                self.infer_with_decomposed_hint(
+                    hint,
+                    |hint| {
+                        let (key_hint, value_hint) = self.decompose_dict(hint);
+                        if key_hint.is_none() && value_hint.is_none() {
+                            None
+                        } else {
+                            Some((key_hint, value_hint))
+                        }
+                    },
+                    |hints| {
+                        let (key_hint, value_hint) = hints.unwrap_or_default();
+                        let key_hint = key_hint.as_ref().and_then(|key_hint| {
+                            hint.as_ref()
+                                .map(|hint| HintRefOld::new(key_hint, hint.errors()))
+                        });
+                        let value_hint = value_hint.as_ref().and_then(|value_hint| {
+                            hint.as_ref()
+                                .map(|hint| HintRefOld::new(value_hint, hint.errors()))
+                        });
+                        self.ifs_infer(&x.generators, errors);
+                        let key_ty = self.expr_infer_with_hint_promote(&x.key, key_hint, errors);
+                        let value_ty =
+                            self.expr_infer_with_hint_promote(&x.value, value_hint, errors);
+                        self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
+                    },
+                )
             }
             Expr::Generator(x) => {
                 let yield_hint = hint.and_then(|hint| self.decompose_generator_yield(hint.ty()));
