@@ -143,6 +143,16 @@ d2: dict[int, int] | dict[str, list[int]] = {k: [True] for k in x}
 );
 
 testcase!(
+    test_set_union,
+    r#"
+class A: ...
+class B: ...
+class B2(B): ...
+x: set[A] | set[B] = {B2()}
+    "#,
+);
+
+testcase!(
     bug = "Unpacked assignments do not currently use contextual typing",
     test_context_assign_unpacked_list,
     r#"

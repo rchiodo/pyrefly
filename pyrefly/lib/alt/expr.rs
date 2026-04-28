@@ -510,23 +510,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::Dict(x) => self.dict_infer(&x.items, hint, x.range, errors),
             Expr::Set(x) => {
-                let elem_hint = hint.and_then(|hint| self.decompose_set(hint.ty()));
-                if x.is_empty() {
-                    let elem_ty = elem_hint.unwrap_or_else(|| {
-                        self.solver()
-                            .fresh_partial_contained(self.uniques, x.range)
-                            .to_type(self.heap)
-                    });
-                    self.heap.mk_class_type(self.stdlib.set(elem_ty))
-                } else {
-                    let elem_tys = self.elts_infer(
-                        &x.elts,
-                        hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
-                        errors,
-                    );
-                    self.heap
-                        .mk_class_type(self.stdlib.set(self.unions(elem_tys)))
-                }
+                let old_hint = hint;
+                let hint = hint.map(HintRef::from_old);
+                self.infer_with_decomposed_hint(
+                    hint,
+                    |hint| self.decompose_set(hint),
+                    |elem_hint| {
+                        if x.is_empty() {
+                            let elem_ty = elem_hint.unwrap_or_else(|| {
+                                self.solver()
+                                    .fresh_partial_contained(self.uniques, x.range)
+                                    .to_type(self.heap)
+                            });
+                            self.heap.mk_class_type(self.stdlib.set(elem_ty))
+                        } else {
+                            let elem_tys = self.elts_infer(
+                                &x.elts,
+                                old_hint.and_then(|hint| hint.with_ty_opt(elem_hint.as_ref())),
+                                errors,
+                            );
+                            self.heap
+                                .mk_class_type(self.stdlib.set(self.unions(elem_tys)))
+                        }
+                    },
+                )
             }
             Expr::ListComp(x) => {
                 let elem_hint = hint.and_then(|hint| self.decompose_list(hint.ty()));
