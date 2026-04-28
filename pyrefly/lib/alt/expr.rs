@@ -490,23 +490,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::Tuple(x) => self.tuple_infer(x, hint, errors),
             Expr::List(x) => {
-                let elt_hint = hint.and_then(|hint| self.decompose_list(hint.ty()));
-                if x.is_empty() {
-                    let elem_ty = elt_hint.unwrap_or_else(|| {
-                        self.solver()
-                            .fresh_partial_contained(self.uniques, x.range)
-                            .to_type(self.heap)
-                    });
-                    self.heap.mk_class_type(self.stdlib.list(elem_ty))
-                } else {
-                    let elem_tys = self.elts_infer(
-                        &x.elts,
-                        hint.and_then(|hint| hint.with_ty_opt(elt_hint.as_ref())),
-                        errors,
-                    );
-                    self.heap
-                        .mk_class_type(self.stdlib.list(self.unions(elem_tys)))
-                }
+                let old_hint = hint;
+                let hint = hint.map(HintRef::from_old);
+                self.infer_with_decomposed_hint(
+                    hint,
+                    |hint| self.decompose_list(hint),
+                    |elt_hint| {
+                        if x.is_empty() {
+                            let elem_ty = elt_hint.unwrap_or_else(|| {
+                                self.solver()
+                                    .fresh_partial_contained(self.uniques, x.range)
+                                    .to_type(self.heap)
+                            });
+                            self.heap.mk_class_type(self.stdlib.list(elem_ty))
+                        } else {
+                            let elem_tys = self.elts_infer(
+                                &x.elts,
+                                old_hint.and_then(|hint| hint.with_ty_opt(elt_hint.as_ref())),
+                                errors,
+                            );
+                            self.heap
+                                .mk_class_type(self.stdlib.list(self.unions(elem_tys)))
+                        }
+                    },
+                )
             }
             Expr::Dict(x) => self.dict_infer(&x.items, hint, x.range, errors),
             Expr::Set(x) => {

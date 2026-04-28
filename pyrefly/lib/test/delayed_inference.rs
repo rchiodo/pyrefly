@@ -415,14 +415,13 @@ assert_type(z, dict[str, int])
 );
 
 testcase!(
-    bug = "Container contents should be promoted",
     test_redundant_empty_container_constructor_call,
     r#"
 from typing import assert_type
 
 x = list([])
 x.append(1)
-assert_type(x, list[int])  # E: assert_type(list[Literal[1]], list[int])
+assert_type(x, list[int])
 
 y = dict({})
 y['k'] = 3

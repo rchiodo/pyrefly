@@ -615,8 +615,8 @@
     {
       "code": -2,
       "column": 12,
-      "concise_description": "`list[complex | Json]` is not assignable to `dict[str, Json] | float | int | list[Json] | str | None`",
-      "description": "`list[complex | Json]` is not assignable to `dict[str, Json] | float | int | list[Json] | str | None`",
+      "concise_description": "`list[complex | int]` is not assignable to `dict[str, Json] | float | int | list[Json] | str | None`",
+      "description": "`list[complex | int]` is not assignable to `dict[str, Json] | float | int | list[Json] | str | None`",
       "line": 20,
       "name": "bad-assignment",
       "severity": "error",
@@ -681,8 +681,8 @@
     {
       "code": -2,
       "column": 30,
-      "concise_description": "`list[list[float] | str | GenericTypeAlias1[str]]` is not assignable to `list[str | GenericTypeAlias1[str]]`",
-      "description": "`list[list[float] | str | GenericTypeAlias1[str]]` is not assignable to `list[str | GenericTypeAlias1[str]]`",
+      "concise_description": "`list[list[float] | str]` is not assignable to `list[str | GenericTypeAlias1[str]]`",
+      "description": "`list[list[float] | str]` is not assignable to `list[str | GenericTypeAlias1[str]]`",
       "line": 63,
       "name": "bad-assignment",
       "severity": "error",
@@ -692,8 +692,8 @@
     {
       "code": -2,
       "column": 35,
-      "concise_description": "`list[int | list[int | list[int | list[float] | str | GenericTypeAlias2[str, int]] | str | GenericTypeAlias2[str, int]] | str | GenericTypeAlias2[str, int]]` is not assignable to `list[int | str | GenericTypeAlias2[str, int]]`",
-      "description": "`list[int | list[int | list[int | list[float] | str | GenericTypeAlias2[str, int]] | str | GenericTypeAlias2[str, int]] | str | GenericTypeAlias2[str, int]]` is not assignable to `list[int | str | GenericTypeAlias2[str, int]]`",
+      "concise_description": "`list[list[int | list[int | list[float] | str]] | str]` is not assignable to `list[int | str | GenericTypeAlias2[str, int]]`",
+      "description": "`list[list[int | list[int | list[float] | str]] | str]` is not assignable to `list[int | str | GenericTypeAlias2[str, int]]`",
       "line": 69,
       "name": "bad-assignment",
       "severity": "error",

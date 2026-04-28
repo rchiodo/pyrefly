@@ -1137,3 +1137,14 @@ def explode_n(source: "H[CanAdd[_AddWithT, _ResultT]]") -> "H[_ResultT]":
 result: "H[int]" = explode_n(H(10))
     "#,
 );
+
+testcase!(
+    test_hint_and_bound_interaction,
+    r#"
+from typing import assert_type, Self, Sequence
+class C[T: int | list[str]]:
+    def __new__(cls, data: T | Sequence[T]) -> Self: ...
+x = C([1, 2])
+assert_type(x, C[int])
+    "#,
+);
