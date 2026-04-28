@@ -41,7 +41,6 @@ use crate::alt::class::class_field::DescriptorBase;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::nn_module_specials::is_nn_sequential;
 use crate::alt::unwrap::HintRef;
-use crate::alt::unwrap::HintRefOld;
 use crate::binding::binding::Key;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
@@ -660,7 +659,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         keywords: &[CallKeyword],
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
     ) -> Option<Type> {
         let dunder_call = self.get_metaclass_dunder_call(cls)?;
         // Clone targs because we don't want instantiations from metaclass __call__
@@ -719,10 +718,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arguments_range: TextRange,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         construct: impl Fn(Option<&Type>) -> ConstructedInstance,
     ) -> Type {
-        let hint = hint.map(HintRef::from_old);
         if let Some(hint) = hint
             && let hints = hint.types()
             && hints.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH
@@ -764,7 +762,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         callee_range: Option<TextRange>,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
     ) -> Type {
         self.construct_with_hint(arguments_range, errors, context, hint, |hint| {
             self.construct_class_inner(
@@ -1089,7 +1087,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arguments_range: TextRange,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
     ) -> Type {
         self.construct_with_hint(arguments_range, errors, context, hint, |hint| {
             self.construct_typed_dict_inner(
@@ -1206,7 +1204,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         callee_range: Option<TextRange>,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         ctor_targs: Option<&mut TArgs>,
     ) -> Type {
         let metadata = call_target.function_metadata();
@@ -1471,7 +1469,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         ctor_targs: Option<&mut TArgs>,
     ) -> Type {
         // First try the call without the hint to see if it succeeds.
@@ -1539,7 +1537,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arguments_range: TextRange,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         ctor_targs: Option<&mut TArgs>,
     ) -> Type {
         self.call_infer_with_callee_range(
@@ -1783,7 +1781,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         x: &ExprCall,
         mut callee_ty: Type,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
         // nn.Sequential chain: thread input through each module's forward method.
@@ -1956,7 +1954,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         kws: &[CallKeyword],
         callee_range: TextRange,
         arg_range: TextRange,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
         let callable =

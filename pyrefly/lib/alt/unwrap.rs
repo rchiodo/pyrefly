@@ -26,32 +26,6 @@ use crate::types::types::Var;
 // without any errors if the hint is incompatible.
 // Soft type hints are used for `e1 or e1` expressions.
 #[derive(Clone, Copy, Debug)]
-pub struct HintRefOld<'a, 'b>(&'b Type, Option<&'a ErrorCollector>);
-
-impl<'a, 'b> HintRefOld<'a, 'b> {
-    pub fn new(hint: &'b Type, errors: Option<&'a ErrorCollector>) -> Self {
-        Self(hint, errors)
-    }
-
-    /// Construct a "soft" type hint that doesn't report an error when the hint is incompatible.
-    pub fn soft(hint: &'b Type) -> Self {
-        Self(hint, None)
-    }
-
-    pub fn ty(&self) -> &Type {
-        self.0
-    }
-
-    pub fn errors(&self) -> Option<&ErrorCollector> {
-        self.1
-    }
-
-    pub fn with_ty_opt(&self, ty: Option<&'b Type>) -> Option<Self> {
-        ty.map(|ty| Self(ty, self.1))
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
 pub struct HintRef<'a, 'b>(&'b [Type], Option<&'a ErrorCollector>);
 
 impl<'a, 'b> HintRef<'a, 'b> {
@@ -68,11 +42,6 @@ impl<'a, 'b> HintRef<'a, 'b> {
         let hint = hint?;
         let ty = ty?;
         Some(Self::new(ty, hint.1))
-    }
-
-    /// Temporary helper to aid with incremental migration from HintRefOld to HintRef.
-    pub fn from_old(hint: HintRefOld<'a, 'b>) -> Self {
-        Self::new(hint.0, hint.1)
     }
 
     fn split(t: &'b Type) -> &'b [Type] {

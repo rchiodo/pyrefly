@@ -39,7 +39,6 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
 use crate::alt::unwrap::HintRef;
-use crate::alt::unwrap::HintRefOld;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -1209,12 +1208,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Helper used by `callable_infer` and Expr::Lambda inference to distribute over hints.
     pub fn callable_infer_with_hint<R>(
         &self,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         errors: &ErrorCollector,
         mut inner: impl FnMut(Option<&Type>, &ErrorCollector) -> R,
         result_type: impl Fn(&R) -> &Type,
     ) -> R {
-        let hint = hint.map(HintRef::from_old);
         let owner = Owner::new();
         let hints = {
             let mut hints = hint.map(|hint| hint.types().map(Some)).unwrap_or_default();
@@ -1282,7 +1280,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         arg_errors: &ErrorCollector,
         call_errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
-        hint: Option<HintRefOld>,
+        hint: Option<HintRef>,
         mut ctor_targs: Option<&mut TArgs>,
     ) -> (
         Type,
