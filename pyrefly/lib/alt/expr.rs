@@ -790,10 +790,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRefOld>,
         errors: &ErrorCollector,
     ) -> Type {
+        let hint = hint.map(HintRef::from_old);
         let owner = Owner::new();
-        let has_hint = hint.is_some();
         let (hint_ts, default_hint) = if let Some(hint) = &hint {
-            let (tuples, nontuples) = self.split_tuple_hint(hint.ty());
+            let (tuples, nontuples) = self.split_tuple_hint(*hint);
             // Combine hints from multiple tuples.
             let mut element_hints: Vec<Vec1<&Type>> = Vec::new();
             let mut default_hint = Vec::new();
@@ -924,7 +924,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             match unbounded.as_slice() {
                 [] => {
-                    if !has_hint && prefix.len() > MAX_TUPLE_LENGTH {
+                    if hint.is_none() && prefix.len() > MAX_TUPLE_LENGTH {
                         self.heap.mk_unbounded_tuple(self.heap.mk_any_implicit())
                     } else {
                         self.heap.mk_concrete_tuple(prefix)
@@ -951,15 +951,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    fn split_tuple_hint<'b>(&self, hint: &'b Type) -> (Vec<&'b Tuple>, Vec<&'b Type>) {
-        match hint {
-            Type::Tuple(tuple) => (vec![tuple], Vec::new()),
-            Type::Union(box Union { members, .. }) => members.iter().partition_map(|t| match t {
-                Type::Tuple(tuple) => Either::Left(tuple),
-                _ => Either::Right(t),
-            }),
-            _ => (Vec::new(), vec![hint]),
-        }
+    fn split_tuple_hint<'b>(&self, hint: HintRef<'_, 'b>) -> (Vec<&'b Tuple>, Vec<&'b Type>) {
+        hint.types().iter().partition_map(|t| match t {
+            Type::Tuple(tuple) => Either::Left(tuple),
+            _ => Either::Right(t),
+        })
     }
 
     fn tuple_to_element_hints<'b>(&self, tup: &'b Tuple) -> (Vec<&'b Type>, Option<&'b Type>) {
