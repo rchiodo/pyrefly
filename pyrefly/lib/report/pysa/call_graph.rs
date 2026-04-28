@@ -1684,6 +1684,9 @@ impl<'a> CallGraphVisitor<'a> {
         if receiver_class.is_none() {
             return Target::Function(callee);
         }
+        if callee_definition.defining_class.is_none() {
+            return Target::Function(callee);
+        }
         // Pysa is responsible for filtering the overridden methods
         // to only those from classes that extend the receiver_class.
         Target::Overrides(callee)

@@ -7754,3 +7754,30 @@ def foo(cls: Type[A | B]):
         )]
     }
 );
+
+call_graph_testcase!(
+    test_nested_function_as_class_attribute_call,
+    TEST_MODULE_NAME,
+    r#"
+def _field_accessor():
+    def f(self):
+        pass
+    return property(f)
+
+class C:
+    year = _field_accessor()
+
+def foo(c: C):
+    c.year
+"#,
+    &|context: &ModuleContext| {
+        let property_getters = vec![
+            create_call_target("test.f", TargetType::Function)
+                .with_receiver_class_for_test("test.C", context),
+        ];
+        vec![(
+            "test.foo",
+            vec![("11:5-11:11", property_getter_callees(property_getters))],
+        )]
+    }
+);
