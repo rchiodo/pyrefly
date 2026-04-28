@@ -37,7 +37,7 @@ use crate::error::legacy::LegacyErrors;
 use crate::report;
 use crate::state::require::Require;
 use crate::state::state::State;
-use crate::state::subscriber::ProgressBarSubscriber;
+use crate::state::subscriber::ProgressBarStyle;
 
 /// Arguments for Buck-powered type checking.
 #[deny(clippy::missing_docs_in_private_items)]
@@ -63,9 +63,16 @@ pub struct BuckCheckArgs {
     #[arg(long, value_enum, default_value_t = report::pysa::PysaFormat::Capnp)]
     report_pysa_format: report::pysa::PysaFormat,
 
-    /// Show a progress bar during type checking.
-    #[arg(long)]
+    /// Show a progress bar during type checking. Deprecated: use `--progress-bar=interactive` instead.
+    #[arg(long, hide = true)]
     show_progress_bar: bool,
+
+    /// Set the progress bar style.
+    /// `interactive` shows a visual progress bar.
+    /// `simple` prints periodic log-style progress messages (suitable for piping or non-interactive use).
+    /// `no` (default) disables progress reporting entirely.
+    #[arg(long, value_enum)]
+    progress_bar: Option<ProgressBarStyle>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]
@@ -90,7 +97,7 @@ fn compute_errors(
     thread_count: ThreadCount,
     report_pysa: Option<&Path>,
     report_pysa_format: report::pysa::PysaFormat,
-    show_progress_bar: bool,
+    progress_bar_style: ProgressBarStyle,
 ) -> anyhow::Result<Vec<Error>> {
     let modules_to_check = sourcedb.modules_to_check().into_iter().collect::<Vec<_>>();
 
@@ -134,19 +141,15 @@ fn compute_errors(
         transaction.as_mut().set_pysa_reporter(Some(reporter));
     }
 
-    if show_progress_bar {
-        transaction
-            .as_mut()
-            .set_subscriber(Some(Box::new(ProgressBarSubscriber::new())));
-    }
+    transaction
+        .as_mut()
+        .set_subscriber(progress_bar_style.make_subscriber());
 
     transaction
         .as_mut()
         .run(&modules_to_check, Require::Errors, None);
 
-    if show_progress_bar {
-        transaction.as_mut().set_subscriber(None);
-    }
+    transaction.as_mut().set_subscriber(None);
 
     let errors = transaction.as_ref().get_errors(&modules_to_check);
 
@@ -199,6 +202,17 @@ fn write_output(errors: &[Error], path: Option<&Path>) -> anyhow::Result<()> {
 }
 
 impl BuckCheckArgs {
+    fn progress_bar_style(&self) -> ProgressBarStyle {
+        if let Some(style) = &self.progress_bar {
+            return style.clone();
+        }
+        if self.show_progress_bar {
+            ProgressBarStyle::Interactive
+        } else {
+            ProgressBarStyle::No
+        }
+    }
+
     pub fn run(self, thread_count: ThreadCount) -> anyhow::Result<CommandExitStatus> {
         let input_file = read_input_file(self.input_path.as_path())?;
         let python_version = PythonVersion::from_str(&input_file.py_version)?;
@@ -216,7 +230,7 @@ impl BuckCheckArgs {
             thread_count,
             self.report_pysa.as_deref(),
             self.report_pysa_format,
-            self.show_progress_bar,
+            self.progress_bar_style(),
         )?;
         let min_severity = self.min_severity.unwrap_or(Severity::Error);
         let displayed_errors: Vec<Error> = type_errors
