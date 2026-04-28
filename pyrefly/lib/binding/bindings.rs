@@ -1443,7 +1443,14 @@ impl<'a> BindingsBuilder<'a> {
             // All partial type reads forward to the NameAssign (def_idx).
             self.insert_binding_idx(deferred.bound_name_idx, Binding::ForwardToFirstUse(def_idx));
         } else {
-            let binding = if deferred.promote {
+            let orig_binding = self.idx_to_binding(default_idx);
+            let binding = if let Some(b) = orig_binding
+                && matches!(b, Binding::LambdaParameter(..))
+            {
+                // Lambda parameters have special handling in Key::check_shortcut.
+                // We bind directly to the definition to ensure the shortcut is always detected.
+                b.clone()
+            } else if deferred.promote {
                 Binding::PromoteForward(default_idx)
             } else {
                 Binding::Forward(default_idx)
