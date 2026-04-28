@@ -24,6 +24,45 @@ reveal_type(r_out)  # E: revealed type: Unknown
 );
 
 testcase!(
+    bug = "Identity with one tparam does not respect generic",
+    test_simple_generic_residual,
+    r#"
+from typing import Callable, reveal_type
+def identity[S](x: Callable[[S], S]) -> Callable[[S], S]:
+    return x
+def generic_fn[T](x: T) -> T:
+    return x
+result = identity(generic_fn)
+reveal_type(result)  # E: revealed type: (Unknown) -> Unknown
+"#,
+);
+
+testcase!(
+    bug = "Identity with two separate tparams does not respect generic",
+    test_two_tparam_generic_residual,
+    r#"
+from typing import Callable, reveal_type
+def simple_identity[A, R](f: Callable[[A], R]) -> Callable[[A], R]:
+    return f
+def generic_fn[T](x: T) -> T: ...
+result = simple_identity(generic_fn)
+reveal_type(result)  # E: revealed type: (Unknown) -> Unknown
+"#,
+);
+
+testcase!(
+    bug = "Add-prefix transform doesn't work with generic functions",
+    test_add_prefix_generic,
+    r#"
+from typing import Callable, reveal_type
+def add_prefix[A, R](f: Callable[[A], R]) -> Callable[[int, A], R]: ...
+def identity_fn[T](x: T) -> T: ...
+result = add_prefix(identity_fn)
+reveal_type(result)  # E: revealed type: (int, Unknown) -> Unknown
+"#,
+);
+
+testcase!(
     bug = "Generic functions don't work with ParamSpec",
     test_param_spec_generic_function,
     r#"
