@@ -50,6 +50,7 @@ use serde::Serialize;
 
 use crate::error::error::Error as TypeError;
 use crate::module::bundled::BundledStub;
+use crate::module::third_party::get_bundled_third_party;
 use crate::module::typeshed::typeshed;
 use crate::module::typeshed_third_party::typeshed_third_party;
 use crate::report::pysa::call_graph::CallGraph;
@@ -503,7 +504,8 @@ fn write_bundle_stubs(bundle: &impl BundledStub, directory: &Path) -> anyhow::Re
         let relative_path = match module_path.details() {
             ModulePathDetails::BundledTypeshed(path) => &**path,
             ModulePathDetails::BundledTypeshedThirdParty(path) => &**path,
-            _ => panic!("unexpected module path for typeshed module"),
+            ModulePathDetails::BundledThirdParty(path) => &**path,
+            _ => panic!("unexpected module path for bundled module"),
         };
         let content = bundle.load(relative_path).unwrap();
         let target_path = directory.join(relative_path);
@@ -514,7 +516,7 @@ fn write_bundle_stubs(bundle: &impl BundledStub, directory: &Path) -> anyhow::Re
     Ok(())
 }
 
-// Dump all typeshed files, so we can parse them.
+// Dump all bundled stub files, so we can parse them.
 fn write_typeshed_files(results_directory: &Path) -> anyhow::Result<()> {
     let step = StepLogger::start("Exporting typeshed files", "Exported typeshed files");
 
@@ -526,6 +528,10 @@ fn write_typeshed_files(results_directory: &Path) -> anyhow::Result<()> {
             typeshed_third_party,
             &results_directory.join("typeshed_third_party"),
         )?;
+    }
+
+    if let Ok(bundled_third_party) = get_bundled_third_party() {
+        write_bundle_stubs(bundled_third_party, &results_directory.join("third_party"))?;
     }
 
     step.finish();
