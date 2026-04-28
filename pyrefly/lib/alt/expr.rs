@@ -979,6 +979,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Type {
         let (key_hint, value_hint) =
             hint.map_or((None, None), |hint| self.decompose_dict(hint.ty()));
+        self.dict_items_infer_inner(range, items, hint, key_hint, value_hint, errors)
+    }
+
+    fn dict_items_infer_inner(
+        &self,
+        range: TextRange,
+        items: Vec<&DictItem>,
+        hint: Option<HintRefOld>,
+        key_hint: Option<Type>,
+        value_hint: Option<Type>,
+        errors: &ErrorCollector,
+    ) -> Type {
         if items.is_empty() {
             let key_ty = key_hint.unwrap_or_else(|| {
                 self.solver()
