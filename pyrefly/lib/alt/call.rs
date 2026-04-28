@@ -41,6 +41,7 @@ use crate::alt::class::class_field::DescriptorBase;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::nn_module_specials::is_nn_sequential;
 use crate::alt::unwrap::HintRef;
+use crate::alt::unwrap::MAX_CALL_HINT_WIDTH;
 use crate::binding::binding::Key;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
@@ -703,11 +704,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Maximum size for a union hint in construction. Hints wider than this are ignored.
-    /// Overly wide unions don't provide a useful hint (we actually get fewer errors on mypy_primer
-    /// when we cap the hint width) and lead to prohibitively expensive construction calls.
-    const MAX_CONSTRUCTION_HINT_WIDTH: usize = 4;
-
     /// Handles union hint decomposition for class and TypedDict construction.
     /// When the hint is a union, tries each member independently and keeps only
     /// successful constructions, preferring those assignable to their hint member.
@@ -723,7 +719,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Type {
         if let Some(hint) = hint
             && let hints = hint.types()
-            && hints.len() <= Self::MAX_CONSTRUCTION_HINT_WIDTH
+            && hints.len() <= MAX_CALL_HINT_WIDTH
         {
             let mut ret_no_match_hint = None;
             for member_hint in hints.iter() {

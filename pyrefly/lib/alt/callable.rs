@@ -39,6 +39,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
 use crate::alt::unwrap::HintRef;
+use crate::alt::unwrap::MAX_CALL_HINT_WIDTH;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -1214,22 +1215,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         result_type: impl Fn(&R) -> &Type,
     ) -> R {
         let owner = Owner::new();
-        let hints = {
-            let mut hints = hint.map(|hint| hint.types().map(Some)).unwrap_or_default();
-            // This `None` hint serves two purposes:
-            // - When hint=None, we try the call once with no hint.
-            // - If the hint is non-None and we hit `None`, that means no individual hint matched,
-            //   in which case we'll try a combined union hint.
-            if hint.is_none_or(|hint| hint.types().len() > 1) {
-                hints.push(None);
-            }
-            hints
+        let hint = match hint {
+            // Optimization: no-hint and single-hint cases can return immediately.
+            None => return inner(None, errors),
+            Some(hint) if hint.types().len() == 1 => return inner(hint.types().first(), errors),
+            // Optimization: discard overly wide hints.
+            Some(hint) if hint.types().len() > MAX_CALL_HINT_WIDTH => return inner(None, errors),
+            Some(hint) => hint,
         };
+        let mut hints = hint.types().map(Some);
+        // Push a marker so we know when no individual hint has matched. We'll try a combined union hint.
+        // Constructing the union is expensive, so we use the marker to avoid unnecessary construction.
+        hints.push(None);
         let mut ret_with_error = None;
         for mut cur_hint in hints {
-            if cur_hint.is_none()
-                && let Some(hint) = hint
-            {
+            if cur_hint.is_none() {
                 let combined_hint = Type::union(hint.types().to_vec());
                 cur_hint = Some(owner.push(combined_hint));
             }

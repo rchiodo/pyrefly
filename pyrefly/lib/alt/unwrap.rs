@@ -21,6 +21,10 @@ use crate::types::tuple::Tuple;
 use crate::types::types::Type;
 use crate::types::types::Var;
 
+/// Maximum size for a union hint to a function call. Hints wider than this are ignored.
+/// Overly wide unions don't provide a useful hint and lead to prohibitively expensive calls.
+pub const MAX_CALL_HINT_WIDTH: usize = 4;
+
 // The error collector is None for a "soft" type hint, where we try to
 // match an expression against a hint, but fall back to the inferred type
 // without any errors if the hint is incompatible.
