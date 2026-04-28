@@ -55,14 +55,24 @@ impl<'a, 'b> HintRefOld<'a, 'b> {
 pub struct HintRef<'a, 'b>(&'b [Type], Option<&'a ErrorCollector>);
 
 impl<'a, 'b> HintRef<'a, 'b> {
+    pub fn new(hint: &'b Type, errors: Option<&'a ErrorCollector>) -> Self {
+        Self(Self::split(hint), errors)
+    }
+
     /// Construct a "soft" type hint that doesn't report an error when the hint is incompatible.
     pub fn soft(hint: &'b Type) -> Self {
-        Self(Self::split(hint), None)
+        Self::new(hint, None)
+    }
+
+    pub fn with_ty_opt(hint: Option<Self>, ty: Option<&'b Type>) -> Option<Self> {
+        let hint = hint?;
+        let ty = ty?;
+        Some(Self::new(ty, hint.1))
     }
 
     /// Temporary helper to aid with incremental migration from HintRefOld to HintRef.
     pub fn from_old(hint: HintRefOld<'a, 'b>) -> Self {
-        Self(Self::split(hint.0), hint.1)
+        Self::new(hint.0, hint.1)
     }
 
     fn split(t: &'b Type) -> &'b [Type] {
