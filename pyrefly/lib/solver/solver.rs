@@ -1719,6 +1719,7 @@ impl Solver {
             solver: self,
             type_order,
             gas: INITIAL_GAS,
+            active_call_context: CallContext::outside(),
             subset_cache: SmallMap::new(),
             class_protocol_assumptions: SmallSet::new(),
             coinductive_assumptions_used: false,
@@ -1954,6 +1955,16 @@ pub enum CallPolarity {
     OutsideCall,
 }
 
+impl CallPolarity {
+    fn negated(self) -> Self {
+        match self {
+            Self::Positive => Self::Negative,
+            Self::Negative => Self::Positive,
+            Self::OutsideCall => Self::OutsideCall,
+        }
+    }
+}
+
 // The context in which we are collecting residuals.
 // - The `identity` is the particular Forall type that appeared as an argument
 //   in a higher-order call
@@ -1975,7 +1986,6 @@ pub struct ResidualWitnessContext {
 #[derive(Clone, Debug, Default)]
 pub struct CallContext {
     witness: Option<ResidualWitnessContext>,
-    #[expect(dead_code)]
     polarity: CallPolarity,
 }
 
@@ -1996,6 +2006,17 @@ impl CallContext {
     pub fn residual_witness(&self) -> Option<&ResidualWitnessContext> {
         self.witness.as_ref()
     }
+
+    pub fn with_preserved_polarity(&self) -> Self {
+        self.clone()
+    }
+
+    pub fn with_negated_polarity(&self) -> Self {
+        Self {
+            witness: self.witness.clone(),
+            polarity: self.polarity.negated(),
+        }
+    }
 }
 
 /// A helper to implement subset ergonomically.
@@ -2004,6 +2025,7 @@ pub struct Subset<'a, Ans: LookupAnswer> {
     pub(crate) solver: &'a Solver,
     pub type_order: TypeOrder<'a, Ans>,
     gas: Gas,
+    active_call_context: CallContext,
     /// Memoization cache for recursive subset checks (protocols and recursive type aliases).
     /// Doubles as a cycle detector: `InProgress` entries break cycles via coinductive
     /// reasoning by optimistically returning `Ok(())`.
@@ -2070,55 +2092,42 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     }
 
     pub fn is_subset_eq(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
-        self.is_subset_eq_with_context_and_polarity(
-            got,
-            want,
-            &CallContext::outside(),
-            CallPolarity::OutsideCall,
-        )
+        let call_context = self.active_call_context.clone();
+        self.is_subset_eq_with_context(got, want, &call_context)
     }
 
-    pub fn is_subset_eq_with_polarity(
-        &mut self,
-        got: &Type,
-        want: &Type,
-        call_polarity: CallPolarity,
-    ) -> Result<(), SubsetError> {
-        let call_context = CallContext::outside();
-        self.is_subset_eq_with_context_and_polarity(got, want, &call_context, call_polarity)
-    }
-
-    pub fn is_subset_eq_with_context_and_polarity(
+    pub fn is_subset_eq_with_context(
         &mut self,
         got: &Type,
         want: &Type,
         call_context: &CallContext,
-        call_polarity: CallPolarity,
     ) -> Result<(), SubsetError> {
+        let old_context = mem::replace(&mut self.active_call_context, call_context.clone());
         if self.gas.stop() {
             // We really have no idea. Just give up for now.
+            self.active_call_context = old_context;
             return Err(SubsetError::Other);
         }
         if matches!(got, Type::Materialization) {
-            return self.is_subset_eq_with_context_and_polarity(
+            let res = self.is_subset_eq_with_context(
                 &self
                     .solver
                     .heap
                     .mk_class_type(self.type_order.stdlib().object().clone()),
                 want,
                 call_context,
-                call_polarity,
             );
+            self.active_call_context = old_context;
+            return res;
         } else if matches!(want, Type::Materialization) {
-            return self.is_subset_eq_with_context_and_polarity(
-                got,
-                &self.solver.heap.mk_never(),
-                call_context,
-                call_polarity,
-            );
+            let res =
+                self.is_subset_eq_with_context(got, &self.solver.heap.mk_never(), call_context);
+            self.active_call_context = old_context;
+            return res;
         }
-        let res = self.is_subset_eq_var(got, want, call_context, call_polarity);
+        let res = self.is_subset_eq_var(got, want, call_context);
         self.gas.restore();
+        self.active_call_context = old_context;
         res
     }
 
@@ -2237,7 +2246,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         got: &Type,
         want: &Type,
         call_context: &CallContext,
-        _call_polarity: CallPolarity,
     ) -> Result<(), SubsetError> {
         if let Some(witness) = call_context.residual_witness() {
             let _ = (
@@ -2615,7 +2623,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     }
                 }
             }
-            _ => self.is_subset_eq_impl(got, want),
+            _ => self.is_subset_eq_impl(got, want, call_context),
         }
     }
 

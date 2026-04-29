@@ -39,7 +39,7 @@ use starlark_map::small_map::SmallMap;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::callable::CallArg;
 use crate::alt::expr::TypeOrExpr;
-use crate::solver::solver::CallPolarity;
+use crate::solver::solver::CallContext;
 use crate::solver::solver::OpenTypedDictSubsetError;
 use crate::solver::solver::Subset;
 use crate::solver::solver::SubsetCacheEntry;
@@ -492,11 +492,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         }
     }
 
-    fn is_subset_params_with_polarity(
+    fn is_subset_params_with_context(
         &mut self,
         l_params: &Params,
         u_params: &Params,
-        _call_polarity: CallPolarity,
+        _call_context: &CallContext,
     ) -> Result<(), SubsetError> {
         self.is_subset_params(l_params, u_params)
     }
@@ -1241,7 +1241,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     /// during the failing computation are rolled back by popping the map back to
     /// the saved size, invalidating intermediate results that may have relied on
     /// a coinductive assumption that turned out to be false.
-    pub fn is_subset_eq_impl(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
+    pub fn is_subset_eq_impl(
+        &mut self,
+        got: &Type,
+        want: &Type,
+        call_context: &CallContext,
+    ) -> Result<(), SubsetError> {
         let cache_key = if self.can_be_recursive(got, want) {
             let key = (got.clone(), want.clone());
             if let Some(entry) = self.subset_cache.get(&key) {
@@ -1266,7 +1271,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         } else {
             None
         };
-        let res = self.is_subset_eq_no_recursive_check(got, want);
+        let res = self.is_subset_eq_no_recursive_check(got, want, call_context);
         if let Some(key) = cache_key {
             match &res {
                 Ok(()) => {
@@ -1293,6 +1298,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         &mut self,
         got: &Type,
         want: &Type,
+        call_context: &CallContext,
     ) -> Result<(), SubsetError> {
         match (got, want) {
             (Type::Any(_), _) => {
@@ -1610,8 +1616,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     metadata: _,
                 }),
             ) => {
-                self.is_subset_params_with_polarity(&l.params, &u.params, CallPolarity::Negative)?;
-                self.is_subset_eq_with_polarity(&l.ret, &u.ret, CallPolarity::Positive)
+                let params_context = call_context.with_negated_polarity();
+                self.is_subset_params_with_context(&l.params, &u.params, &params_context)?;
+                let ret_context = call_context.with_preserved_polarity();
+                self.is_subset_eq_with_context(&l.ret, &u.ret, &ret_context)
             }
             (Type::TypedDict(TypedDict::Anonymous(got)), Type::TypedDict(want)) => {
                 self.is_subset_anonymous_typed_dict(got, want)
@@ -1975,9 +1983,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             // ClassType(int) <: Dim[...]
             // Redirect: int <: Dim[...] becomes Dim[any_implicit] <: Dim[...]
-            (Type::ClassType(cls), want @ Type::Dim(_)) if cls.is_builtin("int") => {
-                self.is_subset_eq_impl(&self.solver.heap.mk_dim(Type::any_implicit()), want)
-            }
+            (Type::ClassType(cls), want @ Type::Dim(_)) if cls.is_builtin("int") => self
+                .is_subset_eq_impl(
+                    &self.solver.heap.mk_dim(Type::any_implicit()),
+                    want,
+                    call_context,
+                ),
             // ========== End Dim Subtyping Rules ==========
             (Type::Literal(l_lit), Type::Literal(u_lit)) => {
                 ok_or(l_lit.value == u_lit.value, SubsetError::Other)
@@ -2100,12 +2111,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 // Finalizing the quantified vars returns instantiation errors
                 let (vs, got) = self.type_order.instantiate_fresh_forall((**forall).clone());
                 let witness_context = self.make_forall_witness_context(&vs, want);
-                let result = self.is_subset_eq_with_context_and_polarity(
-                    &got,
-                    want,
-                    &witness_context,
-                    CallPolarity::OutsideCall,
-                );
+                let result = self.is_subset_eq_with_context(&got, want, &witness_context);
                 result.and(
                     self.finish_quantified(vs)
                         .map_err(SubsetError::TypeVarSpecialization),
