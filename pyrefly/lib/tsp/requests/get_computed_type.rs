@@ -32,7 +32,7 @@ impl<T: TspInterface> TspConnection<T> {
         parse_uri(params.uri())?;
         let position = params.position();
         let ty = self
-            .inner
+            .inner()
             .get_type_at_position(params.uri(), position.line, position.character);
         Ok(ty.map(|t| self.convert_type(&t)))
     }

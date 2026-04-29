@@ -53,7 +53,7 @@ impl<T: TspInterface> TspConnection<T> {
         // notebook's filesystem path so we return the right search paths.
         let resolved_url = if url.scheme() != "file" {
             match self
-                .inner
+                .inner()
                 .resolve_uri_to_path(&url)
                 .and_then(|p| Url::from_file_path(p).ok())
             {
@@ -68,7 +68,7 @@ impl<T: TspInterface> TspConnection<T> {
             url
         };
 
-        match self.inner.get_python_search_paths(&resolved_url) {
+        match self.inner().get_python_search_paths(&resolved_url) {
             Ok(paths) => self.send_ok(id, paths),
             Err(detail) => self.send_err(id, internal_error(&detail)),
         }
