@@ -63,6 +63,34 @@ reveal_type(result)  # E: revealed type: (int, Unknown) -> Unknown
 );
 
 testcase!(
+    bug = "Residual marker recovery incorrectly depends on return-position quantifieds",
+    test_generic_residual_concrete_return,
+    r#"
+from typing import Callable, reveal_type
+def higher_order[A, B](x: Callable[[A, B], int]) -> Callable[[A, B], int]:
+    return x
+def generic_fn[T](x: T, y: T) -> int:
+    return 0
+result = higher_order(generic_fn)
+reveal_type(result)  # E: revealed type: (Unknown, Unknown) -> int
+"#,
+);
+
+testcase!(
+    bug = "Distinct residual positions collapse to one solved variable in higher-order matching",
+    test_generic_residual_distinct_positions,
+    r#"
+from typing import Callable, reveal_type
+def higher_order[A, B](x: Callable[[A, B], B]) -> Callable[[A, B], B]:
+    return x
+def generic_fn[T, S](x: S, y: T) -> T:
+    return y
+result = higher_order(generic_fn)
+reveal_type(result)  # E: revealed type: (Unknown, Unknown) -> Unknown
+"#,
+);
+
+testcase!(
     bug = "Generic functions don't work with ParamSpec",
     test_param_spec_generic_function,
     r#"
