@@ -2116,6 +2116,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let (vs, got) = self.type_order.instantiate_fresh_forall((**forall).clone());
                 let witness_context = self.make_forall_witness_context(&vs, want);
                 let result = self.is_subset_eq_with_context(&got, want, &witness_context);
+                if result.is_ok()
+                    && let Some(witness) = witness_context.residual_witness()
+                {
+                    self.solver.record_generic_residuals_for_witness(witness);
+                }
                 result.and(
                     self.finish_quantified(vs)
                         .map_err(SubsetError::TypeVarSpecialization),

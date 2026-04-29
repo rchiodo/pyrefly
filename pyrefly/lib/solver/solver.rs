@@ -141,10 +141,6 @@ enum Variable {
         bounds: Bounds,
         /// Residual candidates captured during subset checks.
         /// Kept separate from concrete bounds to avoid accidental coupling.
-        #[expect(
-            dead_code,
-            reason = "Residual candidate storage is threaded ahead of marker write/read plumbing"
-        )]
         residuals: Vec<ResidualIdentity>,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
@@ -1331,6 +1327,22 @@ impl Solver {
             self.solve_one_bounds(bounds.upper).or(lower_bound)
         } else {
             lower_bound
+        }
+    }
+
+    pub(crate) fn record_generic_residuals_for_witness(&self, witness: &ResidualWitnessContext) {
+        let lock = self.variables.lock();
+        for &var in witness
+            .origin_vars
+            .iter()
+            .chain(witness.deferred_vars.iter())
+        {
+            let mut variable = lock.get_mut(var);
+            if let Variable::Quantified { residuals, .. } = &mut *variable
+                && !residuals.contains(&witness.identity)
+            {
+                residuals.push(witness.identity.clone());
+            }
         }
     }
 
