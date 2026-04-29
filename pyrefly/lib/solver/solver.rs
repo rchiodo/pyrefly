@@ -65,6 +65,7 @@ use crate::types::simplify::simplify_tuples;
 use crate::types::simplify::unions;
 use crate::types::simplify::unions_with_literals;
 use crate::types::typed_dict::TypedDict;
+use crate::types::types::CallableResidual;
 use crate::types::types::CallableResidualKind;
 use crate::types::types::TParams;
 use crate::types::types::Type;
@@ -151,10 +152,6 @@ enum Variable {
     /// A variable whose answer has been determined
     Answer(Type),
     /// A variable whose answer is a residual that is only visible to selected vars.
-    #[expect(
-        dead_code,
-        reason = "ResidualAnswer scaffolding is wired now and constructed in follow-up residual semantics commits"
-    )]
     ResidualAnswer {
         target_vars: SmallSet<Var>,
         ty: Type,
@@ -646,6 +643,9 @@ impl Solver {
     /// expressions so that all-literal SizeExpr trees fold to single literals.
     pub fn finish_function_return(&self, mut t: Type) -> Type {
         self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false, None);
+        // For the current plumbing stage, substitution finalization always flattens
+        // residual payloads back to their precomputed non-residual fallback.
+        t = self.flatten_residual_for_non_target_read(&t);
         self.erase_unsolved_variables(&mut t);
         self.simplify_mut(&mut t);
         // After variable expansion, dimension expressions may have all-literal operands
@@ -1424,6 +1424,14 @@ impl Solver {
         *right = left.clone();
     }
 
+    fn materialize_generic_residual_type(&self, q: &Quantified) -> Type {
+        Type::CallableResidual(Box::new(CallableResidual {
+            kind: CallableResidualKind::Generic {
+                quantified: q.clone(),
+            },
+        }))
+    }
+
     /// Called after a quantified function has been called. Given `def f[T](x: int): list[T]`,
     /// after the generic has completed.
     /// If `infer_with_first_use` is true, the variable `T` will be have like an
@@ -1449,13 +1457,26 @@ impl Solver {
                 Variable::Quantified {
                     quantified: q,
                     bounds,
-                    ..
+                    residuals,
                 } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
                     }
-                    *e = if let Some(bound) = self.solve_bounds(mem::take(bounds)) {
+                    let solved_bound = self.solve_bounds(mem::take(bounds));
+                    let residual_candidate = if solved_bound.is_none() && residuals.len() == 1 {
+                        residuals.first().cloned()
+                    } else {
+                        None
+                    };
+                    *e = if let Some(bound) = solved_bound {
                         Variable::Answer(bound)
+                    } else if q.is_type_var()
+                        && let Some(ResidualIdentity { target_vars, .. }) = residual_candidate
+                    {
+                        Variable::ResidualAnswer {
+                            target_vars,
+                            ty: self.materialize_generic_residual_type(q),
+                        }
                     } else if infer_with_first_use {
                         Variable::finished(q)
                     } else {
@@ -1611,6 +1632,7 @@ impl Solver {
 
     pub fn for_display(&self, mut t: Type) -> Type {
         self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), true, None);
+        t = self.flatten_residual_for_non_target_read(&t);
         self.simplify_mut(&mut t);
         t.deterministic_printing()
     }
