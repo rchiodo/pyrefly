@@ -65,6 +65,7 @@ use crate::types::simplify::simplify_tuples;
 use crate::types::simplify::unions;
 use crate::types::simplify::unions_with_literals;
 use crate::types::typed_dict::TypedDict;
+use crate::types::types::CallableResidualKind;
 use crate::types::types::TParams;
 use crate::types::types::Type;
 use crate::types::types::Var;
@@ -644,7 +645,7 @@ impl Solver {
     /// erasing unsolved variables without defaults from unions, and canonicalizing dimension
     /// expressions so that all-literal SizeExpr trees fold to single literals.
     pub fn finish_function_return(&self, mut t: Type) -> Type {
-        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false);
+        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false, None);
         self.erase_unsolved_variables(&mut t);
         self.simplify_mut(&mut t);
         // After variable expansion, dimension expressions may have all-literal operands
@@ -665,9 +666,36 @@ impl Solver {
 
     /// Like `expand`, but when you have a `&mut`.
     pub fn expand_vars_mut(&self, t: &mut Type) {
-        self.expand_with_limit(t, TYPE_LIMIT, &VarRecurser::new(), false);
+        self.expand_with_limit(t, TYPE_LIMIT, &VarRecurser::new(), false, None);
         // After we substitute bound variables, we may be able to simplify some types
         self.simplify_mut(t);
+    }
+
+    fn flatten_residual_for_non_target_read(&self, ty: &Type) -> Type {
+        let mut flattened = ty.clone();
+        flattened.transform_mut(&mut |inner| {
+            if let Type::CallableResidual(residual) = inner {
+                match &residual.kind {
+                    CallableResidualKind::Generic { quantified } => {
+                        *inner = quantified.as_gradual_type();
+                    }
+                }
+            }
+        });
+        flattened
+    }
+
+    fn residual_read_for_query_var(
+        &self,
+        query_var: Option<Var>,
+        target_vars: &SmallSet<Var>,
+        ty: &Type,
+    ) -> Type {
+        if query_var.is_some_and(|q| target_vars.contains(&q)) {
+            ty.clone()
+        } else {
+            self.flatten_residual_for_non_target_read(ty)
+        }
     }
 
     /// Expand, but if the resulting type will be greater than limit levels deep, return an `Any`.
@@ -678,21 +706,41 @@ impl Solver {
         limit: usize,
         recurser: &VarRecurser,
         expand_unfinished_variables: bool,
+        query_var: Option<Var>,
     ) {
         if limit == 0 {
             // TODO: Should probably add an error here, and use any_error,
             // but don't have any good location information to hand.
             *t = self.heap.mk_any_implicit();
         } else if let Type::Var(x) = t {
+            let query_var = query_var.or(Some(*x));
             let lock = self.variables.lock();
             if let Some(_guard) = lock.recurse(*x, recurser) {
                 let variable = lock.get(*x);
                 match &*variable {
-                    Variable::Answer(ty) | Variable::ResidualAnswer { ty, .. } => {
+                    Variable::Answer(ty) => {
                         *t = ty.clone();
                         drop(variable);
                         drop(lock);
-                        self.expand_with_limit(t, limit - 1, recurser, expand_unfinished_variables);
+                        self.expand_with_limit(
+                            t,
+                            limit - 1,
+                            recurser,
+                            expand_unfinished_variables,
+                            query_var,
+                        );
+                    }
+                    Variable::ResidualAnswer { target_vars, ty } => {
+                        *t = self.residual_read_for_query_var(query_var, target_vars, ty);
+                        drop(variable);
+                        drop(lock);
+                        self.expand_with_limit(
+                            t,
+                            limit - 1,
+                            recurser,
+                            expand_unfinished_variables,
+                            query_var,
+                        );
                     }
                     Variable::Quantified {
                         quantified: _,
@@ -706,7 +754,13 @@ impl Solver {
                         *t = bound;
                         drop(variable);
                         drop(lock);
-                        self.expand_with_limit(t, limit - 1, recurser, expand_unfinished_variables);
+                        self.expand_with_limit(
+                            t,
+                            limit - 1,
+                            recurser,
+                            expand_unfinished_variables,
+                            query_var,
+                        );
                     }
                     _ => {}
                 }
@@ -715,7 +769,13 @@ impl Solver {
             }
         } else {
             t.recurse_mut(&mut |t| {
-                self.expand_with_limit(t, limit - 1, recurser, expand_unfinished_variables)
+                self.expand_with_limit(
+                    t,
+                    limit - 1,
+                    recurser,
+                    expand_unfinished_variables,
+                    query_var,
+                )
             });
         }
     }
@@ -724,7 +784,10 @@ impl Solver {
     pub fn expand_unwrap(&self, v: Var) -> Type {
         let variables = self.variables.lock();
         match &*variables.get(v) {
-            Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => t.clone(),
+            Variable::Answer(t) => t.clone(),
+            Variable::ResidualAnswer { target_vars, ty } => {
+                self.residual_read_for_query_var(Some(v), target_vars, ty)
+            }
             Variable::Unwrap(bounds) if let Some(bound) = self.solve_bounds(bounds.clone()) => {
                 bound
             }
@@ -735,7 +798,7 @@ impl Solver {
     /// Public wrapper to expand a dimension type by resolving bound Vars.
     /// Used by subset checking to expand Vars before comparing dimension expressions.
     pub fn expand_dimension(&self, dim_ty: &mut Type) {
-        self.expand_with_limit(dim_ty, TYPE_LIMIT, &VarRecurser::new(), true);
+        self.expand_with_limit(dim_ty, TYPE_LIMIT, &VarRecurser::new(), true, None);
     }
 
     /// Given a `Var`, ensures that the solver has an answer for it (or inserts Any if not already),
@@ -745,7 +808,10 @@ impl Solver {
         let lock = self.variables.lock();
         let mut e = lock.get_mut(v);
         let result = match &mut *e {
-            Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => t.clone(),
+            Variable::Answer(t) => t.clone(),
+            Variable::ResidualAnswer { target_vars, ty } => {
+                self.residual_read_for_query_var(Some(v), target_vars, ty)
+            }
             _ => {
                 let ty = match &mut *e {
                     Variable::Quantified {
@@ -1544,7 +1610,7 @@ impl Solver {
     }
 
     pub fn for_display(&self, mut t: Type) -> Type {
-        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), true);
+        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), true, None);
         self.simplify_mut(&mut t);
         t.deterministic_printing()
     }
@@ -1645,23 +1711,30 @@ impl Solver {
             variables: &Variables,
             recurser: &VarRecurser,
             heap: &TypeHeap,
+            query_var: Var,
+            residual_read: &dyn Fn(Var, &SmallSet<Var>, &Type) -> Type,
             res: &mut Vec<Type>,
         ) {
             match t {
                 Type::Var(v) if let Some(_guard) = variables.recurse(v, recurser) => {
                     let variable = variables.get(v);
                     match &*variable {
-                        Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => {
+                        Variable::Answer(t) => {
                             let t = t.clone();
                             drop(variable);
-                            expand(t, variables, recurser, heap, res);
+                            expand(t, variables, recurser, heap, query_var, residual_read, res);
+                        }
+                        Variable::ResidualAnswer { target_vars, ty } => {
+                            let t = residual_read(query_var, target_vars, ty);
+                            drop(variable);
+                            expand(t, variables, recurser, heap, query_var, residual_read, res);
                         }
                         _ => res.push(v.to_type(heap)),
                     }
                 }
                 Type::Union(box Union { members: ts, .. }) => {
                     for t in ts {
-                        expand(t, variables, recurser, heap, res);
+                        expand(t, variables, recurser, heap, query_var, residual_read, res);
                     }
                 }
                 _ => res.push(t),
@@ -1671,12 +1744,21 @@ impl Solver {
         let lock = self.variables.lock();
         let variable = lock.get(var);
         match &*variable {
-            Variable::Answer(forced) | Variable::ResidualAnswer { ty: forced, .. } => {
+            Variable::Answer(forced) => {
                 // An answer was already forced - use it, not the type from analysis.
                 //
                 // This can only happen in a fixpoint, and we'll catch it with a fixpoint non-convergence
                 // error if it does not eventually converge.
                 let forced = forced.clone();
+                drop(variable);
+                drop(lock);
+                forced
+            }
+            Variable::ResidualAnswer {
+                target_vars,
+                ty: forced,
+            } => {
+                let forced = self.residual_read_for_query_var(Some(var), target_vars, forced);
                 drop(variable);
                 drop(lock);
                 forced
@@ -1687,7 +1769,18 @@ impl Solver {
                 // possibilities, so just ignore it.
                 let mut res = Vec::new();
                 // First expand all union/var into a list of the possible unions
-                expand(ty, &lock, &VarRecurser::new(), &self.heap, &mut res);
+                let residual_read = |query_var: Var, target_vars: &SmallSet<Var>, ty: &Type| {
+                    self.residual_read_for_query_var(Some(query_var), target_vars, ty)
+                };
+                expand(
+                    ty,
+                    &lock,
+                    &VarRecurser::new(),
+                    &self.heap,
+                    var,
+                    &residual_read,
+                    &mut res,
+                );
                 // Then remove any reference to self, before unioning it back together
                 res.retain(|x| x != &Type::Var(var));
                 let ty = unions(res, &self.heap);
@@ -2356,115 +2449,123 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
                 let variable1 = variables.get(*v1);
                 let variable2 = variables.get(*v2);
-                match (&*variable1, &*variable2) {
-                    (
-                        Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. },
-                        Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. },
-                    ) => {
-                        let t1 = t1.clone();
-                        let t2 = t2.clone();
-                        drop(variable1);
-                        drop(variable2);
-                        drop(variables);
-                        self.is_subset_eq(&t1, &t2)
-                    }
-                    (_, Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. }) => {
-                        let t2 = t2.clone();
-                        drop(variable1);
-                        drop(variable2);
-                        drop(variables);
-                        self.is_subset_eq(got, &t2)
-                    }
-                    (Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. }, _) => {
-                        let t1 = t1.clone();
-                        drop(variable1);
-                        drop(variable2);
-                        drop(variables);
-                        self.is_subset_eq(&t1, want)
-                    }
-                    // When both variables are quantified, we need to preserve the stricter bound.
-                    // The `unify` function preserves the Variable data from its second argument,
-                    // so we call it with the stricter bound in the v2 position.
-                    (
-                        Variable::Quantified {
-                            quantified: q1,
-                            bounds: _,
-                            ..
-                        },
-                        Variable::Quantified {
-                            quantified: q2,
-                            bounds: _,
-                            ..
-                        },
-                    )
-                    | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
-                        let r1_restricted = q1.restriction().is_restricted();
-                        let r2_restricted = q2.restriction().is_restricted();
-                        let b1 = q1.bound_type(self.type_order.stdlib(), &self.solver.heap);
-                        let b2 = q2.bound_type(self.type_order.stdlib(), &self.solver.heap);
-                        drop(variable1);
-                        drop(variable2);
+                let solved1 = match &*variable1 {
+                    Variable::Answer(t1) => Some(t1.clone()),
+                    Variable::ResidualAnswer { target_vars, ty } => Some(
+                        self.solver
+                            .residual_read_for_query_var(Some(*v1), target_vars, ty),
+                    ),
+                    _ => None,
+                };
+                let solved2 = match &*variable2 {
+                    Variable::Answer(t2) => Some(t2.clone()),
+                    Variable::ResidualAnswer { target_vars, ty } => Some(
+                        self.solver
+                            .residual_read_for_query_var(Some(*v2), target_vars, ty),
+                    ),
+                    _ => None,
+                };
+                if let (Some(t1), Some(t2)) = (solved1.clone(), solved2.clone()) {
+                    drop(variable1);
+                    drop(variable2);
+                    drop(variables);
+                    self.is_subset_eq(&t1, &t2)
+                } else if let Some(t2) = solved2 {
+                    drop(variable1);
+                    drop(variable2);
+                    drop(variables);
+                    self.is_subset_eq(got, &t2)
+                } else if let Some(t1) = solved1 {
+                    drop(variable1);
+                    drop(variable2);
+                    drop(variables);
+                    self.is_subset_eq(&t1, want)
+                } else {
+                    match (&*variable1, &*variable2) {
+                        // When both variables are quantified, we need to preserve the stricter bound.
+                        // The `unify` function preserves the Variable data from its second argument,
+                        // so we call it with the stricter bound in the v2 position.
+                        (
+                            Variable::Quantified {
+                                quantified: q1,
+                                bounds: _,
+                                ..
+                            },
+                            Variable::Quantified {
+                                quantified: q2,
+                                bounds: _,
+                                ..
+                            },
+                        )
+                        | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
+                            let r1_restricted = q1.restriction().is_restricted();
+                            let r2_restricted = q2.restriction().is_restricted();
+                            let b1 = q1.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                            let b2 = q2.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                            drop(variable1);
+                            drop(variable2);
 
-                        match (r1_restricted, r2_restricted) {
-                            (false, false) => {
-                                // Neither has a restriction, order doesn't matter
-                                variables.unify(*v1, *v2);
-                            }
-                            (true, false) => {
-                                // Only v1 has a restriction, preserve v1's data
-                                variables.unify(*v2, *v1);
-                            }
-                            (false, true) => {
-                                // Only v2 has a restriction, preserve v2's data
-                                variables.unify(*v1, *v2);
-                            }
-                            (true, true) => {
-                                // Both have restrictions, need to compare bounds
-                                drop(variables);
+                            match (r1_restricted, r2_restricted) {
+                                (false, false) => {
+                                    // Neither has a restriction, order doesn't matter
+                                    variables.unify(*v1, *v2);
+                                }
+                                (true, false) => {
+                                    // Only v1 has a restriction, preserve v1's data
+                                    variables.unify(*v2, *v1);
+                                }
+                                (false, true) => {
+                                    // Only v2 has a restriction, preserve v2's data
+                                    variables.unify(*v1, *v2);
+                                }
+                                (true, true) => {
+                                    // Both have restrictions, need to compare bounds
+                                    drop(variables);
 
-                                let b1_subtype_of_b2 = self.is_subset_eq(&b1, &b2).is_ok();
-                                let b2_subtype_of_b1 = self.is_subset_eq(&b2, &b1).is_ok();
+                                    let b1_subtype_of_b2 = self.is_subset_eq(&b1, &b2).is_ok();
+                                    let b2_subtype_of_b1 = self.is_subset_eq(&b2, &b1).is_ok();
 
-                                // Unify in the correct order to preserve the stricter bound.
-                                // unify(x, y) preserves y's Variable data.
-                                if b1_subtype_of_b2 && b2_subtype_of_b1 {
-                                    // Bounds are equivalent, order doesn't matter
-                                    self.solver.variables.lock().unify(*v1, *v2);
-                                } else if b1_subtype_of_b2 {
-                                    // b1 is stricter (subtype of b2), preserve v1's data
-                                    self.solver.variables.lock().unify(*v2, *v1);
-                                } else if b2_subtype_of_b1 {
-                                    // b2 is stricter (subtype of b1), preserve v2's data
-                                    self.solver.variables.lock().unify(*v1, *v2);
-                                } else {
-                                    // Bounds are incompatible
-                                    return Err(SubsetError::Other);
+                                    // Unify in the correct order to preserve the stricter bound.
+                                    // unify(x, y) preserves y's Variable data.
+                                    if b1_subtype_of_b2 && b2_subtype_of_b1 {
+                                        // Bounds are equivalent, order doesn't matter
+                                        self.solver.variables.lock().unify(*v1, *v2);
+                                    } else if b1_subtype_of_b2 {
+                                        // b1 is stricter (subtype of b2), preserve v1's data
+                                        self.solver.variables.lock().unify(*v2, *v1);
+                                    } else if b2_subtype_of_b1 {
+                                        // b2 is stricter (subtype of b1), preserve v2's data
+                                        self.solver.variables.lock().unify(*v1, *v2);
+                                    } else {
+                                        // Bounds are incompatible
+                                        return Err(SubsetError::Other);
+                                    }
                                 }
                             }
+                            Ok(())
                         }
-                        Ok(())
-                    }
-                    (
-                        _,
-                        Variable::Quantified {
-                            quantified: _,
-                            bounds: _,
-                            ..
-                        },
-                    ) => {
-                        drop(variable1);
-                        drop(variable2);
-                        // `unify` preserves the Variable in its second argument. When a Quantified
-                        // and a non-Quantified are unified, we preserve the non-Quantified to
-                        // avoid leaking unsolved type parameters across bindings.
-                        variables.unify(*v2, *v1);
-                        Ok(())
-                    }
-                    (_, _) => {
-                        drop(variable1);
-                        drop(variable2);
-                        variables.unify(*v1, *v2);
-                        Ok(())
+                        (
+                            _,
+                            Variable::Quantified {
+                                quantified: _,
+                                bounds: _,
+                                ..
+                            },
+                        ) => {
+                            drop(variable1);
+                            drop(variable2);
+                            // `unify` preserves the Variable in its second argument. When a Quantified
+                            // and a non-Quantified are unified, we preserve the non-Quantified to
+                            // avoid leaking unsolved type parameters across bindings.
+                            variables.unify(*v2, *v1);
+                            Ok(())
+                        }
+                        (_, _) => {
+                            drop(variable1);
+                            drop(variable2);
+                            variables.unify(*v1, *v2);
+                            Ok(())
+                        }
                     }
                 }
             }
@@ -2472,8 +2573,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let variables = self.solver.variables.lock();
                 let v1_ref = variables.get(*v1);
                 match &*v1_ref {
-                    Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. } => {
+                    Variable::Answer(t1) => {
                         let t1 = t1.clone();
+                        drop(v1_ref);
+                        drop(variables);
+                        self.is_subset_eq(&t1, t2)
+                    }
+                    Variable::ResidualAnswer {
+                        target_vars,
+                        ty: t1,
+                    } => {
+                        let t1 =
+                            self.solver
+                                .residual_read_for_query_var(Some(*v1), target_vars, t1);
                         drop(v1_ref);
                         drop(variables);
                         self.is_subset_eq(&t1, t2)
@@ -2589,8 +2701,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let variables = self.solver.variables.lock();
                 let v2_ref = variables.get(*v2);
                 match &*v2_ref {
-                    Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. } => {
+                    Variable::Answer(t2) => {
                         let t2 = t2.clone();
+                        drop(v2_ref);
+                        drop(variables);
+                        self.is_subset_eq(t1, &t2)
+                    }
+                    Variable::ResidualAnswer {
+                        target_vars,
+                        ty: t2,
+                    } => {
+                        let t2 =
+                            self.solver
+                                .residual_read_for_query_var(Some(*v2), target_vars, t2);
                         drop(v2_ref);
                         drop(variables);
                         self.is_subset_eq(t1, &t2)
