@@ -39,6 +39,7 @@ use starlark_map::small_map::SmallMap;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::callable::CallArg;
 use crate::alt::expr::TypeOrExpr;
+use crate::solver::solver::CallPolarity;
 use crate::solver::solver::OpenTypedDictSubsetError;
 use crate::solver::solver::Subset;
 use crate::solver::solver::SubsetCacheEntry;
@@ -489,6 +490,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             _ => result,
         }
+    }
+
+    fn is_subset_params_with_polarity(
+        &mut self,
+        l_params: &Params,
+        u_params: &Params,
+        _call_polarity: CallPolarity,
+    ) -> Result<(), SubsetError> {
+        self.is_subset_params(l_params, u_params)
     }
 
     fn is_subset_protocol(&mut self, got: Type, protocol: ClassType) -> Result<(), SubsetError> {
@@ -1600,8 +1610,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     metadata: _,
                 }),
             ) => {
-                self.is_subset_params(&l.params, &u.params)?;
-                self.is_subset_eq(&l.ret, &u.ret)
+                self.is_subset_params_with_polarity(&l.params, &u.params, CallPolarity::Negative)?;
+                self.is_subset_eq_with_polarity(&l.ret, &u.ret, CallPolarity::Positive)
             }
             (Type::TypedDict(TypedDict::Anonymous(got)), Type::TypedDict(want)) => {
                 self.is_subset_anonymous_typed_dict(got, want)
@@ -2089,7 +2099,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::Forall(forall), _) => {
                 // Finalizing the quantified vars returns instantiation errors
                 let (vs, got) = self.type_order.instantiate_fresh_forall((**forall).clone());
-                let result = self.is_subset_eq(&got, want);
+                let witness_context = self.make_forall_witness_context(&vs, want);
+                let result = self.is_subset_eq_with_context_and_polarity(
+                    &got,
+                    want,
+                    &witness_context,
+                    CallPolarity::OutsideCall,
+                );
                 result.and(
                     self.finish_quantified(vs)
                         .map_err(SubsetError::TypeVarSpecialization),

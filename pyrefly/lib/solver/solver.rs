@@ -107,6 +107,15 @@ impl Bounds {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResidualIdentity {
+    call_site_id: usize,
+    witness_id: usize,
+    /// Vars that are allowed to observe the residualized answer for this candidate.
+    /// This is captured during subset checks and threaded into `Variable::ResidualAnswer`.
+    target_vars: SmallSet<Var>,
+}
+
 #[derive(Clone, Debug)]
 enum Variable {
     /// A "partial type" (terminology borrowed from mypy) for an empty container.
@@ -130,6 +139,13 @@ enum Variable {
     Quantified {
         quantified: Quantified,
         bounds: Bounds,
+        /// Residual candidates captured during subset checks.
+        /// Kept separate from concrete bounds to avoid accidental coupling.
+        #[expect(
+            dead_code,
+            reason = "Residual candidate storage is threaded ahead of marker write/read plumbing"
+        )]
+        residuals: Vec<ResidualIdentity>,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
     Recursive,
@@ -137,6 +153,15 @@ enum Variable {
     Unwrap(Bounds),
     /// A variable whose answer has been determined
     Answer(Type),
+    /// A variable whose answer is a residual that is only visible to selected vars.
+    #[expect(
+        dead_code,
+        reason = "ResidualAnswer scaffolding is wired now and constructed in follow-up residual semantics commits"
+    )]
+    ResidualAnswer {
+        target_vars: SmallSet<Var>,
+        ty: Type,
+    },
 }
 
 impl Variable {
@@ -157,6 +182,7 @@ impl Display for Variable {
             | Variable::Quantified {
                 quantified: q,
                 bounds: _,
+                residuals: _,
             } => {
                 let label = if matches!(self, Variable::PartialQuantified(_)) {
                     "PartialQuantified"
@@ -173,6 +199,9 @@ impl Display for Variable {
             Variable::Recursive => write!(f, "Recursive"),
             Variable::Unwrap(_) => write!(f, "Unwrap"),
             Variable::Answer(t) => write!(f, "{t}"),
+            Variable::ResidualAnswer { target_vars, ty } => {
+                write!(f, "ResidualAnswer({ty}, targets={target_vars:?})")
+            }
         }
     }
 }
@@ -464,7 +493,7 @@ impl Solver {
         let variables = self.variables.lock();
         let mut variable = variables.get_mut(var);
         match &mut *variable {
-            Variable::Recursive | Variable::Answer(..) => {
+            Variable::Recursive | Variable::Answer(..) | Variable::ResidualAnswer { .. } => {
                 // Nothing to do if we have an answer already, and we want to skip recursive Vars
                 // which do not represent placeholder types.
                 None
@@ -472,6 +501,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: q,
                 bounds: _,
+                ..
             } => {
                 // A Variable::Quantified should always be finished (see `finish_quantified`) by
                 // the code that creates it, because we need to know when we're done collecting
@@ -662,7 +692,7 @@ impl Solver {
             if let Some(_guard) = lock.recurse(*x, recurser) {
                 let variable = lock.get(*x);
                 match &*variable {
-                    Variable::Answer(ty) => {
+                    Variable::Answer(ty) | Variable::ResidualAnswer { ty, .. } => {
                         *t = ty.clone();
                         drop(variable);
                         drop(lock);
@@ -671,6 +701,7 @@ impl Solver {
                     Variable::Quantified {
                         quantified: _,
                         bounds,
+                        ..
                     }
                     | Variable::Unwrap(bounds)
                         if expand_unfinished_variables
@@ -697,7 +728,7 @@ impl Solver {
     pub fn expand_unwrap(&self, v: Var) -> Type {
         let variables = self.variables.lock();
         match &*variables.get(v) {
-            Variable::Answer(t) => t.clone(),
+            Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => t.clone(),
             Variable::Unwrap(bounds) if let Some(bound) = self.solve_bounds(bounds.clone()) => {
                 bound
             }
@@ -718,12 +749,13 @@ impl Solver {
         let lock = self.variables.lock();
         let mut e = lock.get_mut(v);
         let result = match &mut *e {
-            Variable::Answer(t) => t.clone(),
+            Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => t.clone(),
             _ => {
                 let ty = match &mut *e {
                     Variable::Quantified {
                         quantified: q,
                         bounds,
+                        ..
                     } => self
                         .solve_bounds(mem::take(bounds))
                         .unwrap_or_else(|| q.as_gradual_type()),
@@ -998,6 +1030,7 @@ impl Solver {
                 Variable::Quantified {
                     quantified: (*q).clone(),
                     bounds: Bounds::new(),
+                    residuals: Vec::new(),
                 },
             );
         }
@@ -1184,6 +1217,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => (
                 bounds.lower.first().cloned(),
@@ -1212,6 +1246,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.lower, new_bound),
             _ => {}
@@ -1231,6 +1266,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => (
                 bounds.upper.first().cloned(),
@@ -1259,6 +1295,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.upper, new_bound),
             _ => {}
@@ -1312,7 +1349,7 @@ impl Solver {
         for v in vs.0 {
             let mut e = lock.get_mut(v);
             match &mut *e {
-                Variable::Answer(_) => {
+                Variable::Answer(_) | Variable::ResidualAnswer { .. } => {
                     // We pin the quantified var to a type when it first appears in a subset constraint,
                     // and at that point we check the instantiation with the bound.
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
@@ -1322,6 +1359,7 @@ impl Solver {
                 Variable::Quantified {
                     quantified: q,
                     bounds,
+                    ..
                 } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
@@ -1370,6 +1408,7 @@ impl Solver {
                     Variable::Quantified {
                         quantified: param.clone(),
                         bounds: Bounds::new(),
+                        residuals: Vec::new(),
                     },
                 );
             }
@@ -1393,6 +1432,7 @@ impl Solver {
                 if let Variable::Quantified {
                     quantified: q,
                     bounds,
+                    ..
                 } = &mut *e
                     && *q == *param
                 {
@@ -1587,7 +1627,7 @@ impl Solver {
                 Type::Var(v) if let Some(_guard) = variables.recurse(v, recurser) => {
                     let variable = variables.get(v);
                     match &*variable {
-                        Variable::Answer(t) => {
+                        Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } => {
                             let t = t.clone();
                             drop(variable);
                             expand(t, variables, recurser, heap, res);
@@ -1607,7 +1647,7 @@ impl Solver {
         let lock = self.variables.lock();
         let variable = lock.get(var);
         match &*variable {
-            Variable::Answer(forced) => {
+            Variable::Answer(forced) | Variable::ResidualAnswer { ty: forced, .. } => {
                 // An answer was already forced - use it, not the type from analysis.
                 //
                 // This can only happen in a fixpoint, and we'll catch it with a fixpoint non-convergence
@@ -1682,6 +1722,7 @@ impl Solver {
             subset_cache: SmallMap::new(),
             class_protocol_assumptions: SmallSet::new(),
             coinductive_assumptions_used: false,
+            next_witness_context_id: 0,
         }
     }
 }
@@ -1888,7 +1929,7 @@ impl SubsetError {
 
 /// Cached result for a recursive subset check. Used by `Subset::subset_cache`.
 #[derive(Clone, Debug)]
-pub(crate) enum SubsetCacheEntry {
+pub enum SubsetCacheEntry {
     /// Currently being computed — used for coinductive cycle detection.
     /// Treated as `Ok(())`: if we encounter a pair already being checked,
     /// we optimistically assume the check succeeds (coinductive reasoning).
@@ -1897,6 +1938,64 @@ pub(crate) enum SubsetCacheEntry {
     Ok,
     /// Computed and failed.
     Err(SubsetError),
+}
+
+/// Polarity for subset checks done while comparing callable signatures.
+///
+/// `OutsideCall` is required because `is_subset_eq` is also called in contexts
+/// that are unrelated to callable subtyping.
+///
+/// TODO(stroxler): Rename this to something clearer (it's difficult to restack)
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum CallPolarity {
+    Positive,
+    Negative,
+    #[default]
+    OutsideCall,
+}
+
+// The context in which we are collecting residuals.
+// - The `identity` is the particular Forall type that appeared as an argument
+//   in a higher-order call
+// - The `origin_vars` are `Vars` that correspond to scoped type parameters
+//   inside of that argument (the "origin" of the generic behavior)
+// - The `deferred_vars` are `Vars` that correspond to call-scope vars from
+//   the higher-order call we were making; these might get "deferred" in the
+//   sense that instead of finishing to a concrete type we may finish to a
+//   CallableResidual if no other constraints on these types appear.
+//
+// TODO(stroxler): Rethink the names of fields here. It would be difficult to restack.
+#[derive(Clone, Debug)]
+pub struct ResidualWitnessContext {
+    identity: ResidualIdentity,
+    origin_vars: SmallSet<Var>,
+    deferred_vars: SmallSet<Var>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CallContext {
+    witness: Option<ResidualWitnessContext>,
+    #[expect(dead_code)]
+    polarity: CallPolarity,
+}
+
+impl CallContext {
+    pub fn outside() -> Self {
+        Self::default()
+    }
+
+    pub fn with_witness(witness: ResidualWitnessContext) -> Self {
+        // TODO(stroxler): Seeding the polarity as OutsideCall isn't quite right, but it's
+        // good enough to get started. We need to clean this up later.
+        Self {
+            witness: Some(witness),
+            polarity: CallPolarity::OutsideCall,
+        }
+    }
+
+    pub fn residual_witness(&self) -> Option<&ResidualWitnessContext> {
+        self.witness.as_ref()
+    }
 }
 
 /// A helper to implement subset ergonomically.
@@ -1935,9 +2034,31 @@ pub struct Subset<'a, Ans: LookupAnswer> {
     /// the current computation. Used to avoid caching protocol results in the
     /// persistent cross-call cache when they depend on coinductive assumptions.
     pub coinductive_assumptions_used: bool,
+    next_witness_context_id: usize,
 }
 
 impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
+    pub fn make_forall_witness_context(
+        &mut self,
+        vars: &QuantifiedHandle,
+        want: &Type,
+    ) -> CallContext {
+        let id = self.next_witness_context_id;
+        self.next_witness_context_id = self
+            .next_witness_context_id
+            .checked_add(1)
+            .expect("witness context id overflow");
+        CallContext::with_witness(ResidualWitnessContext {
+            identity: ResidualIdentity {
+                call_site_id: id,
+                witness_id: id,
+                target_vars: want.collect_maybe_placeholder_vars().into_iter().collect(),
+            },
+            origin_vars: vars.0.iter().copied().collect(),
+            deferred_vars: SmallSet::new(),
+        })
+    }
+
     pub fn is_consistent(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
         self.is_subset_eq(got, want)?;
         self.is_subset_eq(want, got)
@@ -1949,22 +2070,54 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     }
 
     pub fn is_subset_eq(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
+        self.is_subset_eq_with_context_and_polarity(
+            got,
+            want,
+            &CallContext::outside(),
+            CallPolarity::OutsideCall,
+        )
+    }
+
+    pub fn is_subset_eq_with_polarity(
+        &mut self,
+        got: &Type,
+        want: &Type,
+        call_polarity: CallPolarity,
+    ) -> Result<(), SubsetError> {
+        let call_context = CallContext::outside();
+        self.is_subset_eq_with_context_and_polarity(got, want, &call_context, call_polarity)
+    }
+
+    pub fn is_subset_eq_with_context_and_polarity(
+        &mut self,
+        got: &Type,
+        want: &Type,
+        call_context: &CallContext,
+        call_polarity: CallPolarity,
+    ) -> Result<(), SubsetError> {
         if self.gas.stop() {
             // We really have no idea. Just give up for now.
             return Err(SubsetError::Other);
         }
         if matches!(got, Type::Materialization) {
-            return self.is_subset_eq(
+            return self.is_subset_eq_with_context_and_polarity(
                 &self
                     .solver
                     .heap
                     .mk_class_type(self.type_order.stdlib().object().clone()),
                 want,
+                call_context,
+                call_polarity,
             );
         } else if matches!(want, Type::Materialization) {
-            return self.is_subset_eq(got, &self.solver.heap.mk_never());
+            return self.is_subset_eq_with_context_and_polarity(
+                got,
+                &self.solver.heap.mk_never(),
+                call_context,
+                call_polarity,
+            );
         }
-        let res = self.is_subset_eq_var(got, want);
+        let res = self.is_subset_eq_var(got, want, call_context, call_polarity);
         self.gas.restore();
         res
     }
@@ -2079,7 +2232,20 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     /// inequality, but not when it is on the left. This means that, e.g.:
     /// - if `f[T](x: T) -> T: ...`, then `f(1)` gets solved to `int`
     /// - if `f(x: Literal[0]): ...`, then `x = []; f(x[0])` results in `x: list[Literal[0]]`
-    fn is_subset_eq_var(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
+    fn is_subset_eq_var(
+        &mut self,
+        got: &Type,
+        want: &Type,
+        call_context: &CallContext,
+        _call_polarity: CallPolarity,
+    ) -> Result<(), SubsetError> {
+        if let Some(witness) = call_context.residual_witness() {
+            let _ = (
+                &witness.identity,
+                &witness.origin_vars,
+                &witness.deferred_vars,
+            );
+        }
         match (got, want) {
             _ if got == want => Ok(()),
             (Type::Var(v1), Type::Var(v2)) => {
@@ -2097,11 +2263,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: v1_bounds,
+                                ..
                             }
                             | Variable::Unwrap(v1_bounds),
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: v2_bounds,
+                                ..
                             }
                             | Variable::Unwrap(v2_bounds),
                         ) => {
@@ -2117,7 +2285,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let variable1 = variables.get(*v1);
                 let variable2 = variables.get(*v2);
                 match (&*variable1, &*variable2) {
-                    (Variable::Answer(t1), Variable::Answer(t2)) => {
+                    (
+                        Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. },
+                        Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. },
+                    ) => {
                         let t1 = t1.clone();
                         let t2 = t2.clone();
                         drop(variable1);
@@ -2125,14 +2296,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         drop(variables);
                         self.is_subset_eq(&t1, &t2)
                     }
-                    (_, Variable::Answer(t2)) => {
+                    (_, Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. }) => {
                         let t2 = t2.clone();
                         drop(variable1);
                         drop(variable2);
                         drop(variables);
                         self.is_subset_eq(got, &t2)
                     }
-                    (Variable::Answer(t1), _) => {
+                    (Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. }, _) => {
                         let t1 = t1.clone();
                         drop(variable1);
                         drop(variable2);
@@ -2146,10 +2317,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         Variable::Quantified {
                             quantified: q1,
                             bounds: _,
+                            ..
                         },
                         Variable::Quantified {
                             quantified: q2,
                             bounds: _,
+                            ..
                         },
                     )
                     | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
@@ -2204,6 +2377,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         Variable::Quantified {
                             quantified: _,
                             bounds: _,
+                            ..
                         },
                     ) => {
                         drop(variable1);
@@ -2226,7 +2400,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let variables = self.solver.variables.lock();
                 let v1_ref = variables.get(*v1);
                 match &*v1_ref {
-                    Variable::Answer(t1) => {
+                    Variable::Answer(t1) | Variable::ResidualAnswer { ty: t1, .. } => {
                         let t1 = t1.clone();
                         drop(v1_ref);
                         drop(variables);
@@ -2235,6 +2409,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         bounds: _,
+                        ..
                     } if q.kind() == QuantifiedKind::ParamSpec => {
                         // TODO(https://github.com/facebook/pyrefly/issues/105): figure out what to
                         // do with ParamSpec.
@@ -2302,7 +2477,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         // the PartialContained behavior (see comment there).
                         let variables = self.solver.variables.lock();
                         let v1_current = variables.get(*v1);
-                        if let Variable::Answer(t) = &*v1_current
+                        if let Variable::Answer(t) | Variable::ResidualAnswer { ty: t, .. } =
+                            &*v1_current
                             && t.is_none()
                         {
                             let widened = self
@@ -2341,7 +2517,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let variables = self.solver.variables.lock();
                 let v2_ref = variables.get(*v2);
                 match &*v2_ref {
-                    Variable::Answer(t2) => {
+                    Variable::Answer(t2) | Variable::ResidualAnswer { ty: t2, .. } => {
                         let t2 = t2.clone();
                         drop(v2_ref);
                         drop(variables);
@@ -2350,6 +2526,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         bounds,
+                        ..
                     } => {
                         let q = q.clone();
                         let upper_bound = self.solver.get_current_bound(bounds.upper.clone());
