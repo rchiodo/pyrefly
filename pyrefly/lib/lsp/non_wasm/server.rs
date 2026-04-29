@@ -1160,6 +1160,12 @@ pub struct ServerCapabilitiesWithTypeHierarchy {
     type_hierarchy_provider: Option<bool>,
 }
 
+impl ServerCapabilitiesWithTypeHierarchy {
+    pub fn set_experimental(&mut self, value: Value) {
+        self.base.experimental = Some(value);
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InitializeResult<C> {
