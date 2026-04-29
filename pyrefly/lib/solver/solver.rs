@@ -1346,6 +1346,18 @@ impl Solver {
         }
     }
 
+    fn merge_residual_candidates(
+        left: &mut Vec<ResidualIdentity>,
+        right: &mut Vec<ResidualIdentity>,
+    ) {
+        for residual in mem::take(right) {
+            if !left.contains(&residual) {
+                left.push(residual);
+            }
+        }
+        *right = left.clone();
+    }
+
     /// Called after a quantified function has been called. Given `def f[T](x: int): list[T]`,
     /// after the generic has completed.
     /// If `infer_with_first_use` is true, the variable `T` will be have like an
@@ -2303,6 +2315,22 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     let mut v1_mut = variables.get_mut(*v1);
                     let mut v2_mut = variables.get_mut(*v2);
                     match (&mut *v1_mut, &mut *v2_mut) {
+                        (
+                            Variable::Quantified {
+                                quantified: _,
+                                bounds: v1_bounds,
+                                residuals: v1_residuals,
+                            },
+                            Variable::Quantified {
+                                quantified: _,
+                                bounds: v2_bounds,
+                                residuals: v2_residuals,
+                            },
+                        ) => {
+                            v1_bounds.extend(mem::take(v2_bounds));
+                            *v2_bounds = v1_bounds.clone();
+                            Solver::merge_residual_candidates(v1_residuals, v2_residuals);
+                        }
                         (
                             Variable::Quantified {
                                 quantified: _,
