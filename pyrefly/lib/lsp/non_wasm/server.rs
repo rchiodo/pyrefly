@@ -497,7 +497,7 @@ pub trait TspInterface: Send + Sync + 'static {
 
     /// Return the cell index if `uri` is an open notebook cell, or `None`
     /// for regular file URIs.
-    fn maybe_get_cell_index(&self, uri: &Url) -> Option<usize>;
+    fn maybe_get_code_cell_index(&self, uri: &Url) -> Option<usize>;
 }
 
 pub struct Connection {
@@ -1961,7 +1961,7 @@ impl Server {
                             url
                         )
                     })?;
-                    for cell_url in lsp_notebook.cell_urls() {
+                    for cell_url in lsp_notebook.code_cell_urls() {
                         self.open_notebook_cells
                             .write()
                             .insert(cell_url.clone(), notebook_path.clone());
@@ -2905,7 +2905,7 @@ impl Server {
                 return match &**lsp_file {
                     LspFile::Notebook(notebook) => {
                         let error_cell = e.get_notebook_cell()?;
-                        let error_cell_uri = notebook.get_cell_url(error_cell)?;
+                        let error_cell_uri = notebook.get_code_cell_url(error_cell)?;
                         if let Some(filter_cell) = cell_uri
                             && error_cell_uri != filter_cell
                         {
@@ -3040,7 +3040,7 @@ impl Server {
             if let Some(lsp_file) = open_files.get(&handle_path_buf) {
                 match &**lsp_file {
                     LspFile::Notebook(notebook) => {
-                        for url in notebook.cell_urls() {
+                        for url in notebook.code_cell_urls() {
                             diags.insert(PathBuf::from(url.to_string()), Vec::new());
                         }
                     }
@@ -3965,7 +3965,7 @@ impl Server {
         match entry.get().as_ref() {
             LspFile::Notebook(notebook) => match kind {
                 DidCloseKind::NotebookDocument => {
-                    let cell_urls: Vec<_> = notebook.cell_urls().to_vec();
+                    let cell_urls: Vec<_> = notebook.code_cell_urls().to_vec();
                     for cell in cell_urls {
                         self.publish_diagnostics_for_uri(
                             cell.clone(),
@@ -4378,7 +4378,7 @@ impl Server {
                             if let Some(cell_idx) = info.to_cell_for_lsp(range.start())
                                 && let Some(path) = to_real_path(info.path())
                                 && let Some(notebook) = open_notebooks.get(&path)
-                                && let Some(cell_url) = notebook.get_cell_url(cell_idx)
+                                && let Some(cell_url) = notebook.get_code_cell_url(cell_idx)
                             {
                                 uri = cell_url.clone();
                             }
@@ -4487,7 +4487,7 @@ impl Server {
             // If the code action is triggered from a notebook cell, we need the cell's
             // index so that import quick-fixes can be redirected to the current cell
             // instead of always targeting cell 1 (position 0 of the combined AST).
-            let triggered_cell_index = self.maybe_get_cell_index(uri);
+            let triggered_cell_index = self.maybe_get_code_cell_index(uri);
             if let Some(quickfixes) = transaction.local_quickfix_code_actions_sorted(
                 &handle,
                 range,
@@ -4517,7 +4517,7 @@ impl Server {
                                     if let Some(LspFile::Notebook(notebook)) =
                                         open_files.get(&path).map(|f| &**f)
                                     {
-                                        notebook.get_cell_url(current_cell_idx).cloned()
+                                        notebook.get_code_cell_url(current_cell_idx).cloned()
                                     } else {
                                         None
                                     }
@@ -4910,7 +4910,7 @@ impl Server {
                             if let Some(cell_idx) = info.to_cell_for_lsp(range.start())
                                 && let Some(path) = to_real_path(info.path())
                                 && let Some(notebook) = open_notebooks.get(&path)
-                                && let Some(cell_url) = notebook.get_cell_url(cell_idx)
+                                && let Some(cell_url) = notebook.get_code_cell_url(cell_idx)
                             {
                                 uri = cell_url.clone();
                             }
@@ -5060,7 +5060,7 @@ impl Server {
         params: InlayHintParams,
     ) -> Result<Option<Vec<InlayHint>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let range = &params.range;
         let (handle, lsp_analysis_config) = self
             .make_handle_with_lsp_analysis_config_if_enabled(uri, Some(InlayHintRequest::METHOD))?;
@@ -5142,7 +5142,7 @@ impl Server {
         let runnable_code_lens = self
             .workspaces
             .get_with(path.clone(), |(_, workspace)| workspace.runnable_code_lens);
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let handle = self
             .make_handle_if_enabled(uri, Some(CodeLensRequest::METHOD))
             .ok()?;
@@ -5168,7 +5168,7 @@ impl Server {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(SemanticTokensFullRequest::METHOD))?;
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -5184,7 +5184,7 @@ impl Server {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(SemanticTokensRangeRequest::METHOD))?;
         let module_info = transaction
             .get_module_info(&handle)
@@ -5204,7 +5204,7 @@ impl Server {
         params: DocumentSymbolParams,
     ) -> Result<Option<Vec<DocumentSymbol>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let path = self
             .path_for_uri_or_notebook_cell(uri)
             .ok_or(EmptyResponseReason::NoFilePath)?;
@@ -5408,7 +5408,7 @@ impl Server {
         text_document: &TextDocumentIdentifier,
     ) -> Option<Vec<Range>> {
         let uri = &text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, None).ok()?;
         let module = transaction.get_module_info(&handle)?;
         let docstring_ranges = transaction.docstring_ranges(&handle)?;
@@ -5430,7 +5430,7 @@ impl Server {
         params: FoldingRangeParams,
     ) -> Result<Option<Vec<FoldingRange>>, EmptyResponseReason> {
         let uri = &params.text_document.uri;
-        let maybe_cell_idx = self.maybe_get_cell_index(uri);
+        let maybe_cell_idx = self.maybe_get_code_cell_index(uri);
         let handle = self.make_handle_if_enabled(uri, Some(FoldingRangeRequest::METHOD))?;
         let module = transaction
             .get_module_info(&handle)
@@ -5758,7 +5758,7 @@ impl Server {
             // we don't know what URI refers to which cell.
             let path = to_real_path(definition_module_info.path())?;
             if let LspFile::Notebook(notebook) = &**self.open_files.read().get(&path)?
-                && let Some(cell_url) = notebook.get_cell_url(cell_idx)
+                && let Some(cell_url) = notebook.get_code_cell_url(cell_idx)
             {
                 uri = cell_url.clone();
             }
@@ -5771,13 +5771,13 @@ impl Server {
 
     /// If the uri is an open notebook cell, return the index of the cell within the notebook
     /// otherwise, return None.
-    fn maybe_get_cell_index(&self, cell_uri: &Url) -> Option<usize> {
+    fn maybe_get_code_cell_index(&self, cell_uri: &Url) -> Option<usize> {
         self.open_notebook_cells
             .read()
             .get(cell_uri)
             .and_then(|path| self.open_files.read().get(path).duped())
             .and_then(|file| match &*file {
-                LspFile::Notebook(notebook) => notebook.get_cell_index(cell_uri),
+                LspFile::Notebook(notebook) => notebook.get_code_cell_index(cell_uri),
                 _ => None,
             })
     }
@@ -5788,12 +5788,12 @@ impl Server {
         module: &ModuleInfo,
         position: Position,
     ) -> TextSize {
-        let notebook_cell = self.maybe_get_cell_index(uri);
+        let notebook_cell = self.maybe_get_code_cell_index(uri);
         module.from_lsp_position(position, notebook_cell)
     }
 
     pub fn from_lsp_range(&self, uri: &Url, module: &ModuleInfo, position: Range) -> TextRange {
-        let notebook_cell = self.maybe_get_cell_index(uri);
+        let notebook_cell = self.maybe_get_code_cell_index(uri);
         module.from_lsp_range(position, notebook_cell)
     }
 
@@ -6373,7 +6373,7 @@ impl TspInterface for Server {
             .ok()
             .or_else(|| Url::from_file_path(uri).ok())?;
         let path = self.path_for_uri_or_notebook_cell(&url)?;
-        let notebook_cell = self.maybe_get_cell_index(&url);
+        let notebook_cell = self.maybe_get_code_cell_index(&url);
 
         let handle = make_open_handle(&self.state, &path);
         let transaction = self.state.transaction();
@@ -6421,7 +6421,7 @@ impl TspInterface for Server {
         self.path_for_uri_or_notebook_cell(uri)
     }
 
-    fn maybe_get_cell_index(&self, uri: &Url) -> Option<usize> {
-        Self::maybe_get_cell_index(self, uri)
+    fn maybe_get_code_cell_index(&self, uri: &Url) -> Option<usize> {
+        Self::maybe_get_code_cell_index(self, uri)
     }
 }
