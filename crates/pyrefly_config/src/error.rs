@@ -55,10 +55,46 @@ impl ErrorDisplayConfig {
         self.0.insert(kind, severity);
     }
 
+    /// Iterate over `(ErrorKind, Severity)` entries in this config.
+    pub fn iter(&self) -> impl Iterator<Item = (ErrorKind, Severity)> + '_ {
+        self.0.iter().map(|(&k, &s)| (k, s))
+    }
+
     /// Merge another config's error codes into this one.
     /// Codes from `other` override codes in `self`.
     pub fn merge_from(&mut self, other: &ErrorDisplayConfig) {
         for (&kind, &severity) in &other.0 {
+            self.0.insert(kind, severity);
+        }
+    }
+
+    /// Merge user overrides on top of `self` (the preset base), ensuring that
+    /// user-level settings win even when they target a parent kind or a
+    /// deprecated alias whose children/canonical form the preset sets directly.
+    ///
+    /// For example, if the preset has `BadOverrideMutableAttribute = Ignore`
+    /// and the user writes `bad-override = "error"`, we drop the preset's
+    /// child entry so that `severity()` falls back to the user's parent
+    /// override.
+    pub fn merge_user_overrides(&mut self, user: &ErrorDisplayConfig) {
+        self.0.retain(|kind, _| {
+            if user.0.contains_key(kind) {
+                // Preset entry will be overwritten by user's entry below.
+                return false;
+            }
+            if let Some(parent) = kind.parent_kind()
+                && user.0.contains_key(&parent)
+            {
+                return false;
+            }
+            if let Some(alias) = kind.deprecated_alias()
+                && user.0.contains_key(&alias)
+            {
+                return false;
+            }
+            true
+        });
+        for (&kind, &severity) in &user.0 {
             self.0.insert(kind, severity);
         }
     }
