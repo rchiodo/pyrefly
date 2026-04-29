@@ -1947,7 +1947,7 @@ pub enum SubsetCacheEntry {
 /// that are unrelated to callable subtyping.
 ///
 /// TODO(stroxler): Rename this to something clearer (it's difficult to restack)
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
 pub enum CallPolarity {
     Positive,
     Negative,
@@ -1963,6 +1963,16 @@ impl CallPolarity {
             Self::OutsideCall => Self::OutsideCall,
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
+pub(crate) enum SubsetCacheContext {
+    #[default]
+    Default,
+    Witness {
+        witness_id: usize,
+        polarity: CallPolarity,
+    },
 }
 
 // The context in which we are collecting residuals.
@@ -2017,6 +2027,20 @@ impl CallContext {
             polarity: self.polarity.negated(),
         }
     }
+
+    pub(crate) fn subset_cache_context(&self) -> SubsetCacheContext {
+        if let Some(witness) = &self.witness {
+            // Context-scoped cache keying preserves memoization while keeping
+            // witness/polarity-sensitive side effects isolated. Most checks run
+            // under Default context and keep prior cache behavior.
+            SubsetCacheContext::Witness {
+                witness_id: witness.identity.witness_id,
+                polarity: self.polarity,
+            }
+        } else {
+            SubsetCacheContext::Default
+        }
+    }
 }
 
 /// A helper to implement subset ergonomically.
@@ -2045,7 +2069,7 @@ pub struct Subset<'a, Ans: LookupAnswer> {
     /// must be discarded. Only entries added during the failing computation are
     /// removed; entries from earlier (independent) computations are preserved.
     /// This works because `SmallMap` preserves insertion order.
-    pub subset_cache: SmallMap<(Type, Type), SubsetCacheEntry>,
+    pub subset_cache: SmallMap<(Type, Type, SubsetCacheContext), SubsetCacheEntry>,
     /// Class-level recursive assumptions for protocol checks.
     /// When checking `got <: protocol` where got's type arguments contain Vars
     /// (indicating we're in a recursive pattern), we track (got_class, protocol_class)

@@ -1247,8 +1247,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         want: &Type,
         call_context: &CallContext,
     ) -> Result<(), SubsetError> {
+        let context_key = call_context.subset_cache_context();
         let cache_key = if self.can_be_recursive(got, want) {
-            let key = (got.clone(), want.clone());
+            // Cache keys include residual context identity so witness-scoped
+            // comparisons do not suppress context-sensitive side effects.
+            // The vast majority of checks run under `Default` context.
+            let key = (got.clone(), want.clone(), context_key);
             if let Some(entry) = self.subset_cache.get(&key) {
                 return match entry {
                     SubsetCacheEntry::InProgress => {
