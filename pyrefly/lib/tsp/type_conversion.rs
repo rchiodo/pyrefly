@@ -42,6 +42,7 @@ use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType as PyreflyClassType;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::types::BoundMethodType;
+use pyrefly_types::types::CallableResidualKind;
 use pyrefly_types::types::Forallable;
 use pyrefly_types::types::Type as PyreflyType;
 use ruff_text_size::TextRange;
@@ -159,6 +160,11 @@ impl TypeConverter<'_> {
 
             // --- Callable (typing.Callable[[int, str], bool]) ---
             PyreflyType::Callable(c) => self.convert_callable(c),
+            PyreflyType::CallableResidual(residual) => match &residual.kind {
+                CallableResidualKind::Generic { quantified } => {
+                    self.convert(&quantified.as_gradual_type())
+                }
+            },
 
             // --- Unions ---
             PyreflyType::Union(u) => {

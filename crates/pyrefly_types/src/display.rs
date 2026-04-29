@@ -42,6 +42,7 @@ use crate::typed_dict::TypedDict;
 use crate::types::AnyStyle;
 use crate::types::BoundMethod;
 use crate::types::BoundMethodType;
+use crate::types::CallableResidualKind;
 use crate::types::Forall;
 use crate::types::Forallable;
 use crate::types::NeverStyle;
@@ -362,7 +363,10 @@ impl<'a> TypeDisplayContext<'a> {
             let needs_parens = wrap_callables_and_intersect
                 && matches!(
                     t,
-                    Type::Callable(_) | Type::Function(_) | Type::Intersect(_)
+                    Type::Callable(_)
+                        | Type::CallableResidual(_)
+                        | Type::Function(_)
+                        | Type::Intersect(_)
                 );
             if needs_parens {
                 output.write_str("(")?;
@@ -598,6 +602,11 @@ impl<'a> TypeDisplayContext<'a> {
                     c.fmt_with_type(output, &|t, o| self.fmt_helper_generic(t, false, o))
                 }
             }
+            Type::CallableResidual(box residual) => match &residual.kind {
+                CallableResidualKind::Generic { quantified } => {
+                    self.fmt_helper_generic(&quantified.as_gradual_type(), is_toplevel, output)
+                }
+            },
             Type::Function(box Function {
                 signature,
                 metadata,
@@ -830,7 +839,10 @@ impl<'a> TypeDisplayContext<'a> {
                             }
                             literals.push(&lit.value)
                         }
-                        Type::Callable(_) | Type::Function(_) | Type::Intersect(_) => {
+                        Type::Callable(_)
+                        | Type::CallableResidual(_)
+                        | Type::Function(_)
+                        | Type::Intersect(_) => {
                             // These types need parentheses in union context
                             let mut temp = String::new();
                             {
@@ -893,7 +905,10 @@ impl<'a> TypeDisplayContext<'a> {
                             // Regular union member - use helper for just this one
                             let needs_parens = matches!(
                                 t,
-                                Type::Callable(_) | Type::Function(_) | Type::Intersect(_)
+                                Type::Callable(_)
+                                    | Type::CallableResidual(_)
+                                    | Type::Function(_)
+                                    | Type::Intersect(_)
                             );
                             if needs_parens {
                                 output.write_str("(")?;

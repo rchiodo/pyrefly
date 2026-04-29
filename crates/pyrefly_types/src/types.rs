@@ -393,6 +393,23 @@ pub enum CalleeKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
+pub enum CallableResidualKind {
+    /// A generic residual. The `quantified` is the quantified type variable we
+    /// want to use when reconstructing a `Callable` that contains a generic
+    /// residual; we'll wrap it in a Forall that scopes all the residuals.
+    ///
+    /// If it appears anywhere else, the fallback is `quantified.as_gradual_type()`
+    Generic { quantified: Quantified },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Visit, VisitMut, TypeEq)]
+pub struct CallableResidual {
+    pub kind: CallableResidualKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Visit, VisitMut, TypeEq)]
 pub struct BoundMethod {
     /// Type of the self/cls argument,
     pub obj: Type,
@@ -736,6 +753,11 @@ pub enum Type {
     LiteralString(LitStyle),
     /// typing.Callable
     Callable(Box<Callable>),
+    /// The result of solving a parameter in a higher-order function call against some part of a
+    /// generic or overloaded argument type. This type captures information about the structure
+    /// of the argument, so that we can resonstruct the same generic/overload structure if it
+    /// appears in a callable type later. Otherwise, we should *flatten* to a fallback type.
+    CallableResidual(Box<CallableResidual>),
     /// A function declared using the `def` keyword.
     /// Note that the FunctionKind metadata doesn't participate in subtyping, and thus two types with distinct metadata are still subtypes.
     Function(Box<Function>),
@@ -881,6 +903,7 @@ impl Visit for Type {
             Type::Literal(x) => x.visit(f),
             Type::LiteralString(_) => {}
             Type::Callable(x) => x.visit(f),
+            Type::CallableResidual(x) => x.visit(f),
             Type::Function(x) => x.visit(f),
             Type::BoundMethod(x) => x.visit(f),
             Type::Overload(x) => x.visit(f),
@@ -936,6 +959,7 @@ impl VisitMut for Type {
             Type::Literal(x) => x.visit_mut(f),
             Type::LiteralString(_) => {}
             Type::Callable(x) => x.visit_mut(f),
+            Type::CallableResidual(x) => x.visit_mut(f),
             Type::Function(x) => x.visit_mut(f),
             Type::BoundMethod(x) => x.visit_mut(f),
             Type::Overload(x) => x.visit_mut(f),
@@ -1387,7 +1411,7 @@ impl Type {
 
     pub fn callee_kind(&self) -> Option<CalleeKind> {
         match self {
-            Type::Callable(_) => Some(CalleeKind::Callable),
+            Type::Callable(_) | Type::CallableResidual(_) => Some(CalleeKind::Callable),
             Type::Function(func) => Some(CalleeKind::Function(func.metadata.kind.clone())),
             Type::ClassDef(c) => Some(CalleeKind::Class(c.kind())),
             Type::Forall(forall) => forall.body.clone().as_type().callee_kind(),
