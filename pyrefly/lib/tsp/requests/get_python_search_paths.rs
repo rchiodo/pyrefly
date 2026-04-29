@@ -16,11 +16,11 @@ use lsp_types::Url;
 use tsp_types::protocol::GetPythonSearchPathsParams;
 
 use crate::lsp::non_wasm::server::TspInterface;
-use crate::tsp::server::TspServer;
+use crate::tsp::server::TspConnection;
 use crate::tsp::validation::internal_error;
 use crate::tsp::validation::parse_uri;
 
-impl<T: TspInterface> TspServer<T> {
+impl<T: TspInterface> TspConnection<T> {
     /// Handle a `typeServer/getPythonSearchPaths` request.
     ///
     /// Validates the snapshot, parses the `from_uri`, and delegates to
