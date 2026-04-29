@@ -477,6 +477,17 @@ pub trait TspInterface: Send + Sync + 'static {
         func_id: &pyrefly_types::callable::FuncId,
     ) -> Option<TextRange>;
 
+    /// Resolve an importable module to its backing filesystem path using the
+    /// import-resolution context of `source_uri`.
+    ///
+    /// Returns `None` when the source URI is invalid, cannot be mapped to a
+    /// path, or the target module cannot be resolved.
+    fn resolve_module_uri(
+        &self,
+        source_uri: &str,
+        module: &pyrefly_types::module::ModuleType,
+    ) -> Option<PathBuf>;
+
     /// Resolve a URI to a filesystem path.
     ///
     /// Handles both `file://` URIs (via [`Url::to_file_path`]) and notebook
@@ -6383,6 +6394,27 @@ impl TspInterface for Server {
         let key = KeyUndecoratedFunctionRange(def_index);
         let idx = bindings.key_to_idx_hashed_opt(Hashed::new(&key))?;
         Some(bindings.get(idx).0.range())
+    }
+
+    fn resolve_module_uri(
+        &self,
+        source_uri: &str,
+        module: &pyrefly_types::module::ModuleType,
+    ) -> Option<PathBuf> {
+        let url = Url::parse(source_uri)
+            .ok()
+            .or_else(|| Url::from_file_path(source_uri).ok())?;
+        let source_path = self.path_for_uri_or_notebook_cell(&url)?;
+
+        let source_handle = make_open_handle(&self.state, &source_path);
+        let transaction = self.state.transaction();
+        let module_name = ModuleName::from_str(&module.to_string());
+        let finding = transaction
+            .import_handle(&source_handle, module_name, None)
+            .finding()?;
+
+        let path = to_real_path(finding.path())?;
+        Some(path.canonicalize().unwrap_or(path))
     }
 
     fn resolve_uri_to_path(&self, uri: &Url) -> Option<PathBuf> {
