@@ -1668,9 +1668,9 @@ dependencies = [
 
 [[package]]
 name = "lock_free_hashtable"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "675f71e608891537a702876c647c86beeb822e921069d168276ec469eae5f1a9"
+checksum = "1b6adcc312b6182b49148a8903e73bea4ff3d587f030ad1d758fb97c76f9472e"
 dependencies = [
  "allocative",
  "atomic",
@@ -3171,11 +3171,10 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "static_interner"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a18cca271f002300361200bfd4d681fae4a68744817cfee6a084ce13fc23cfa7"
+checksum = "fab44341fbf4deae6e8d5ab450f24e1b34e0b2439d39ac0e9b5215a4e5493263"
 dependencies = [
- "allocative",
  "dupe",
  "equivalent",
  "lock_free_hashtable",
