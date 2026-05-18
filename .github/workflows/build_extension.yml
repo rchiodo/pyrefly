@@ -132,11 +132,25 @@ jobs:
         with:
           command: build
           target: ${{ matrix.rust_target }}
-          args: "--release --all-features --artifact-dir lsp/bin --manifest-path pyrefly/Cargo.toml"
+          args: "--release --all-features --manifest-path pyrefly/Cargo.toml"
           toolchain: stable
       - name: build pyrefly binary
         if: ${{ matrix.rust_target == '' }}
-        run: cargo build --release --all-features --artifact-dir lsp/bin --manifest-path pyrefly/Cargo.toml
+        run: cargo build --release --all-features --manifest-path pyrefly/Cargo.toml
+      - name: copy binary to lsp/bin
+        shell: bash
+        run: |
+          mkdir -p lsp/bin
+          if [ -n "${{ matrix.rust_target }}" ]; then
+            src="target/${{ matrix.rust_target }}/release"
+          else
+            src="target/release"
+          fi
+          if [ "${{ matrix.platform }}" = "win32" ]; then
+            cp "$src/pyrefly.exe" lsp/bin/
+          else
+            cp "$src/pyrefly" lsp/bin/
+          fi
       - uses: actions/setup-node@v6
         with:
           node-version: 22
