@@ -50,6 +50,7 @@ use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
 use crate::alt::class::class_field::ClassField;
+use crate::alt::class::typed_dict::TypedDictErrorKind;
 use crate::alt::class::variance_inference::VarianceMap;
 use crate::alt::types::abstract_class::AbstractClassMembers;
 use crate::alt::types::class_bases::ClassBases;
@@ -2181,12 +2182,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.error(
                     errors,
                     range,
-                    ErrorKind::BadTypedDictKey,
-                    format!(
-                        "TypedDict `{}` does not have key `{}`",
-                        typed_dict.name(),
-                        field_name
-                    ),
+                    typed_dict.key_error_kind(),
+                    format!("{} does not have key `{field_name}`", typed_dict.label()),
                 );
                 return;
             };
@@ -4681,6 +4678,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         field_name: Option<&Name>,
         field_ty: &Type,
         read_only: bool,
+        is_anonymous: bool,
         value: &ExprOrBinding,
         key_range: TextRange,
         assign_range: TextRange,
@@ -4699,8 +4697,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 format!("{key} in TypedDict `{typed_dict}` is read-only"),
             )
         } else {
-            let context =
-                &|| TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(field_name.cloned()));
+            let context = &|| {
+                TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
+                    field_name.cloned(),
+                    is_anonymous,
+                ))
+            };
             match value {
                 ExprOrBinding::Expr(e) => self.expr(e, Some((field_ty, context)), errors),
                 ExprOrBinding::Binding(b) => {
@@ -4730,12 +4732,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 return self.error(
                     errors,
                     key_range,
-                    ErrorKind::BadTypedDictKey,
-                    format!(
-                        "TypedDict `{}` does not have key `{}`",
-                        typed_dict.name(),
-                        field_name
-                    ),
+                    typed_dict.key_error_kind(),
+                    format!("{} does not have key `{field_name}`", typed_dict.label()),
                 );
             };
         self.check_assign_to_typed_dict_field(
@@ -4743,6 +4741,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(field_name),
             &field_ty,
             read_only,
+            typed_dict.is_anonymous(),
             value,
             key_range,
             assign_range,
@@ -4786,6 +4785,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             None,
                             &field_ty,
                             false,
+                            typed_dict.is_anonymous(),
                             value,
                             subscript.slice.range(),
                             subscript.range(),

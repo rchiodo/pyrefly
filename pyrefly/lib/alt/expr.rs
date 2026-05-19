@@ -68,6 +68,7 @@ use vec1::vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::callable::CallArg;
+use crate::alt::class::typed_dict::TypedDictErrorKind;
 use crate::alt::nn_module_specials::is_nn_module_dict;
 use crate::alt::solve::TypeFormContext;
 use crate::alt::unwrap::HintRef;
@@ -2403,11 +2404,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             } else {
                                 let mut builder = errors.error_builder(
                                     slice.range(),
-                                    ErrorKind::BadTypedDictKey,
+                                    typed_dict.key_error_kind(),
                                     format!(
-                                        "TypedDict `{}` does not have key `{}`",
-                                        typed_dict.name(),
-                                        field_name
+                                        "{} does not have key `{field_name}`",
+                                        typed_dict.label()
                                     ),
                                 );
                                 if let Some(suggestion) = best_suggestion(
@@ -2436,10 +2436,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 self.error(
                                     errors,
                                     slice.range(),
-                                    ErrorKind::BadTypedDictKey,
+                                    typed_dict.key_error_kind(),
                                     format!(
-                                        "Invalid key for TypedDict `{}`, got `{}`",
-                                        typed_dict.name(),
+                                        "Invalid key for {}, got `{}`",
+                                        typed_dict.label(),
                                         self.for_display(ty.clone())
                                     ),
                                 )
