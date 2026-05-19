@@ -52,27 +52,6 @@ Base.build()
 # Cannot call abstract method `Base.build` [abstract-method-call]
 ```
 
-## annotation-mismatch
-
-This error indicates a mismatch between multiple annotations for a single
-variable. This is relatively uncommon, but it can happen in if-statements:
-
-```python
-if some_cond:
-    x: int = 1
-else:
-    x: str = "two" # Inconsistent type annotations for x: str, int [annotation-mismatch]
-```
-
-It can be helpful to annotate the variable before branch, especially if there is
-a useful default value for it. For example:
-
-```python
-x: str = "default"
-if some_cond:
-  x = "actual value"
-```
-
 ## assert-type
 
 An `assert-type` error is raised when a `typing.assert_type()` call fails.
