@@ -2938,21 +2938,14 @@ impl Scopes {
             // compiler has identified as local shadows enclosing scopes, so we should prefer
             // inner static lookups to outer flow lookups.
             if !is_class && let Some(static_info) = scope.stat.0.get_hashed(name) {
-                // For comprehension scopes, check if the name exists in an enclosing scope first.
-                // This handles the case where a walrus operator's target was added to the
-                // comprehension's static scope (via `add_lvalue_to_current_static`) but should
-                // still resolve to the enclosing scope's binding.
-                if matches!(scope.kind, ScopeKind::Comprehension { .. }) {
-                    for enclosing_scope in self.scopes.iter().rev().skip(1) {
-                        if let Some(enclosing_flow_info) =
-                            enclosing_scope.scope.flow.get_info_hashed(name)
-                        {
-                            return Some(NameReadInfo::Flow {
-                                idx: enclosing_flow_info.idx(),
-                                initialized: enclosing_flow_info.initialized(),
-                            });
-                        }
-                    }
+                // A walrus operator's target is added to the comprehension's
+                // static scope (via `add_lvalue_to_current_static`) before the
+                // walrus write adds it to flow. When reading the name before
+                // that write, skip this scope so visit_scopes continues to the
+                // enclosing scope — which correctly handles class-scope-skipping
+                // and flow barriers.
+                if matches!(scope.kind, ScopeKind::Comprehension { .. }) && flow_info.is_none() {
+                    return None;
                 }
 
                 let forward_ref_key = static_info.as_key(name.into_key());
