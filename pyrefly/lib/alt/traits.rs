@@ -498,13 +498,16 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyAbstractClassCheck {
 
 impl<Ans: LookupAnswer> Solve<Ans> for KeyClassSubscriptSymmetry {
     fn solve(
-        _answers: &AnswersSolver<Ans>,
-        _binding: &BindingClassSubscriptSymmetry,
+        answers: &AnswersSolver<Ans>,
+        binding: &BindingClassSubscriptSymmetry,
         _range: TextRange,
         _errors: &ErrorCollector,
     ) -> Arc<bool> {
-        // TODO: implement algorithm
-        Arc::new(true)
+        if let Some(cls) = &answers.get_idx(binding.class_idx).0 {
+            Arc::new(answers.calculate_subscript_symmetry(cls))
+        } else {
+            Arc::new(true)
+        }
     }
 
     fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
