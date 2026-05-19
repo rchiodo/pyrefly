@@ -185,11 +185,11 @@ impl ModuleRanges {
 #[derive(Debug)]
 pub struct Errors {
     // Sorted by module name and path (so deterministic display order)
-    loads: Vec<(Arc<Load>, ArcId<ConfigFile>)>,
+    loads: Vec<(Arc<Load>, Option<Arc<ModuleRanges>>, ArcId<ConfigFile>)>,
 }
 
 impl Errors {
-    pub fn new(mut loads: Vec<(Arc<Load>, ArcId<ConfigFile>)>) -> Self {
+    pub fn new(mut loads: Vec<(Arc<Load>, Option<Arc<ModuleRanges>>, ArcId<ConfigFile>)>) -> Self {
         loads.sort_by_key(|x| (x.0.module_info.name(), x.0.module_info.path().dupe()));
         Self { loads }
     }
@@ -209,12 +209,14 @@ impl Errors {
 
     pub fn collect_errors(&self) -> CollectedErrors {
         let mut errors = CollectedErrors::default();
-        for (load, config) in &self.loads {
+        for (load, module_ranges, config) in &self.loads {
             if load.errors.style() == ErrorStyle::Never {
                 continue;
             }
             let error_config = config.get_error_config(load.module_info.path().as_path());
-            let ranges = load.module_ranges();
+            let ranges = module_ranges
+                .as_ref()
+                .expect("module_ranges must be present when error style is not Never");
             load.errors.collect_into(
                 &error_config,
                 &ranges.multi_line,
@@ -264,7 +266,7 @@ impl Errors {
 
     pub fn collect_ignores(&self) -> SmallMap<&ModulePath, &Ignore> {
         let mut ignore_collection: SmallMap<&ModulePath, &Ignore> = SmallMap::new();
-        for (load, _) in &self.loads {
+        for (load, _, _) in &self.loads {
             let module_path = load.module_info.path();
             let ignores = load.module_info.ignore();
             ignore_collection.insert(module_path, ignores);
@@ -292,11 +294,15 @@ impl Errors {
         let fstring_ranges_by_module: SmallMap<&ModulePath, &[(LineNumber, LineNumber)]> = self
             .loads
             .iter()
-            .filter(|(load, _)| load.errors.style() != ErrorStyle::Never)
-            .map(|(load, _)| {
+            .filter(|(load, _, _)| load.errors.style() != ErrorStyle::Never)
+            .map(|(load, module_ranges, _)| {
                 (
                     load.module_info.path(),
-                    load.module_ranges().multi_line.as_slice(),
+                    module_ranges
+                        .as_ref()
+                        .expect("module_ranges must be present when error style is not Never")
+                        .multi_line
+                        .as_slice(),
                 )
             })
             .collect();
@@ -304,7 +310,7 @@ impl Errors {
         let enabled_ignores_by_module: SmallMap<&ModulePath, SmallSet<Tool>> = self
             .loads
             .iter()
-            .map(|(load, config)| {
+            .map(|(load, _, config)| {
                 let path = load.module_info.path();
                 (path, config.enabled_ignores(path.as_path()).clone())
             })
@@ -360,7 +366,7 @@ impl Errors {
         }
 
         // Iterate over each module and check for unused ignores
-        for (load, config) in &self.loads {
+        for (load, _, config) in &self.loads {
             let module = &load.module_info;
             let module_path = module.path();
             let ignore = module.ignore();
@@ -482,7 +488,7 @@ impl Errors {
         let config_by_path: SmallMap<&ModulePath, &ArcId<ConfigFile>> = self
             .loads
             .iter()
-            .map(|(load, config)| (load.module_info.path(), config))
+            .map(|(load, _, config)| (load.module_info.path(), config))
             .collect();
 
         for error in unused_errors {
@@ -504,12 +510,14 @@ impl Errors {
     }
 
     pub fn check_against_expectations(&self) -> anyhow::Result<()> {
-        for (load, config) in &self.loads {
+        for (load, module_ranges, config) in &self.loads {
             if load.errors.style() == ErrorStyle::Never {
                 continue;
             }
             let error_config = config.get_error_config(load.module_info.path().as_path());
-            let ranges = load.module_ranges();
+            let ranges = module_ranges
+                .as_ref()
+                .expect("module_ranges must be present when error style is not Never");
             let mut result = CollectedErrors::default();
             load.errors.collect_into(
                 &error_config,
@@ -551,7 +559,7 @@ mod tests {
     impl Errors {
         pub fn check_var_leak(&self) -> anyhow::Result<()> {
             let regex = Regex::new(r"@\d+").unwrap();
-            for (load, config) in &self.loads {
+            for (load, _, config) in &self.loads {
                 let error_config = config.get_error_config(load.module_info.path().as_path());
                 let errors = load.errors.collect(&error_config).ordinary;
                 for error in errors {

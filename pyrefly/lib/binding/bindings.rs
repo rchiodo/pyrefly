@@ -100,6 +100,7 @@ use crate::export::exports::LookupExport;
 use crate::export::special::SpecialExport;
 use crate::module::module_info::ModuleInfo;
 use crate::solver::solver::Solver;
+use crate::state::errors::ModuleRanges;
 use crate::state::loader::FindError;
 use crate::state::loader::FindingOrError;
 use crate::table;
@@ -188,6 +189,9 @@ struct BindingsInner {
     module_info: ModuleInfo,
     table: BindingTable,
     metadata: Arc<BindingsMetadata>,
+    /// Multi-line ranges and ignore-all directives, computed from the AST
+    /// here, before the AST is evicted from memory. Used for error suppression.
+    module_ranges: Arc<ModuleRanges>,
     scope_trace: Option<ScopeTrace>,
     unused_parameters: Vec<UnusedParameter>,
     unused_imports: Vec<UnusedImport>,
@@ -336,6 +340,10 @@ impl Bindings {
             module_info,
             table: Default::default(),
             metadata: Arc::new(BindingsMetadata::new()),
+            module_ranges: Arc::new(ModuleRanges {
+                multi_line: Vec::new(),
+                ignore_all: SmallMap::new(),
+            }),
             scope_trace: None,
             unused_parameters: Vec::new(),
             unused_imports: Vec::new(),
@@ -360,6 +368,10 @@ impl Bindings {
 
     pub fn metadata(&self) -> &Arc<BindingsMetadata> {
         &self.0.metadata
+    }
+
+    pub fn module_ranges(&self) -> &Arc<ModuleRanges> {
+        &self.0.module_ranges
     }
 
     /// Look up pre-computed class fields by `ClassDefIndex`. O(1) Vec index.
@@ -569,6 +581,10 @@ impl Bindings {
         analyze_unannotated_for_ide: bool,
         infer_return_types: InferReturnTypes,
     ) -> Self {
+        // Compute module ranges from the AST before consuming it. These are
+        // needed later for error collection, which runs after the AST may
+        // have been evicted.
+        let module_ranges = Arc::new(ModuleRanges::compute(&x, &module_info));
         let mut builder = BindingsBuilder {
             module_info: module_info.dupe(),
             lookup,
@@ -694,6 +710,7 @@ impl Bindings {
             module_info,
             table: builder.table,
             metadata: Arc::new(builder.metadata),
+            module_ranges,
             scope_trace: if enable_trace {
                 Some(scope_trace)
             } else {

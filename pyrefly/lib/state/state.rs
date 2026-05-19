@@ -21,7 +21,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::MutexGuard;
-use std::sync::OnceLock;
 use std::sync::RwLockReadGuard;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -118,7 +117,6 @@ use crate::module::typeshed::BundledTypeshedStdlib;
 use crate::solver::solver::VarRecurser;
 use crate::state::epoch::Epoch;
 use crate::state::errors::Errors;
-use crate::state::errors::ModuleRanges;
 use crate::state::load::FileContents;
 use crate::state::load::Load;
 use crate::state::loader::FindingOrError;
@@ -879,7 +877,8 @@ impl<'a> Transaction<'a> {
                 .filter_map(|handle| {
                     self.with_module_config_inner(handle, |config, x| {
                         let load = x.get_load()?;
-                        Some((load, config.dupe()))
+                        let module_ranges = x.module_ranges();
+                        Some((load, module_ranges, config.dupe()))
                     })
                 })
                 .collect(),
@@ -895,7 +894,8 @@ impl<'a> Transaction<'a> {
                     .values()
                     .filter_map(|x| {
                         let load = x.state.get_load()?;
-                        Some((load, x.config.dupe()))
+                        let module_ranges = x.state.module_ranges();
+                        Some((load, module_ranges, x.config.dupe()))
                     })
                     .collect(),
             );
@@ -906,14 +906,16 @@ impl<'a> Transaction<'a> {
             .iter_unordered()
             .filter_map(|x| {
                 let load = x.1.state.get_load()?;
-                Some((load, x.1.config.read().dupe()))
+                let module_ranges = x.1.state.module_ranges();
+                Some((load, module_ranges, x.1.config.read().dupe()))
             })
             .collect::<Vec<_>>();
         for (k, v) in self.readable.modules.iter() {
             if self.data.updated_modules.get(k).is_none()
                 && let Some(load) = v.state.get_load()
             {
-                res.push((load, v.config.dupe()));
+                let module_ranges = v.state.module_ranges();
+                res.push((load, module_ranges, v.config.dupe()));
             }
         }
         Errors::new(res)
@@ -1224,7 +1226,6 @@ impl<'a> Transaction<'a> {
             guard.store_load(Some(Arc::new(Load {
                 errors: ErrorCollector::new(old_load.module_info.dupe(), old_load.errors.style()),
                 module_info: old_load.module_info.clone(),
-                module_ranges: OnceLock::new(),
             })));
             rebuild(false);
             return;
@@ -1259,7 +1260,6 @@ impl<'a> Transaction<'a> {
                             old_load.errors.style(),
                         ),
                         module_info: old_load.module_info.clone(),
-                        module_ranges: OnceLock::new(),
                     })));
                 }
                 rebuild(false);
@@ -1451,17 +1451,6 @@ impl<'a> Transaction<'a> {
                 );
             }
             if todo == Step::Answers {
-                // Compute module ranges on Load while the AST is still available.
-                // OnceLock ensures this is a no-op if already set.
-                let ast = module_data
-                    .state
-                    .get_ast()
-                    .expect("AST must exist at Answers step");
-                let load = module_data
-                    .state
-                    .get_load()
-                    .expect("Load must exist at Answers step");
-                load.set_module_ranges(ModuleRanges::compute(&ast, &load.module_info));
                 if !require.keep_ast()
                     && self.data.pysa_reporter.is_none()
                     && self.data.cinderx_reporter.is_none()
