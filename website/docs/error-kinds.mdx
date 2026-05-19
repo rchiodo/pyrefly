@@ -455,6 +455,8 @@ f()  # deprecated!
 
 ## division-by-zero
 
+Default severity: `warn`
+
 Division, floor division, or modulo by a literal zero value. This catches cases where the divisor is the literal `0` or a variable with type `Literal[0]`, which would always raise `ZeroDivisionError` at runtime.
 
 ```python
@@ -1065,6 +1067,8 @@ Pyrefly has bundled stubs for a package, but no corresponding source package was
 
 ## name-mismatch
 
+Default severity: `warn`
+
 This warning indicates that the first string argument to a functional type definition does not
 match the name it is assigned to.
 
@@ -1114,6 +1118,8 @@ f(1.0)
 ```
 
 ## non-convergent-recursion
+
+Default severity: `warn`
 
 Some Python code has type analysis that is recursive. Consider, for example:
 ```
@@ -1382,9 +1388,13 @@ The default severity of this diagnostic is `info`.
 
 ## unannotated-attribute
 
+Default severity: `ignore`
+
 Deprecated: this error code has been renamed to [implicit-any-attribute](#implicit-any-attribute). The old name is still accepted in suppression comments and configuration for backwards compatibility.
 
 ## unannotated-parameter
+
+Default severity: `ignore`
 
 Deprecated: this error code has been renamed to [implicit-any-parameter](#implicit-any-parameter). The old name is still accepted in suppression comments and configuration for backwards compatibility.
 
