@@ -5597,7 +5597,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Subscripted Dim[X] is already converted to Type::Dim in parse_symint_type,
                 // so only the bare case (promoted to ClassType with default targs) reaches here.
                 if let Type::ClassType(cls) = t.as_ref()
-                    && cls.has_qname("torch_shapes", "Dim")
+                    && cls.has_qname("shape_extensions", "Dim")
                 {
                     return Some(self.heap.mk_dim(cls.targs().as_slice()[0].clone()));
                 }

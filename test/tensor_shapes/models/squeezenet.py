@@ -24,8 +24,8 @@ import torch.nn as nn
 import torch.nn.init as init
 
 if TYPE_CHECKING:
+    from shape_extensions import Dim
     from torch import Tensor
-    from torch_shapes import Dim
 
 
 class Fire[InC, SQ, E1, E3](nn.Module):

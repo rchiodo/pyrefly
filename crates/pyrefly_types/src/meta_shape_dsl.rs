@@ -607,10 +607,10 @@ impl fmt::Display for DslBuiltin {
         match self {
             DslBuiltin::Len => write!(f, "len"),
             DslBuiltin::Range => write!(f, "range"),
-            DslBuiltin::Prod => write!(f, "torch_shapes.prod"),
-            DslBuiltin::Sum => write!(f, "torch_shapes.sum"),
+            DslBuiltin::Prod => write!(f, "shape_extensions.prod"),
+            DslBuiltin::Sum => write!(f, "shape_extensions.sum"),
             DslBuiltin::Str => write!(f, "str"),
-            DslBuiltin::ParseEinsumEquation => write!(f, "torch_shapes.parse_einsum_equation"),
+            DslBuiltin::ParseEinsumEquation => write!(f, "shape_extensions.parse_einsum_equation"),
             DslBuiltin::Enumerate => write!(f, "enumerate"),
             DslBuiltin::Zip => write!(f, "zip"),
         }
@@ -1243,7 +1243,7 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
 /// Convert a function call expression, dispatching special forms.
 fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
     // Extract function name for dispatch. Supports both simple names (`len`)
-    // and dotted names (`torch_shapes.prod`).
+    // and dotted names (`shape_extensions.prod`).
     let func_name = match call.func.as_ref() {
         Expr::Name(n) => n.id.to_string(),
         Expr::Attribute(a) => {
@@ -1324,14 +1324,14 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
         "str"
         | "enumerate"
         | "zip"
-        | "torch_shapes.prod"
-        | "torch_shapes.sum"
-        | "torch_shapes.parse_einsum_equation" => {
+        | "shape_extensions.prod"
+        | "shape_extensions.sum"
+        | "shape_extensions.parse_einsum_equation" => {
             let builtin = match func_name.as_str() {
-                "torch_shapes.prod" => DslBuiltin::Prod,
-                "torch_shapes.sum" => DslBuiltin::Sum,
+                "shape_extensions.prod" => DslBuiltin::Prod,
+                "shape_extensions.sum" => DslBuiltin::Sum,
                 "str" => DslBuiltin::Str,
-                "torch_shapes.parse_einsum_equation" => DslBuiltin::ParseEinsumEquation,
+                "shape_extensions.parse_einsum_equation" => DslBuiltin::ParseEinsumEquation,
                 "enumerate" => DslBuiltin::Enumerate,
                 "zip" => DslBuiltin::Zip,
                 _ => unreachable!(),

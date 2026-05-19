@@ -2695,9 +2695,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         cls.has_toplevel_qname("torch", "Tensor")
     }
 
-    /// Check if a class is a Dim class (torch_shapes.Dim)
+    /// Check if a class is a Dim class (shape_extensions.Dim)
     fn is_symint_class(&self, cls: &Class) -> bool {
-        cls.has_toplevel_qname("torch_shapes", "Dim")
+        cls.has_toplevel_qname("shape_extensions", "Dim")
     }
 
     /// Parse a single dimension expression (recursive helper)

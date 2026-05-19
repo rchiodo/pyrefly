@@ -489,7 +489,7 @@ impl<'a> TypeDisplayContext<'a> {
             }
             // Display Dim[Unknown] as just "Dim" for cleaner output
             Type::ClassType(class_type)
-                if class_type.has_qname("torch_shapes", "Dim")
+                if class_type.has_qname("shape_extensions", "Dim")
                     && class_type.targs().as_slice().len() == 1
                     && matches!(
                         class_type.targs().as_slice()[0],
