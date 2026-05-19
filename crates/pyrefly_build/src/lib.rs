@@ -59,7 +59,7 @@ use crate::source_db::query_source_db::QuerySourceDatabase;
 static BUILD_SYSTEM_CACHE: LazyLock<
     Mutex<
         SmallMap<
-            (PathBuf, BuildSystemArgs),
+            (PathBuf, BuildSystemArgs, Vec<Target>, bool),
             WeakArcId<Box<dyn source_db::SourceDatabase + 'static>>,
         >,
     >,
@@ -114,6 +114,8 @@ pub struct BuildSystem {
     /// Are there any sources we should use before looking at the build system (like stubs)?
     #[serde(default)]
     pub search_path_prefix: Vec<PathBuf>,
+    // TODO(connernilsen): pull this out into per-config lookup, so build systme can be shared with
+    // different settings.
     /// Are there any targets that should be included as a catch-all if the standard
     /// search strategy fails?
     #[serde(default)]
@@ -167,7 +169,12 @@ impl BuildSystem {
         }
 
         let mut cache = BUILD_SYSTEM_CACHE.lock();
-        let key = (repo_root.clone(), self.args.clone());
+        let key = (
+            repo_root.clone(),
+            self.args.clone(),
+            self.catch_all_targets.clone(),
+            self.catch_all_targets_only,
+        );
         if let Some(maybe_result) = cache.get(&key)
             && let Some(result) = maybe_result.upgrade()
         {
@@ -184,9 +191,12 @@ impl BuildSystem {
             BuildSystemArgs::Buck(args) => Arc::new(BxlQuerier::new(args.clone())),
             BuildSystemArgs::Custom(args) => Arc::new(CustomQuerier::new(args.clone())),
         };
-        let source_db = ArcId::new(
-            Box::new(QuerySourceDatabase::new(repo_root, querier)) as Box<dyn SourceDatabase>
-        );
+        let source_db = ArcId::new(Box::new(QuerySourceDatabase::new(
+            repo_root,
+            querier,
+            self.catch_all_targets.clone(),
+            self.catch_all_targets_only,
+        )) as Box<dyn SourceDatabase>);
         cache.insert(key, source_db.downgrade());
         Some(Ok(source_db))
     }

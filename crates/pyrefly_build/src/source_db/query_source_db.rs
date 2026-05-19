@@ -128,16 +128,25 @@ pub struct QuerySourceDatabase {
     repo_root: InternedPath,
     querier: Arc<dyn SourceDbQuerier>,
     cached_modules: ModulePathCache,
+    _catch_all_targets: Vec<Target>,
+    _catch_all_targets_only: bool,
 }
 
 impl QuerySourceDatabase {
-    pub fn new(cwd: PathBuf, querier: Arc<dyn SourceDbQuerier>) -> Self {
+    pub fn new(
+        cwd: PathBuf,
+        querier: Arc<dyn SourceDbQuerier>,
+        catch_all_targets: Vec<Target>,
+        catch_all_targets_only: bool,
+    ) -> Self {
         QuerySourceDatabase {
             repo_root: InternedPath::new(cwd),
             inner: RwLock::new(Inner::new()),
             includes: Mutex::new(SmallSet::new()),
             querier,
             cached_modules: ModulePathCache::new(),
+            _catch_all_targets: catch_all_targets,
+            _catch_all_targets_only: catch_all_targets_only,
         }
     }
 
@@ -518,6 +527,8 @@ mod tests {
                 repo_root: InternedPath::from_path(root),
                 querier: Arc::new(DummyQuerier {}),
                 cached_modules: ModulePathCache::new(),
+                _catch_all_targets: vec![],
+                _catch_all_targets_only: false,
             };
             new.update_with_target_manifest(raw_db);
             new
