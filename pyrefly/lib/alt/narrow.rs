@@ -44,6 +44,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::call::CallTargetLookup;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
+use crate::alt::types::instance::Instance;
 use crate::binding::binding::Key;
 use crate::binding::narrow::AtomicNarrowOp;
 use crate::binding::narrow::FacetOrigin;
@@ -98,20 +99,20 @@ const NARROW_ENUM_LIMIT: usize = 100;
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     // Get the union of all members of an enum, minus the specified member
-    fn subtract_enum_member(&self, ty: &Type, cls: &ClassType, name: &Name) -> Type {
+    fn subtract_enum_member(&self, instance: Instance, name: &Name) -> Type {
         if self
-            .get_class_fields(cls.class_object())
+            .get_class_fields(instance.class)
             .is_some_and(|f| f.len() > NARROW_ENUM_LIMIT)
         {
-            return ty.clone();
+            return instance.to_type(self.heap);
         }
-        let e = self.get_enum_from_class(cls.class_object()).unwrap();
+        let e = self.get_enum_from_class(instance.class).unwrap();
         // Enums derived from enum.Flag cannot be treated as a union of their members
         if e.is_flag {
-            return ty.clone();
+            return instance.to_type(self.heap);
         }
         self.unions(
-            self.get_enum_members(cls.class_object())
+            self.get_enum_members(instance.class)
                 .into_iter()
                 .filter_map(|f| {
                     if let Lit::Enum(lit_enum) = &f
@@ -264,6 +265,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
+    fn enum_instance<'b, 'c>(left: &'b Type, right: &'c Type) -> Option<(Instance<'b>, &'c Name)> {
+        let left = match left {
+            Type::ClassType(cls) => Instance::of_class(cls),
+            Type::SelfType(cls) => Instance::of_self_type(cls),
+            _ => return None,
+        };
+        if let Type::Literal(right) = right
+            && let Lit::Enum(right) = &right.value
+            && left.class == right.class.class_object()
+            && left.targs == right.class.targs()
+        {
+            Some((left, &right.member))
+        } else {
+            None
+        }
+    }
+
     /// Narrow a type by removing values identity-equal to `right` (`is not` semantics).
     fn narrow_is_not(&self, ty: &Type, right: &Type) -> Type {
         self.distribute_over_union(ty, |t| match (t, right) {
@@ -282,11 +300,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             {
                 Lit::Bool(!b).to_implicit_type()
             }
-            (Type::ClassType(left_cls) | Type::SelfType(left_cls), Type::Literal(right))
-                if let Lit::Enum(right) = &right.value
-                    && left_cls == &right.class =>
-            {
-                self.subtract_enum_member(t, left_cls, &right.member)
+            (left, right) if let Some((instance, name)) = Self::enum_instance(left, right) => {
+                self.subtract_enum_member(instance, name)
             }
             _ => t.clone(),
         })
@@ -1135,13 +1150,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 {
                                     result = Lit::Bool(!b).to_implicit_type();
                                 }
-                                (
-                                    Type::ClassType(left_cls) | Type::SelfType(left_cls),
-                                    Type::Literal(right),
-                                ) if let Lit::Enum(right) = &right.value
-                                    && left_cls == &right.class =>
+                                (left, right)
+                                    if let Some((instance, name)) =
+                                        Self::enum_instance(left, right) =>
                                 {
-                                    result = self.subtract_enum_member(t, left_cls, &right.member);
+                                    result = self.subtract_enum_member(instance, name);
                                 }
                                 _ => {}
                             }
@@ -1367,13 +1380,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         {
                             Lit::Bool(!b).to_implicit_type()
                         }
-                        (
-                            Type::ClassType(left_cls) | Type::SelfType(left_cls),
-                            Type::Literal(right),
-                        ) if let Lit::Enum(right) = &right.value
-                            && left_cls == &right.class =>
+                        (left, right)
+                            if let Some((instance, name)) = Self::enum_instance(left, right) =>
                         {
-                            self.subtract_enum_member(t, left_cls, &right.member)
+                            self.subtract_enum_member(instance, name)
                         }
                         _ => t.clone(),
                     })
