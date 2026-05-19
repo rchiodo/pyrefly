@@ -830,6 +830,63 @@ impl Transaction<'_> {
         }
     }
 
+    /// Resolve `module_name` (handling relative imports via `dots`) to a
+    /// module handle.
+    fn resolve_import_module(
+        &self,
+        handle: &Handle,
+        module_name: ModuleName,
+        dots: u32,
+    ) -> Option<Handle> {
+        let resolved = if dots > 0 {
+            let is_init = handle.path().is_init();
+            let suffix = if module_name.as_str().is_empty() {
+                None
+            } else {
+                Some(&Name::new(module_name.as_str()))
+            };
+            handle
+                .module()
+                .new_maybe_relative(is_init, dots, suffix)
+                .unwrap_or(module_name)
+        } else {
+            module_name
+        };
+        self.import_handle(handle, resolved, None).finding()
+    }
+
+    /// Add export completions for a resolved import module.
+    fn add_imported_name_completions(
+        &self,
+        imp_handle: &Handle,
+        result: &mut Vec<RankedCompletion>,
+    ) {
+        let exports = self.get_exports(imp_handle);
+        for (name, export) in exports.iter() {
+            let (is_deprecated, kind) = match export {
+                ExportLocation::ThisModule(export) => (
+                    export.deprecation.is_some(),
+                    export
+                        .symbol_kind
+                        .map_or(CompletionItemKind::VARIABLE, |k| {
+                            k.to_lsp_completion_item_kind()
+                        }),
+                ),
+                ExportLocation::OtherModule(_, _) => (false, CompletionItemKind::VARIABLE),
+            };
+            result.push(RankedCompletion::new(CompletionItem {
+                label: name.to_string(),
+                kind: Some(kind),
+                tags: if is_deprecated {
+                    Some(vec![CompletionItemTag::DEPRECATED])
+                } else {
+                    None
+                },
+                ..Default::default()
+            }));
+        }
+    }
+
     fn add_attribute_completions_for_type(
         &self,
         handle: &Handle,
@@ -924,22 +981,7 @@ impl Transaction<'_> {
                         module_name, dots, ..
                     },
             }) => {
-                // For relative imports (dots > 0), resolve to an absolute module name.
-                let resolved = if dots > 0 {
-                    let is_init = handle.path().is_init();
-                    let suffix = if module_name.as_str().is_empty() {
-                        None
-                    } else {
-                        Some(&Name::new(module_name.as_str()))
-                    };
-                    handle
-                        .module()
-                        .new_maybe_relative(is_init, dots, suffix)
-                        .unwrap_or(module_name)
-                } else {
-                    module_name
-                };
-                if let Some(handle) = self.import_handle(handle, resolved, None).finding() {
+                if let Some(imp_handle) = self.resolve_import_module(handle, module_name, dots) {
                     if "import".starts_with(identifier.as_str()) {
                         result.push(RankedCompletion::new(CompletionItem {
                             label: "import".to_owned(),
@@ -947,32 +989,7 @@ impl Transaction<'_> {
                             ..Default::default()
                         }))
                     }
-                    let exports = self.get_exports(&handle);
-                    for (name, export) in exports.iter() {
-                        let (is_deprecated, kind) = match export {
-                            ExportLocation::ThisModule(export) => (
-                                export.deprecation.is_some(),
-                                export
-                                    .symbol_kind
-                                    .map_or(CompletionItemKind::VARIABLE, |k| {
-                                        k.to_lsp_completion_item_kind()
-                                    }),
-                            ),
-                            ExportLocation::OtherModule(_, _) => {
-                                (false, CompletionItemKind::VARIABLE)
-                            }
-                        };
-                        result.push(RankedCompletion::new(CompletionItem {
-                            label: name.to_string(),
-                            kind: Some(kind),
-                            tags: if is_deprecated {
-                                Some(vec![CompletionItemTag::DEPRECATED])
-                            } else {
-                                None
-                            },
-                            ..Default::default()
-                        }))
-                    }
+                    self.add_imported_name_completions(&imp_handle, &mut result);
                 }
             }
             Some(IdentifierWithContext {
