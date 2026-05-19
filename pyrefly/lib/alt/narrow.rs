@@ -1449,22 +1449,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         match first_facet {
-            FacetKind::Attribute(first_attr_name) => match remaining_facets.split_first() {
-                None => match base.type_at_facet(first_facet) {
-                    Some(ty) => self.force_for_narrowing(ty, range, errors),
-                    None => self.narrowable_for_attr(base.ty(), first_attr_name, range, errors),
-                },
-                Some((next_name, remaining_facets)) => {
-                    let base = self.attr_infer(base, first_attr_name, range, errors, None);
-                    self.narrowable_for_facet_chain(
-                        &base,
-                        next_name,
-                        remaining_facets,
-                        range,
-                        errors,
-                    )
+            FacetKind::Attribute(first_attr_name) => {
+                // Use a synthesized fake range for the attribute lookup itself to avoid
+                // overwriting typing traces (e.g. property getters, overload callees) keyed
+                // on the real `range`, which typically points at unrelated code such as the
+                // RHS of an equality narrow. The real `range` is still threaded through to
+                // recursive facet-chain narrowing so that errors there remain locatable.
+                let fake_range = TextRange::default();
+                match remaining_facets.split_first() {
+                    None => match base.type_at_facet(first_facet) {
+                        Some(ty) => self.force_for_narrowing(ty, range, errors),
+                        None => {
+                            self.narrowable_for_attr(base.ty(), first_attr_name, fake_range, errors)
+                        }
+                    },
+                    Some((next_name, remaining_facets)) => {
+                        let base = self.attr_infer(base, first_attr_name, fake_range, errors, None);
+                        self.narrowable_for_facet_chain(
+                            &base,
+                            next_name,
+                            remaining_facets,
+                            range,
+                            errors,
+                        )
+                    }
                 }
-            },
+            }
             FacetKind::Index(idx) => {
                 // We synthesize a slice expression for the subscript here.
                 // For negative indices, we must produce `UnaryOp(USub, NumberLiteral(abs))`
