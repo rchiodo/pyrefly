@@ -114,20 +114,32 @@ pub fn make_error_config(
     {
         // These severities take precedence over enable/disable
         if warn_redundant_casts || strict {
-            errors.insert(ErrorKind::RedundantCast.to_string(), Severity::Warn);
+            errors.insert(
+                ErrorKind::RedundantCast.to_name().to_owned(),
+                Severity::Warn,
+            );
         }
         if disallow_untyped_defs || disallow_incomplete_defs || strict {
-            errors.insert(ErrorKind::ImplicitAnyParameter.to_string(), Severity::Error);
-            errors.insert(ErrorKind::UnannotatedReturn.to_string(), Severity::Error);
+            errors.insert(
+                ErrorKind::ImplicitAnyParameter.to_name().to_owned(),
+                Severity::Error,
+            );
+            errors.insert(
+                ErrorKind::UnannotatedReturn.to_name().to_owned(),
+                Severity::Error,
+            );
         }
         if disallow_any_generics || strict {
-            errors.insert(ErrorKind::ImplicitAny.to_string(), Severity::Error);
+            errors.insert(ErrorKind::ImplicitAny.to_name().to_owned(), Severity::Error);
         }
-        if report_deprecated_as_note && errors.contains_key(&ErrorKind::Deprecated.to_string()) {
-            errors.insert(ErrorKind::Deprecated.to_string(), Severity::Info);
+        if report_deprecated_as_note && errors.contains_key(ErrorKind::Deprecated.to_name()) {
+            errors.insert(ErrorKind::Deprecated.to_name().to_owned(), Severity::Info);
         }
         if allow_redefinitions {
-            errors.insert(ErrorKind::Redefinition.to_string(), Severity::Ignore);
+            errors.insert(
+                ErrorKind::Redefinition.to_name().to_owned(),
+                Severity::Ignore,
+            );
         }
     }
     code_to_kind(errors)
