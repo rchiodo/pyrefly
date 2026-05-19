@@ -83,6 +83,7 @@ pub struct MypyErrorConfigFlags {
     pub disallow_untyped_defs: bool,
     pub disallow_incomplete_defs: bool,
     pub disallow_any_generics: bool,
+    pub disallow_any_explicit: bool,
     pub strict: bool,
     pub report_deprecated_as_note: bool,
     pub allow_redefinitions: bool,
@@ -107,6 +108,7 @@ pub fn make_error_config(
         disallow_untyped_defs,
         disallow_incomplete_defs,
         disallow_any_generics,
+        disallow_any_explicit,
         strict,
         report_deprecated_as_note,
         allow_redefinitions,
@@ -131,6 +133,9 @@ pub fn make_error_config(
         }
         if disallow_any_generics || strict {
             errors.insert(ErrorKind::ImplicitAny.to_name().to_owned(), Severity::Error);
+        }
+        if disallow_any_explicit {
+            errors.insert(ErrorKind::ExplicitAny.to_name().to_owned(), Severity::Error);
         }
         if report_deprecated_as_note && errors.contains_key(ErrorKind::Deprecated.to_name()) {
             errors.insert(ErrorKind::Deprecated.to_name().to_owned(), Severity::Info);
@@ -168,6 +173,7 @@ fn code_to_kind(errors: HashMap<String, Severity>) -> Option<ErrorDisplayConfig>
                 add(severity, ErrorKind::UnsupportedOperation);
             }
             "dict-item" => add(severity, ErrorKind::BadTypedDict),
+            "explicit-any" => add(severity, ErrorKind::ExplicitAny),
             "operator" => add(severity, ErrorKind::UnsupportedOperation),
             "typeddict-unknown-key" => add(severity, ErrorKind::BadTypedDictKey),
             "typeddict-readonly-mutated" => add(severity, ErrorKind::ReadOnly),
