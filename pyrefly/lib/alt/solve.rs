@@ -4448,11 +4448,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> TypeInfo {
         // If we can't assign to this subscript, then we don't narrow the type
-        let assigned_ty = self.check_assign_to_subscript(subscript, value, errors);
+        let (assigned_ty, base_ty) = self.check_assign_to_subscript(subscript, value, errors);
         let narrowed = if assigned_ty.is_any() {
             None
         } else {
-            Some(assigned_ty)
+            let mut all_arms_symmetric = true;
+            self.map_over_union(&base_ty, |arm| {
+                if all_arms_symmetric && !self.subscript_assign_arm_allows_narrowing(arm) {
+                    all_arms_symmetric = false;
+                }
+            });
+            if all_arms_symmetric {
+                Some(assigned_ty)
+            } else {
+                None
+            }
         };
         if let Some((identifier, unresolved_chain)) =
             identifier_and_chain_for_expr(&Expr::Subscript(subscript.clone()))
@@ -4486,6 +4496,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Placeholder: in this case, we're assigning to an anonymous base and the
             // type info will not propagate anywhere.
             TypeInfo::of_ty(self.heap.mk_never())
+        }
+    }
+
+    /// Whether post-assignment narrowing of `arm[k]` to the assigned value is
+    /// sound for this union arm. Defers to the per-class cached
+    /// `KeyClassSubscriptSymmetry` answer for `ClassType` arms; preserves
+    /// today's always-narrow behavior for everything else (TypedDicts,
+    /// tuples, etc.).
+    fn subscript_assign_arm_allows_narrowing(&self, arm: &Type) -> bool {
+        match arm {
+            Type::ClassType(cls) => *self.get_subscript_symmetry_for_class(cls.class_object()),
+            _ => true,
         }
     }
 
@@ -4721,10 +4743,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         subscript: &ExprSubscript,
         value: &ExprOrBinding,
         errors: &ErrorCollector,
-    ) -> Type {
+    ) -> (Type, Type) {
         let base = self.expr_infer(&subscript.value, errors);
         let slice_ty = self.expr_infer(&subscript.slice, errors);
-        self.distribute_over_union(&base, |base| {
+        let assigned_ty = self.distribute_over_union(&base, |base| {
             self.distribute_over_union(&slice_ty, |key| {
                 match (base, key) {
                     (Type::TypedDict(typed_dict), Type::Literal(lit))
@@ -4794,7 +4816,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
             })
-        })
+        });
+        (assigned_ty, base)
     }
 
     fn wrap_callable_legacy_typevars(&self, ty: Type) -> Type {
