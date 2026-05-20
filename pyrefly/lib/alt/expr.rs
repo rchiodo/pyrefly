@@ -162,14 +162,16 @@ enum ConditionRedundantReason {
     EnumLiteral(Name, Name),
     Function(ModuleName, FunctionKind),
     Class(Name),
+    /// Instance of a class that defines neither `__bool__` nor `__len__`, so always truthy
+    InstanceAlwaysTruthy(Name),
 }
 
 impl ConditionRedundantReason {
     fn equivalent_boolean(&self) -> Option<bool> {
         match self {
-            ConditionRedundantReason::Function(..) | ConditionRedundantReason::Class(..) => {
-                Some(true)
-            }
+            ConditionRedundantReason::Function(..)
+            | ConditionRedundantReason::Class(..)
+            | ConditionRedundantReason::InstanceAlwaysTruthy(..) => Some(true),
             ConditionRedundantReason::IntLiteral(b)
             | ConditionRedundantReason::StrLiteral(b)
             | ConditionRedundantReason::BytesLiteral(b) => Some(*b),
@@ -199,6 +201,9 @@ impl ConditionRedundantReason {
             }
             ConditionRedundantReason::Class(name) => {
                 format!("Class name `{name}` used as condition")
+            }
+            ConditionRedundantReason::InstanceAlwaysTruthy(name) => {
+                format!("Instance of `{name}` used as condition")
             }
         }
     }
@@ -2986,6 +2991,35 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 kind.clone(),
             )),
             Type::ClassDef(cls) => Some(ConditionRedundantReason::Class(cls.name().clone())),
+            Type::ClassType(ct) => {
+                let cls = ct.class_object();
+                // Skip warning for `object` itself and for abstract/protocol types:
+                // a variable typed as `Hashable`, `Iterable`, etc. may hold a concrete
+                // instance that defines `__bool__` or `__len__` at runtime.
+                let metadata = self.get_metadata_for_class(cls);
+                let is_abstract =
+                    cls.is_builtin("object") || metadata.is_protocol() || metadata.extends_abc();
+                // Skip warning for classes coming from stubs. Stub-only classes often have
+                // dynamic runtime behavior (e.g. `datetime`, `asyncio.Future`, `Lock`,
+                // sqlalchemy `Session`) that the stubs don't model, and the idiomatic
+                // `if x:` None-guard pattern is widespread in real-world code.
+                let is_from_stub = cls.module_path().is_interface();
+                // Skip warning for dataclasses. These are commonly used as plain data
+                // containers and `if obj:` is frequently a defensive pattern; the
+                // warning would create excessive noise for little benefit.
+                let is_dataclass = metadata.dataclass_metadata().is_some();
+                if !is_abstract
+                    && !is_from_stub
+                    && !is_dataclass
+                    && self.class_instances_always_truthy(cls)
+                {
+                    Some(ConditionRedundantReason::InstanceAlwaysTruthy(
+                        cls.name().clone(),
+                    ))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
