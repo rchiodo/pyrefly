@@ -685,6 +685,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 let callee_ty = self.expr_infer(&x.func, errors);
                 self.check_pytorch_tensor_item_call(x, &callee_ty, errors);
+                self.check_pytorch_tensor_cuda_call(x, &callee_ty, errors);
                 self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
@@ -849,6 +850,47 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                      Consider `tensor[0]` for scalar tensors, accumulate values \
                      on the GPU with `torch.sum()`, or defer `.item()` to outside \
                      the training loop."
+                        .to_owned(),
+                )
+                .emit();
+        }
+    }
+
+    /// Warn when `.cuda()` is called on a `torch.Tensor`. This hard-codes the
+    /// target device; `.to(device)` is preferred for device-agnostic code.
+    fn check_pytorch_tensor_cuda_call(
+        &self,
+        x: &ExprCall,
+        callee_ty: &Type,
+        errors: &ErrorCollector,
+    ) {
+        let Expr::Attribute(attr_expr) = &*x.func else {
+            return;
+        };
+        if attr_expr.attr.id.as_str() != "cuda" {
+            return;
+        }
+        if !x.arguments.is_empty() {
+            return;
+        }
+        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
+            matches!(&bm.obj, Type::Tensor(_))
+                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
+        } else {
+            false
+        };
+        if is_tensor {
+            errors
+                .error_builder(
+                    x.range(),
+                    ErrorKind::PytorchEfficiencyLintCudaCall,
+                    "`Tensor.cuda()` hard-codes the target device".to_owned(),
+                )
+                .with_detail(
+                    "Use `.to(device)` instead so your code works on any \
+                     accelerator (CUDA, XPU, MPS, etc.). For example: \
+                     `tensor.to(device)` where `device` is set at the top of \
+                     your script."
                         .to_owned(),
                 )
                 .emit();

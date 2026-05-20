@@ -150,3 +150,51 @@ def f(device: torch.device) -> None:
     x = torch.zeros(3, 4, device=device)
 "#,
 );
+
+testcase!(
+    test_to_dtype_on_factory_with_device_ok,
+    env_with_lint(),
+    r#"
+import torch
+
+def f(device: torch.device, other_device: torch.device) -> None:
+    x = torch.randn(3, 4, device=device).to(other_device)
+"#,
+);
+
+// --- C7: Deprecated .cuda() calls ---
+
+testcase!(
+    test_tensor_cuda_call,
+    env_with_lint(),
+    r#"
+import torch
+
+def f(x: torch.Tensor) -> None:
+    y = x.cuda()  # E: `Tensor.cuda()` hard-codes the target device
+"#,
+);
+
+testcase!(
+    test_non_tensor_cuda_call_ok,
+    env_with_lint(),
+    r#"
+class Foo:
+    def cuda(self) -> "Foo":
+        return self
+
+def f(x: Foo) -> None:
+    y = x.cuda()
+"#,
+);
+
+testcase!(
+    test_tensor_cuda_disabled_by_default,
+    env(),
+    r#"
+import torch
+
+def f(x: torch.Tensor) -> None:
+    y = x.cuda()
+"#,
+);

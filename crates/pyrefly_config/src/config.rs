@@ -1246,6 +1246,7 @@ impl ConfigFile {
         // because set_default_severity only inserts when the key is absent.
         if self.root.pytorch_efficiency_lints == Some(true) {
             let errors = self.root.errors.get_or_insert_default();
+            errors.set_default_severity(ErrorKind::PytorchEfficiencyLintCudaCall, Severity::Warn);
             errors.set_default_severity(ErrorKind::PytorchEfficiencyLintItemCall, Severity::Warn);
             errors.set_default_severity(
                 ErrorKind::PytorchEfficiencyLintRedundantToCall,

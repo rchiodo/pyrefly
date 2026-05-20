@@ -278,6 +278,9 @@ pub enum ErrorKind {
     ParseError,
     /// A protocol attribute was first defined inside a method instead of the class body.
     ProtocolImplicitlyDefinedAttribute,
+    /// Calling `.cuda()` on a `torch.Tensor` hard-codes the target device.
+    /// Use `.to(device)` instead for device-agnostic code.
+    PytorchEfficiencyLintCudaCall,
     /// Calling `.item()` on a `torch.Tensor` forces GPU→CPU synchronization,
     /// blocking the training loop until all pending GPU operations complete.
     PytorchEfficiencyLintItemCall,
@@ -441,6 +444,7 @@ impl ErrorKind {
             ErrorKind::NonConvergentRecursion => Severity::Warn,
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
             ErrorKind::OpenUnpacking => Severity::Ignore,
+            ErrorKind::PytorchEfficiencyLintCudaCall => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintItemCall => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintRedundantToCall => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,

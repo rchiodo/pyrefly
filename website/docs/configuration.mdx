@@ -968,6 +968,7 @@ The following lints are enabled by this flag:
 
 | Lint | What it detects |
 |---|---|
+| [`pytorch-efficiency-lint-cuda-call`](./error-kinds.mdx#pytorch-efficiency-lint-cuda-call) | `Tensor.cuda()` — hard-coded device |
 | [`pytorch-efficiency-lint-item-call`](./error-kinds.mdx#pytorch-efficiency-lint-item-call) | `Tensor.item()` — GPU→CPU sync stall |
 | [`pytorch-efficiency-lint-redundant-to-call`](./error-kinds.mdx#pytorch-efficiency-lint-redundant-to-call) | `torch.zeros(...).to(device)` — redundant copy |
 
