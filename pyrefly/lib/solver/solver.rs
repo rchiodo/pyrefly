@@ -1901,15 +1901,25 @@ impl Solver {
         }
     }
 
-    /// Add a bound to the variable if it is a Quantified or Unwrap
+    /// Add a bound to the variable if it is a Quantified or Unwrap.
+    ///
+    /// Given two recorded bounds `A` and `B` on the same variable where `B <: A`:
+    ///
+    /// - For *lower* bounds we keep `A`. From `A <: T` we get `B <: T` (transitivity
+    ///   through `B <: A`), so `A` carries strictly more information.
+    /// - For *upper* bounds we keep `B`. From `T <: B` we get `T <: A` (transitivity
+    ///   through `B <: A`), so `B` carries strictly more information. Without this,
+    ///   a tight bound like `T <: int` would be discarded in favor of a looser
+    ///   `T <: int | () -> int` that was recorded first.
     fn get_new_bound(
         &self,
         existing_bound: Option<Type>,
         bound: Type,
+        is_upper: bool,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
     ) -> NewBound {
         // Check if the new bound can absorb or be absorbed into the existing bound.
-        // Examples: `float` absorbs `int`, `list[Any]` absorbs `list[int]`.
+        // Examples (lower bound): `float` absorbs `int`, `list[Any]` absorbs `list[int]`.
         // TODO(https://github.com/facebook/pyrefly/issues/105): there are a few fishy things:
         // * We're only checking against the first bound.
         // * We're keeping `Any` separate so it can be filtered out in `solve_one_bounds`.
@@ -1920,9 +1930,13 @@ impl Solver {
                 let _ = is_subset(&bound, &first); // Ignore the result, just pin vars
                 None
             } else if is_subset(&bound.materialize(), &first).is_ok() {
-                Some(first)
+                // `bound <: first`: lower bounds keep `first` (the supertype), upper
+                // bounds keep `bound` (the subtype).
+                Some(if is_upper { bound.clone() } else { first })
             } else if is_subset(&first.materialize(), &bound).is_ok() {
-                Some(bound.clone())
+                // `first <: bound`: lower bounds adopt `bound` (the supertype), upper
+                // bounds keep `first` (the subtype).
+                Some(if is_upper { first } else { bound.clone() })
             } else {
                 None
             }
@@ -2006,7 +2020,7 @@ impl Solver {
             upper_bound.map_or(Ok(()), |upper_bound| is_subset(&bound, &upper_bound))
         });
         let new_bound = if res.is_ok() {
-            self.get_new_bound(first_bound, bound, is_subset)
+            self.get_new_bound(first_bound, bound, false, is_subset)
         } else {
             // TODO(https://github.com/facebook/pyrefly/issues/105): don't throw away the bound.
             NewBound::AddBound(Type::any_error())
@@ -2055,7 +2069,7 @@ impl Solver {
             lower_bound.map_or(Ok(()), |lower_bound| is_subset(&lower_bound, &bound))
         });
         let new_bound = if res.is_ok() {
-            self.get_new_bound(first_bound, bound, is_subset)
+            self.get_new_bound(first_bound, bound, true, is_subset)
         } else {
             // TODO(https://github.com/facebook/pyrefly/issues/105): don't throw away the bound.
             NewBound::AddBound(Type::any_error())
