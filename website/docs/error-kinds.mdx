@@ -1317,6 +1317,19 @@ class Template(Protocol):
         self.temp: list[int] = []  # protocol-implicitly-defined-attribute
 ```
 
+## pytorch-efficiency-lint-item-call
+
+Calling `.item()` on a `torch.Tensor` forces GPU-to-CPU synchronization, blocking the training loop until all pending GPU operations complete. This can reduce GPU utilization from over 90% to under 50%. Prefer `tensor[0]` for scalar tensors, accumulate values on the GPU with `torch.sum()`, or defer `.item()` to outside the training loop.
+
+The default severity of this diagnostic is `ignore`. Enable it with [`pytorch-efficiency-lints = true`](./configuration.mdx#pytorch-efficiency-lints) in your `pyrefly.toml`.
+
+```python
+import torch
+
+def f(x: torch.Tensor) -> None:
+    v = x.item()  # pytorch-efficiency-lint-item-call
+```
+
 ## read-only
 
 This error indicates that the attribute being accessed does exist but cannot be modified.

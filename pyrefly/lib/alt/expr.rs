@@ -684,6 +684,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     return ty;
                 }
                 let callee_ty = self.expr_infer(&x.func, errors);
+                self.check_pytorch_tensor_item_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
                 } else if let Some((obj_ty, key)) =
@@ -806,6 +807,50 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 builder = builder.with_detail(detail);
             }
             builder.emit();
+        }
+    }
+
+    /// Warn when `.item()` is called on a `torch.Tensor`. This forces GPU→CPU
+    /// synchronization, stalling the training loop until all pending GPU ops finish.
+    fn check_pytorch_tensor_item_call(
+        &self,
+        x: &ExprCall,
+        callee_ty: &Type,
+        errors: &ErrorCollector,
+    ) {
+        let Expr::Attribute(attr_expr) = &*x.func else {
+            return;
+        };
+        if attr_expr.attr.id.as_str() != "item" {
+            return;
+        }
+        if !x.arguments.is_empty() {
+            return;
+        }
+        // Extract the receiver type from the already-resolved BoundMethod
+        // rather than re-inferring the base expression.
+        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
+            matches!(&bm.obj, Type::Tensor(_))
+                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
+        } else {
+            false
+        };
+        if is_tensor {
+            errors
+                .error_builder(
+                    x.range(),
+                    ErrorKind::PytorchEfficiencyLintItemCall,
+                    "`Tensor.item()` causes implicit GPU-to-CPU synchronization".to_owned(),
+                )
+                .with_detail(
+                    "This call blocks until all pending GPU operations complete, \
+                     which can reduce GPU utilization from >90% to under 50%. \
+                     Consider `tensor[0]` for scalar tensors, accumulate values \
+                     on the GPU with `torch.sum()`, or defer `.item()` to outside \
+                     the training loop."
+                        .to_owned(),
+                )
+                .emit();
         }
     }
 

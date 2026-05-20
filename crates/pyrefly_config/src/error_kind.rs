@@ -278,6 +278,9 @@ pub enum ErrorKind {
     ParseError,
     /// A protocol attribute was first defined inside a method instead of the class body.
     ProtocolImplicitlyDefinedAttribute,
+    /// Calling `.item()` on a `torch.Tensor` forces GPU→CPU synchronization,
+    /// blocking the training loop until all pending GPU operations complete.
+    PytorchEfficiencyLintItemCall,
     /// The attribute exists but cannot be modified.
     ReadOnly,
     /// Attempting to annotate or redefine a name with a type that conflicts with an existing annotation in scope.
@@ -434,6 +437,7 @@ impl ErrorKind {
             ErrorKind::NonConvergentRecursion => Severity::Warn,
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
             ErrorKind::OpenUnpacking => Severity::Ignore,
+            ErrorKind::PytorchEfficiencyLintItemCall => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,
             ErrorKind::RedundantCondition => Severity::Warn,
             ErrorKind::RevealType => Severity::Info,
