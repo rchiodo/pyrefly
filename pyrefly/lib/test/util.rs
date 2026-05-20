@@ -434,7 +434,7 @@ impl TestEnv {
             errors.set_error_severity(ErrorKind::NotRequiredKeyAccess, Severity::Error);
         }
         if self.pytorch_efficiency_lint_error {
-            errors.set_error_severity(ErrorKind::PytorchEfficiencyLintItemCall, Severity::Warn);
+            config.root.pytorch_efficiency_lints = Some(true);
         }
         config.extra_file_extensions = self.extra_file_extensions.clone();
         let mut sourcedb = MapDatabase::new(config.get_sys_info());
