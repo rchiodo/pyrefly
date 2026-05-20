@@ -273,8 +273,18 @@ def f(x: T) -> None:
 
 // Test descriptor semantics for class-level annotation-only fields vs. method-initialized
 // instance attributes. Annotation-only fields in the class body are treated as descriptors
+//
 // (so reads invoke `__get__` and writes without `__set__` are rejected); method-initialized
 // attributes are plain instance attributes and bypass the descriptor protocol.
+//
+// The behavior of annotation-only attributes is ambiguous, since if they are actually assigned
+// to instances then the runtime behavior is *not* descriptor-based. But in practice it's not
+// unusual for metaclass logic to be involved, and in addition parts of the ecosystem assume
+// this behavior because mypy and pyright chose it.
+//
+// TODO(stroxler): Consider whether we could implement a false-positive-resistant approach
+// for ambiguous cases someday. This would probably require something like an intersection;
+// the same kind of ambiguity also pops up with Callables and callback protocols.
 testcase!(
     test_annotation_only_attribute_has_descriptor_semantics,
     r#"
