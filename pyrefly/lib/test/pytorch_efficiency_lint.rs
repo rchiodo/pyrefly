@@ -15,7 +15,10 @@ fn env() -> TestEnv {
         r#"
 class device: ...
 
+class Size(tuple[int, ...]): ...
+
 class Tensor:
+    shape: Size
     def item(self) -> int | float: ...
     def sum(self) -> "Tensor": ...
     def to(self, device: device) -> "Tensor": ...
@@ -196,5 +199,49 @@ import torch
 
 def f(x: torch.Tensor) -> None:
     y = x.cuda()
+"#,
+);
+
+// --- C5: Printing tensors ---
+
+testcase!(
+    test_print_tensor,
+    env_with_lint(),
+    r#"
+import torch
+
+def f(x: torch.Tensor) -> None:
+    print(x)  # E: printing a `Tensor` causes implicit GPU-to-CPU synchronization
+"#,
+);
+
+testcase!(
+    test_print_non_tensor_ok,
+    env_with_lint(),
+    r#"
+def f(x: int) -> None:
+    print(x)
+"#,
+);
+
+testcase!(
+    test_print_tensor_shape_ok,
+    env_with_lint(),
+    r#"
+import torch
+
+def f(x: torch.Tensor) -> None:
+    print(x.shape)
+"#,
+);
+
+testcase!(
+    test_print_tensor_disabled_by_default,
+    env(),
+    r#"
+import torch
+
+def f(x: torch.Tensor) -> None:
+    print(x)
 "#,
 );

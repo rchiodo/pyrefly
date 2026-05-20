@@ -686,6 +686,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let callee_ty = self.expr_infer(&x.func, errors);
                 self.check_pytorch_tensor_item_call(x, &callee_ty, errors);
                 self.check_pytorch_tensor_cuda_call(x, &callee_ty, errors);
+                self.check_pytorch_print_tensor(x, &callee_ty, errors);
                 self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
@@ -894,6 +895,44 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .to_owned(),
                 )
                 .emit();
+        }
+    }
+
+    /// Warn when a `torch.Tensor` is passed to `print()`. This triggers
+    /// `__repr__`, which forces GPU→CPU synchronization.
+    fn check_pytorch_print_tensor(&self, x: &ExprCall, _callee_ty: &Type, errors: &ErrorCollector) {
+        let Expr::Name(name) = &*x.func else {
+            return;
+        };
+        if name.id.as_str() != "print" {
+            return;
+        }
+        for arg in &x.arguments.args {
+            // Only check simple name references to avoid re-inferring complex
+            // expressions (which could produce duplicate diagnostics).
+            let Expr::Name(_) = arg else {
+                continue;
+            };
+            let arg_ty = self.expr_infer(arg, errors);
+            let is_tensor = matches!(&arg_ty, Type::Tensor(_))
+                || matches!(&arg_ty, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"));
+            if is_tensor {
+                errors
+                    .error_builder(
+                        arg.range(),
+                        ErrorKind::PytorchEfficiencyLintPrintTensor,
+                        "printing a `Tensor` causes implicit GPU-to-CPU synchronization".to_owned(),
+                    )
+                    .with_detail(
+                        "The `print()` call triggers `Tensor.__repr__()`, which \
+                         transfers data from GPU to CPU and blocks until all pending \
+                         GPU operations complete. Use `print(tensor.shape)` to inspect \
+                         metadata without synchronizing, or guard with \
+                         `if DEBUG: print(tensor)`."
+                            .to_owned(),
+                    )
+                    .emit();
+            }
         }
     }
 

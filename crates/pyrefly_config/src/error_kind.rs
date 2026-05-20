@@ -284,6 +284,9 @@ pub enum ErrorKind {
     /// Calling `.item()` on a `torch.Tensor` forces GPU→CPU synchronization,
     /// blocking the training loop until all pending GPU operations complete.
     PytorchEfficiencyLintItemCall,
+    /// Passing a `torch.Tensor` to `print()` triggers `__repr__`, which forces
+    /// GPU→CPU synchronization.
+    PytorchEfficiencyLintPrintTensor,
     /// Calling `.to(device)` on a tensor returned by a factory function like
     /// `torch.zeros()` that already accepts a `device=` parameter. Passing
     /// `device=` directly avoids allocating the tensor on CPU first.
@@ -446,6 +449,7 @@ impl ErrorKind {
             ErrorKind::OpenUnpacking => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintCudaCall => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintItemCall => Severity::Ignore,
+            ErrorKind::PytorchEfficiencyLintPrintTensor => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintRedundantToCall => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,
             ErrorKind::RedundantCondition => Severity::Warn,

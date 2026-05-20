@@ -1344,6 +1344,20 @@ def f(x: torch.Tensor) -> None:
     v = x.item()  # pytorch-efficiency-lint-item-call
 ```
 
+## pytorch-efficiency-lint-print-tensor
+
+Passing a `torch.Tensor` to `print()` triggers `Tensor.__repr__()`, which forces GPU-to-CPU synchronization and blocks until all pending GPU operations complete. Use `print(tensor.shape)` to inspect metadata without synchronizing, or guard with `if DEBUG: print(tensor)`.
+
+The default severity of this diagnostic is `ignore`. Enable it with [`pytorch-efficiency-lints = true`](./configuration.mdx#pytorch-efficiency-lints) in your `pyrefly.toml`.
+
+```python
+import torch
+
+def f(x: torch.Tensor) -> None:
+    print(x)  # pytorch-efficiency-lint-print-tensor
+    # Fix: print(x.shape) or print(x.dtype)
+```
+
 ## pytorch-efficiency-lint-redundant-to-call
 
 Calling `.to(device)` on a tensor returned by a factory function like `torch.zeros()` allocates the tensor on CPU first, then copies it to the target device. Pass `device=` directly to the factory function instead to avoid the redundant allocation and copy.

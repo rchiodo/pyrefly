@@ -1248,6 +1248,8 @@ impl ConfigFile {
             let errors = self.root.errors.get_or_insert_default();
             errors.set_default_severity(ErrorKind::PytorchEfficiencyLintCudaCall, Severity::Warn);
             errors.set_default_severity(ErrorKind::PytorchEfficiencyLintItemCall, Severity::Warn);
+            errors
+                .set_default_severity(ErrorKind::PytorchEfficiencyLintPrintTensor, Severity::Warn);
             errors.set_default_severity(
                 ErrorKind::PytorchEfficiencyLintRedundantToCall,
                 Severity::Warn,
