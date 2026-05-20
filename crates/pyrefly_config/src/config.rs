@@ -1247,6 +1247,10 @@ impl ConfigFile {
         if self.root.pytorch_efficiency_lints == Some(true) {
             let errors = self.root.errors.get_or_insert_default();
             errors.set_default_severity(ErrorKind::PytorchEfficiencyLintItemCall, Severity::Warn);
+            errors.set_default_severity(
+                ErrorKind::PytorchEfficiencyLintRedundantToCall,
+                Severity::Warn,
+            );
         }
 
         // Apply preset as defaults: preset values fill in any fields the user
@@ -1303,6 +1307,10 @@ impl ConfigFile {
                     let sub_errors = sub.settings.errors.get_or_insert_default();
                     sub_errors.set_default_severity(
                         ErrorKind::PytorchEfficiencyLintItemCall,
+                        Severity::Warn,
+                    );
+                    sub_errors.set_default_severity(
+                        ErrorKind::PytorchEfficiencyLintRedundantToCall,
                         Severity::Warn,
                     );
                 }

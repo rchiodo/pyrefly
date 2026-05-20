@@ -685,6 +685,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 let callee_ty = self.expr_infer(&x.func, errors);
                 self.check_pytorch_tensor_item_call(x, &callee_ty, errors);
+                self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
                 } else if let Some((obj_ty, key)) =
@@ -852,6 +853,94 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
                 .emit();
         }
+    }
+
+    /// Warn when `.to(device)` is called on a tensor returned by a factory function
+    /// like `torch.zeros()` that already accepts a `device=` parameter. Passing
+    /// `device=` directly avoids allocating on CPU and then copying to the target device.
+    fn check_pytorch_redundant_to_call(
+        &self,
+        x: &ExprCall,
+        callee_ty: &Type,
+        errors: &ErrorCollector,
+    ) {
+        let Expr::Attribute(attr_expr) = &*x.func else {
+            return;
+        };
+        if attr_expr.attr.id.as_str() != "to" {
+            return;
+        }
+        if x.arguments.is_empty() {
+            return;
+        }
+        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
+            matches!(&bm.obj, Type::Tensor(_))
+                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
+        } else {
+            false
+        };
+        if !is_tensor {
+            return;
+        }
+        let Expr::Call(base_call) = &*attr_expr.value else {
+            return;
+        };
+        let Expr::Attribute(factory_attr) = &*base_call.func else {
+            return;
+        };
+        let factory_name = factory_attr.attr.id.as_str();
+        const TENSOR_FACTORIES: &[&str] = &[
+            "zeros",
+            "ones",
+            "empty",
+            "randn",
+            "rand",
+            "full",
+            "arange",
+            "linspace",
+            "logspace",
+            "eye",
+            "zeros_like",
+            "ones_like",
+            "empty_like",
+            "randn_like",
+            "rand_like",
+            "full_like",
+        ];
+        if !TENSOR_FACTORIES.contains(&factory_name) {
+            return;
+        }
+        let Expr::Name(module_name) = &*factory_attr.value else {
+            return;
+        };
+        if module_name.id.as_str() != "torch" {
+            return;
+        }
+        // Don't fire if the factory already has `device=` — the `.to()` is
+        // likely a dtype cast (e.g., `torch.randn(..., device="cuda").to(torch.bfloat16)`).
+        let factory_has_device = base_call
+            .arguments
+            .keywords
+            .iter()
+            .any(|kw| kw.arg.as_ref().is_some_and(|id| id.as_str() == "device"));
+        if factory_has_device {
+            return;
+        }
+        errors
+            .error_builder(
+                x.range(),
+                ErrorKind::PytorchEfficiencyLintRedundantToCall,
+                format!(
+                    "`torch.{factory_name}(...).to(device)` creates the tensor on CPU \
+                     first, then copies it"
+                ),
+            )
+            .with_detail(format!(
+                "Pass `device=` directly to `torch.{factory_name}()` \
+                 to create the tensor on the target device and avoid a redundant copy. \
+                 For example: `torch.{factory_name}(..., device=device)`"
+            ))
+            .emit();
     }
 
     fn tuple_infer(&self, x: &ExprTuple, hint: Option<HintRef>, errors: &ErrorCollector) -> Type {

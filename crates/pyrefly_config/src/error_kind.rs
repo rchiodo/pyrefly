@@ -281,6 +281,10 @@ pub enum ErrorKind {
     /// Calling `.item()` on a `torch.Tensor` forces GPU→CPU synchronization,
     /// blocking the training loop until all pending GPU operations complete.
     PytorchEfficiencyLintItemCall,
+    /// Calling `.to(device)` on a tensor returned by a factory function like
+    /// `torch.zeros()` that already accepts a `device=` parameter. Passing
+    /// `device=` directly avoids allocating the tensor on CPU first.
+    PytorchEfficiencyLintRedundantToCall,
     /// The attribute exists but cannot be modified.
     ReadOnly,
     /// Attempting to annotate or redefine a name with a type that conflicts with an existing annotation in scope.
@@ -438,6 +442,7 @@ impl ErrorKind {
             ErrorKind::NotRequiredKeyAccess => Severity::Ignore,
             ErrorKind::OpenUnpacking => Severity::Ignore,
             ErrorKind::PytorchEfficiencyLintItemCall => Severity::Ignore,
+            ErrorKind::PytorchEfficiencyLintRedundantToCall => Severity::Ignore,
             ErrorKind::RedundantCast => Severity::Warn,
             ErrorKind::RedundantCondition => Severity::Warn,
             ErrorKind::RevealType => Severity::Info,

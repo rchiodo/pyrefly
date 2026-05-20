@@ -1330,6 +1330,20 @@ def f(x: torch.Tensor) -> None:
     v = x.item()  # pytorch-efficiency-lint-item-call
 ```
 
+## pytorch-efficiency-lint-redundant-to-call
+
+Calling `.to(device)` on a tensor returned by a factory function like `torch.zeros()` allocates the tensor on CPU first, then copies it to the target device. Pass `device=` directly to the factory function instead to avoid the redundant allocation and copy.
+
+The default severity of this diagnostic is `ignore`. Enable it with [`pytorch-efficiency-lints = true`](./configuration.mdx#pytorch-efficiency-lints) in your `pyrefly.toml`.
+
+```python
+import torch
+
+device = torch.device("cuda")
+x = torch.zeros(3, 4).to(device)  # pytorch-efficiency-lint-redundant-to-call
+# Fix: x = torch.zeros(3, 4, device=device)
+```
+
 ## read-only
 
 This error indicates that the attribute being accessed does exist but cannot be modified.
