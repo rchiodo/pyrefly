@@ -1246,14 +1246,9 @@ impl ConfigFile {
         // because set_default_severity only inserts when the key is absent.
         if self.root.pytorch_efficiency_lints == Some(true) {
             let errors = self.root.errors.get_or_insert_default();
-            errors.set_default_severity(ErrorKind::PytorchEfficiencyLintCudaCall, Severity::Warn);
-            errors.set_default_severity(ErrorKind::PytorchEfficiencyLintItemCall, Severity::Warn);
-            errors
-                .set_default_severity(ErrorKind::PytorchEfficiencyLintPrintTensor, Severity::Warn);
-            errors.set_default_severity(
-                ErrorKind::PytorchEfficiencyLintRedundantToCall,
-                Severity::Warn,
-            );
+            for &kind in ErrorKind::pytorch_efficiency_lints() {
+                errors.set_default_severity(kind, Severity::Warn);
+            }
         }
 
         // Apply preset as defaults: preset values fill in any fields the user
@@ -1308,14 +1303,9 @@ impl ConfigFile {
             for sub in &mut self.sub_configs {
                 if sub.settings.pytorch_efficiency_lints == Some(true) {
                     let sub_errors = sub.settings.errors.get_or_insert_default();
-                    sub_errors.set_default_severity(
-                        ErrorKind::PytorchEfficiencyLintItemCall,
-                        Severity::Warn,
-                    );
-                    sub_errors.set_default_severity(
-                        ErrorKind::PytorchEfficiencyLintRedundantToCall,
-                        Severity::Warn,
-                    );
+                    for &kind in ErrorKind::pytorch_efficiency_lints() {
+                        sub_errors.set_default_severity(kind, Severity::Warn);
+                    }
                 }
                 if let Some(sub_errors) = &mut sub.settings.errors {
                     let mut merged = root_errors.clone();

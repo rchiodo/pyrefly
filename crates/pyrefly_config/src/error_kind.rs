@@ -371,6 +371,12 @@ impl std::str::FromStr for ErrorKind {
 /// Also means we can grab error code names without allocation, which is nice.
 static ERROR_KIND_CACHE: LazyLock<SmallMap<String, ErrorKind>> = LazyLock::new(ErrorKind::cache);
 
+static PYTORCH_EFFICIENCY_LINTS: LazyLock<Vec<ErrorKind>> = LazyLock::new(|| {
+    enum_iterator::all::<ErrorKind>()
+        .filter(|k| k.to_name().starts_with("pytorch-efficiency-lint-"))
+        .collect()
+});
+
 impl ErrorKind {
     fn cache() -> SmallMap<String, ErrorKind> {
         let mut map = SmallMap::new();
@@ -381,6 +387,11 @@ impl ErrorKind {
         }
 
         map
+    }
+
+    /// All error kinds with the `pytorch-efficiency-lint-` prefix.
+    pub fn pytorch_efficiency_lints() -> &'static [ErrorKind] {
+        &PYTORCH_EFFICIENCY_LINTS
     }
 
     pub fn to_name(self) -> &'static str {
