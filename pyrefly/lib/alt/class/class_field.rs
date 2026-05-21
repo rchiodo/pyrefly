@@ -2277,7 +2277,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Some(inherited_ty) if inferred_from_method => {
                         // Inherit the previous type of the attribute if the only declaration-like
                         // thing the current class does is assign to the attribute in a method.
-                        inherited_ty
+                        // If the attribute is a method, bind it to the current class.
+                        if inherited_ty.visit_toplevel_func_metadata(&|m| m.flags.is_classmethod) {
+                            make_bound_classmethod(
+                                self.heap,
+                                &ClassBase::ClassDef(self.as_class_type_unchecked(class)),
+                                inherited_ty,
+                            )
+                            .into_inner()
+                        } else {
+                            make_bound_method(self.heap, self.promote_silently(class), inherited_ty)
+                                .into_inner()
+                        }
                     }
                     Some(inherited_ty)
                         if inherited_annotation.is_none() && direct_annotation.is_none() =>
