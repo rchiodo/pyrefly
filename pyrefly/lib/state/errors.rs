@@ -227,15 +227,6 @@ impl Errors {
         errors
     }
 
-    pub fn collect_errors_with_baseline(
-        &self,
-        baseline_path: Option<&Path>,
-        relative_to: &Path,
-    ) -> CollectedErrors {
-        let errors = self.collect_errors();
-        self.apply_baseline(errors, baseline_path, relative_to)
-    }
-
     /// Apply baseline filtering to already-collected errors.
     pub fn apply_baseline(
         &self,
