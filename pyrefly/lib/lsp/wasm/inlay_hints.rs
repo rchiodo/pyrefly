@@ -186,10 +186,11 @@ impl<'a> Transaction<'a> {
                         // authoritatively typed; suggesting an explicit
                         // annotation here would be redundant and, for the
                         // receiver case, could mislead users into
-                        // annotating with the RHS-derived type.
+                        // annotating with the RHS-derived type. The same
+                        // applies to receiver-bearing unpacked rebinds.
                         Binding::NameAssign(x) if !x.is_pinned() => (Some(&*x.expr), false),
                         Binding::Expr(None, e) => (Some(&**e), false),
-                        Binding::UnpackedValue(None, unpack_idx, _, pos, _) => {
+                        Binding::UnpackedValue(None, unpack_idx, _, pos, None) => {
                             // Try to get the element expression from the unpacked source
                             let element_expr =
                                 Self::get_unpacked_element_expr(&bindings, *unpack_idx, *pos);
