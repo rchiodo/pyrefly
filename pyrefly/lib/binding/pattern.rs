@@ -186,7 +186,13 @@ impl<'a> BindingsBuilder<'a> {
                                 let position = UnpackedPosition::Slice(i, num_patterns - i - 1);
                                 self.bind_definition(
                                     name,
-                                    Binding::UnpackedValue(None, subject_idx, p.range, position),
+                                    Binding::UnpackedValue(
+                                        None,
+                                        subject_idx,
+                                        p.range,
+                                        position,
+                                        None,
+                                    ),
                                     FlowStyle::Other,
                                 );
                             }
@@ -200,7 +206,13 @@ impl<'a> BindingsBuilder<'a> {
                             };
                             let key_for_subpattern = self.insert_binding(
                                 Key::Anon(x.range()),
-                                Binding::UnpackedValue(None, subject_idx, x.range(), position),
+                                Binding::UnpackedValue(
+                                    None,
+                                    subject_idx,
+                                    x.range(),
+                                    position,
+                                    None,
+                                ),
                             );
                             let subject_for_subpattern = match &match_subject {
                                 // For tuple subjects, map pattern index to the

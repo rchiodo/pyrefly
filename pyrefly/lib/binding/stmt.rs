@@ -201,7 +201,7 @@ impl<'a> BindingsBuilder<'a> {
         for target in targets.iter_mut() {
             let range = target.range();
             self.bind_target_no_expr(target, &|ann| {
-                Binding::MultiTargetAssign(ann, rhs_idx, range)
+                Binding::MultiTargetAssign(ann, rhs_idx, range, None)
             });
         }
     }

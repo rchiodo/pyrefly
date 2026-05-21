@@ -189,7 +189,7 @@ impl<'a> Transaction<'a> {
                         // annotating with the RHS-derived type.
                         Binding::NameAssign(x) if !x.is_pinned() => (Some(&*x.expr), false),
                         Binding::Expr(None, e) => (Some(&**e), false),
-                        Binding::UnpackedValue(None, unpack_idx, _, pos) => {
+                        Binding::UnpackedValue(None, unpack_idx, _, pos, _) => {
                             // Try to get the element expression from the unpacked source
                             let element_expr =
                                 Self::get_unpacked_element_expr(&bindings, *unpack_idx, *pos);
