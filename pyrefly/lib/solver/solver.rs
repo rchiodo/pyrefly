@@ -24,7 +24,6 @@ use itertools::Either;
 use itertools::Itertools;
 use pyrefly_types::callable_residual::OverloadBranchProjection;
 use pyrefly_types::callable_residual::OverloadResidualIdentity;
-use pyrefly_types::callable_residual::OverloadResidualIdentityAnalysis;
 use pyrefly_types::dimension::ShapeError;
 use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::heap::TypeHeap;
@@ -766,7 +765,7 @@ impl Solver {
     /// expressions so that all-literal SizeExpr trees fold to single literals.
     pub fn finish_function_return(&self, mut t: Type) -> Type {
         self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false, None);
-        t = self.finalize_callable_residuals_at_boundary_impl(t, true);
+        t = t.finalize_callable_residuals_at_boundary(&self.heap, true);
         self.erase_unsolved_variables(&mut t);
         self.simplify_mut(&mut t);
         // After variable expansion, dimension expressions may have all-literal operands
@@ -790,100 +789,6 @@ impl Solver {
         self.expand_with_limit(t, TYPE_LIMIT, &VarRecurser::new(), false, None);
         // After we substitute bound variables, we may be able to simplify some types
         self.simplify_mut(t);
-    }
-
-    /// Finalize callable residuals at a substitution boundary (a return type or class field).
-    ///
-    /// We run overload handling first and generic handling second.
-    fn finalize_callable_residuals_at_boundary_impl(
-        &self,
-        ty: Type,
-        preserve_class_targs: bool,
-    ) -> Type {
-        let mut active_overload_identities = Vec::new();
-        self.finalize_callable_residuals_at_boundary_impl_with_active(
-            ty,
-            preserve_class_targs,
-            &mut active_overload_identities,
-        )
-    }
-
-    fn finalize_callable_residuals_at_boundary_impl_with_active(
-        &self,
-        mut ty: Type,
-        preserve_class_targs: bool,
-        active_overload_identities: &mut Vec<OverloadResidualIdentity>,
-    ) -> Type {
-        // Overload reconstruction is only for callable roots. For non-callable
-        // roots, keep the outer structure and rely on inline residual fallback.
-        let callable_root = ty.is_toplevel_callable();
-
-        // Reconstruction is only safe when all overload residual markers in
-        // the type share a single witness identity. Multiple witnesses would
-        // produce a cross-product explosion; strip all markers and fall
-        // through to generic residual finalization instead.
-        if callable_root
-            && let OverloadResidualIdentityAnalysis::Single {
-                identity,
-                branch_indices,
-            } = ty.analyze_overload_residual_identity()
-        {
-            if active_overload_identities.contains(&identity) {
-                unreachable!(
-                    "detected recursive overload residual identity cycle during finalization",
-                );
-            }
-            if branch_indices.is_empty() {
-                // TODO(T235420905): This path is intended to be unreachable for coherent
-                // witnesses, but we have seen CI panic signatures around this stack. Audit
-                // the top-of-stack identity/branch-coherence invariant and decide whether
-                // to harden this boundary or tighten upstream residual capture.
-                ty.strip_overload_residual_identity(&identity, &self.heap);
-            } else {
-                active_overload_identities.push(identity.clone());
-                let mut reconstructed = Vec::with_capacity(branch_indices.len());
-                for branch_index in branch_indices {
-                    let mut branch_ty = ty.clone();
-                    let substitution_result = branch_ty
-                        .substitute_overload_residual_identity_branch(&identity, branch_index);
-                    if !substitution_result.substituted {
-                        unreachable!(
-                            "selected overload residual identity must be present during reconstruction",
-                        );
-                    }
-                    if substitution_result.marker_remaining {
-                        unreachable!(
-                            "overload residual substitution did not eliminate active identity"
-                        );
-                    }
-                    reconstructed.push(
-                        self.finalize_callable_residuals_at_boundary_impl_with_active(
-                            branch_ty,
-                            preserve_class_targs,
-                            active_overload_identities,
-                        ),
-                    );
-                }
-                let popped = active_overload_identities
-                    .pop()
-                    .expect("active_overload_identities push/pop must stay balanced");
-                debug_assert_eq!(popped, identity);
-                if let Some(overload_ty) = ty.try_combine_reconstructed_overload(&reconstructed) {
-                    ty = overload_ty;
-                } else {
-                    // This fallback only applies to callable roots. Non-callable
-                    // roots bypass reconstruction and rely on inline fallback.
-                    ty = unions(reconstructed, &self.heap);
-                }
-            }
-        }
-
-        ty.finalize_callable_residuals_mut(&self.heap, false, preserve_class_targs);
-        ty
-    }
-
-    pub(crate) fn finalize_callable_residuals_at_boundary(&self, ty: Type) -> Type {
-        self.finalize_callable_residuals_at_boundary_impl(ty, false)
     }
 
     fn residual_read_for_query_var(
@@ -1274,7 +1179,7 @@ impl Solver {
     /// surfaces and other serialization/display-adjacent consumers.
     pub fn for_export_boundary(&self, mut t: Type) -> Type {
         self.expand_vars_mut(&mut t);
-        t = self.finalize_callable_residuals_at_boundary(t);
+        t = t.finalize_callable_residuals_at_boundary(&self.heap, false);
         self.simplify_mut(&mut t);
         t
     }

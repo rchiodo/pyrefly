@@ -89,7 +89,7 @@ impl CallableResidual {
     }
 }
 
-pub enum OverloadResidualIdentityAnalysis {
+enum OverloadResidualIdentityAnalysis {
     None,
     Single {
         identity: OverloadResidualIdentity,
@@ -98,9 +98,9 @@ pub enum OverloadResidualIdentityAnalysis {
     Multiple,
 }
 
-pub struct OverloadBranchSubstitutionResult {
-    pub substituted: bool,
-    pub marker_remaining: bool,
+struct OverloadBranchSubstitutionResult {
+    substituted: bool,
+    marker_remaining: bool,
 }
 
 impl Type {
@@ -158,7 +158,7 @@ impl Type {
     /// - `None`: no overload residual markers in this type
     /// - `Single`: exactly one witness identity with the branch-index intersection
     /// - `Multiple`: more than one witness identity appears in the same type
-    pub fn analyze_overload_residual_identity(&self) -> OverloadResidualIdentityAnalysis {
+    fn analyze_overload_residual_identity(&self) -> OverloadResidualIdentityAnalysis {
         let mut first: Option<OverloadResidualIdentity> = None;
         let mut intersection: Option<SmallSet<usize>> = None;
         let mut conflict = false;
@@ -210,7 +210,7 @@ impl Type {
 
     /// Strip all overload residual markers with the given identity, replacing
     /// them with their fallback types.
-    pub fn strip_overload_residual_identity(
+    fn strip_overload_residual_identity(
         &mut self,
         identity: &OverloadResidualIdentity,
         heap: &TypeHeap,
@@ -230,7 +230,7 @@ impl Type {
 
     /// Substitute overload residual markers matching `identity` with the type
     /// from the branch at `branch_index`.
-    pub fn substitute_overload_residual_identity_branch(
+    fn substitute_overload_residual_identity_branch(
         &mut self,
         identity: &OverloadResidualIdentity,
         branch_index: usize,
@@ -276,7 +276,7 @@ impl Type {
     /// Try to reconstruct an overloaded type from per-branch finalized types.
     ///
     /// Returns `None` if any branch type cannot be converted to an overload signature.
-    pub fn try_combine_reconstructed_overload(&self, reconstructed: &[Type]) -> Option<Type> {
+    fn try_combine_reconstructed_overload(&self, reconstructed: &[Type]) -> Option<Type> {
         let metadata = self
             .visit_toplevel_func_metadata(&|metadata| Some(metadata.clone()))
             .unwrap_or(FuncMetadata {
@@ -340,7 +340,7 @@ impl Type {
     ///
     /// Non-callable structure is traversed once. Callable/function subtrees run
     /// two phases (overload then generic) internally.
-    pub fn finalize_callable_residuals_mut(
+    fn finalize_callable_residuals_mut(
         &mut self,
         heap: &TypeHeap,
         callable_slot: bool,
@@ -434,6 +434,99 @@ impl Type {
                 (changed, consumed_residual)
             }
         }
+    }
+
+    /// Finalize callable residuals at a substitution boundary (a return type or class field).
+    ///
+    /// We run overload handling first and generic handling second.
+    pub fn finalize_callable_residuals_at_boundary(
+        self,
+        heap: &TypeHeap,
+        preserve_class_targs: bool,
+    ) -> Type {
+        let mut active_overload_identities = Vec::new();
+        self.finalize_callable_residuals_at_boundary_impl(
+            heap,
+            preserve_class_targs,
+            &mut active_overload_identities,
+        )
+    }
+
+    fn finalize_callable_residuals_at_boundary_impl(
+        mut self,
+        heap: &TypeHeap,
+        preserve_class_targs: bool,
+        active_overload_identities: &mut Vec<OverloadResidualIdentity>,
+    ) -> Type {
+        // Overload reconstruction is only for callable roots. For non-callable
+        // roots, keep the outer structure and rely on inline residual fallback.
+        let callable_root = self.is_toplevel_callable();
+
+        // Reconstruction is only safe when all overload residual markers in
+        // the type share a single witness identity. Multiple witnesses would
+        // produce a cross-product explosion; strip all markers and fall
+        // through to generic residual finalization instead.
+        if callable_root
+            && let OverloadResidualIdentityAnalysis::Single {
+                identity,
+                branch_indices,
+            } = self.analyze_overload_residual_identity()
+        {
+            if active_overload_identities.contains(&identity) {
+                unreachable!(
+                    "detected recursive overload residual identity cycle during finalization",
+                );
+            }
+            if branch_indices.is_empty() {
+                // TODO(T235420905): This path is intended to be unreachable for coherent
+                // witnesses, but we have seen CI panic signatures around this stack. Audit
+                // the top-of-stack identity/branch-coherence invariant and decide whether
+                // to harden this boundary or tighten upstream residual capture.
+                self.strip_overload_residual_identity(&identity, heap);
+            } else {
+                active_overload_identities.push(identity.clone());
+                let reconstructed: Vec<Type> = branch_indices
+                    .into_iter()
+                    .map(|branch_index| {
+                        let mut branch_ty = self.clone();
+                        let substitution_result = branch_ty
+                            .substitute_overload_residual_identity_branch(
+                                &identity,
+                                branch_index,
+                            );
+                        if !substitution_result.substituted {
+                            unreachable!(
+                                "selected overload residual identity must be present during reconstruction",
+                            );
+                        }
+                        if substitution_result.marker_remaining {
+                            unreachable!(
+                                "overload residual substitution did not eliminate active identity"
+                            );
+                        }
+                        branch_ty.finalize_callable_residuals_at_boundary_impl(
+                            heap,
+                            preserve_class_targs,
+                            active_overload_identities,
+                        )
+                    })
+                    .collect();
+                let popped = active_overload_identities
+                    .pop()
+                    .expect("active_overload_identities push/pop must stay balanced");
+                debug_assert_eq!(popped, identity);
+                if let Some(overload_ty) = self.try_combine_reconstructed_overload(&reconstructed) {
+                    self = overload_ty;
+                } else {
+                    // This fallback only applies to callable roots. Non-callable
+                    // roots bypass reconstruction and rely on inline fallback.
+                    self = unions(reconstructed, heap);
+                }
+            }
+        }
+
+        self.finalize_callable_residuals_mut(heap, false, preserve_class_targs);
+        self
     }
 
     fn finalize_callable_residuals_in_phase_mut(

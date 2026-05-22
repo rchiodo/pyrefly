@@ -2611,7 +2611,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn normalize_attr_ty(&self, mut ty: Type) -> Type {
         self.expand_vars_mut(&mut ty);
-        self.solver().finalize_callable_residuals_at_boundary(ty)
+        ty.finalize_callable_residuals_at_boundary(self.heap, false)
     }
 
     fn as_instance_attribute(
