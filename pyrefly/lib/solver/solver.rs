@@ -26,6 +26,7 @@ use pyrefly_types::callable_residual::CallableResidual;
 use pyrefly_types::callable_residual::CallableResidualKind;
 use pyrefly_types::callable_residual::OverloadBranchProjection;
 use pyrefly_types::callable_residual::OverloadResidualIdentity;
+use pyrefly_types::callable_residual::OverloadResidualIdentityAnalysis;
 use pyrefly_types::dimension::ShapeError;
 use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::heap::TypeHeap;
@@ -172,15 +173,6 @@ struct OverloadWitnessPruningDecision {
 
 type OverloadPruningByWitness = HashMap<OverloadResidualIdentity, OverloadWitnessPruningDecision>;
 
-enum OverloadResidualIdentityAnalysis {
-    None,
-    Single {
-        identity: OverloadResidualIdentity,
-        branch_indices: Vec<usize>,
-    },
-    Multiple,
-}
-
 #[derive(Clone, Debug)]
 struct OverloadSolvedConstraint {
     quantified_name: Name,
@@ -190,11 +182,6 @@ struct OverloadSolvedConstraint {
 #[derive(Clone, Debug)]
 struct OverloadAllPrunedCause {
     solved_constraints: Vec<OverloadSolvedConstraint>,
-}
-
-struct OverloadBranchSubstitutionResult {
-    substituted: bool,
-    marker_remaining: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -879,61 +866,6 @@ impl Solver {
         Forallable::Function(func).forall(self.quantified_tparams_for_forall(&callable_ty))
     }
 
-    /// Analyze overload residual markers in one pass.
-    /// Returns:
-    /// - `None`: no overload residual markers in this type
-    /// - `Single`: exactly one witness identity with the branch-index intersection
-    /// - `Multiple`: more than one witness identity appears in the same type
-    fn analyze_overload_residual_identity(&self, ty: &Type) -> OverloadResidualIdentityAnalysis {
-        let mut first: Option<OverloadResidualIdentity> = None;
-        let mut intersection: Option<SmallSet<usize>> = None;
-        let mut conflict = false;
-        ty.universe(&mut |inner| {
-            if conflict {
-                return;
-            }
-            if let Type::CallableResidual(residual) = inner
-                && let CallableResidualKind::Overload { identity, branches } = &residual.kind
-            {
-                let branch_indices: SmallSet<usize> =
-                    branches.iter().map(|branch| branch.branch_index).collect();
-                match &first {
-                    None => {
-                        first = Some(identity.clone());
-                        intersection = Some(branch_indices);
-                    }
-                    Some(existing) if existing == identity => {
-                        let current = intersection.take().expect(
-                            "matching overload residual identity must have intersection state",
-                        );
-                        intersection = Some(
-                            current
-                                .into_iter()
-                                .filter(|idx| branch_indices.contains(idx))
-                                .collect(),
-                        );
-                    }
-                    Some(_) => conflict = true,
-                }
-            }
-        });
-        if conflict {
-            OverloadResidualIdentityAnalysis::Multiple
-        } else if let Some(identity) = first {
-            let mut branch_indices = intersection
-                .expect("matching overload residual identity must produce an intersection set")
-                .into_iter()
-                .collect::<Vec<_>>();
-            branch_indices.sort_unstable();
-            OverloadResidualIdentityAnalysis::Single {
-                identity,
-                branch_indices,
-            }
-        } else {
-            OverloadResidualIdentityAnalysis::None
-        }
-    }
-
     fn strip_overload_residual_identity(&self, ty: &mut Type, identity: &OverloadResidualIdentity) {
         ty.transform_mut(&mut |inner| {
             if let Type::CallableResidual(residual) = inner
@@ -946,50 +878,6 @@ impl Solver {
                 *inner = self.residual_fallback_type(residual);
             }
         });
-    }
-
-    fn substitute_overload_residual_identity_branch(
-        &self,
-        ty: &mut Type,
-        identity: &OverloadResidualIdentity,
-        branch_index: usize,
-    ) -> OverloadBranchSubstitutionResult {
-        let mut substituted = false;
-        let mut marker_remaining = false;
-        ty.transform_mut(&mut |inner| {
-            if let Type::CallableResidual(residual) = inner
-                && let CallableResidualKind::Overload {
-                    identity: marker_identity,
-                    branches,
-                } = &residual.kind
-                && marker_identity == identity
-            {
-                let branch = branches
-                    .iter()
-                    .find(|branch| branch.branch_index == branch_index)
-                    .expect("selected overload branch index must exist on every matching marker");
-                let branch_ty = &branch.ty;
-                let branch_contains_identity = branch_ty.any(|candidate| {
-                    if let Type::CallableResidual(candidate_residual) = candidate
-                        && let CallableResidualKind::Overload {
-                            identity: candidate_identity,
-                            ..
-                        } = &candidate_residual.kind
-                    {
-                        candidate_identity == identity
-                    } else {
-                        false
-                    }
-                });
-                marker_remaining |= branch_contains_identity;
-                *inner = branch_ty.clone();
-                substituted = true;
-            }
-        });
-        OverloadBranchSubstitutionResult {
-            substituted,
-            marker_remaining,
-        }
     }
 
     fn overload_metadata_for_reconstruction(&self, ty: &Type) -> FuncMetadata {
@@ -1305,7 +1193,7 @@ impl Solver {
             && let OverloadResidualIdentityAnalysis::Single {
                 identity,
                 branch_indices,
-            } = self.analyze_overload_residual_identity(&ty)
+            } = ty.analyze_overload_residual_identity()
         {
             if active_overload_identities.contains(&identity) {
                 unreachable!(
@@ -1323,11 +1211,8 @@ impl Solver {
                 let mut reconstructed = Vec::with_capacity(branch_indices.len());
                 for branch_index in branch_indices {
                     let mut branch_ty = ty.clone();
-                    let substitution_result = self.substitute_overload_residual_identity_branch(
-                        &mut branch_ty,
-                        &identity,
-                        branch_index,
-                    );
+                    let substitution_result = branch_ty
+                        .substitute_overload_residual_identity_branch(&identity, branch_index);
                     if !substitution_result.substituted {
                         unreachable!(
                             "selected overload residual identity must be present during reconstruction",
