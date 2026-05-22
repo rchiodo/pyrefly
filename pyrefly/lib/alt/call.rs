@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 use pyrefly_python::dunder;
+use pyrefly_types::callable_residual::CallableResidualKind;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::special_form::SpecialForm;
 use pyrefly_types::tensor_ops_registry::TensorOpsRegistry;
@@ -60,7 +61,6 @@ use crate::types::type_var::Restriction;
 use crate::types::typed_dict::TypedDict;
 use crate::types::types::AnyStyle;
 use crate::types::types::BoundMethod;
-use crate::types::types::CallableResidualKind;
 use crate::types::types::OverloadType;
 use crate::types::types::Type;
 
