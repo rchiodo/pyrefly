@@ -874,7 +874,6 @@ impl Solver {
                     // This fallback only applies to callable roots. Non-callable
                     // roots bypass reconstruction and rely on inline fallback.
                     ty = unions(reconstructed, &self.heap);
-                    self.simplify_mut(&mut ty);
                 }
             }
         }
