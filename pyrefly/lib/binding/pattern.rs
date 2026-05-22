@@ -135,11 +135,12 @@ impl<'a> BindingsBuilder<'a> {
                     .iter()
                     .filter(|x| !matches!(x, Pattern::MatchStar(_)))
                     .count();
-                // If every sub-pattern is irrefutable (wildcards like `_`, bare names,
-                // or `*rest`), the structural `IsSequence + LenEq/LenGte` narrow on the
-                // subject fully captures what the pattern proves. Spurious Placeholders
-                // added by `and_all` for empty sub-pattern narrow ops would otherwise
-                // block negative narrowing (see equivalent fix in MatchClass below).
+                // If every sub-pattern is irrefutable -- i.e., patterns that always match
+                // like wildcards (`_`), bare names (e.g., `x`), or `*rest` -- the structural
+                // `IsSequence + LenEq/LenGte` narrow on the subject fully captures what the
+                // pattern proves. Spurious Placeholders added by `and_all` for empty
+                // sub-pattern narrow ops would otherwise block negative narrowing
+                // (see equivalent fix in MatchClass below).
                 let all_subpatterns_irrefutable = x
                     .patterns
                     .iter()
