@@ -2585,7 +2585,7 @@ impl Solver {
     ) -> Result<(), SubsetError> {
         let mut subset = self.subset(type_order);
         if let Some(cc) = call_context {
-            subset.with_active_call_context(cc, |me| me.is_subset_eq(got, want))
+            subset.with_active_call_context(cc.clone(), |me| me.is_subset_eq(got, want))
         } else {
             subset.is_subset_eq(got, want)
         }
@@ -2917,7 +2917,7 @@ impl ResidualWitnessContext {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CallContext {
     witness: Option<ResidualWitnessContext>,
     argument_side: ArgumentSide,
@@ -3134,7 +3134,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let deferred_vars = self.snapshot_witness_deferred_vars();
         let coinductive_assumptions_used = self.coinductive_assumptions_used;
         let result =
-            self.with_active_call_context(&CallContext::outside(), |me| me.is_subset_eq(got, want));
+            self.with_active_call_context(CallContext::outside(), |me| me.is_subset_eq(got, want));
         self.solver.restore_vars(vars_snapshot);
         self.subset_cache = cache_snapshot;
         self.class_protocol_assumptions = protocol_assumptions;
@@ -3200,40 +3200,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
     fn with_active_call_context<T>(
         &mut self,
-        call_context: &CallContext,
+        call_context: CallContext,
         f: impl FnOnce(&mut Self) -> T,
     ) -> T {
-        let old_witness = mem::replace(
-            &mut self.active_call_context.witness,
-            call_context.witness.clone(),
-        );
-        let old_argument_side = mem::replace(
-            &mut self.active_call_context.argument_side,
-            call_context.argument_side,
-        );
-        let old_deferred_quantified_vars = mem::replace(
-            &mut self.active_call_context.deferred_quantified_vars,
-            call_context.deferred_quantified_vars.clone(),
-        );
-        let old_overload_witness_payloads = mem::replace(
-            &mut self.active_call_context.overload_witness_payloads,
-            call_context.overload_witness_payloads.clone(),
-        );
-        let old_require_boundary_consumption = mem::replace(
-            &mut self.active_call_context.require_boundary_consumption,
-            call_context.require_boundary_consumption.clone(),
-        );
-        let old_boundary_consumed_and_drained = mem::replace(
-            &mut self.active_call_context.boundary_consumed_and_drained,
-            call_context.boundary_consumed_and_drained.clone(),
-        );
+        let old = mem::replace(&mut self.active_call_context, call_context);
         let res = f(self);
-        self.active_call_context.witness = old_witness;
-        self.active_call_context.argument_side = old_argument_side;
-        self.active_call_context.deferred_quantified_vars = old_deferred_quantified_vars;
-        self.active_call_context.overload_witness_payloads = old_overload_witness_payloads;
-        self.active_call_context.require_boundary_consumption = old_require_boundary_consumption;
-        self.active_call_context.boundary_consumed_and_drained = old_boundary_consumed_and_drained;
+        self.active_call_context = old;
         res
     }
 
