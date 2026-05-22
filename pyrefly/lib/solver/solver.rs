@@ -2923,7 +2923,7 @@ pub struct CallContext {
     argument_side: ArgumentSide,
     deferred_quantified_vars: Arc<Mutex<SmallSet<Var>>>,
     /// Invariant: payload entries are scoped to this call-context lineage and
-    /// must not leak across `with_outside_call_context` boundaries.
+    /// must not leak across `with_outside_context` boundaries.
     overload_witness_payloads: Arc<Mutex<OverloadWitnessPayloadByHash>>,
     /// Whether this context must be consumed at a solve boundary.
     require_boundary_consumption: Arc<AtomicBool>,
@@ -2949,20 +2949,37 @@ impl CallContext {
         Self::default()
     }
 
-    pub fn set_argument_side(&mut self, argument_side: ArgumentSide) {
-        self.argument_side = argument_side;
-    }
-
     pub(crate) fn register_fresh_quantified_vars(&self, vars: &[Var]) {
         let mut deferred_quantified_vars = self.deferred_quantified_vars.lock();
         deferred_quantified_vars.extend(vars.iter().copied());
     }
 
-    pub fn require_boundary_consumption(&self) {
+    pub fn with_argument_side(mut self, argument_side: ArgumentSide) -> Self {
+        self.argument_side = argument_side;
+        self
+    }
+
+    pub fn require_boundary_consumption(self) -> Self {
         self.require_boundary_consumption
             .store(true, Ordering::Relaxed);
         self.boundary_consumed_and_drained
             .store(false, Ordering::Relaxed);
+        self
+    }
+
+    pub fn with_outside_context(mut self) -> Self {
+        // Keep fresh-var tracking attached to the same boundary while
+        // temporarily disabling residual hooks. Fresh quantified vars created in
+        // this scope must still be finished when the outer boundary drains.
+        self.witness = Default::default();
+        self.argument_side = Default::default();
+        self.overload_witness_payloads = Default::default();
+        self
+    }
+
+    pub fn with_residual_witness(mut self, witness: ResidualWitnessContext) -> Self {
+        self.witness = Some(witness);
+        self
     }
 
     pub fn residual_witness(&self) -> Option<&ResidualWitnessContext> {
@@ -2971,6 +2988,10 @@ impl CallContext {
 
     pub fn residual_witness_mut(&mut self) -> Option<&mut ResidualWitnessContext> {
         self.witness.as_mut()
+    }
+
+    pub fn take_residual_witness(&mut self) -> Option<ResidualWitnessContext> {
+        self.witness.take()
     }
 
     pub(crate) fn argument_side(&self) -> ArgumentSide {
@@ -3198,7 +3219,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         res
     }
 
-    fn with_active_call_context<T>(
+    pub fn with_active_call_context<T>(
         &mut self,
         call_context: CallContext,
         f: impl FnOnce(&mut Self) -> T,
@@ -3206,54 +3227,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let old = mem::replace(&mut self.active_call_context, call_context);
         let res = f(self);
         self.active_call_context = old;
-        res
-    }
-
-    pub(crate) fn with_active_argument_side<T>(
-        &mut self,
-        argument_side: ArgumentSide,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> T {
-        let old_argument_side =
-            mem::replace(&mut self.active_call_context.argument_side, argument_side);
-        let res = f(self);
-        self.active_call_context.argument_side = old_argument_side;
-        res
-    }
-
-    pub(crate) fn with_active_witness_and_side<T>(
-        &mut self,
-        witness: ResidualWitnessContext,
-        argument_side: ArgumentSide,
-        f: impl FnOnce(&mut Self) -> T,
-    ) -> (T, Option<ResidualWitnessContext>) {
-        let old_witness = self.active_call_context.witness.replace(witness);
-        let old_argument_side =
-            mem::replace(&mut self.active_call_context.argument_side, argument_side);
-        let res = f(self);
-        let active_witness = self.active_call_context.witness.take();
-        self.active_call_context.witness = old_witness;
-        self.active_call_context.argument_side = old_argument_side;
-        (res, active_witness)
-    }
-
-    pub(crate) fn with_outside_call_context<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
-        let old_witness = self.active_call_context.witness.take();
-        let old_argument_side = mem::replace(
-            &mut self.active_call_context.argument_side,
-            ArgumentSide::NotAnalyzingACall,
-        );
-        // Keep fresh-var tracking attached to the same boundary while
-        // temporarily disabling residual hooks. Fresh quantified vars created in
-        // this scope must still be finished when the outer boundary drains.
-        let old_overload_witness_payloads = mem::replace(
-            &mut self.active_call_context.overload_witness_payloads,
-            Arc::new(Mutex::new(SmallMap::new())),
-        );
-        let res = f(self);
-        self.active_call_context.witness = old_witness;
-        self.active_call_context.argument_side = old_argument_side;
-        self.active_call_context.overload_witness_payloads = old_overload_witness_payloads;
         res
     }
 

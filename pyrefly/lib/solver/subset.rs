@@ -651,7 +651,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         if allow_residual_capture {
             self.is_subset_eq(got, want)
         } else {
-            self.with_outside_call_context(|me| me.is_subset_eq(got, want))
+            self.with_active_call_context(
+                self.active_call_context.clone().with_outside_context(),
+                |me| me.is_subset_eq(got, want),
+            )
         }
     }
 
@@ -1277,19 +1280,24 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     let overload_type = Type::Overload(overload.clone());
                     let synthesized =
                         self.make_overload_witness(&overload_type, &eligible_vars, argument_side);
-                    self.with_active_witness_and_side(synthesized, argument_side, |me| {
-                        let (witness, captured_vars) =
+                    self.with_active_call_context(
+                        self.active_call_context
+                            .clone()
+                            .with_residual_witness(synthesized)
+                            .with_argument_side(argument_side),
+                        |me| {
+                            let (witness, captured_vars) =
                             me.witness_and_captured_vars_for_overload().expect(
                                 "synthesized overload witness must be active for capture probing",
                             );
-                        me.is_subset_overload_with_active_witness(
-                            &witness,
-                            &captured_vars,
-                            overload,
-                            want,
-                        )
-                    })
-                    .0
+                            me.is_subset_overload_with_active_witness(
+                                &witness,
+                                &captured_vars,
+                                overload,
+                                want,
+                            )
+                        },
+                    )
                 }
             } else {
                 any(overload.signatures.iter(), |l| {
@@ -1751,9 +1759,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     _ => unreachable!("guarded by pattern above"),
                 };
                 let argument_side = self.active_call_context.argument_side();
-                self.with_active_argument_side(argument_side.negated(), |me| {
-                    me.is_subset_params(&l_sig.params, &u_sig.params)
-                })?;
+                self.with_active_call_context(
+                    self.active_call_context
+                        .clone()
+                        .with_argument_side(argument_side.negated()),
+                    |me| me.is_subset_params(&l_sig.params, &u_sig.params),
+                )?;
                 self.is_subset_eq(&l_sig.ret, &u_sig.ret)
             }
             (Type::TypedDict(TypedDict::Anonymous(got)), Type::TypedDict(want)) => {
@@ -2267,10 +2278,18 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 let argument_side = self.active_call_context.argument_side();
                 let in_call_analysis = !matches!(argument_side, ArgumentSide::NotAnalyzingACall);
                 let witness = self.make_forall_witness(&forall_type, &vs, want);
-                let (result, mut maybe_witness) =
-                    self.with_active_witness_and_side(witness, argument_side, |me| {
-                        me.is_subset_eq(&got, want)
-                    });
+                let (result, mut maybe_witness) = self.with_active_call_context(
+                    self.active_call_context
+                        .clone()
+                        .with_residual_witness(witness)
+                        .with_argument_side(argument_side),
+                    |me| {
+                        (
+                            me.is_subset_eq(&got, want),
+                            me.active_call_context.take_residual_witness(),
+                        )
+                    },
+                );
                 if result.is_ok()
                     && !matches!(argument_side, ArgumentSide::NotAnalyzingACall)
                     && let Some(witness) = maybe_witness.as_mut()

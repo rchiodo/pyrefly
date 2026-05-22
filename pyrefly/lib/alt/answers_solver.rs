@@ -3079,8 +3079,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             | TypeCheckKind::CallVarArgs(..)
             | TypeCheckKind::CallKwArgs(..)
             | TypeCheckKind::CallUnpackKwArg(..) => {
-                let mut call_context = CallContext::outside();
-                call_context.set_argument_side(ArgumentSide::Got);
+                let call_context = CallContext::outside().with_argument_side(ArgumentSide::Got);
                 self.solver()
                     .is_subset_eq(got, want, self.type_order(), Some(&call_context))
             }

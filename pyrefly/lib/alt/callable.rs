@@ -1380,9 +1380,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Vec<TypeVarSpecializationError>,
         HashMap<TextRange, Type>,
     ) {
-        let mut call_context = CallContext::outside();
-        call_context.set_argument_side(ArgumentSide::Got);
-        call_context.require_boundary_consumption();
+        let call_context = CallContext::outside()
+            .with_argument_side(ArgumentSide::Got)
+            .require_boundary_consumption();
 
         // Look up meta-shape early so we can conditionally collect bound args.
         // Only consult the registry when tensor_shapes is enabled to avoid
