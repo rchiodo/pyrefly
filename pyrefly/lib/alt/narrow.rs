@@ -466,7 +466,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // These are safe to ignore, as the only possible specialization errors are handled elsewhere:
                     // * If `left` is an invalid specialization, the error has already been reported at its definition site.
                     // * Unsafe runtime protocol overlaps are separately checked for in special_calls.rs.
-                    let _specialization_errors = self.solver().finish_quantified(vs, false);
+                    let _specialization_errors = self.finish_quantified(vs, false);
                     result
                 } else {
                     l.clone()
@@ -509,7 +509,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // These are safe to ignore, as the only possible specialization errors are handled elsewhere:
                     // * If `left` is an invalid specialization, the error has already been reported at its definition site.
                     // * Unsafe runtime protocol overlaps are separately checked for in special_calls.rs.
-                    let _specialization_errors = self.solver().finish_quantified(vs, false);
+                    let _specialization_errors = self.finish_quantified(vs, false);
                     result
                 } else {
                     l.clone()
@@ -533,7 +533,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         self.solver()
                             .fresh_quantified(&tparams, unwrapped, self.uniques);
                     let result = self.subtract(l, &unwrapped);
-                    let _specialization_errors = self.solver().finish_quantified(vs, false);
+                    let _specialization_errors = self.finish_quantified(vs, false);
                     result
                 } else {
                     l.clone()
@@ -661,7 +661,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // These are safe to ignore, as the only possible specialization errors are handled elsewhere:
                 // * If `left` is an invalid specialization, the error has already been reported at its definition site.
                 // * Unsafe runtime protocol overlaps are separately checked for in special_calls.rs.
-                let _specialization_errors = self.solver().finish_quantified(vs, false);
+                let _specialization_errors = self.finish_quantified(vs, false);
             } else {
                 res.push(left.clone())
             }
@@ -689,7 +689,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // These are safe to ignore, as the only possible specialization errors are handled elsewhere:
                 // * If `left` is an invalid specialization, the error has already been reported at its definition site.
                 // * Unsafe runtime protocol overlaps are separately checked for in special_calls.rs.
-                let _specialization_errors = self.solver().finish_quantified(vs, false);
+                let _specialization_errors = self.finish_quantified(vs, false);
             } else {
                 res.push(left.clone())
             }

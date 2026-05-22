@@ -2326,10 +2326,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     // to avoid leaking Quantified placeholders in ad-hoc paths.
                     let finish_result = self
                         .solver
-                        .finish_quantified_with_subset(
+                        .finish_quantified(
                             vs,
                             self.solver.infer_with_first_use,
-                            &mut |got, want| self.is_subset_eq_probe_for_pruning(got, want),
+                            self.type_order,
+                            None,
                         )
                         .map_err(SubsetError::TypeVarSpecialization);
                     match result {

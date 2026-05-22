@@ -1289,7 +1289,8 @@ impl Solver {
         // Either we have solutions, or we fall back to Any. We don't want Variable::Partial.
         // If this errors, then the definition is invalid, and we should have raised an error at
         // the definition site.
-        let _specialization_errors = self.finish_quantified(vs, false);
+        let _specialization_errors =
+            self.finish_quantified_with_pruning(vs, false, &mut |_got, _want| Ok(()), None);
 
         callable
     }
@@ -1959,10 +1960,8 @@ impl Solver {
             .collect()
     }
 
-    // Quantified finishing entrypoints. Keep these together so callsites can
-    // choose the right mode (no-pruning vs pruning) without hunting around.
-    ///
-    /// Finish a specific quantified set without pruning overload branches.
+    /// Finish a specific quantified set, resolving type variables to their
+    /// solved types or gradual fallbacks.
     ///
     /// Called after a quantified function has been called. Given
     /// `def f[T](x: int): list[T]`, this runs after generic solving completes.
@@ -1971,69 +1970,57 @@ impl Solver {
     /// empty-container partial type and may be pinned by first use.
     /// If `infer_with_first_use` is false, unresolved `T` is replaced with
     /// gradual (`Any`-like) fallback.
-    pub fn finish_quantified(
-        &self,
-        vs: QuantifiedHandle,
-        infer_with_first_use: bool,
-    ) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        self.finish_quantified_with_subset(vs, infer_with_first_use, &mut |_got, _want| Ok(()))
-    }
-
-    /// Finish a specific quantified set with overload pruning checks driven by
-    /// the given `TypeOrder`.
     ///
-    /// Useful in call/callable paths where we already have a type-order
-    /// context and want pruning decisions to use that same subset relation.
-    pub fn finish_quantified_with_type_order<Ans: LookupAnswer>(
+    /// If `call_context` is provided, tracked fresh vars and overload witness
+    /// payloads are drained from it and included in the finishing set.
+    pub fn finish_quantified<Ans: LookupAnswer>(
         &self,
         vs: QuantifiedHandle,
         infer_with_first_use: bool,
         type_order: TypeOrder<Ans>,
+        call_context: Option<&CallContext>,
     ) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        let mut subset = self.subset(type_order);
-        self.finish_quantified_with_subset(vs, infer_with_first_use, &mut |got, want| {
-            subset.is_subset_eq_probe_for_pruning(got, want)
-        })
-    }
-
-    /// Finish quantified vars at a call boundary by consuming tracked fresh
-    /// quantified vars from `CallContext`, then finishing the reachable
-    /// quantified closure from explicit roots plus tracked roots.
-    pub fn finish_quantified_with_type_order_and_call_context<Ans: LookupAnswer>(
-        &self,
-        vs: QuantifiedHandle,
-        infer_with_first_use: bool,
-        type_order: TypeOrder<Ans>,
-        call_context: &CallContext,
-    ) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        let tracked_fresh_vars = call_context.take_deferred_quantified_vars();
-        let mut overload_witness_payloads = call_context.take_overload_witness_payloads();
-        call_context.mark_boundary_consumed_and_drained();
-        let payload_vars: SmallSet<Var> = overload_witness_payloads
-            .values()
-            .flat_map(|branch_captures| branch_captures.iter())
-            .flat_map(|capture| capture.values.keys().copied())
-            .collect();
-        let mut roots: SmallSet<Var> = vs.0.into_iter().collect();
-        roots.extend(tracked_fresh_vars.0);
-        // Solve boundaries explicitly own fresh quantified tracking. We finish
-        // the exact boundary set (explicit roots + fresh vars + payload vars),
-        // rather than using reachability expansion that can miss or overreach.
-        let mut all_boundary_vars: Vec<Var> = roots.into_iter().collect();
-        // Payload-driven overload pruning must include solved vars even if they
-        // already collapsed to `Answer` before boundary finishing.
-        all_boundary_vars.extend(payload_vars);
-        all_boundary_vars.sort_unstable();
-        all_boundary_vars.dedup();
-        if all_boundary_vars.is_empty() {
+        let (vs, mut overload_witness_payloads) = if let Some(cc) = call_context {
+            let tracked_fresh_vars = cc.take_deferred_quantified_vars();
+            let overload_witness_payloads = cc.take_overload_witness_payloads();
+            cc.mark_boundary_consumed_and_drained();
+            let payload_vars: SmallSet<Var> = overload_witness_payloads
+                .values()
+                .flat_map(|branch_captures| branch_captures.iter())
+                .flat_map(|capture| capture.values.keys().copied())
+                .collect();
+            let mut roots: SmallSet<Var> = vs.0.into_iter().collect();
+            roots.extend(tracked_fresh_vars.0);
+            // Solve boundaries explicitly own fresh quantified tracking. We finish
+            // the exact boundary set (explicit roots + fresh vars + payload vars),
+            // rather than using reachability expansion that can miss or overreach.
+            let mut all_boundary_vars: Vec<Var> = roots.into_iter().collect();
+            // Payload-driven overload pruning must include solved vars even if they
+            // already collapsed to `Answer` before boundary finishing.
+            all_boundary_vars.extend(payload_vars);
+            all_boundary_vars.sort_unstable();
+            all_boundary_vars.dedup();
+            (
+                QuantifiedHandle(all_boundary_vars),
+                overload_witness_payloads,
+            )
+        } else {
+            (vs, SmallMap::new())
+        };
+        if vs.0.is_empty() {
             return Ok(());
         }
+        let payloads = if overload_witness_payloads.is_empty() {
+            None
+        } else {
+            Some(&mut overload_witness_payloads)
+        };
         let mut subset = self.subset(type_order);
-        self.finish_quantified_with_subset_and_payloads(
-            QuantifiedHandle(all_boundary_vars),
+        self.finish_quantified_with_pruning(
+            vs,
             infer_with_first_use,
             &mut |got, want| subset.is_subset_eq_probe_for_pruning(got, want),
-            Some(&mut overload_witness_payloads),
+            payloads,
         )
     }
 
@@ -2042,25 +2029,20 @@ impl Solver {
     ///
     /// Useful at boundaries where the caller has a type but not an explicit
     /// quantified handle.
-    pub fn finish_all_quantified(&self, ty: &Type) -> Result<(), Vec1<TypeVarSpecializationError>> {
+    pub fn finish_all_quantified<Ans: LookupAnswer>(
+        &self,
+        ty: &Type,
+        type_order: TypeOrder<Ans>,
+    ) -> Result<(), Vec1<TypeVarSpecializationError>> {
         let vs = QuantifiedHandle(ty.collect_maybe_placeholder_vars());
-        self.finish_quantified(vs, self.infer_with_first_use)
+        self.finish_quantified(vs, self.infer_with_first_use, type_order, None)
     }
 
-    /// Core quantified-finishing implementation used by all wrappers.
+    /// Core quantified-finishing implementation.
     ///
     /// The injected `is_subset` callback controls whether/how overload branch
     /// pruning compatibility is checked.
-    pub(crate) fn finish_quantified_with_subset(
-        &self,
-        vs: QuantifiedHandle,
-        infer_with_first_use: bool,
-        is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-    ) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        self.finish_quantified_with_subset_and_payloads(vs, infer_with_first_use, is_subset, None)
-    }
-
-    fn finish_quantified_with_subset_and_payloads(
+    fn finish_quantified_with_pruning(
         &self,
         vs: QuantifiedHandle,
         infer_with_first_use: bool,

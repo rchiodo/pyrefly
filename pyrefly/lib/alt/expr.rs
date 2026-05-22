@@ -511,7 +511,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         if let Some(hint) = cur_hint {
                             // Ensure no param vars are pinned to unfinished Variable::Quantified.
                             // Since lambda parameters are unannotated, the specialization errors can be ignored.
-                            let _specialization_errors = self.solver().finish_all_quantified(hint);
+                            let _specialization_errors =
+                                self.solver().finish_all_quantified(hint, self.type_order());
                         }
                         let ret = self.expr_infer_type_no_trace(
                             &lambda.body,

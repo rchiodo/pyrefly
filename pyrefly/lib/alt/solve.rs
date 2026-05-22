@@ -131,7 +131,9 @@ use crate::error::style::ErrorStyle;
 use crate::export::deprecation::parse_deprecation;
 use crate::export::special::SpecialExport;
 use crate::solver::solver::PinError;
+use crate::solver::solver::QuantifiedHandle;
 use crate::solver::solver::SubsetError;
+use crate::solver::solver::TypeVarSpecializationError;
 use crate::state::loader::FindError;
 use crate::state::loader::FindingOrError;
 use crate::types::annotation::Annotation;
@@ -479,6 +481,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.solver()
             .is_equivalent(got, want, self.type_order())
             .is_ok()
+    }
+
+    pub fn finish_quantified(
+        &self,
+        vs: QuantifiedHandle,
+        infer_with_first_use: bool,
+    ) -> Result<(), Vec1<TypeVarSpecializationError>> {
+        self.solver()
+            .finish_quantified(vs, infer_with_first_use, self.type_order(), None)
     }
 
     pub fn expr_class_keyword(&self, x: &Expr, errors: &ErrorCollector) -> Annotation {
