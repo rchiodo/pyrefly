@@ -2573,34 +2573,22 @@ impl Solver {
 
     /// Is `got <: want`? If you aren't sure, return `false`.
     /// May cause partial variables to be resolved to an answer.
+    ///
+    /// If `call_context` is provided, the subset check runs with that context
+    /// active (e.g. to enable residual capture during call analysis).
     pub fn is_subset_eq<Ans: LookupAnswer>(
         &self,
         got: &Type,
         want: &Type,
         type_order: TypeOrder<Ans>,
-    ) -> Result<(), SubsetError> {
-        self.is_subset_eq_impl(got, want, type_order)
-    }
-
-    fn is_subset_eq_impl<Ans: LookupAnswer>(
-        &self,
-        got: &Type,
-        want: &Type,
-        type_order: TypeOrder<Ans>,
+        call_context: Option<&CallContext>,
     ) -> Result<(), SubsetError> {
         let mut subset = self.subset(type_order);
-        subset.is_subset_eq(got, want)
-    }
-
-    pub(crate) fn is_subset_eq_with_call_context<Ans: LookupAnswer>(
-        &self,
-        got: &Type,
-        want: &Type,
-        type_order: TypeOrder<Ans>,
-        call_context: &CallContext,
-    ) -> Result<(), SubsetError> {
-        let mut subset = self.subset(type_order);
-        subset.is_subset_eq_with_context(got, want, call_context)
+        if let Some(cc) = call_context {
+            subset.with_active_call_context(cc, |me| me.is_subset_eq(got, want))
+        } else {
+            subset.is_subset_eq(got, want)
+        }
     }
 
     pub fn is_consistent<Ans: LookupAnswer>(
@@ -3145,7 +3133,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let protocol_assumptions = self.class_protocol_assumptions.clone();
         let deferred_vars = self.snapshot_witness_deferred_vars();
         let coinductive_assumptions_used = self.coinductive_assumptions_used;
-        let result = self.is_subset_eq_with_context(got, want, &CallContext::outside());
+        let result =
+            self.with_active_call_context(&CallContext::outside(), |me| me.is_subset_eq(got, want));
         self.solver.restore_vars(vars_snapshot);
         self.subset_cache = cache_snapshot;
         self.class_protocol_assumptions = protocol_assumptions;
@@ -3207,15 +3196,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let res = self.is_subset_eq_var(got, want);
         self.gas.restore();
         res
-    }
-
-    fn is_subset_eq_with_context(
-        &mut self,
-        got: &Type,
-        want: &Type,
-        call_context: &CallContext,
-    ) -> Result<(), SubsetError> {
-        self.with_active_call_context(call_context, |me| me.is_subset_eq(got, want))
     }
 
     fn with_active_call_context<T>(

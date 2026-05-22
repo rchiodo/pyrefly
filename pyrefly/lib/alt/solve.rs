@@ -468,7 +468,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn is_subset_eq_with_reason(&self, got: &Type, want: &Type) -> Result<(), SubsetError> {
-        self.solver().is_subset_eq(got, want, self.type_order())
+        self.solver()
+            .is_subset_eq(got, want, self.type_order(), None)
     }
 
     pub fn is_consistent(&self, got: &Type, want: &Type) -> bool {
