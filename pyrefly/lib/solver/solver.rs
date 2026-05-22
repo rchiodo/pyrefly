@@ -3111,15 +3111,47 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         hasher.finish()
     }
 
-    pub fn snapshot_witness_deferred_vars(&self) -> SmallMap<u64, SmallSet<Var>> {
+    fn snapshot_witness_deferred_vars(&self) -> SmallMap<u64, SmallSet<Var>> {
         self.witness_deferred_vars.clone()
     }
 
-    pub(crate) fn restore_witness_deferred_vars(
-        &mut self,
-        deferred_vars: SmallMap<u64, SmallSet<Var>>,
-    ) {
+    fn restore_witness_deferred_vars(&mut self, deferred_vars: SmallMap<u64, SmallSet<Var>>) {
         self.witness_deferred_vars = deferred_vars;
+    }
+
+    /// Run a speculative subset check used only for overload-branch pruning in
+    /// quantified finishing.
+    ///
+    /// Why this exists:
+    /// Pruning asks "would this branch be compatible with the solved type?" so we
+    /// can trim impossible overload residual branches before final materialization.
+    ///
+    /// Why we snapshot:
+    /// `is_subset_eq` is not pure - it can pin vars, refine bounds, and update
+    /// subset/protocol/witness side-state. None of those probe side effects are
+    /// semantically part of the real solve path, so we snapshot and restore the
+    /// relevant local state after each probe.
+    fn is_subset_eq_probe_for_pruning(
+        &mut self,
+        got: &Type,
+        want: &Type,
+    ) -> Result<(), SubsetError> {
+        let mut vars: SmallSet<Var> = got.collect_maybe_placeholder_vars().into_iter().collect();
+        vars.extend(want.collect_maybe_placeholder_vars());
+        let vars = vars.into_iter().collect::<Vec<_>>();
+        let vars_snapshot = self.solver.snapshot_vars(&vars);
+        let cache_snapshot = self.subset_cache.clone();
+        self.subset_cache.clear();
+        let protocol_assumptions = self.class_protocol_assumptions.clone();
+        let deferred_vars = self.snapshot_witness_deferred_vars();
+        let coinductive_assumptions_used = self.coinductive_assumptions_used;
+        let result = self.is_subset_eq_with_context(got, want, &CallContext::outside());
+        self.solver.restore_vars(vars_snapshot);
+        self.subset_cache = cache_snapshot;
+        self.class_protocol_assumptions = protocol_assumptions;
+        self.restore_witness_deferred_vars(deferred_vars);
+        self.coinductive_assumptions_used = coinductive_assumptions_used;
+        result
     }
 
     pub(crate) fn make_forall_witness(
@@ -3177,7 +3209,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         res
     }
 
-    pub fn is_subset_eq_with_context(
+    fn is_subset_eq_with_context(
         &mut self,
         got: &Type,
         want: &Type,
@@ -3290,10 +3322,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     ) {
         let mut payloads = self.active_call_context.overload_witness_payloads.lock();
         payloads.insert(witness_hash, branch_captures);
-    }
-
-    pub(crate) fn active_argument_side(&self) -> ArgumentSide {
-        self.active_call_context.argument_side()
     }
 
     pub(crate) fn make_overload_witness(
