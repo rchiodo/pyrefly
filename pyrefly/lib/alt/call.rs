@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 use pyrefly_python::dunder;
-use pyrefly_types::callable_residual::CallableResidualKind;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::special_form::SpecialForm;
 use pyrefly_types::tensor_ops_registry::TensorOpsRegistry;
@@ -175,16 +174,6 @@ impl ConstructedInstance {
 }
 
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
-    fn type_contains_overload_callable_residual(&self, ty: &Type) -> bool {
-        ty.any(|inner| {
-            matches!(
-                inner,
-                Type::CallableResidual(residual)
-                    if matches!(&residual.kind, CallableResidualKind::Overload { .. })
-            )
-        })
-    }
-
     fn error_call_target(
         &self,
         errors: &ErrorCollector,
@@ -252,7 +241,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Type::BoundMethod(bm) => {
                 let bound_method = *bm;
-                if self.type_contains_overload_callable_residual(&bound_method.obj) {
+                if bound_method.obj.contains_overload_callable_residual() {
                     let mut is_subset = |got: &Type, want: &Type| self.is_subset_eq(got, want);
                     if let Some(bound) = self.bind_boundmethod(&bound_method, &mut is_subset) {
                         return self.as_call_target_impl(bound, quantified);

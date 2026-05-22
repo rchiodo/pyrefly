@@ -53,3 +53,16 @@ pub struct OverloadBranchProjection {
 pub struct CallableResidual {
     pub kind: CallableResidualKind,
 }
+
+impl Type {
+    /// Check if the type contains an overload callable residual marker anywhere.
+    pub fn contains_overload_callable_residual(&self) -> bool {
+        self.any(|inner| {
+            matches!(
+                inner,
+                Type::CallableResidual(residual)
+                    if matches!(&residual.kind, CallableResidualKind::Overload { .. })
+            )
+        })
+    }
+}
