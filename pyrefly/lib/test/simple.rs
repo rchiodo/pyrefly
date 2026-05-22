@@ -1230,6 +1230,36 @@ testcase!(
 );
 
 testcase!(
+    test_syntax_error_empty_decorator_slice,
+    r#"
+@:[ # E: Parse # E: Parse
+    "#,
+);
+
+testcase!(
+    test_syntax_error_empty_match_star,
+    r#"
+x = object()
+match x:
+    case [*]: # E: Parse
+        pass
+    "#,
+);
+
+testcase!(
+    test_syntax_error_empty_match_bindings,
+    r#"
+x = object()
+match x:
+    case as: # E: Parse
+        pass
+match x:
+    case {**}: # E: Parse
+        pass
+    "#,
+);
+
+testcase!(
     test_mangled_for,
     r#"
 # This has identical Identifiers in the AST, which seems like the right AST.

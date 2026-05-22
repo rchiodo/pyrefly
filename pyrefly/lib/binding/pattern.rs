@@ -103,9 +103,15 @@ impl<'a> BindingsBuilder<'a> {
                 // If there's no name for this pattern, refine the variable being matched
                 // If there is a new name, refine that instead
                 let original_subject = match_subject.clone();
-                let alias_name = p.name.as_ref().map(|name| name.id.clone());
+                let alias_name = p
+                    .name
+                    .as_ref()
+                    .filter(|name| !Ast::is_synthesized_empty_identifier(name))
+                    .map(|name| name.id.clone());
                 let mut subject = match_subject;
-                if let Some(name) = &p.name {
+                if let Some(name) = &p.name
+                    && !Ast::is_synthesized_empty_identifier(name)
+                {
                     self.bind_definition(name, Binding::Forward(subject_idx), FlowStyle::Other);
                     subject = MatchSubject::Single(NarrowingSubject::Name(name.id.clone()));
                 };
@@ -192,7 +198,9 @@ impl<'a> BindingsBuilder<'a> {
                     // Process each sub-pattern in the sequence pattern
                     match x {
                         Pattern::MatchStar(p) => {
-                            if let Some(name) = &p.name {
+                            if let Some(name) = &p.name
+                                && !Ast::is_synthesized_empty_identifier(name)
+                            {
                                 let position = UnpackedPosition::Slice(i, num_patterns - i - 1);
                                 self.bind_definition(
                                     name,
@@ -337,7 +345,9 @@ impl<'a> BindingsBuilder<'a> {
                             match_key_idx,
                         ))
                     });
-                if let Some(rest) = x.rest {
+                if let Some(rest) = x.rest
+                    && !Ast::is_synthesized_empty_identifier(&rest)
+                {
                     self.bind_definition(&rest, Binding::Forward(subject_idx), FlowStyle::Other);
                 }
                 narrow_ops
@@ -515,7 +525,9 @@ impl<'a> BindingsBuilder<'a> {
                 narrow_ops.unwrap_or_default()
             }
             Pattern::MatchStar(p) => {
-                if let Some(name) = &p.name {
+                if let Some(name) = &p.name
+                    && !Ast::is_synthesized_empty_identifier(name)
+                {
                     self.bind_definition(name, Binding::Forward(subject_idx), FlowStyle::Other);
                 }
                 NarrowOps::new()
