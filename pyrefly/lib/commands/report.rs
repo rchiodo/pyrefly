@@ -25,6 +25,7 @@ use pyrefly_python::nesting_context::NestingContext;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::callable::PropertyRole;
 use pyrefly_types::class::ClassDefIndex;
+use pyrefly_types::class::ClassType;
 use pyrefly_types::types::Type;
 use pyrefly_util::forgetter::Forgetter;
 use pyrefly_util::includes::Includes;
@@ -1711,6 +1712,60 @@ impl ReportArgs {
             .collect()
     }
 
+    /// `module.Cls.member` names for each public class, including MRO-inherited ones.
+    fn collect_class_members(
+        module: &Module,
+        bindings: &Bindings,
+        answers: &Answers,
+        transaction: &Transaction,
+        handle: &Handle,
+        tco_classes: &SmallSet<Idx<KeyClass>>,
+    ) -> SmallSet<String> {
+        let fqname_prefix = if module.name() != ModuleName::unknown() {
+            format!("{}.", module.name())
+        } else {
+            String::new()
+        };
+
+        let mut members = SmallSet::new();
+        for idx in bindings.keys::<KeyClass>() {
+            if tco_classes.contains(&idx) {
+                continue;
+            }
+            let BindingClass::ClassDef(binding) = bindings.get(idx) else {
+                continue;
+            };
+            if Self::has_function_ancestor(&binding.parent) {
+                continue;
+            }
+            let Some(cls) = answers.get_idx(idx).and_then(|r| r.0.clone()) else {
+                continue;
+            };
+
+            let qname = Self::class_qualified_name(module, &binding.parent, &binding.def.name);
+            let fqname = format!("{fqname_prefix}{qname}");
+
+            let mro = answers
+                .get_idx(bindings.key_to_idx(&KeyClassMro(cls.index())))
+                .unwrap_or_else(|| Arc::new(ClassMro::Cyclic));
+            let mro: &[_] = match mro.as_ref() {
+                ClassMro::Resolved(a) => a,
+                ClassMro::Cyclic => &[],
+            };
+            for obj in std::iter::once(&cls).chain(mro.iter().map(ClassType::class_object)) {
+                if obj.module_name().as_str() == "builtins" {
+                    continue;
+                }
+                if let Some(fields) = transaction.get_class_fields(handle, obj) {
+                    for name in fields.names() {
+                        members.insert(format!("{fqname}.{name}"));
+                    }
+                }
+            }
+        }
+        members
+    }
+
     /// When a `.pyi` stub only covers a subset of a `.py` file's public
     /// symbols, add the uncovered symbols from the `.py` so that completeness
     /// metrics reflect the full module interface.
@@ -1721,6 +1776,7 @@ impl ReportArgs {
         py_functions: Vec<Function>,
         py_variables: Vec<Variable>,
         py_classes: Vec<ReportClass>,
+        stub_class_members: &SmallSet<String>,
     ) {
         // Dedupe py-side symbols against all stub-side names regardless of kind, so a name defined
         // as a function or class in the stub isn't re-added as an untyped attr by a .py re-export.
@@ -1732,12 +1788,12 @@ impl ReportArgs {
             .cloned()
             .collect();
         for py_func in py_functions {
-            if !stub_names.contains(&py_func.name) {
+            if !stub_names.contains(&py_func.name) && !stub_class_members.contains(&py_func.name) {
                 stub_functions.push(py_func);
             }
         }
         for py_var in py_variables {
-            if !stub_names.contains(&py_var.name) {
+            if !stub_names.contains(&py_var.name) && !stub_class_members.contains(&py_var.name) {
                 stub_variables.push(py_var);
             }
         }
@@ -2027,6 +2083,14 @@ impl ReportArgs {
                         &py_answers,
                         &py_tco_classes,
                     ));
+                    let stub_class_members = Self::collect_class_members(
+                        &module,
+                        &bindings,
+                        &answers,
+                        transaction,
+                        handle,
+                        &tco_classes,
+                    );
                     Self::merge_uncovered_py_symbols(
                         &mut functions,
                         &mut variables,
@@ -2034,6 +2098,7 @@ impl ReportArgs {
                         py_functions,
                         py_variables,
                         py_classes,
+                        &stub_class_members,
                     );
                 }
 
@@ -2305,6 +2370,14 @@ mod tests {
         ));
 
         // Merge uncovered symbols from .py into the stub report
+        let stub_class_members = ReportArgs::collect_class_members(
+            &module,
+            &bindings,
+            &answers,
+            &pyi_txn,
+            &pyi_handle,
+            &tco_classes,
+        );
         ReportArgs::merge_uncovered_py_symbols(
             &mut functions,
             &mut variables,
@@ -2312,6 +2385,7 @@ mod tests {
             py_functions,
             py_variables,
             py_classes,
+            &stub_class_members,
         );
 
         ReportArgs::build_module_report(
@@ -2387,6 +2461,14 @@ mod tests {
     fn test_report_stub_reexport() {
         let report = build_stub_module_report("stub_reexport.pyi", "stub_reexport.py");
         compare_snapshot("stub_reexport.expected.json", &report);
+    }
+
+    /// gh-3519: don't double-count methods whose stub coverage is inherited.
+    #[test]
+    fn test_report_inherited_method_via_stub() {
+        let report =
+            build_stub_module_report("stub_inherited_methods.pyi", "stub_inherited_methods.py");
+        compare_snapshot("stub_inherited_methods.expected.json", &report);
     }
 
     /// Stubs-only packages: .py discovered via site-package-path, merged like co-located stubs.
