@@ -140,6 +140,9 @@ def compare(
     s: set[int],
     fs: frozenset[int],
     d: Decimal,
+    bo: bool,
+    c: complex,
+    mv: memoryview,
 ) -> None:
     x == y  # E: Comparison `==` between incompatible types `int` and `str`
     x != y  # E: Comparison `!=` between incompatible types `int` and `str`
@@ -148,6 +151,11 @@ def compare(
     x == d
     b == ba
     s == fs
+    x == bo
+    c == f
+    b == mv
+    bo == y  # E: Comparison `==` between incompatible types `bool` and `str`
+    mv == y  # E: Comparison `==` between incompatible types `memoryview` and `str`
 "#,
 );
 
