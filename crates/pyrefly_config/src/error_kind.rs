@@ -185,6 +185,8 @@ pub enum ErrorKind {
     /// do not recognize as always executing (we recognize constructors and some test setup
     /// methods).
     ImplicitlyDefinedAttribute,
+    /// Equality or inequality comparison between incompatible types.
+    IncompatibleComparison,
     /// Overload residual branch pruning left no valid branch for a solved type variable.
     IncompatibleOverloadResidual,
     /// An inconsistency between inherited fields or methods from multiple base classes.
@@ -450,6 +452,7 @@ impl ErrorKind {
             ErrorKind::ImplicitAnyTypeArgument => Severity::Ignore,
             ErrorKind::ImplicitImport => Severity::Warn,
             ErrorKind::ImplicitlyDefinedAttribute => Severity::Ignore,
+            ErrorKind::IncompatibleComparison => Severity::Ignore,
             ErrorKind::InvalidDecorator => Severity::Warn,
             ErrorKind::MissingOverrideDecorator => Severity::Ignore,
             ErrorKind::MissingSource => Severity::Ignore,
