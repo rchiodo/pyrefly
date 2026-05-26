@@ -986,7 +986,10 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Stmt::For(mut x) => {
-                if x.is_async && !self.scopes.is_in_async_def() {
+                if x.is_async
+                    && !self.scopes.is_in_async_def()
+                    && !self.module_info.path().is_notebook()
+                {
                     self.error(
                         x.range(),
                         ErrorKind::InvalidSyntax,
@@ -1167,7 +1170,10 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Stmt::With(x) => {
-                if x.is_async && !self.scopes.is_in_async_def() {
+                if x.is_async
+                    && !self.scopes.is_in_async_def()
+                    && !self.module_info.path().is_notebook()
+                {
                     self.error(
                         x.range(),
                         ErrorKind::InvalidSyntax,
