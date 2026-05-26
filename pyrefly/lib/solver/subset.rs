@@ -1243,7 +1243,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             if successful_branch_captures.is_empty() {
                 unreachable!("successful overload probe must produce a branch capture");
             }
-            self.persist_overload_witness_payload(
+            self.persist_overload_witness_captures(
                 witness.witness_hash(),
                 successful_branch_captures,
             );

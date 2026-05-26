@@ -130,7 +130,7 @@ pub(crate) struct OverloadBranchCapture {
     values: SmallMap<Var, Variable>,
 }
 
-type OverloadWitnessPayloadByHash = SmallMap<u64, Vec<OverloadBranchCapture>>;
+type OverloadWitnessCapturesByHash = SmallMap<u64, Vec<OverloadBranchCapture>>;
 
 /// Witness-keyed pruning decisions threaded through finishing.
 #[derive(Clone, Debug, Default)]
@@ -154,7 +154,7 @@ struct OverloadAllPrunedCause {
 }
 
 #[derive(Clone, Debug)]
-struct SolvedVarByPayload {
+struct SolvedVarInfo {
     quantified_name: Option<Name>,
     solved_ty: Type,
 }
@@ -1589,9 +1589,8 @@ impl Solver {
         }
     }
 
-    /// Materialize an overload residual type for a single var from payload-backed
-    /// branch captures.
-    fn materialize_overload_residual_from_payloads(
+    /// Materialize an overload residual type for a single var from branch captures.
+    fn materialize_overload_residual(
         &self,
         witness_hash: u64,
         var: Var,
@@ -1692,7 +1691,7 @@ impl Solver {
                 .all(|upper| is_subset(solved_ty, upper).is_ok())
     }
 
-    fn quantified_name_for_payload_var(
+    fn quantified_name_for_var(
         &self,
         branch_value: &Variable,
         existing_name: Option<Name>,
@@ -1707,13 +1706,13 @@ impl Solver {
             .unwrap_or_else(|| Name::new("unknown"))
     }
 
-    fn compute_overload_pruning_by_witness_from_payloads(
+    fn compute_overload_pruning_by_witness(
         &self,
-        solved_vars_by_payload: &SmallMap<Var, SolvedVarByPayload>,
-        overload_witness_payloads: &mut OverloadWitnessPayloadByHash,
+        solved_vars: &SmallMap<Var, SolvedVarInfo>,
+        overload_witness_captures: &mut OverloadWitnessCapturesByHash,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
     ) -> OverloadPruningByWitness {
-        overload_witness_payloads
+        overload_witness_captures
             .iter_mut()
             .filter_map(|(witness_hash, branch_captures)| {
                 let identity = OverloadResidualIdentity {
@@ -1721,7 +1720,7 @@ impl Solver {
                 };
                 let mut surviving_by_witness: Option<SmallSet<usize>> = None;
                 let mut solved_constraints = Vec::new();
-                for (var, solved_var) in solved_vars_by_payload {
+                for (var, solved_var) in solved_vars {
                     let mut surviving_for_solved_var = SmallSet::new();
                     let mut saw_var_in_witness = false;
                     for capture in branch_captures.iter_mut() {
@@ -1744,7 +1743,7 @@ impl Solver {
                         .iter()
                         .find_map(|capture| {
                             capture.values.get(var).map(|branch_value| {
-                                self.quantified_name_for_payload_var(
+                                self.quantified_name_for_var(
                                     branch_value,
                                     solved_var.quantified_name.clone(),
                                     *var,
@@ -1792,7 +1791,7 @@ impl Solver {
     /// gradual (`Any`-like) fallback.
     ///
     /// If `call_context` is provided, tracked fresh vars and overload witness
-    /// payloads are drained from it and included in the finishing set.
+    /// captures are drained from it and included in the finishing set.
     pub fn finish_quantified<Ans: LookupAnswer>(
         &self,
         vs: QuantifiedHandle,
@@ -1800,11 +1799,11 @@ impl Solver {
         type_order: TypeOrder<Ans>,
         call_context: Option<&CallContext>,
     ) -> Result<(), Vec1<TypeVarSpecializationError>> {
-        let (vs, mut overload_witness_payloads) = if let Some(cc) = call_context {
+        let (vs, mut overload_witness_captures) = if let Some(cc) = call_context {
             let tracked_fresh_vars = cc.take_deferred_quantified_vars();
-            let overload_witness_payloads = cc.take_overload_witness_payloads();
+            let overload_witness_captures = cc.take_overload_witness_captures();
             cc.mark_boundary_consumed_and_drained();
-            let payload_vars: SmallSet<Var> = overload_witness_payloads
+            let overload_capture_vars: SmallSet<Var> = overload_witness_captures
                 .values()
                 .flat_map(|branch_captures| branch_captures.iter())
                 .flat_map(|capture| capture.values.keys().copied())
@@ -1812,17 +1811,17 @@ impl Solver {
             let mut roots: SmallSet<Var> = vs.0.into_iter().collect();
             roots.extend(tracked_fresh_vars.0);
             // Solve boundaries explicitly own fresh quantified tracking. We finish
-            // the exact boundary set (explicit roots + fresh vars + payload vars),
+            // the exact boundary set (explicit roots + fresh vars + overload capture vars),
             // rather than using reachability expansion that can miss or overreach.
             let mut all_boundary_vars: Vec<Var> = roots.into_iter().collect();
-            // Payload-driven overload pruning must include solved vars even if they
+            // Overload pruning must include solved vars even if they
             // already collapsed to `Answer` before boundary finishing.
-            all_boundary_vars.extend(payload_vars);
+            all_boundary_vars.extend(overload_capture_vars);
             all_boundary_vars.sort_unstable();
             all_boundary_vars.dedup();
             (
                 QuantifiedHandle(all_boundary_vars),
-                overload_witness_payloads,
+                overload_witness_captures,
             )
         } else {
             (vs, SmallMap::new())
@@ -1835,7 +1834,7 @@ impl Solver {
             vs,
             infer_with_first_use,
             &mut |got, want| subset.is_subset_eq_probe_for_pruning(got, want),
-            &mut overload_witness_payloads,
+            &mut overload_witness_captures,
         )
     }
 
@@ -1862,10 +1861,10 @@ impl Solver {
         vs: QuantifiedHandle,
         infer_with_first_use: bool,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-        overload_witness_payloads: &mut OverloadWitnessPayloadByHash,
+        overload_witness_captures: &mut OverloadWitnessCapturesByHash,
     ) -> Result<(), Vec1<TypeVarSpecializationError>> {
         let mut err = Vec::new();
-        let has_payloads = !overload_witness_payloads.is_empty();
+        let has_overload_captures = !overload_witness_captures.is_empty();
         let mut solved_quantified_names_by_var: SmallMap<Var, Name> = SmallMap::new();
         let lock = self.variables.lock();
         for &v in &vs.0 {
@@ -1888,7 +1887,7 @@ impl Solver {
                     }
                     let original_bounds = mem::take(bounds);
                     if let Some(bound) = self.solve_bounds(original_bounds.clone()) {
-                        if has_payloads {
+                        if has_overload_captures {
                             solved_quantified_names_by_var.insert(v, q.name().clone());
                         }
                         *variable = Variable::Answer(bound);
@@ -1901,14 +1900,14 @@ impl Solver {
         }
         drop(lock);
 
-        let overload_pruning_by_witness = if has_payloads {
+        let overload_pruning_by_witness = if has_overload_captures {
             let lock = self.variables.lock();
-            let solved_vars_by_payload: SmallMap<Var, SolvedVarByPayload> =
+            let solved_vars: SmallMap<Var, SolvedVarInfo> =
                 vs.0.iter()
                     .filter_map(|&v| match &*lock.get(v) {
                         Variable::Answer(solved_ty) => Some((
                             v,
-                            SolvedVarByPayload {
+                            SolvedVarInfo {
                                 quantified_name: solved_quantified_names_by_var.get(&v).cloned(),
                                 solved_ty: solved_ty.clone(),
                             },
@@ -1917,9 +1916,9 @@ impl Solver {
                     })
                     .collect();
             drop(lock);
-            self.compute_overload_pruning_by_witness_from_payloads(
-                &solved_vars_by_payload,
-                overload_witness_payloads,
+            self.compute_overload_pruning_by_witness(
+                &solved_vars,
+                overload_witness_captures,
                 is_subset,
             )
         } else {
@@ -1967,7 +1966,7 @@ impl Solver {
         // should not produce an overload residual.
         let var_to_witness: SmallMap<Var, Option<u64>> = {
             let mut map: SmallMap<Var, Option<u64>> = SmallMap::new();
-            for (&wh, captures) in overload_witness_payloads.iter() {
+            for (&wh, captures) in overload_witness_captures.iter() {
                 for capture in captures {
                     for &v in capture.values.keys() {
                         match map.entry(v) {
@@ -2052,16 +2051,16 @@ impl Solver {
                     Variable::Answer(Type::never())
                 } else if let Some(witness_hash) = witness_hash {
                     let captures =
-                        overload_witness_payloads
+                        overload_witness_captures
                             .get(&witness_hash)
                             .unwrap_or_else(|| {
-                                unreachable!("payload materialization requires witness captures")
+                                unreachable!("overload materialization requires witness captures")
                             });
                     let target_vars: SmallSet<Var> = captures
                         .iter()
                         .flat_map(|c| c.values.keys().copied())
                         .collect();
-                    let ty = self.materialize_overload_residual_from_payloads(
+                    let ty = self.materialize_overload_residual(
                         witness_hash,
                         v,
                         captures,
@@ -2124,7 +2123,7 @@ impl Solver {
     pub fn generalize_class_targs(
         &self,
         targs: &mut TArgs,
-        vars_with_payload_residuals: &SmallSet<Var>,
+        vars_with_overload_residuals: &SmallSet<Var>,
     ) {
         // Expanding targs might require the variables lock, so do that first.
         targs.as_mut().iter_mut().for_each(|t| self.expand_mut(t));
@@ -2139,8 +2138,8 @@ impl Solver {
                 } = &mut *e
                     && *q == *param
                 {
-                    let has_payload_residuals = vars_with_payload_residuals.contains(v);
-                    if bounds.is_empty() && residuals.is_empty() && !has_payload_residuals {
+                    let has_overload_residuals = vars_with_overload_residuals.contains(v);
+                    if bounds.is_empty() && residuals.is_empty() && !has_overload_residuals {
                         *t = param.clone().to_type(&self.heap);
                     } else if !bounds.is_empty() {
                         // If the variable has bounds, finalize its type now.
@@ -2749,9 +2748,9 @@ pub struct CallContext {
     witness: Option<ResidualWitnessContext>,
     argument_side: ArgumentSide,
     deferred_quantified_vars: Arc<Mutex<SmallSet<Var>>>,
-    /// Invariant: payload entries are scoped to this call-context lineage and
+    /// Invariant: capture entries are scoped to this call-context lineage and
     /// must not leak across `with_outside_context` boundaries.
-    overload_witness_payloads: Arc<Mutex<OverloadWitnessPayloadByHash>>,
+    overload_witness_captures: Arc<Mutex<OverloadWitnessCapturesByHash>>,
     /// Whether this context must be consumed at a solve boundary.
     require_boundary_consumption: Arc<AtomicBool>,
     /// Whether deferred state from this context lineage was consumed/drained.
@@ -2764,7 +2763,7 @@ impl Default for CallContext {
             witness: None,
             argument_side: ArgumentSide::default(),
             deferred_quantified_vars: Arc::new(Mutex::new(SmallSet::new())),
-            overload_witness_payloads: Arc::new(Mutex::new(SmallMap::new())),
+            overload_witness_captures: Arc::new(Mutex::new(SmallMap::new())),
             require_boundary_consumption: Arc::new(AtomicBool::new(false)),
             boundary_consumed_and_drained: Arc::new(AtomicBool::new(false)),
         }
@@ -2800,7 +2799,7 @@ impl CallContext {
         // this scope must still be finished when the outer boundary drains.
         self.witness = Default::default();
         self.argument_side = Default::default();
-        self.overload_witness_payloads = Default::default();
+        self.overload_witness_captures = Default::default();
         self
     }
 
@@ -2858,16 +2857,16 @@ impl CallContext {
         )
     }
 
-    fn take_overload_witness_payloads(&self) -> OverloadWitnessPayloadByHash {
-        let mut overload_witness_payloads = self.overload_witness_payloads.lock();
-        mem::take(&mut *overload_witness_payloads)
+    fn take_overload_witness_captures(&self) -> OverloadWitnessCapturesByHash {
+        let mut overload_witness_captures = self.overload_witness_captures.lock();
+        mem::take(&mut *overload_witness_captures)
     }
 
-    /// Returns the set of vars that appear in overload witness payload captures
-    /// without draining the payloads.
-    pub fn payload_captured_vars(&self) -> SmallSet<Var> {
-        let payloads = self.overload_witness_payloads.lock();
-        payloads
+    /// Returns the set of vars that appear in overload witness captures
+    /// without draining them.
+    pub fn overload_captured_vars(&self) -> SmallSet<Var> {
+        let captures = self.overload_witness_captures.lock();
+        captures
             .values()
             .flat_map(|captures| captures.iter())
             .flat_map(|capture| capture.values.keys().copied())
@@ -2901,8 +2900,8 @@ impl Drop for CallContext {
                 "CallContext dropped with deferred quantified vars still pending",
             );
             assert!(
-                self.overload_witness_payloads.lock().is_empty(),
-                "CallContext dropped with overload witness payloads still pending",
+                self.overload_witness_captures.lock().is_empty(),
+                "CallContext dropped with overload witness captures still pending",
             );
         }
     }
@@ -3075,16 +3074,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         self.witness_deferred_vars.shift_remove(&witness_hash)
     }
 
-    /// Persist overload probe captures in call-context payload storage.
-    /// Finishing consumes these payloads as the authoritative pruning source
-    /// when present, with variable-backed residuals as fallback.
-    pub(crate) fn persist_overload_witness_payload(
+    /// Persist overload probe captures in the call context.
+    /// Finishing consumes these captures as the authoritative pruning source.
+    pub(crate) fn persist_overload_witness_captures(
         &self,
         witness_hash: u64,
         branch_captures: Vec<OverloadBranchCapture>,
     ) {
-        let mut payloads = self.active_call_context.overload_witness_payloads.lock();
-        payloads.insert(witness_hash, branch_captures);
+        let mut captures = self.active_call_context.overload_witness_captures.lock();
+        captures.insert(witness_hash, branch_captures);
     }
 
     pub(crate) fn make_overload_witness(
