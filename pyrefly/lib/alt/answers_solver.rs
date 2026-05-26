@@ -2118,7 +2118,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Arc::unwrap_or_clone avoids cloning since the refcount is 1 here.
         let raw_answer = if K::EXPORTED {
             let mut forced = Arc::unwrap_or_clone(raw_answer);
-            forced.visit_mut(&mut |x| self.current.solver().deep_force_mut(x));
+            forced.visit_mut(&mut |x| self.current.solver().force_mut(x));
             Arc::new(forced)
         } else {
             raw_answer
@@ -2221,7 +2221,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // Deep-force to resolve all type variables, matching the
                 // invariant that all iterative answers are deep-forced.
                 let mut forced = Arc::unwrap_or_clone(prior_answer);
-                forced.visit_mut(&mut |x| self.current.solver().deep_force_mut(x));
+                forced.visit_mut(&mut |x| self.current.solver().force_mut(x));
                 let answer = Arc::new(forced);
 
                 // Type-erase for storage. The concrete type inside the outer
@@ -2301,7 +2301,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // for convergence comparisons: without forcing, structurally identical
         // answers can appear different due to unresolved Var IDs.
         let mut forced = Arc::unwrap_or_clone(answer);
-        forced.visit_mut(&mut |x| self.current.solver().deep_force_mut(x));
+        forced.visit_mut(&mut |x| self.current.solver().force_mut(x));
         let answer = Arc::new(forced);
 
         // Type-erase the answer for storage in iteration state.

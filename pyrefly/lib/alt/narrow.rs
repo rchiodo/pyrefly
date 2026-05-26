@@ -1869,7 +1869,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub(crate) fn with_type_for_exhaustiveness_check(&self, info: Arc<TypeInfo>) -> TypeInfo {
         info.arc_clone().map_ty(|mut ty| {
-            self.expand_vars_mut(&mut ty);
+            self.expand_mut(&mut ty);
             match ty {
                 Type::SelfType(cls) => Type::ClassType(cls),
                 ty => ty,
@@ -1969,7 +1969,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.get_facet_chain_type(&narrowed, &resolved_chain, *subject_range)
             }
         };
-        self.expand_vars_mut(&mut remaining_ty);
+        self.expand_mut(&mut remaining_ty);
         // If the result is `Never` then the cases were exhaustive
         if remaining_ty.is_never() || remaining_ty.is_any() {
             return;
@@ -2040,7 +2040,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             }
         };
-        self.expand_vars_mut(&mut narrowed_ty);
+        self.expand_mut(&mut narrowed_ty);
         if !narrowed_ty.is_never() && !has_never_trigger_facet {
             return;
         }
@@ -2113,7 +2113,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     return false;
                 };
                 let mut facet_ty = self.get_facet_chain_type(type_info, &resolved_chain, range);
-                self.expand_vars_mut(&mut facet_ty);
+                self.expand_mut(&mut facet_ty);
                 facet_ty.is_never()
             }
             NarrowOp::And(ops) => ops

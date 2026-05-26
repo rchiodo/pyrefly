@@ -775,7 +775,7 @@ impl Solver {
     /// Finish the type returned from a function call. This entails expanding solved variables,
     /// erasing unsolved variables without defaults from unions, and canonicalizing dimension
     /// expressions so that all-literal SizeExpr trees fold to single literals.
-    pub fn finish_function_return(&self, mut t: Type) -> Type {
+    pub fn for_return_boundary(&self, mut t: Type) -> Type {
         self.resolve_vars(&mut t, VarExpansionPolicy::Expand, &VarRecurser::new());
         t = t.finalize_callable_residuals_at_boundary(&self.heap, true);
         self.erase_unsolved_variables(&mut t);
@@ -788,13 +788,13 @@ impl Solver {
     /// Variables that have not yet been bound will remain as Var.
     ///
     /// In addition, if the type exceeds a large depth, it will be replaced with `Any`.
-    pub fn expand_vars(&self, mut t: Type) -> Type {
-        self.expand_vars_mut(&mut t);
+    pub fn expand(&self, mut t: Type) -> Type {
+        self.expand_mut(&mut t);
         t
     }
 
-    /// Like `expand_vars`, but when you have a `&mut`.
-    pub fn expand_vars_mut(&self, t: &mut Type) {
+    /// Like `expand`, but when you have a `&mut`.
+    pub fn expand_mut(&self, t: &mut Type) {
         self.resolve_vars(t, VarExpansionPolicy::Expand, &VarRecurser::new());
         // After we substitute bound variables, we may be able to simplify some types
         self.simplify_mut(t);
@@ -947,7 +947,7 @@ impl Solver {
 
     /// Public wrapper to expand a dimension type by resolving bound Vars.
     /// Used by subset checking to expand Vars before comparing dimension expressions.
-    pub fn expand_dimension(&self, dim_ty: &mut Type) {
+    pub fn expand_with_bounds(&self, dim_ty: &mut Type) {
         self.resolve_vars(
             dim_ty,
             VarExpansionPolicy::ExpandWithBounds,
@@ -987,8 +987,8 @@ impl Solver {
         }
     }
 
-    /// A version of `deep_force` that works in-place on a `Type`.
-    pub fn deep_force_mut(&self, t: &mut Type) {
+    /// A version of `force` that works in-place on a `Type`.
+    pub fn force_mut(&self, t: &mut Type) {
         self.resolve_vars(t, VarExpansionPolicy::Force, &VarRecurser::new());
         // After forcing, we might be able to simplify some unions
         self.simplify_mut(t);
@@ -1182,8 +1182,8 @@ impl Solver {
     /// Guarantees there will be no `Var` in the result.
     ///
     /// In addition, if the type exceeds a large depth, it will be replaced with `Any`.
-    pub fn deep_force(&self, mut t: Type) -> Type {
-        self.deep_force_mut(&mut t);
+    pub fn force(&self, mut t: Type) -> Type {
+        self.force_mut(&mut t);
         t
     }
 
@@ -2318,10 +2318,7 @@ impl Solver {
     /// instantiation, but __init__ will.
     pub fn generalize_class_targs(&self, targs: &mut TArgs) {
         // Expanding targs might require the variables lock, so do that first.
-        targs
-            .as_mut()
-            .iter_mut()
-            .for_each(|t| self.expand_vars_mut(t));
+        targs.as_mut().iter_mut().for_each(|t| self.expand_mut(t));
         let lock = self.variables.lock();
         targs.iter_paired_mut().for_each(|(param, t)| {
             if let Type::Var(v) = t {

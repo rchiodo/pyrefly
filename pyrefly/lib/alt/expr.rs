@@ -1599,7 +1599,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // for the next one. Most useful for expressions like `optional_list or []`.
             let hint = hint.or_else(|| hint_acc.as_ref().map(HintRef::soft));
             let mut t = self.expr_infer_with_hint(value, hint, errors);
-            self.expand_vars_mut(&mut t);
+            self.expand_mut(&mut t);
             // If this is not the last entry, we have to make a type-dependent decision and also narrow the
             // result; both operations require us to force `Var` first or they become unpredictable.
             if i < last_index {

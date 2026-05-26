@@ -51,8 +51,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let expr_b = &args[1];
             let a = self
                 .solver()
-                .deep_force(self.expr_infer_with_hint(expr_a, hint, errors));
-            let b = self.solver().deep_force(self.expr_untype(
+                .force(self.expr_infer_with_hint(expr_a, hint, errors));
+            let b = self.solver().force(self.expr_untype(
                 expr_b,
                 TypeFormContext::FunctionArgument,
                 errors,

@@ -1863,7 +1863,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     |type_info| type_info.arc_clone_ty(),
                 )
         } else {
-            self.expand_vars_mut(&mut callee_ty);
+            self.expand_mut(&mut callee_ty);
 
             let args;
             let kws;

@@ -796,7 +796,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             // Resolve Vars inside Unbounded tuples and re-dispatch.
             (Tuple::Unbounded(inner), Tuple::Concrete(_)) if let Type::Var(v) = &**inner => {
-                let resolved = self.solver.expand_vars(self.solver.expand_unwrap(*v));
+                let resolved = self.solver.expand(self.solver.expand_unwrap(*v));
                 if matches!(resolved, Type::Var(_)) {
                     Err(SubsetError::Other)
                 } else {
@@ -1558,8 +1558,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 // Expand any bound Vars in both expressions
                 let mut got_expanded = Type::Size(s1.clone());
                 let mut want_expanded = Type::Size(s2.clone());
-                self.solver.expand_dimension(&mut got_expanded);
-                self.solver.expand_dimension(&mut want_expanded);
+                self.solver.expand_with_bounds(&mut got_expanded);
+                self.solver.expand_with_bounds(&mut want_expanded);
 
                 // Check if the expanded "want" side contains unbound Vars in nested positions
                 if contains_var_in_type(&want_expanded) {
@@ -1588,7 +1588,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // A SizeExpr like (A + A) // 2 might simplify to A (a Quantified)
             (Type::Size(s), Type::Quantified(q)) if matches!(q.kind, QuantifiedKind::TypeVar) => {
                 let mut got_expanded = Type::Size(s.clone());
-                self.solver.expand_dimension(&mut got_expanded);
+                self.solver.expand_with_bounds(&mut got_expanded);
                 let got_canonical = got_expanded.canonicalize();
                 let want_canonical = Type::Quantified(q.clone());
                 if got_canonical == want_canonical {
@@ -1605,7 +1605,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // Quantified <: Size - expand Size, canonicalize, and compare
             (Type::Quantified(q), Type::Size(s)) if matches!(q.kind, QuantifiedKind::TypeVar) => {
                 let mut want_expanded = Type::Size(s.clone());
-                self.solver.expand_dimension(&mut want_expanded);
+                self.solver.expand_with_bounds(&mut want_expanded);
                 let got_canonical = Type::Quantified(q.clone());
                 let want_canonical = want_expanded.canonicalize();
                 if got_canonical == want_canonical {

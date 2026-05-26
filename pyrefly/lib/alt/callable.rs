@@ -516,7 +516,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         match x {
             CallArg::Star(x, _) => {
                 let mut ty = x.infer(self, errors);
-                self.expand_vars_mut(&mut ty);
+                self.expand_mut(&mut ty);
                 // This can either be `P.args` or `tuple[Any, ...]`
                 matches!(&ty, Type::Args(q2) if &**q2 == q)
                     || self.is_subset_eq(&ty, &self.heap.mk_unbounded_tuple(self.heap.mk_never()))
@@ -532,7 +532,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> bool {
         let mut ty = x.value.infer(self, errors);
-        self.expand_vars_mut(&mut ty);
+        self.expand_mut(&mut ty);
         // This can either be `P.kwargs` or `dict[str, Any]`
         matches!(&ty, Type::Kwargs(q2) if &**q2 == q)
             || self.is_subset_eq(
@@ -1489,7 +1489,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 HashMap::new()
             }
             Params::ParamSpec(concatenate, p) => {
-                let p = self.solver().expand_vars(p);
+                let p = self.solver().expand(p);
                 match p {
                     Type::ParamSpecValue(params) => self.callable_infer_params(
                         callable_name,
@@ -1616,7 +1616,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         (
-            self.solver().finish_function_return(ret),
+            self.solver().for_return_boundary(ret),
             errors,
             expected_types,
         )

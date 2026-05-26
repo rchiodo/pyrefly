@@ -2067,7 +2067,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         type_info.visit_mut(&mut |ty| {
             self.pin_all_placeholder_types(ty, true, range, errors);
-            self.expand_vars_mut(ty);
+            self.expand_mut(ty);
         });
         Arc::new(type_info)
     }
@@ -2151,9 +2151,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn expand_vars_mut(&self, ty: &mut Type) {
+    pub fn expand_mut(&self, ty: &mut Type) {
         // Replace any solved recursive variables with their answers.
-        self.solver().expand_vars_mut(ty);
+        self.solver().expand_mut(ty);
     }
 
     fn check_del_typed_dict_field(
@@ -3172,7 +3172,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 None => narrowed.ty().clone(),
             };
-            self.expand_vars_mut(&mut remaining_ty);
+            self.expand_mut(&mut remaining_ty);
             if remaining_ty.is_never() {
                 return self.heap.mk_never();
             }
@@ -4703,7 +4703,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let mut value_ty = self.expr_infer(&item.value, &swallower);
                 // Swallow errors when pinning inner placeholder types.
                 self.pin_all_placeholder_types(&mut value_ty, true, item.value.range(), &swallower);
-                self.expand_vars_mut(&mut value_ty);
+                self.expand_mut(&mut value_ty);
                 info.record_key_completion(&chain, Some(value_ty.clone()));
                 self.populate_dict_literal_facets(info, prefix, &item.value);
             }
@@ -5042,7 +5042,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) {
         // Expand the type, in case unexpanded `Vars` are hiding further `Var`s that
         // need to be pinned.
-        self.solver().expand_vars_mut(ty);
+        self.solver().expand_mut(ty);
         let vars = ty.collect_all_vars();
         // Pin all relevant vars and collect ranges of PartialContained vars
         for var in vars {
@@ -5331,7 +5331,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn solve_decorator(&self, x: &BindingDecorator, errors: &ErrorCollector) -> Arc<Decorator> {
         let mut ty = self.expr_infer(&x.expr, errors);
         self.pin_all_placeholder_types(&mut ty, true, x.expr.range(), errors);
-        self.expand_vars_mut(&mut ty);
+        self.expand_mut(&mut ty);
         let deprecation = parse_deprecation(&x.expr);
         Arc::new(Decorator { ty, deprecation })
     }

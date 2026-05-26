@@ -1771,7 +1771,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         //
         // TODO(stroxler): Ideally we would implement some simple heuristics, similar to
         // first-use based inference we use with assignments, to get more useful types here.
-        let ty = self.solver().deep_force(ty);
+        let ty = self.solver().force(ty);
 
         // Create the resulting field and check for override inconsistencies before returning
         let is_abstract = ty.is_abstract_method();
@@ -1971,7 +1971,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             (None, _) => self.expr_infer(x, errors),
         };
-        self.expand_vars_mut(&mut ty);
+        self.expand_mut(&mut ty);
         ty
     }
 
@@ -2610,7 +2610,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     fn normalize_attr_ty(&self, mut ty: Type) -> Type {
-        self.expand_vars_mut(&mut ty);
+        self.expand_mut(&mut ty);
         ty.finalize_callable_residuals_at_boundary(self.heap, false)
     }
 
@@ -2689,7 +2689,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ty = self.wrap_with_quantified(ty, quantified);
                 }
                 let mut obj = instance.to_type(self.heap);
-                self.expand_vars_mut(&mut obj);
+                self.expand_mut(&mut obj);
                 ClassAttribute::read_write(make_bound_method(self.heap, obj, ty).unwrap_or_else(
                     |ty| {
                         make_bound_classmethod(self.heap, &instance.to_class_base(), ty)
