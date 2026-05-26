@@ -1769,7 +1769,7 @@ impl<'a> Transaction<'a> {
     /// Returns `Err(DefinitionNotFound)` if the attribute doesn't exist
     /// on any branch of a union type. The returned `Vec1` is guaranteed
     /// non-empty.
-    fn find_attribute_definition_for_base_type(
+    pub(crate) fn find_attribute_definition_for_base_type(
         &self,
         handle: &Handle,
         preference: FindPreference,
