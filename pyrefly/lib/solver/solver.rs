@@ -2316,7 +2316,11 @@ impl Solver {
     /// Solve each fresh var created in freshen_class_targs. If we still have a Var, we do not
     /// yet have an instantiation, but one might come later. E.g., __new__ did not provide an
     /// instantiation, but __init__ will.
-    pub fn generalize_class_targs(&self, targs: &mut TArgs) {
+    pub fn generalize_class_targs(
+        &self,
+        targs: &mut TArgs,
+        vars_with_payload_residuals: &SmallSet<Var>,
+    ) {
         // Expanding targs might require the variables lock, so do that first.
         targs.as_mut().iter_mut().for_each(|t| self.expand_mut(t));
         let lock = self.variables.lock();
@@ -2332,7 +2336,12 @@ impl Solver {
                 } = &mut *e
                     && *q == *param
                 {
-                    if bounds.is_empty() && residuals.is_empty() && overload_residuals.is_empty() {
+                    let has_payload_residuals = vars_with_payload_residuals.contains(v);
+                    if bounds.is_empty()
+                        && residuals.is_empty()
+                        && overload_residuals.is_empty()
+                        && !has_payload_residuals
+                    {
                         *t = param.clone().to_type(&self.heap);
                     } else if !bounds.is_empty() {
                         // If the variable has bounds, finalize its type now.
@@ -3053,6 +3062,17 @@ impl CallContext {
     fn take_overload_witness_payloads(&self) -> OverloadWitnessPayloadByHash {
         let mut overload_witness_payloads = self.overload_witness_payloads.lock();
         mem::take(&mut *overload_witness_payloads)
+    }
+
+    /// Returns the set of vars that appear in overload witness payload captures
+    /// without draining the payloads.
+    pub fn payload_captured_vars(&self) -> SmallSet<Var> {
+        let payloads = self.overload_witness_payloads.lock();
+        payloads
+            .values()
+            .flat_map(|captures| captures.iter())
+            .flat_map(|capture| capture.values.keys().copied())
+            .collect()
     }
 
     fn mark_boundary_consumed_and_drained(&self) {

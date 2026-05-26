@@ -1571,7 +1571,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         if let Some(targs) = ctor_targs {
-            self.solver().generalize_class_targs(targs);
+            let payload_vars = call_context.payload_captured_vars();
+            self.solver().generalize_class_targs(targs, &payload_vars);
         }
         let mut errors = self
             .solver()

@@ -28,6 +28,7 @@ use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
+use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
 
 use crate::alt::answers::LookupAnswer;
@@ -842,7 +843,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .freshen_class_targs(cls.targs_mut(), self.uniques);
 
             let matched_hint = self.is_subset_eq(&self.heap.mk_class_type(cls.clone()), hint);
-            self.solver().generalize_class_targs(cls.targs_mut());
+            self.solver()
+                .generalize_class_targs(cls.targs_mut(), &SmallSet::new());
             (vs, matched_hint)
         } else {
             (QuantifiedHandle::empty(), false)
@@ -1166,7 +1168,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .solver()
                 .freshen_class_targs(typed_dict.targs_mut(), self.uniques);
             let matched_hint = self.is_subset_eq(&typed_dict.clone().to_type(self.heap), hint);
-            self.solver().generalize_class_targs(typed_dict.targs_mut());
+            self.solver()
+                .generalize_class_targs(typed_dict.targs_mut(), &SmallSet::new());
             (vs, matched_hint)
         } else {
             (QuantifiedHandle::empty(), false)
