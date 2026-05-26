@@ -3252,13 +3252,6 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     /// - if `f[T](x: T) -> T: ...`, then `f(1)` gets solved to `int`
     /// - if `f(x: Literal[0]): ...`, then `x = []; f(x[0])` results in `x: list[Literal[0]]`
     fn is_subset_eq_var(&mut self, got: &Type, want: &Type) -> Result<(), SubsetError> {
-        if let Some(witness) = self.active_call_context.residual_witness() {
-            let _ = (
-                &witness.identity,
-                &witness.origin_vars,
-                &witness.deferred_vars,
-            );
-        }
         match (got, want) {
             _ if got == want => Ok(()),
             (Type::Var(v1), Type::Var(v2)) => {
