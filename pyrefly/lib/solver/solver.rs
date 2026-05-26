@@ -124,7 +124,6 @@ struct ResidualIdentity {
 }
 
 /// Full per-branch capture used transiently during overload probing.
-/// Decomposed into per-var results by `record_overload_residuals_for_witness`.
 #[derive(Clone, Debug)]
 pub(crate) struct OverloadBranchCapture {
     branch_index: usize,
@@ -132,26 +131,6 @@ pub(crate) struct OverloadBranchCapture {
 }
 
 type OverloadWitnessPayloadByHash = SmallMap<u64, Vec<OverloadBranchCapture>>;
-
-/// Shared context for an overload capture event. Arc'd to avoid duplication across vars.
-#[derive(Clone, Debug)]
-struct OverloadResidualWitness {
-    identity: ResidualIdentity,
-}
-
-/// Per-var, per-branch capture at solver level.
-#[derive(Clone, Debug)]
-struct OverloadVarBranchCapture {
-    branch_index: usize,
-    value: Variable,
-}
-
-/// Per-var overload residual, stored on `Variable::Quantified`.
-#[derive(Clone, Debug)]
-struct OverloadResidualForVar {
-    witness: Arc<OverloadResidualWitness>,
-    branches: Vec<OverloadVarBranchCapture>,
-}
 
 /// Witness-keyed pruning decisions threaded through finishing.
 #[derive(Clone, Debug, Default)]
@@ -172,18 +151,6 @@ struct OverloadSolvedConstraint {
 #[derive(Clone, Debug)]
 struct OverloadAllPrunedCause {
     solved_constraints: Vec<OverloadSolvedConstraint>,
-}
-
-/// Snapshot of a solved quantified var after the bounds-first pass in
-/// `finish_quantified`.
-///
-/// Used by witness-level overload pruning: eliminate branches whose
-/// branch-implied bounds are incompatible with the solved type.
-#[derive(Clone, Debug)]
-struct SolvedVarWithResiduals {
-    quantified_name: Name,
-    solved_ty: Type,
-    overload_residuals: Vec<OverloadResidualForVar>,
 }
 
 #[derive(Clone, Debug)]
@@ -218,8 +185,6 @@ enum Variable {
         /// Residual candidates captured during subset checks.
         /// Kept separate from concrete bounds to avoid accidental coupling.
         residuals: Vec<ResidualIdentity>,
-        /// Overload residual candidates captured during overload dispatch.
-        overload_residuals: Vec<OverloadResidualForVar>,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
     Recursive,
@@ -253,7 +218,6 @@ impl Display for Variable {
                 quantified: q,
                 bounds: _,
                 residuals: _,
-                overload_residuals: _,
             } => {
                 let label = if matches!(self, Variable::PartialQuantified(_)) {
                     "PartialQuantified"
@@ -1238,7 +1202,6 @@ impl Solver {
                     quantified: (*q).clone(),
                     bounds: Bounds::new(),
                     residuals: Vec::new(),
-                    overload_residuals: Vec::new(),
                 },
             );
         }
@@ -1590,50 +1553,6 @@ impl Solver {
         }
     }
 
-    /// Record per-var overload residuals from full branch captures.
-    /// Decomposes each branch's full capture into per-var entries.
-    #[expect(dead_code, reason = "removed in the next commit in this stack")]
-    pub(crate) fn record_overload_residuals_for_witness(
-        &self,
-        witness: &ResidualWitnessContext,
-        branch_captures: Vec<OverloadBranchCapture>,
-    ) {
-        let shared_witness = Arc::new(OverloadResidualWitness {
-            identity: witness.identity.clone(),
-        });
-        let lock = self.variables.lock();
-        for &var in witness
-            .origin_vars
-            .iter()
-            .chain(witness.deferred_vars.iter())
-        {
-            let mut variable = lock.get_mut(var);
-            if let Variable::Quantified {
-                overload_residuals, ..
-            } = &mut *variable
-            {
-                let branches: Vec<OverloadVarBranchCapture> = branch_captures
-                    .iter()
-                    .filter_map(|capture| {
-                        capture
-                            .values
-                            .get(&var)
-                            .map(|value| OverloadVarBranchCapture {
-                                branch_index: capture.branch_index,
-                                value: value.clone(),
-                            })
-                    })
-                    .collect();
-                if !branches.is_empty() {
-                    overload_residuals.push(OverloadResidualForVar {
-                        witness: shared_witness.clone(),
-                        branches,
-                    });
-                }
-            }
-        }
-    }
-
     fn merge_residual_candidates(
         left: &mut Vec<ResidualIdentity>,
         right: &mut Vec<ResidualIdentity>,
@@ -1646,74 +1565,6 @@ impl Solver {
         *right = left.clone();
     }
 
-    #[expect(dead_code, reason = "removed in the next commit in this stack")]
-    fn materialize_overload_residual_type(
-        &self,
-        residual: &OverloadResidualForVar,
-        overload_pruning_by_witness: &OverloadPruningByWitness,
-    ) -> Type {
-        let identity = OverloadResidualIdentity {
-            witness_hash: residual.witness.identity.witness_hash,
-        };
-        let pruning_decision = overload_pruning_by_witness.get(&identity);
-        if pruning_decision.is_some_and(|decision| decision.all_pruned) {
-            // All candidate branches were pruned for this witness.
-            // Return Never immediately and avoid any branch materialization work.
-            return Type::never();
-        }
-        let surviving_branch_indices = pruning_decision
-            .map(|decision| decision.surviving_branch_indices.clone())
-            .unwrap_or_else(|| {
-                residual
-                    .branches
-                    .iter()
-                    .map(|branch| branch.branch_index)
-                    .collect()
-            });
-        let surviving_branches = residual
-            .branches
-            .iter()
-            .filter(|branch| surviving_branch_indices.contains(&branch.branch_index))
-            .map(|branch| {
-                let mut ty = self.materialize_overload_residual_branch_value(&branch.value);
-                ty.flatten_overload_residual_markers(&self.heap);
-                OverloadBranchProjection {
-                    branch_index: branch.branch_index,
-                    ty,
-                }
-            })
-            .collect::<Vec<_>>();
-        match surviving_branches.len() {
-            0 => {
-                unreachable!(
-                    "overload residual pruning produced no surviving branches without all_pruned"
-                )
-            }
-            1 => {
-                surviving_branches
-                    .into_iter()
-                    .next()
-                    .expect("single surviving overload branch must exist")
-                    .ty
-            }
-            _ => {
-                let first_ty = surviving_branches
-                    .first()
-                    .expect("multiple surviving overload branches must have first branch")
-                    .ty
-                    .clone();
-                if surviving_branches
-                    .iter()
-                    .all(|branch| branch.ty == first_ty)
-                {
-                    first_ty
-                } else {
-                    Type::callable_residual_overload(identity, surviving_branches)
-                }
-            }
-        }
-    }
-
     fn materialize_overload_residual_branch_value(&self, value: &Variable) -> Type {
         match value {
             Variable::Answer(ty) | Variable::ResidualAnswer { ty, .. } => ty.clone(),
@@ -1721,7 +1572,6 @@ impl Solver {
                 quantified,
                 bounds,
                 residuals,
-                ..
             } => {
                 if let Some(bound) = self.solve_bounds(bounds.clone()) {
                     return bound;
@@ -1855,115 +1705,6 @@ impl Solver {
                 _ => None,
             })
             .unwrap_or_else(|| Name::new("unknown"))
-    }
-
-    #[expect(dead_code, reason = "removed in the next commit in this stack")]
-    fn compute_overload_pruning_by_witness(
-        &self,
-        solved_vars_with_residuals: &mut [SolvedVarWithResiduals],
-        is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-    ) -> OverloadPruningByWitness {
-        let mut all_branch_indices_by_witness: HashMap<OverloadResidualIdentity, SmallSet<usize>> =
-            HashMap::new();
-        let mut surviving_branch_indices_by_witness: HashMap<
-            OverloadResidualIdentity,
-            SmallSet<usize>,
-        > = HashMap::new();
-        let mut solved_constraints_by_witness: HashMap<
-            OverloadResidualIdentity,
-            Vec<OverloadSolvedConstraint>,
-        > = HashMap::new();
-
-        for solved_var in solved_vars_with_residuals {
-            let mut surviving_per_witness_for_solved_var: HashMap<
-                OverloadResidualIdentity,
-                SmallSet<usize>,
-            > = HashMap::new();
-            for residual in &mut solved_var.overload_residuals {
-                let identity = OverloadResidualIdentity {
-                    witness_hash: residual.witness.identity.witness_hash,
-                };
-                let all_branch_indices = all_branch_indices_by_witness
-                    .entry(identity.clone())
-                    .or_default();
-                let solved_constraints_for_witness = solved_constraints_by_witness
-                    .entry(identity.clone())
-                    .or_default();
-                if !solved_constraints_for_witness
-                    .iter()
-                    .any(|constraint| constraint.quantified_name == solved_var.quantified_name)
-                {
-                    solved_constraints_for_witness.push(OverloadSolvedConstraint {
-                        quantified_name: solved_var.quantified_name.clone(),
-                        solved_ty: solved_var.solved_ty.clone(),
-                    });
-                }
-                let surviving_for_solved_var = surviving_per_witness_for_solved_var
-                    .entry(identity.clone())
-                    .or_default();
-                for branch in &mut residual.branches {
-                    all_branch_indices.insert(branch.branch_index);
-                    if self.branch_bounds_compatibility_check(
-                        &mut branch.value,
-                        &solved_var.solved_ty,
-                        is_subset,
-                    ) {
-                        surviving_for_solved_var.insert(branch.branch_index);
-                    }
-                }
-            }
-            for (identity, surviving_for_solved_var) in surviving_per_witness_for_solved_var {
-                if let Some(existing_surviving) =
-                    surviving_branch_indices_by_witness.get_mut(&identity)
-                {
-                    existing_surviving.retain(|idx| surviving_for_solved_var.contains(idx));
-                } else {
-                    surviving_branch_indices_by_witness.insert(identity, surviving_for_solved_var);
-                }
-            }
-        }
-
-        all_branch_indices_by_witness
-            .into_keys()
-            .map(|identity| {
-                let surviving_branch_indices = surviving_branch_indices_by_witness
-                    .get(&identity)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        unreachable!(
-                            "all observed overload residual witnesses must have surviving candidates"
-                        )
-                    });
-                let all_pruned = surviving_branch_indices.is_empty();
-                let all_pruned_cause = if all_pruned {
-                    let mut solved_constraints = solved_constraints_by_witness
-                        .get(&identity)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            unreachable!(
-                                "all-pruned witness decisions must include solved constraints"
-                            )
-                        });
-                    solved_constraints
-                        .sort_by(|left, right| left.quantified_name.cmp(&right.quantified_name));
-                    Some(
-                        OverloadAllPrunedCause {
-                            solved_constraints,
-                        },
-                    )
-                } else {
-                    None
-                };
-                (
-                    identity,
-                    OverloadWitnessPruningDecision {
-                        surviving_branch_indices: surviving_branch_indices.clone(),
-                        all_pruned,
-                        all_pruned_cause,
-                    },
-                )
-            })
-            .collect()
     }
 
     fn compute_overload_pruning_by_witness_from_payloads(
@@ -2253,7 +1994,6 @@ impl Solver {
                 quantified: q,
                 bounds,
                 residuals,
-                ..
             } = &mut *e
             {
                 let solved_bound = self.solve_bounds(mem::take(bounds));
@@ -2371,7 +2111,6 @@ impl Solver {
                         quantified: param.clone(),
                         bounds: Bounds::new(),
                         residuals: Vec::new(),
-                        overload_residuals: Vec::new(),
                     },
                 );
             }
@@ -2397,17 +2136,11 @@ impl Solver {
                     quantified: q,
                     bounds,
                     residuals,
-                    overload_residuals,
-                    ..
                 } = &mut *e
                     && *q == *param
                 {
                     let has_payload_residuals = vars_with_payload_residuals.contains(v);
-                    if bounds.is_empty()
-                        && residuals.is_empty()
-                        && overload_residuals.is_empty()
-                        && !has_payload_residuals
-                    {
+                    if bounds.is_empty() && residuals.is_empty() && !has_payload_residuals {
                         *t = param.clone().to_type(&self.heap);
                     } else if !bounds.is_empty() {
                         // If the variable has bounds, finalize its type now.
@@ -3549,22 +3282,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                 quantified: _,
                                 bounds: v1_bounds,
                                 residuals: v1_residuals,
-                                overload_residuals: v1_overload_residuals,
                             },
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: v2_bounds,
                                 residuals: v2_residuals,
-                                overload_residuals: v2_overload_residuals,
                             },
                         ) => {
                             v1_bounds.extend(mem::take(v2_bounds));
                             *v2_bounds = v1_bounds.clone();
                             Solver::merge_residual_candidates(v1_residuals, v2_residuals);
-                            // Overload residual merge semantics (identity-aware dedupe/pruning)
-                            // are not wired yet; for now keep all captured candidates.
-                            v1_overload_residuals.extend(mem::take(v2_overload_residuals));
-                            *v2_overload_residuals = v1_overload_residuals.clone();
                         }
                         (
                             Variable::Quantified {
