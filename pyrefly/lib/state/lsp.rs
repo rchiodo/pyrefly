@@ -211,6 +211,7 @@ pub enum TypeCheckingMode {
     Legacy,
     Default,
     Strict,
+    All,
 }
 
 impl From<TypeCheckingMode> for pyrefly_config::resolve_unconfigured::UnconfiguredOverride {
@@ -223,6 +224,7 @@ impl From<TypeCheckingMode> for pyrefly_config::resolve_unconfigured::Unconfigur
             TypeCheckingMode::Legacy => Inner::Legacy,
             TypeCheckingMode::Default => Inner::Default,
             TypeCheckingMode::Strict => Inner::Strict,
+            TypeCheckingMode::All => Inner::All,
         }
     }
 }
