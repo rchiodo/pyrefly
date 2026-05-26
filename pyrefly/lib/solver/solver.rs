@@ -482,6 +482,19 @@ impl Display for Solver {
 /// but we don't want to stack overflow.
 const TYPE_LIMIT: usize = 20;
 
+/// Policy for how `resolve_vars` handles unsolved variables.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum VarExpansionPolicy {
+    /// Replace solved vars with their answers. Leave unsolved vars as `Var`.
+    Expand,
+    /// Like `Expand`, but also solve unsolved `Quantified`/`Unwrap` vars from
+    /// their accumulated bounds if possible.
+    ExpandWithBounds,
+    /// Like `ExpandWithBounds`, but force all remaining unsolved vars to
+    /// `Any`/gradual fallback and write the answer back to the solver.
+    Force,
+}
+
 /// A new bound to add to a variable.
 enum NewBound {
     /// The new bound should replace the existing bound.
@@ -563,7 +576,6 @@ impl Solver {
     }
 
     /// Force all non-recursive Vars in `vars`.
-    /// TODO: deduplicate Variable-to-gradual-type logic with `force_var`.
     pub fn pin_placeholder_type(&self, var: Var, pin_partial_types: bool) -> Option<PinError> {
         let variables = self.variables.lock();
         let mut variable = variables.get_mut(var);
@@ -764,14 +776,11 @@ impl Solver {
     /// erasing unsolved variables without defaults from unions, and canonicalizing dimension
     /// expressions so that all-literal SizeExpr trees fold to single literals.
     pub fn finish_function_return(&self, mut t: Type) -> Type {
-        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), false, None);
+        self.resolve_vars(&mut t, VarExpansionPolicy::Expand, &VarRecurser::new());
         t = t.finalize_callable_residuals_at_boundary(&self.heap, true);
         self.erase_unsolved_variables(&mut t);
         self.simplify_mut(&mut t);
-        // After variable expansion, dimension expressions may have all-literal operands
-        // (e.g., (64 + 2 - 3 - 1) // 2 + 1) that should fold to a single literal (32).
-        // Without this, Sequential chaining compounds symbolic expressions across layers.
-        self.simplify_forced_type(t)
+        t
     }
 
     /// Expand a type. All variables that have been bound will be replaced with non-Var types,
@@ -784,9 +793,9 @@ impl Solver {
         t
     }
 
-    /// Like `expand`, but when you have a `&mut`.
+    /// Like `expand_vars`, but when you have a `&mut`.
     pub fn expand_vars_mut(&self, t: &mut Type) {
-        self.expand_with_limit(t, TYPE_LIMIT, &VarRecurser::new(), false, None);
+        self.resolve_vars(t, VarExpansionPolicy::Expand, &VarRecurser::new());
         // After we substitute bound variables, we may be able to simplify some types
         self.simplify_mut(t);
     }
@@ -804,84 +813,119 @@ impl Solver {
         }
     }
 
-    /// Expand, but if the resulting type will be greater than limit levels deep, return an `Any`.
-    /// Avoids producing things that stack overflow later in the process.
-    fn expand_with_limit(
+    /// Unified var resolution traversal. Recursively walks the type tree, resolving
+    /// `Var`s according to the given policy:
+    /// - `Expand`: replace solved vars, leave unsolved as-is
+    /// - `ExpandWithBounds`: also solve unsolved vars from their bounds if possible
+    /// - `Force`: like ExpandWithBounds, but force unsolved vars to Any/gradual fallback
+    fn resolve_vars(&self, t: &mut Type, policy: VarExpansionPolicy, recurser: &VarRecurser) {
+        self.resolve_vars_with_limit(t, TYPE_LIMIT, policy, recurser, None);
+    }
+
+    fn resolve_vars_with_limit(
         &self,
         t: &mut Type,
         limit: usize,
+        policy: VarExpansionPolicy,
         recurser: &VarRecurser,
-        expand_unfinished_variables: bool,
         query_var: Option<Var>,
     ) {
         if limit == 0 {
-            // TODO: Should probably add an error here, and use any_error,
-            // but don't have any good location information to hand.
             *t = self.heap.mk_any_implicit();
         } else if let Type::Var(x) = t {
             let query_var = query_var.or(Some(*x));
             let lock = self.variables.lock();
             if let Some(_guard) = lock.recurse(*x, recurser) {
-                let variable = lock.get(*x);
-                match &*variable {
-                    Variable::Answer(ty) => {
-                        *t = ty.clone();
-                        drop(variable);
+                match policy {
+                    VarExpansionPolicy::Force => {
+                        let mut e = lock.get_mut(*x);
+                        match &mut *e {
+                            Variable::Answer(ty) => {
+                                *t = ty.clone();
+                            }
+                            Variable::ResidualAnswer { target_vars, ty } => {
+                                *t = self.residual_read_for_query_var(query_var, target_vars, ty);
+                            }
+                            _ => {
+                                let ty = match &mut *e {
+                                    Variable::Quantified {
+                                        quantified: q,
+                                        bounds,
+                                        ..
+                                    } => self
+                                        .solve_bounds(mem::take(bounds))
+                                        .unwrap_or_else(|| q.as_gradual_type()),
+                                    Variable::PartialQuantified(q) => q.as_gradual_type(),
+                                    Variable::Unwrap(bounds) => self
+                                        .solve_bounds(mem::take(bounds))
+                                        .unwrap_or_else(|| self.heap.mk_any_implicit()),
+                                    _ => self.heap.mk_any_implicit(),
+                                };
+                                *e = Variable::Answer(ty.clone());
+                                *t = ty;
+                            }
+                        }
+                        drop(e);
                         drop(lock);
-                        self.expand_with_limit(
-                            t,
-                            limit - 1,
-                            recurser,
-                            expand_unfinished_variables,
-                            query_var,
-                        );
+                        self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var);
                     }
-                    Variable::ResidualAnswer { target_vars, ty } => {
-                        *t = self.residual_read_for_query_var(query_var, target_vars, ty);
-                        drop(variable);
-                        drop(lock);
-                        self.expand_with_limit(
-                            t,
-                            limit - 1,
-                            recurser,
-                            expand_unfinished_variables,
-                            query_var,
-                        );
+                    _ => {
+                        let variable = lock.get(*x);
+                        match &*variable {
+                            Variable::Answer(ty) => {
+                                *t = ty.clone();
+                                drop(variable);
+                                drop(lock);
+                                self.resolve_vars_with_limit(
+                                    t,
+                                    limit - 1,
+                                    policy,
+                                    recurser,
+                                    query_var,
+                                );
+                            }
+                            Variable::ResidualAnswer { target_vars, ty } => {
+                                *t = self.residual_read_for_query_var(query_var, target_vars, ty);
+                                drop(variable);
+                                drop(lock);
+                                self.resolve_vars_with_limit(
+                                    t,
+                                    limit - 1,
+                                    policy,
+                                    recurser,
+                                    query_var,
+                                );
+                            }
+                            Variable::Quantified {
+                                quantified: _,
+                                bounds,
+                                ..
+                            }
+                            | Variable::Unwrap(bounds)
+                                if policy == VarExpansionPolicy::ExpandWithBounds
+                                    && let Some(bound) = self.solve_bounds(bounds.clone()) =>
+                            {
+                                *t = bound;
+                                drop(variable);
+                                drop(lock);
+                                self.resolve_vars_with_limit(
+                                    t,
+                                    limit - 1,
+                                    policy,
+                                    recurser,
+                                    query_var,
+                                );
+                            }
+                            _ => {}
+                        }
                     }
-                    Variable::Quantified {
-                        quantified: _,
-                        bounds,
-                        ..
-                    }
-                    | Variable::Unwrap(bounds)
-                        if expand_unfinished_variables
-                            && let Some(bound) = self.solve_bounds(bounds.clone()) =>
-                    {
-                        *t = bound;
-                        drop(variable);
-                        drop(lock);
-                        self.expand_with_limit(
-                            t,
-                            limit - 1,
-                            recurser,
-                            expand_unfinished_variables,
-                            query_var,
-                        );
-                    }
-                    _ => {}
                 }
             } else {
                 *t = self.heap.mk_any_implicit();
             }
         } else {
             t.recurse_mut(&mut |t| {
-                self.expand_with_limit(
-                    t,
-                    limit - 1,
-                    recurser,
-                    expand_unfinished_variables,
-                    query_var,
-                )
+                self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var)
             });
         }
     }
@@ -904,7 +948,11 @@ impl Solver {
     /// Public wrapper to expand a dimension type by resolving bound Vars.
     /// Used by subset checking to expand Vars before comparing dimension expressions.
     pub fn expand_dimension(&self, dim_ty: &mut Type) {
-        self.expand_with_limit(dim_ty, TYPE_LIMIT, &VarRecurser::new(), true, None);
+        self.resolve_vars(
+            dim_ty,
+            VarExpansionPolicy::ExpandWithBounds,
+            &VarRecurser::new(),
+        );
     }
 
     /// Given a `Var`, ensures that the solver has an answer for it (or inserts Any if not already),
@@ -913,7 +961,7 @@ impl Solver {
     pub fn force_var(&self, v: Var) -> Type {
         let lock = self.variables.lock();
         let mut e = lock.get_mut(v);
-        let result = match &mut *e {
+        match &mut *e {
             Variable::Answer(t) => t.clone(),
             Variable::ResidualAnswer { target_vars, ty } => {
                 self.residual_read_for_query_var(Some(v), target_vars, ty)
@@ -936,50 +984,12 @@ impl Solver {
                 *e = Variable::Answer(ty.clone());
                 ty
             }
-        };
-        // Simplify dimension expressions after forcing
-        // This ensures Tensor[(10 * 20)] becomes Tensor[200]
-        self.simplify_forced_type(result)
-    }
-
-    /// Simplify dimension expressions in a forced type
-    fn simplify_forced_type(&self, mut ty: Type) -> Type {
-        // Use transform_mut to visit every Type node and simplify dimensions
-        ty.transform_mut(&mut |t| {
-            let simplified = canonicalize(t.clone());
-            if &simplified != t {
-                *t = simplified;
-            }
-        });
-        ty
-    }
-
-    fn deep_force_mut_with_limit(&self, t: &mut Type, limit: usize, recurser: &VarRecurser) {
-        if limit == 0 {
-            // TODO: Should probably add an error here, and use any_error,
-            // but don't have any good location information to hand.
-            *t = self.heap.mk_any_implicit();
-        } else if let Type::Var(v) = t {
-            if let Some(_guard) = self.recurse(*v, recurser) {
-                *t = self.force_var(*v);
-                self.deep_force_mut_with_limit(t, limit - 1, recurser);
-            } else {
-                *t = self.heap.mk_any_implicit();
-            }
-        } else {
-            t.recurse_mut(&mut |t| self.deep_force_mut_with_limit(t, limit - 1, recurser));
-            // After forcing all Vars recursively, simplify dimension expressions
-            // This handles cases like Tensor[(10 * 20)] after Vars are forced to 10 and 20
-            let simplified = canonicalize(t.clone());
-            if &simplified != t {
-                *t = simplified;
-            }
         }
     }
 
     /// A version of `deep_force` that works in-place on a `Type`.
     pub fn deep_force_mut(&self, t: &mut Type) {
-        self.deep_force_mut_with_limit(t, TYPE_LIMIT, &VarRecurser::new());
+        self.resolve_vars(t, VarExpansionPolicy::Force, &VarRecurser::new());
         // After forcing, we might be able to simplify some unions
         self.simplify_mut(t);
     }
@@ -1108,6 +1118,14 @@ impl Solver {
                 }
                 *param_list = ParamList::new(new_params);
             }
+            // Simplify dimension expressions
+            // This ensures Tensor[(10 * 20)] becomes Tensor[200]
+            if let Type::Size(_) = x {
+                let simplified = canonicalize(x.clone());
+                if &simplified != x {
+                    *x = simplified;
+                }
+            }
         });
     }
 
@@ -1178,7 +1196,7 @@ impl Solver {
     /// This is the canonical boundary normalization entry point used by report/query
     /// surfaces and other serialization/display-adjacent consumers.
     pub fn for_export_boundary(&self, mut t: Type) -> Type {
-        self.expand_vars_mut(&mut t);
+        self.resolve_vars(&mut t, VarExpansionPolicy::Expand, &VarRecurser::new());
         t = t.finalize_callable_residuals_at_boundary(&self.heap, false);
         self.simplify_mut(&mut t);
         t
@@ -2404,7 +2422,11 @@ impl Solver {
 
     pub fn for_display(&self, t: Type) -> Type {
         let mut t = t;
-        self.expand_with_limit(&mut t, TYPE_LIMIT, &VarRecurser::new(), true, None);
+        self.resolve_vars(
+            &mut t,
+            VarExpansionPolicy::ExpandWithBounds,
+            &VarRecurser::new(),
+        );
         self.simplify_mut(&mut t);
         t.deterministic_printing()
     }
