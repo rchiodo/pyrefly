@@ -1307,8 +1307,12 @@ impl Solver {
         // Either we have solutions, or we fall back to Any. We don't want Variable::Partial.
         // If this errors, then the definition is invalid, and we should have raised an error at
         // the definition site.
-        let _specialization_errors =
-            self.finish_quantified_with_pruning(vs, false, &mut |_got, _want| Ok(()), None);
+        let _specialization_errors = self.finish_quantified_with_pruning(
+            vs,
+            false,
+            &mut |_got, _want| Ok(()),
+            &mut SmallMap::new(),
+        );
 
         callable
     }
@@ -1588,6 +1592,7 @@ impl Solver {
 
     /// Record per-var overload residuals from full branch captures.
     /// Decomposes each branch's full capture into per-var entries.
+    #[expect(dead_code, reason = "removed in the next commit in this stack")]
     pub(crate) fn record_overload_residuals_for_witness(
         &self,
         witness: &ResidualWitnessContext,
@@ -1641,6 +1646,7 @@ impl Solver {
         *right = left.clone();
     }
 
+    #[expect(dead_code, reason = "removed in the next commit in this stack")]
     fn materialize_overload_residual_type(
         &self,
         residual: &OverloadResidualForVar,
@@ -1669,10 +1675,7 @@ impl Solver {
             .iter()
             .filter(|branch| surviving_branch_indices.contains(&branch.branch_index))
             .map(|branch| {
-                let mut ty = self.materialize_overload_residual_branch_value(
-                    &branch.value,
-                    overload_pruning_by_witness,
-                );
+                let mut ty = self.materialize_overload_residual_branch_value(&branch.value);
                 ty.flatten_overload_residual_markers(&self.heap);
                 OverloadBranchProjection {
                     branch_index: branch.branch_index,
@@ -1711,29 +1714,17 @@ impl Solver {
         }
     }
 
-    fn materialize_overload_residual_branch_value(
-        &self,
-        value: &Variable,
-        overload_pruning_by_witness: &OverloadPruningByWitness,
-    ) -> Type {
+    fn materialize_overload_residual_branch_value(&self, value: &Variable) -> Type {
         match value {
             Variable::Answer(ty) | Variable::ResidualAnswer { ty, .. } => ty.clone(),
             Variable::Quantified {
                 quantified,
                 bounds,
                 residuals,
-                overload_residuals,
+                ..
             } => {
                 if let Some(bound) = self.solve_bounds(bounds.clone()) {
                     return bound;
-                }
-                if overload_residuals.len() == 1 {
-                    return self.materialize_overload_residual_type(
-                        overload_residuals.first().expect(
-                            "overload_residuals.len() == 1 must provide one overload residual",
-                        ),
-                        overload_pruning_by_witness,
-                    );
                 }
                 if residuals.len() == 1 {
                     return Type::callable_residual_generic(quantified.clone());
@@ -1749,8 +1740,7 @@ impl Solver {
     }
 
     /// Materialize an overload residual type for a single var from payload-backed
-    /// branch captures. This is the payload equivalent of `materialize_overload_residual_type`.
-    #[expect(dead_code)]
+    /// branch captures.
     fn materialize_overload_residual_from_payloads(
         &self,
         witness_hash: u64,
@@ -1779,8 +1769,7 @@ impl Solver {
             .filter(|capture| surviving_branch_indices.contains(&capture.branch_index))
             .filter_map(|capture| {
                 let value = capture.values.get(&var)?;
-                let mut ty = self
-                    .materialize_overload_residual_branch_value(value, overload_pruning_by_witness);
+                let mut ty = self.materialize_overload_residual_branch_value(value);
                 ty.flatten_overload_residual_markers(&self.heap);
                 Some(OverloadBranchProjection {
                     branch_index: capture.branch_index,
@@ -1868,6 +1857,7 @@ impl Solver {
             .unwrap_or_else(|| Name::new("unknown"))
     }
 
+    #[expect(dead_code, reason = "removed in the next commit in this stack")]
     fn compute_overload_pruning_by_witness(
         &self,
         solved_vars_with_residuals: &mut [SolvedVarWithResiduals],
@@ -2099,17 +2089,12 @@ impl Solver {
         if vs.0.is_empty() {
             return Ok(());
         }
-        let payloads = if overload_witness_payloads.is_empty() {
-            None
-        } else {
-            Some(&mut overload_witness_payloads)
-        };
         let mut subset = self.subset(type_order);
         self.finish_quantified_with_pruning(
             vs,
             infer_with_first_use,
             &mut |got, want| subset.is_subset_eq_probe_for_pruning(got, want),
-            payloads,
+            &mut overload_witness_payloads,
         )
     }
 
@@ -2136,14 +2121,11 @@ impl Solver {
         vs: QuantifiedHandle,
         infer_with_first_use: bool,
         is_subset: &mut dyn FnMut(&Type, &Type) -> Result<(), SubsetError>,
-        overload_witness_payloads: Option<&mut OverloadWitnessPayloadByHash>,
+        overload_witness_payloads: &mut OverloadWitnessPayloadByHash,
     ) -> Result<(), Vec1<TypeVarSpecializationError>> {
         let mut err = Vec::new();
-        let use_payload_pruning = overload_witness_payloads
-            .as_ref()
-            .is_some_and(|payloads| !payloads.is_empty());
+        let has_payloads = !overload_witness_payloads.is_empty();
         let mut solved_quantified_names_by_var: SmallMap<Var, Name> = SmallMap::new();
-        let mut solved_vars_with_residuals = Vec::new();
         let lock = self.variables.lock();
         for &v in &vs.0 {
             let mut variable = lock.get_mut(v);
@@ -2158,7 +2140,6 @@ impl Solver {
                 Variable::Quantified {
                     quantified: q,
                     bounds,
-                    overload_residuals,
                     ..
                 } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
@@ -2166,21 +2147,10 @@ impl Solver {
                     }
                     let original_bounds = mem::take(bounds);
                     if let Some(bound) = self.solve_bounds(original_bounds.clone()) {
-                        let quantified_name = q.name().clone();
-                        let solved_ty = bound.clone();
-                        let captured_overload_residuals =
-                            (!use_payload_pruning).then(|| overload_residuals.clone());
-                        if use_payload_pruning {
-                            solved_quantified_names_by_var.insert(v, quantified_name.clone());
+                        if has_payloads {
+                            solved_quantified_names_by_var.insert(v, q.name().clone());
                         }
                         *variable = Variable::Answer(bound);
-                        if let Some(overload_residuals) = captured_overload_residuals {
-                            solved_vars_with_residuals.push(SolvedVarWithResiduals {
-                                quantified_name,
-                                solved_ty,
-                                overload_residuals,
-                            });
-                        }
                     } else {
                         *bounds = original_bounds;
                     }
@@ -2190,10 +2160,7 @@ impl Solver {
         }
         drop(lock);
 
-        let overload_pruning_by_witness = if use_payload_pruning {
-            let overload_witness_payloads = overload_witness_payloads.unwrap_or_else(|| {
-                unreachable!("payload pruning requires call-context witness payloads")
-            });
+        let overload_pruning_by_witness = if has_payloads {
             let lock = self.variables.lock();
             let solved_vars_by_payload: SmallMap<Var, SolvedVarByPayload> =
                 vs.0.iter()
@@ -2215,7 +2182,7 @@ impl Solver {
                 is_subset,
             )
         } else {
-            self.compute_overload_pruning_by_witness(&mut solved_vars_with_residuals, is_subset)
+            HashMap::new()
         };
         for decision in overload_pruning_by_witness.values() {
             if !decision.all_pruned {
@@ -2254,6 +2221,30 @@ impl Solver {
             });
         }
 
+        // Reverse map from var to its unique witness hash. If a var appears in
+        // multiple witnesses, it maps to None so we skip it — ambiguous witnesses
+        // should not produce an overload residual.
+        let var_to_witness: SmallMap<Var, Option<u64>> = {
+            let mut map: SmallMap<Var, Option<u64>> = SmallMap::new();
+            for (&wh, captures) in overload_witness_payloads.iter() {
+                for capture in captures {
+                    for &v in capture.values.keys() {
+                        match map.entry(v) {
+                            Entry::Occupied(mut e) => {
+                                if *e.get() != Some(wh) {
+                                    *e.get_mut() = None;
+                                }
+                            }
+                            Entry::Vacant(e) => {
+                                e.insert(Some(wh));
+                            }
+                        }
+                    }
+                }
+            }
+            map
+        };
+
         let mut reported_all_pruned_witnesses = SmallSet::new();
         let lock = self.variables.lock();
         for &v in &vs.0 {
@@ -2262,30 +2253,24 @@ impl Solver {
                 quantified: q,
                 bounds,
                 residuals,
-                overload_residuals,
+                ..
             } = &mut *e
             {
                 let solved_bound = self.solve_bounds(mem::take(bounds));
-                let overload_residual_candidate =
-                    if solved_bound.is_none() && overload_residuals.len() == 1 {
-                        overload_residuals.first().cloned()
-                    } else {
-                        None
-                    };
-                let overload_all_pruned =
-                    overload_residual_candidate
-                        .as_ref()
-                        .is_some_and(|candidate| {
-                            let identity = OverloadResidualIdentity {
-                                witness_hash: candidate.witness.identity.witness_hash,
-                            };
-                            overload_pruning_by_witness
-                                .get(&identity)
-                                .is_some_and(|decision| decision.all_pruned)
-                        });
-                if overload_all_pruned && let Some(candidate) = overload_residual_candidate.as_ref()
-                {
-                    let witness_hash = candidate.witness.identity.witness_hash;
+
+                let witness_hash = if solved_bound.is_none() {
+                    var_to_witness.get(&v).copied().flatten()
+                } else {
+                    None
+                };
+                let overload_all_pruned = witness_hash.is_some_and(|wh| {
+                    overload_pruning_by_witness
+                        .get(&OverloadResidualIdentity { witness_hash: wh })
+                        .is_some_and(|decision| decision.all_pruned)
+                });
+
+                if overload_all_pruned {
+                    let witness_hash = witness_hash.expect("all-pruned requires a witness hash");
                     if reported_all_pruned_witnesses.insert(witness_hash) {
                         let all_pruned_cause = overload_pruning_by_witness
                             .get(&OverloadResidualIdentity { witness_hash })
@@ -2325,14 +2310,24 @@ impl Solver {
                     Variable::Answer(bound)
                 } else if overload_all_pruned {
                     Variable::Answer(Type::never())
-                } else if let Some(overload_residual) = overload_residual_candidate {
-                    Variable::ResidualAnswer {
-                        target_vars: overload_residual.witness.identity.target_vars.clone(),
-                        ty: self.materialize_overload_residual_type(
-                            &overload_residual,
-                            &overload_pruning_by_witness,
-                        ),
-                    }
+                } else if let Some(witness_hash) = witness_hash {
+                    let captures =
+                        overload_witness_payloads
+                            .get(&witness_hash)
+                            .unwrap_or_else(|| {
+                                unreachable!("payload materialization requires witness captures")
+                            });
+                    let target_vars: SmallSet<Var> = captures
+                        .iter()
+                        .flat_map(|c| c.values.keys().copied())
+                        .collect();
+                    let ty = self.materialize_overload_residual_from_payloads(
+                        witness_hash,
+                        v,
+                        captures,
+                        &overload_pruning_by_witness,
+                    );
+                    Variable::ResidualAnswer { target_vars, ty }
                 } else if let Some(ResidualIdentity { target_vars, .. }) = residual_candidate {
                     Variable::ResidualAnswer {
                         target_vars,
