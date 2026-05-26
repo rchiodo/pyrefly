@@ -1748,6 +1748,77 @@ impl Solver {
         }
     }
 
+    /// Materialize an overload residual type for a single var from payload-backed
+    /// branch captures. This is the payload equivalent of `materialize_overload_residual_type`.
+    #[expect(dead_code)]
+    fn materialize_overload_residual_from_payloads(
+        &self,
+        witness_hash: u64,
+        var: Var,
+        branch_captures: &[OverloadBranchCapture],
+        overload_pruning_by_witness: &OverloadPruningByWitness,
+    ) -> Type {
+        let identity = OverloadResidualIdentity { witness_hash };
+        let pruning_decision = overload_pruning_by_witness.get(&identity);
+        if pruning_decision.is_some_and(|decision| decision.all_pruned) {
+            // All candidate branches were pruned for this witness.
+            // Return Never immediately and avoid any branch materialization work.
+            return Type::never();
+        }
+        let surviving_branch_indices = pruning_decision
+            .map(|decision| decision.surviving_branch_indices.clone())
+            .unwrap_or_else(|| {
+                branch_captures
+                    .iter()
+                    .filter(|capture| capture.values.contains_key(&var))
+                    .map(|capture| capture.branch_index)
+                    .collect()
+            });
+        let surviving_branches = branch_captures
+            .iter()
+            .filter(|capture| surviving_branch_indices.contains(&capture.branch_index))
+            .filter_map(|capture| {
+                let value = capture.values.get(&var)?;
+                let mut ty = self
+                    .materialize_overload_residual_branch_value(value, overload_pruning_by_witness);
+                ty.flatten_overload_residual_markers(&self.heap);
+                Some(OverloadBranchProjection {
+                    branch_index: capture.branch_index,
+                    ty,
+                })
+            })
+            .collect::<Vec<_>>();
+        match surviving_branches.len() {
+            0 => {
+                unreachable!(
+                    "overload residual pruning produced no surviving branches without all_pruned"
+                )
+            }
+            1 => {
+                surviving_branches
+                    .into_iter()
+                    .next()
+                    .expect("single surviving overload branch must exist")
+                    .ty
+            }
+            _ => {
+                let first_ty = surviving_branches
+                    .first()
+                    .expect("multiple surviving overload branches must have first branch")
+                    .ty
+                    .clone();
+                if surviving_branches
+                    .iter()
+                    .all(|branch| branch.ty == first_ty)
+                {
+                    first_ty
+                } else {
+                    Type::callable_residual_overload(identity, surviving_branches)
+                }
+            }
+        }
+    }
+
     fn branch_bounds_compatibility_check(
         &self,
         branch_value: &mut Variable,
