@@ -1092,7 +1092,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         result: Type,
     ) -> Type {
         let class_metadata = self.get_metadata_for_class(ct.class_object());
-        let capture_names_from_metadata: Vec<Name>;
         let capture_names: &[Name] = if let Some(names) = class_metadata.capture_init() {
             names
         } else {
