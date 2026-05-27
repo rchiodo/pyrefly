@@ -244,6 +244,27 @@ impl<'a> TypeDisplayContext<'a> {
         Fmt(|f| self.fmt_helper(t, f, false))
     }
 
+    pub fn display_quantified(&'a self, quantified: &'a Quantified) -> impl Display + 'a {
+        Fmt(|f| {
+            let output = &mut DisplayOutput::new(self, f);
+            self.fmt_quantified(quantified, output)
+        })
+    }
+
+    fn fmt_quantified(&self, quantified: &Quantified, output: &mut impl TypeOutput) -> fmt::Result {
+        write!(output, "{}", quantified.name)?;
+        if self.always_display_module_name
+            && !self
+                .forall_tparam_uniques
+                .borrow()
+                .contains(quantified.identity())
+            && let Some(owner) = &quantified.owner
+        {
+            write!(output, "@{owner}")?;
+        }
+        Ok(())
+    }
+
     fn fmt_targ(
         &self,
         param: &Quantified,
@@ -1142,16 +1163,7 @@ impl<'a> TypeDisplayContext<'a> {
                 output.write_str("]")
             }
             Type::Var(var) => write!(output, "{var}"),
-            Type::Quantified(var) => {
-                write!(output, "{}", var.name)?;
-                if self.always_display_module_name
-                    && !self.forall_tparam_uniques.borrow().contains(var.identity())
-                    && let Some(owner) = &var.owner
-                {
-                    write!(output, "@{owner}")?;
-                }
-                Ok(())
-            }
+            Type::Quantified(var) => self.fmt_quantified(var, output),
             Type::QuantifiedValue(var) => write!(output, "{var}"),
             Type::ElementOfTypeVarTuple(var) => write!(output, "ElementOf[{var}]"),
             Type::Args(q) => {

@@ -134,7 +134,7 @@ fn test_simple_int_annotation() {
 }
 
 #[test]
-fn test_type_shapes_include_structured_named_callable_and_variable_data() {
+fn test_type_shapes_include_structured_named_callable_and_type_variable_data() {
     let tdir = TempDir::new().unwrap();
     let file_path = tdir.path().join("main.py");
     let code = r#"from typing import Callable, TypeVar
@@ -189,7 +189,9 @@ def apply(f: Callable[[int, str], bool], x: T) -> bool:
     );
     assert!(
         shapes.iter().any(|shape| {
-            shape.get("kind").and_then(Value::as_str) == Some("variable")
+            shape.get("kind").and_then(Value::as_str) == Some("type_variable")
+                && shape.get("display").and_then(Value::as_str)
+                    == Some("Variable[T (bound to builtins.int)]")
                 && shape.get("name").and_then(Value::as_str) == Some("T")
                 && shape
                     .get("bounds")

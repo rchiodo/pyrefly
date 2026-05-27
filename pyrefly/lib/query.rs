@@ -176,23 +176,25 @@ pub struct Attribute {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeShape {
+    /// Backwards-compatible string form of this type.
     pub display: String,
     #[serde(flatten)]
     pub kind: TypeShapeKind,
 }
 
+/// Structured client-facing categories for Pyrefly types.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TypeShapeKind {
-    Named {
-        name: String,
-        args: Vec<TypeShape>,
-    },
+    /// A named type, optionally with type arguments.
+    Named { name: String, args: Vec<TypeShape> },
+    /// A callable type represented by parameter types and return type.
     Callable {
         params: Vec<TypeShape>,
         return_type: Box<TypeShape>,
     },
-    Variable {
+    /// A type parameter, with any bound or constraint types attached.
+    TypeVariable {
         name: String,
         bounds: Vec<TypeShape>,
     },
@@ -250,11 +252,16 @@ fn bound_of_type_var_decl(ty: &Type) -> Option<(&QName, &Type)> {
     }
 }
 
-fn type_to_string(ty: &Type) -> String {
-    let mut ctx = TypeDisplayContext::new(&[ty]);
+fn query_type_display_context<'a>(types: &[&'a Type]) -> TypeDisplayContext<'a> {
+    let mut ctx = TypeDisplayContext::new(types);
     ctx.always_display_module_name();
     ctx.always_display_expanded_unions();
     ctx.set_lsp_display_mode(LspDisplayMode::Query);
+    ctx
+}
+
+fn type_to_string(ty: &Type) -> String {
+    let ctx = query_type_display_context(&[ty]);
     if is_static_method(ty) {
         format!("typing.StaticMethod[{}]", ctx.display(ty))
     } else if let Some(bound) = bound_of_type_var(ty) {
@@ -276,22 +283,23 @@ fn type_to_string(ty: &Type) -> String {
     }
 }
 
-fn type_shape_from(ty: &Type, display: &str) -> TypeShape {
+fn type_shape_from(ty: &Type, display: String) -> TypeShape {
     TypeShape {
-        display: display.to_owned(),
+        display,
         kind: type_shape_kind(ty),
     }
 }
 
 fn type_to_shape(ty: &Type) -> TypeShape {
-    type_shape_from(ty, &type_to_string(ty))
+    type_shape_from(ty, type_to_string(ty))
 }
 
 fn type_shape_kind(ty: &Type) -> TypeShapeKind {
     match ty {
-        Type::ClassDef(cls) => {
-            named_type_shape_kind("typing.Type", vec![class_object_to_shape(cls)])
-        }
+        Type::ClassDef(cls) => named_type_shape_kind(
+            "typing.Type",
+            vec![named_leaf(qname_to_string(cls.qname()))],
+        ),
         Type::ClassType(class_type) => named_type_shape_kind(
             qname_to_string(class_type.qname()),
             class_type
@@ -346,19 +354,19 @@ fn type_shape_kind(ty: &Type) -> TypeShapeKind {
         Type::Quantified(quantified) | Type::QuantifiedValue(quantified) => {
             quantified_variable_shape(quantified)
         }
-        Type::TypeVar(type_var) => TypeShapeKind::Variable {
+        Type::TypeVar(type_var) => TypeShapeKind::TypeVariable {
             name: type_var.qname().id().to_string(),
             bounds: restriction_bounds(type_var.restriction()),
         },
-        Type::ParamSpec(param_spec) => TypeShapeKind::Variable {
+        Type::ParamSpec(param_spec) => TypeShapeKind::TypeVariable {
             name: param_spec.qname().id().to_string(),
             bounds: Vec::new(),
         },
-        Type::TypeVarTuple(type_var_tuple) => TypeShapeKind::Variable {
+        Type::TypeVarTuple(type_var_tuple) => TypeShapeKind::TypeVariable {
             name: type_var_tuple.qname().id().to_string(),
             bounds: Vec::new(),
         },
-        Type::ElementOfTypeVarTuple(quantified) => TypeShapeKind::Variable {
+        Type::ElementOfTypeVarTuple(quantified) => TypeShapeKind::TypeVariable {
             name: quantified.name.to_string(),
             bounds: Vec::new(),
         },
@@ -381,10 +389,10 @@ fn type_shape_kind(ty: &Type) -> TypeShapeKind {
             named_type_shape_kind("ParamSpecValue", param_list_to_shapes(params))
         }
         Type::Args(param_spec) | Type::ArgsValue(param_spec) => {
-            named_type_shape_kind("ParamSpecArgs", vec![quantified_to_shape(param_spec)])
+            named_type_shape_kind("ParamSpecArgs", vec![param_spec_shape(param_spec)])
         }
         Type::Kwargs(param_spec) | Type::KwargsValue(param_spec) => {
-            named_type_shape_kind("ParamSpecKwargs", vec![quantified_to_shape(param_spec)])
+            named_type_shape_kind("ParamSpecKwargs", vec![param_spec_shape(param_spec)])
         }
         Type::Module(module) => {
             named_type_shape_kind("Module", vec![named_leaf(module.to_string())])
@@ -426,7 +434,13 @@ fn type_shape_kind(ty: &Type) -> TypeShapeKind {
         },
         Type::KwCall(call) => type_shape_kind(&call.return_ty),
         Type::Any(_) => named_type_shape_kind("typing.Any", Vec::new()),
-        Type::Never(style) => named_type_shape_kind(never_type_name(*style), Vec::new()),
+        Type::Never(style) => named_type_shape_kind(
+            match style {
+                NeverStyle::NoReturn => "typing.NoReturn",
+                NeverStyle::Never => "typing.Never",
+            },
+            Vec::new(),
+        ),
         Type::None => named_type_shape_kind("None", Vec::new()),
         Type::SpecialForm(special_form) => {
             named_type_shape_kind(special_form.to_string(), Vec::new())
@@ -483,10 +497,6 @@ fn format_type_application(name: &str, args: &[TypeShape]) -> String {
 
 fn qname_to_string(qname: &QName) -> String {
     format!("{}", Fmt(|f| qname.fmt_with_module(f)))
-}
-
-fn class_object_to_shape(class: &Class) -> TypeShape {
-    named_leaf(qname_to_string(class.qname()))
 }
 
 fn typed_dict_shape(typed_dict: &TypedDict, is_partial: bool) -> TypeShapeKind {
@@ -557,13 +567,17 @@ fn tuple_args(tuple: &Tuple) -> Vec<TypeShape> {
     }
 }
 
-fn quantified_to_shape(quantified: &Quantified) -> TypeShape {
-    let ty = Type::Quantified(Box::new(quantified.clone()));
-    type_to_shape(&ty)
+fn param_spec_shape(param_spec: &Quantified) -> TypeShape {
+    debug_assert_eq!(param_spec.kind, QuantifiedKind::ParamSpec);
+    let ctx = query_type_display_context(&[]);
+    TypeShape {
+        display: ctx.display_quantified(param_spec).to_string(),
+        kind: quantified_variable_shape(param_spec),
+    }
 }
 
 fn quantified_variable_shape(quantified: &Quantified) -> TypeShapeKind {
-    TypeShapeKind::Variable {
+    TypeShapeKind::TypeVariable {
         name: quantified.name.to_string(),
         bounds: quantified_restriction_bounds(&quantified.restriction),
     }
@@ -605,22 +619,17 @@ fn alias_shape(alias: &TypeAliasData) -> TypeShapeKind {
 }
 
 fn union_shape(union: &Union) -> TypeShapeKind {
-    let mut members = union.members.iter().map(type_to_shape).collect::<Vec<_>>();
-    let non_none = members
+    if union
+        .members
         .iter()
-        .filter(|member| {
-            !matches!(
-                member.kind,
-                TypeShapeKind::Named {
-                    ref name,
-                    ref args
-                } if name == "None" && args.is_empty()
-            )
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if non_none.len() != members.len() {
-        members = non_none;
+        .any(|member| matches!(member, Type::None))
+    {
+        let mut members = union
+            .members
+            .iter()
+            .filter(|member| !matches!(member, Type::None))
+            .map(type_to_shape)
+            .collect::<Vec<_>>();
         let inner = if members.len() == 1 {
             members.pop().unwrap()
         } else {
@@ -628,14 +637,8 @@ fn union_shape(union: &Union) -> TypeShapeKind {
         };
         named_type_shape_kind("typing.Optional", vec![inner])
     } else {
+        let members = union.members.iter().map(type_to_shape).collect();
         named_type_shape_kind("typing.Union", members)
-    }
-}
-
-fn never_type_name(style: NeverStyle) -> &'static str {
-    match style {
-        NeverStyle::NoReturn => "typing.NoReturn",
-        NeverStyle::Never => "typing.Never",
     }
 }
 
@@ -1486,7 +1489,7 @@ impl Query {
         name: ModuleName,
         path: ModulePath,
     ) -> Option<Vec<(PythonASTRange, String)>> {
-        self.get_types_in_file_with(name, path, true, |_ty, display| display.to_owned())
+        self.get_types_in_file_with(name, path, |_ty, display| display)
     }
 
     pub fn get_type_shapes_in_file(
@@ -1494,18 +1497,17 @@ impl Query {
         name: ModuleName,
         path: ModulePath,
     ) -> Option<Vec<(PythonASTRange, TypeShape)>> {
-        self.get_types_in_file_with(name, path, false, type_shape_from)
+        self.get_types_in_file_with(name, path, type_shape_from)
     }
 
     fn get_types_in_file_with<T, F>(
         &self,
         name: ModuleName,
         path: ModulePath,
-        cache_display_types: bool,
         transform: F,
     ) -> Option<Vec<(PythonASTRange, T)>>
     where
-        F: Fn(&Type, &str) -> T,
+        F: Fn(&Type, String) -> T,
     {
         let handle = self.make_handle(name, path);
 
@@ -1525,22 +1527,19 @@ impl Query {
             module_info: &ModuleInfo,
             res: &mut Vec<(PythonASTRange, T)>,
             type_cache: &TypeCache,
-            cache_display_types: bool,
             transform: &F,
         ) where
-            F: Fn(&Type, &str) -> T,
+            F: Fn(&Type, String) -> T,
         {
             let display = type_to_string(ty);
-            if cache_display_types {
-                // Only clone ty if not already in cache
-                type_cache
-                    .cache
-                    .entry(display.clone())
-                    .or_insert_with(|| ty.clone());
-            }
+            // Only clone ty if not already in cache
+            type_cache
+                .cache
+                .entry(display.clone())
+                .or_insert_with(|| ty.clone());
             res.push((
                 python_ast_range_for_expr(module_info, range, e, parent),
-                transform(ty, &display),
+                transform(ty, display),
             ));
         }
         fn try_find_key_for_name(name: &ExprName, bindings: &Bindings) -> Option<Key> {
@@ -1563,10 +1562,9 @@ impl Query {
             bindings: &Bindings,
             res: &mut Vec<(PythonASTRange, T)>,
             type_cache: &TypeCache,
-            cache_display_types: bool,
             transform: &F,
         ) where
-            F: Fn(&Type, &str) -> T,
+            F: Fn(&Type, String) -> T,
         {
             let range = x.range();
             if let Expr::Name(name) = x
@@ -1581,7 +1579,6 @@ impl Query {
                     module_info,
                     res,
                     type_cache,
-                    cache_display_types,
                     transform,
                 );
             } else if let Some(ty) = answers.get_type_trace(range) {
@@ -1593,7 +1590,6 @@ impl Query {
                     module_info,
                     res,
                     type_cache,
-                    cache_display_types,
                     transform,
                 );
             }
@@ -1606,7 +1602,6 @@ impl Query {
                     bindings,
                     res,
                     type_cache,
-                    cache_display_types,
                     transform,
                 )
             });
@@ -1621,7 +1616,6 @@ impl Query {
                 &bindings,
                 &mut res,
                 &self.type_cache,
-                cache_display_types,
                 &transform,
             )
         });
