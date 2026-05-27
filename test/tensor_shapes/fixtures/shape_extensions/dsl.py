@@ -24,6 +24,41 @@ def shape_dsl_function(fn: typing.Callable) -> typing.Callable:
     return fn
 
 
+# DSL builtins: these exist so that DSL definition files can import them
+# and avoid unbound-name errors. The DSL compiler recognizes these names
+# as builtins regardless of the Python-level definitions here.
+
+
+class Tensor:
+    """A tensor value in the DSL, constructed via Tensor(shape=[...])."""
+
+    shape: list[int]
+
+    def __init__(self, *, shape: list[int]) -> None:
+        self.shape = shape
+
+
+class symint:
+    """A symbolic integer dimension in the DSL."""
+
+    ...
+
+
+class Error(Exception):
+    """DSL error raised via `raise Error("message")`."""
+
+    ...
+
+
+class _Unknown:
+    """Sentinel returned from DSL functions to fall back to the declared return type."""
+
+    ...
+
+
+Unknown: _Unknown = _Unknown()
+
+
 def prod(xs: list[int]) -> int:
     """Compute the product of a list of dimension sizes."""
     ...

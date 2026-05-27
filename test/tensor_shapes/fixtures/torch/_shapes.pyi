@@ -3,7 +3,16 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from shape_extensions.dsl import shape_dsl_function
+from shape_extensions.dsl import (
+    Error,
+    parse_einsum_equation,
+    prod,
+    shape_dsl_function,
+    sum,
+    symint,
+    Tensor,
+    Unknown,
+)
 
 @shape_dsl_function
 def normalize_dim(rank: int, dim: int) -> int:
@@ -108,8 +117,8 @@ def reshape_ir(self: Tensor, shape: list[int | symint]) -> Tensor:
     if has_zero:
         raise Error("reshape dimensions cannot contain 0")
     if minus_one_count > 0:
-        known = shape_extensions.dsl.prod([d for d in shape if d != -1])
-        total = shape_extensions.dsl.prod(self.shape)
+        known = prod([d for d in shape if d != -1])
+        total = prod(self.shape)
         if isinstance(total, int) and isinstance(known, int) and total % known != 0:
             raise Error(
                 "could not infer size for dimension -1: expected "
@@ -159,9 +168,7 @@ def flatten_ir(self: Tensor, start_dim: int = 0, end_dim: int = -1) -> Tensor:
     s = normalize_dim(rank, start_dim)
     e = normalize_dim(rank, end_dim)
     return Tensor(
-        shape=self.shape[:s]
-        + [shape_extensions.dsl.prod(self.shape[s : e + 1])]
-        + self.shape[e + 1 :]
+        shape=self.shape[:s] + [prod(self.shape[s : e + 1])] + self.shape[e + 1 :]
     )
 
 @shape_dsl_function
@@ -197,9 +204,7 @@ def cat_ir(tensors: list[Tensor], dim: int = 0) -> Tensor:
     d = normalize_dim(len(first.shape), dim)
     return Tensor(
         shape=[
-            shape_extensions.dsl.sum([t.shape[i] for t in tensors])
-            if i == d
-            else dim_val
+            sum([t.shape[i] for t in tensors]) if i == d else dim_val
             for i, dim_val in enumerate(first.shape)
         ]
     )
@@ -363,7 +368,7 @@ def repeat_interleave_ir(
     self: Tensor, repeats: int | symint, dim: int | None = None
 ) -> Tensor:
     if dim == None:
-        return Tensor(shape=[shape_extensions.dsl.prod(self.shape) * repeats])
+        return Tensor(shape=[prod(self.shape) * repeats])
     d = normalize_dim(len(self.shape), dim)
     return Tensor(shape=replace_dim(self.shape, d, self.shape[d] * repeats))
 
@@ -493,7 +498,7 @@ def apply_einsum(
 @shape_dsl_function
 def einsum_ir(spec: str, operands: list[Tensor] | None = None) -> Tensor:
     if operands != None:
-        output_map, check_pairs = shape_extensions.dsl.parse_einsum_equation(spec)
+        output_map, check_pairs = parse_einsum_equation(spec)
         return apply_einsum(output_map, check_pairs, operands)
     return Unknown
 
@@ -681,7 +686,7 @@ def size_ir(self: Tensor, dim: int | None = None) -> int | symint:
 
 @shape_dsl_function
 def numel_ir(self: Tensor) -> int | symint:
-    return shape_extensions.dsl.prod(self.shape)
+    return prod(self.shape)
 
 @shape_dsl_function
 def dim_ir(self: Tensor) -> int:

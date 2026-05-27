@@ -1420,14 +1420,19 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, DslCompileE
         "str"
         | "enumerate"
         | "zip"
+        | "prod"
         | "shape_extensions.dsl.prod"
+        | "sum"
         | "shape_extensions.dsl.sum"
+        | "parse_einsum_equation"
         | "shape_extensions.dsl.parse_einsum_equation" => {
             let builtin = match func_name.as_str() {
-                "shape_extensions.dsl.prod" => DslBuiltin::Prod,
-                "shape_extensions.dsl.sum" => DslBuiltin::Sum,
+                "prod" | "shape_extensions.dsl.prod" => DslBuiltin::Prod,
+                "sum" | "shape_extensions.dsl.sum" => DslBuiltin::Sum,
                 "str" => DslBuiltin::Str,
-                "shape_extensions.dsl.parse_einsum_equation" => DslBuiltin::ParseEinsumEquation,
+                "parse_einsum_equation" | "shape_extensions.dsl.parse_einsum_equation" => {
+                    DslBuiltin::ParseEinsumEquation
+                }
                 "enumerate" => DslBuiltin::Enumerate,
                 "zip" => DslBuiltin::Zip,
                 _ => unreachable!(),
