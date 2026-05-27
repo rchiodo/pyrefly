@@ -2878,10 +2878,9 @@ Definition Result:
 
 #[test]
 fn goto_def_constructor_dataclass_inheriting_init() {
-    // BUG: A dataclass inheriting from a base with explicit __init__.
-    // The dataclass synthesizes its own __init__ which should take
-    // precedence, but gotodef finds the inherited Base.__init__ via MRO
-    // instead of jumping to the class definition.
+    // Dataclass inheriting from a base with explicit __init__: gotodef
+    // should jump to the class definition because the dataclass synthesizes
+    // its own __init__ which takes precedence over the inherited one.
     let base_code = r#"
 class Base:
     def __init__(self, **kwargs: object) -> None: ...
@@ -2902,15 +2901,14 @@ Config(name="x", value=1)
         &[("main", code), ("base_mod", base_code)],
         get_test_report,
     );
-    // Currently jumps to Base.__init__ — should jump to `class Config`.
     assert_eq!(
         r#"
 # main.py
 10 | Config(name="x", value=1)
          ^
 Definition Result:
-3 |     def __init__(self, **kwargs: object) -> None: ...
-            ^^^^^^^^
+6 | class Config(Base):
+          ^^^^^^
 
 
 # base_mod.py

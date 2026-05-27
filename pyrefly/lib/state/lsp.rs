@@ -1701,6 +1701,10 @@ impl<'a> Transaction<'a> {
     /// instance, find `__call__`. Returns all found definitions, or empty if
     /// neither case applies. Does not match functions/callables — those should
     /// use the normal go-to-definition path.
+    ///
+    /// When a class synthesizes its own `__init__` or `__new__` (e.g.
+    /// dataclass, pydantic, TypedDict, NamedTuple), we skip the corresponding
+    /// MRO lookup so the caller falls through to the class definition.
     fn find_call_target_definitions(
         &self,
         handle: &Handle,
@@ -1708,7 +1712,20 @@ impl<'a> Transaction<'a> {
         ty: Type,
     ) -> Vec<FindDefinitionItemWithDocstring> {
         match &ty {
-            Type::ClassDef(_) => {
+            Type::ClassDef(cls) => {
+                let has_synthesized_constructor = self
+                    .ad_hoc_solve(handle, "check_synthesized_ctor", |solver| {
+                        solver
+                            .get_synthesized_field_from_current_class_only(cls, &dunder::INIT)
+                            .is_some()
+                            || solver
+                                .get_synthesized_field_from_current_class_only(cls, &dunder::NEW)
+                                .is_some()
+                    })
+                    .unwrap_or(false);
+                if has_synthesized_constructor {
+                    return vec![];
+                }
                 let mut defs = self
                     .find_attribute_definition_for_base_type(
                         handle,

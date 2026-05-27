@@ -1254,7 +1254,7 @@ Test()
 8 | Test()
      ^
 ```python
-(method) __init__: def __init__(
+(class) Test: def Test(
     _cls: type[Test],
     a: str,
     b: int

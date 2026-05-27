@@ -3738,7 +3738,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
-    fn get_synthesized_field_from_current_class_only(
+    pub(crate) fn get_synthesized_field_from_current_class_only(
         &self,
         cls: &Class,
         name: &Name,
