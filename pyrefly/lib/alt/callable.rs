@@ -12,7 +12,7 @@ use itertools::Itertools;
 use pyrefly_python::dunder;
 use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::meta_shape_dsl::MetaShapeFunction;
-use pyrefly_types::meta_shape_dsl::ShapeTransformRef;
+use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::tuple::Tuple;
 use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_types::types::TArgs;
@@ -1337,7 +1337,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         callable: Callable,
         callable_name: Option<&FunctionKind>,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         tparams: Option<&TParams>,
         self_obj: Option<Type>,
         args: &[CallArg],
@@ -1381,7 +1381,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         callable: Callable,
         callable_name: Option<&FunctionKind>,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         tparams: Option<&TParams>,
         mut self_obj: Option<Type>,
         mut args: &[CallArg],

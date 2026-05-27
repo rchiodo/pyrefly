@@ -40,7 +40,7 @@ use ruff_python_ast::UnaryOp as RuffUnaryOp;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 
-use crate::callable::Derived;
+use crate::callable::IdentityIgnored;
 use crate::dimension::ShapeError;
 use crate::dimension::SizeExpr;
 use crate::dimension::canonicalize;
@@ -3780,73 +3780,74 @@ fn is_self_reachable(start: &str, adj: &HashMap<String, Vec<String>>) -> bool {
 /// Reference to a shape-DSL function that refines a callable's return type.
 /// Carried on `FuncFlags` for functions decorated with `@uses_shape_dsl`.
 #[derive(Debug, Clone)]
-pub struct ShapeTransformRef {
+pub struct ShapeTransform {
     pub dsl_fn: Arc<ShapeDslFunction>,
-    /// Transitive closure of user-defined helpers called by `dsl_fn`.
-    pub helpers: Derived<Arc<Vec<Arc<ShapeDslFunction>>>>,
+    /// Transitive closure (including `dsl_fn` itself) of user-defined
+    /// functions reachable from `dsl_fn`. Identity-ignored for hashing/eq.
+    pub fn_closure: IdentityIgnored<Arc<Vec<Arc<ShapeDslFunction>>>>,
 }
 
 /// Pointer identity: delegates to `ShapeDslFunction`'s pointer-identity equality.
-impl PartialEq for ShapeTransformRef {
+impl PartialEq for ShapeTransform {
     fn eq(&self, other: &Self) -> bool {
         self.dsl_fn == other.dsl_fn
     }
 }
 
-impl Eq for ShapeTransformRef {}
+impl Eq for ShapeTransform {}
 
-impl Hash for ShapeTransformRef {
+impl Hash for ShapeTransform {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.dsl_fn.hash(state);
     }
 }
 
-impl PartialOrd for ShapeTransformRef {
+impl PartialOrd for ShapeTransform {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for ShapeTransformRef {
+impl Ord for ShapeTransform {
     fn cmp(&self, other: &Self) -> Ordering {
         self.dsl_fn.cmp(&other.dsl_fn)
     }
 }
 
-impl Visit<Type> for ShapeTransformRef {
+impl Visit<Type> for ShapeTransform {
     const RECURSE_CONTAINS: bool = false;
     fn recurse<'a>(&'a self, _: &mut dyn FnMut(&'a Type)) {}
 }
 
-impl VisitMut<Type> for ShapeTransformRef {
+impl VisitMut<Type> for ShapeTransform {
     const RECURSE_CONTAINS: bool = false;
     fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {}
 }
 
-impl Visit<Type> for Arc<ShapeTransformRef> {
+impl Visit<Type> for Arc<ShapeTransform> {
     const RECURSE_CONTAINS: bool = false;
     fn recurse<'a>(&'a self, _: &mut dyn FnMut(&'a Type)) {}
 }
 
-impl VisitMut<Type> for Arc<ShapeTransformRef> {
+impl VisitMut<Type> for Arc<ShapeTransform> {
     const RECURSE_CONTAINS: bool = false;
     fn recurse_mut(&mut self, _: &mut dyn FnMut(&mut Type)) {}
 }
 
-impl TypeEq for ShapeTransformRef {
+impl TypeEq for ShapeTransform {
     fn type_eq(&self, other: &Self, _ctx: &mut TypeEqCtx) -> bool {
         self == other
     }
 }
 
-impl ShapeTransformRef {
-    /// Build a `MetaShapeFunction` evaluator from this shape transform reference.
-    /// Populates `fn_lookup` with this function and its transitive callees
-    /// so that cross-function DSL calls resolve correctly.
+impl ShapeTransform {
+    /// Build a `MetaShapeFunction` evaluator from this shape transform.
+    /// Populates `fn_lookup` with all functions in `fn_closure` so that
+    /// cross-function DSL calls resolve correctly.
     pub fn to_meta_shape_function(&self) -> Box<dyn MetaShapeFunction> {
-        // helpers contains self and its transitive callees.
+        // fn_closure contains self and its transitive callees.
         let fn_lookup: Arc<HashMap<String, Arc<DslFnDef>>> = Arc::new(
-            self.helpers
+            self.fn_closure
                 .iter()
                 .map(|h| (h.inner.name.clone(), h.inner.clone()))
                 .collect(),

@@ -16,15 +16,15 @@ use pyrefly_python::ast::Ast;
 use pyrefly_python::dunder;
 use pyrefly_python::module_path::ModuleStyle;
 use pyrefly_python::short_identifier::ShortIdentifier;
-use pyrefly_types::callable::Derived;
 use pyrefly_types::callable::FuncId;
+use pyrefly_types::callable::IdentityIgnored;
 use pyrefly_types::callable::Params;
 use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::meta_shape_dsl::ShapeDslFunction;
-use pyrefly_types::meta_shape_dsl::ShapeTransformRef;
+use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::meta_shape_dsl::validate_shape_dsl_functions;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::quantified::QuantifiedOrigin;
@@ -548,8 +548,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Build the transitive closure of helper functions this DSL function calls,
             // then validate cross-function call signatures.
             let module_dsl_fns = self.bindings().metadata().shape_dsl_functions();
-            let helpers = compute_transitive_helpers(&dsl_fn, module_dsl_fns);
-            if let Err(type_errors) = validate_shape_dsl_functions(&helpers) {
+            let fn_closure = compute_transitive_helpers(&dsl_fn, module_dsl_fns);
+            if let Err(type_errors) = validate_shape_dsl_functions(&fn_closure) {
                 for err in &type_errors {
                     self.error(
                         errors,
@@ -575,7 +575,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     def_index: Some(def_index),
                     outer_funcs,
                 });
-                FunctionKind::ShapeDsl(func_id, dsl_fn, Derived(helpers))
+                FunctionKind::ShapeDsl(func_id, dsl_fn, IdentityIgnored(fn_closure))
             }
         } else {
             FunctionKind::from_name(
@@ -592,11 +592,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some((_name, ir_identifier)) = uses_shape_dsl_ir_name {
             let ir_type = self.get(&Key::BoundName(ir_identifier)).arc_clone_ty();
             if let Type::Function(func) = &ir_type
-                && let FunctionKind::ShapeDsl(_, dsl_fn, helpers) = &func.metadata.kind
+                && let FunctionKind::ShapeDsl(_, dsl_fn, fn_closure) = &func.metadata.kind
             {
-                flags.shape_transform = Some(Arc::new(ShapeTransformRef {
+                flags.shape_transform = Some(Arc::new(ShapeTransform {
                     dsl_fn: dsl_fn.clone(),
-                    helpers: helpers.clone(),
+                    fn_closure: fn_closure.clone(),
                 }));
             } else {
                 self.error(

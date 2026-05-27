@@ -13,7 +13,7 @@ use itertools::Itertools;
 use pyrefly_types::callable::ArgCount;
 use pyrefly_types::callable::ArgCounts;
 use pyrefly_types::callable::Param;
-use pyrefly_types::meta_shape_dsl::ShapeTransformRef;
+use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::tuple::Tuple;
 use pyrefly_types::types::TArgs;
 use pyrefly_util::gas::Gas;
@@ -240,7 +240,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         overloads: Vec1<TargetWithTParams<Function>>,
         metadata: &FuncMetadata,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         self_obj: Option<Type>,
         args: &[CallArg],
         keywords: &[CallKeyword],
@@ -528,7 +528,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         overloads: &Vec1<&'c TargetWithTParams<Function>>,
         metadata: &FuncMetadata,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         self_obj: Option<&Type>,
         args: &[CallArg],
         keywords: &[CallKeyword],
@@ -827,7 +827,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         callable: &'c TargetWithTParams<Function>,
         metadata: &FuncMetadata,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         self_obj: Option<&Type>,
         args: &[CallArg],
         keywords: &[CallKeyword],

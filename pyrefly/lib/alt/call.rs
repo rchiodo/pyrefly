@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 use pyrefly_python::dunder;
-use pyrefly_types::meta_shape_dsl::ShapeTransformRef;
+use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::special_form::SpecialForm;
 use pyrefly_types::typed_dict::TypedDictInner;
@@ -1521,7 +1521,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         callable: Callable,
         callable_name: Option<&FunctionKind>,
-        shape_transform: Option<&ShapeTransformRef>,
+        shape_transform: Option<&ShapeTransform>,
         tparams: Option<&TParams>,
         self_obj: Option<Type>,
         args: &[CallArg],
