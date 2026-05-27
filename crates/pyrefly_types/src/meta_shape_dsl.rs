@@ -3346,11 +3346,74 @@ fn collect_call_targets_expr(expr: &DslExpr, targets: &mut HashSet<String>) {
 /// cross-function calls have consistent signatures. Returns collected
 /// type error messages on failure.
 ///
+/// Also rejects programs whose call graph (restricted to `fns`) contains
+/// a cycle, since the DSL evaluator does not support recursion.
+///
 /// Intended to be called with a per-caller transitive closure (root +
 /// its resolved helpers), not the full module.
 pub fn validate_shape_dsl_functions(fns: &[Arc<ShapeDslFunction>]) -> Result<(), Vec<String>> {
+    // Reject recursive cycles before running the type checker. The DSL
+    // evaluator does not support recursion and would infinite-loop at a
+    // call site if a cycle reached the interpreter.
+    if has_dsl_cycle(fns) {
+        let root_name = fns
+            .first()
+            // has_dsl_cycle returned true ⟹ fns is non-empty.
+            .expect("non-empty closure when a cycle is detected")
+            .name();
+        return Err(vec![format!(
+            "DSL function '{}' is recursive (or part of a recursive cycle); \
+             recursion is not supported in shape DSL",
+            root_name
+        )]);
+    }
     let defs: Vec<DslFnDef> = fns.iter().map(|f| (*f.inner).clone()).collect();
     type_check_program(&defs)
+}
+
+/// Returns `true` if the call graph of `fns` — restricted to functions
+/// within `fns` — contains a cycle.
+///
+/// Uses a DFS reachability check: a function is considered cyclic iff it
+/// can reach itself through one or more hops.  Both direct self-recursion
+/// and mutual recursion are detected.
+fn has_dsl_cycle(fns: &[Arc<ShapeDslFunction>]) -> bool {
+    let fn_names: HashSet<String> = fns.iter().map(|f| f.name().to_owned()).collect();
+    // Build adjacency lists restricted to functions in this closure.
+    let adj: HashMap<String, Vec<String>> = fns
+        .iter()
+        .map(|f| {
+            let callees: Vec<String> = f
+                .call_targets()
+                .into_iter()
+                .filter(|t| fn_names.contains(t))
+                .collect();
+            (f.name().to_owned(), callees)
+        })
+        .collect();
+    fns.iter().any(|f| is_self_reachable(f.name(), &adj))
+}
+
+/// Returns `true` if `start` can reach itself through one or more edges in `adj`.
+fn is_self_reachable(start: &str, adj: &HashMap<String, Vec<String>>) -> bool {
+    let neighbors = match adj.get(start) {
+        Some(n) => n,
+        None => return false,
+    };
+    let mut visited: HashSet<&str> = HashSet::new();
+    // Use a Vec as a DFS stack seeded with the direct callees of `start`.
+    let mut stack: Vec<&str> = neighbors.iter().map(String::as_str).collect();
+    while let Some(curr) = stack.pop() {
+        if curr == start {
+            return true;
+        }
+        if visited.insert(curr) {
+            if let Some(nexts) = adj.get(curr) {
+                stack.extend(nexts.iter().map(String::as_str));
+            }
+        }
+    }
+    false
 }
 
 /// Reference to a shape-DSL function that refines a callable's return type.
