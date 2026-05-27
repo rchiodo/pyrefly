@@ -262,9 +262,6 @@ impl<'a> Transaction<'a> {
                             .unwrap()
                             .solver()
                             .for_display(class_field.ty());
-                        if ty.is_any() {
-                            continue;
-                        }
                         let expr = match value.as_ref() {
                             ExprOrBinding::Expr(e) => Some(e),
                             ExprOrBinding::Binding(_) => None,
@@ -285,7 +282,7 @@ impl<'a> Transaction<'a> {
                         };
                         let should_show = match expr {
                             Some(e) => is_interesting(e, &ty, class_name),
-                            None => true,
+                            None => !ty.is_any(),
                         };
                         if should_show {
                             let type_parts = ty.get_types_with_locations(Some(&stdlib));
