@@ -562,31 +562,32 @@ impl<'a> BindingsBuilder<'a> {
     /// `@uses_shape_dsl(..., capture_init=[...])` and return the list of `__init__`
     /// parameter names to capture for shape inference.
     fn extract_capture_init(&self, body: &[Stmt]) -> Option<Vec<Name>> {
-        body.iter()
+        let forward = body
+            .iter()
             .filter_map(|stmt| stmt.as_function_def_stmt())
-            .filter(|func_def| func_def.name.as_str() == "forward")
-            .flat_map(|func_def| &func_def.decorator_list)
-            .find_map(|decorator| {
-                let call = decorator.expression.as_call_expr()?;
-                if self.as_special_export(&call.func) != Some(SpecialExport::UsesShapeDsl) {
-                    return None;
-                }
-                let capture_init_kw = call.arguments.keywords.iter().find(|kw| {
-                    kw.arg
-                        .as_ref()
-                        .is_some_and(|a| a.as_str() == "capture_init")
-                })?;
-                let list = capture_init_kw.value.as_list_expr()?;
-                let names: Vec<Name> = list
-                    .elts
-                    .iter()
-                    .filter_map(|elt| {
-                        elt.as_string_literal_expr()
-                            .map(|s| Name::new(s.value.to_str()))
-                    })
-                    .collect();
-                Some(names)
-            })
+            .find(|func_def| func_def.name.as_str() == "forward")?;
+
+        forward.decorator_list.iter().find_map(|decorator| {
+            let call = decorator.expression.as_call_expr()?;
+            if self.as_special_export(&call.func) != Some(SpecialExport::UsesShapeDsl) {
+                return None;
+            }
+            let capture_init_kw = call.arguments.keywords.iter().find(|kw| {
+                kw.arg
+                    .as_ref()
+                    .is_some_and(|a| a.as_str() == "capture_init")
+            })?;
+            let list = capture_init_kw.value.as_list_expr()?;
+            let names: Vec<Name> = list
+                .elts
+                .iter()
+                .filter_map(|elt| {
+                    elt.as_string_literal_expr()
+                        .map(|s| Name::new(s.value.to_str()))
+                })
+                .collect();
+            Some(names)
+        })
     }
 
     /// Extracts docstrings for each field, mapping the field's range to the docstring's range.
