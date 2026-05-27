@@ -156,7 +156,7 @@ like [lldb](https://docs.rs/lldb/latest/lldb/#installation):
 
 Contributing a pull request (PR) is the main way to propose changes to Pyrefly. To ensure your PR is reviewed efficiently and has the best chance of being accepted, please make sure you have done the following:
 
-- [ ] Comment on the issue so we can assign it to you
+- [ ] **IMPORTANT** [Comment on the issue](https://github.com/facebook/pyrefly/issues) so we can assign it to you
 - [ ] Updated or added new tests to cover your changes (see testing section for details)
 - [ ] Made sure all continuous integration (CI) checks pass before requesting a review. Fix any errors or warnings, or ask us about any CI results you don't understand.
 - [ ] Written a clear description: Provide a concise summary of what your PR does. Explain the motivation, the approach, and any important details.
