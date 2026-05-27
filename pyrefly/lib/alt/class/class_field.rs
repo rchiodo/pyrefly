@@ -57,6 +57,7 @@ use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::DataclassMetadata;
 use crate::alt::types::instance::Instance;
 use crate::alt::types::instance::InstanceKind;
+use crate::alt::types::pydantic::PydanticModelKind;
 use crate::binding::binding::Binding;
 use crate::binding::binding::ClassFieldDefinition;
 use crate::binding::binding::ExprOrBinding;
@@ -2436,6 +2437,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let Some(member) = self.get_non_synthesized_dataclass_member_impl(cls, name) else {
             return DataclassMember::NotAField;
         };
+        if name.as_str().starts_with('_')
+            && matches!(
+                self.get_metadata_for_class(cls).pydantic_model_kind(),
+                Some(
+                    PydanticModelKind::BaseModel
+                        | PydanticModelKind::RootModel
+                        | PydanticModelKind::BaseSettings
+                )
+            )
+        {
+            return DataclassMember::NotAField;
+        }
         let field = &*member.value;
         // A field with type KW_ONLY is a sentinel value that indicates that the remaining
         // fields should be keyword-only params in the generated `__init__`.

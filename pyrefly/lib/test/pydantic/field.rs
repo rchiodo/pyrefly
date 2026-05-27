@@ -224,6 +224,36 @@ A()  # E: Missing argument `x`
 );
 
 pydantic_testcase!(
+    test_private_attributes_not_init_fields,
+    r#"
+from pydantic import BaseModel
+
+class Foo(BaseModel):
+    a: int
+    _a: int
+
+    def initialize(self):
+        self._a = 1
+
+Foo(a=1)
+Foo()  # E: Missing argument `a`
+    "#,
+);
+
+pydantic_testcase!(
+    test_pydantic_dataclass_underscore_field_is_init_param,
+    r#"
+from pydantic.dataclasses import dataclass
+
+@dataclass
+class Bar:
+    _name: str
+
+Bar(_name="hello")
+    "#,
+);
+
+pydantic_testcase!(
     test_field_default_gt_violation,
     r#"
 from pydantic import BaseModel, Field
