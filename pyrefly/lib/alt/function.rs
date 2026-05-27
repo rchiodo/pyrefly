@@ -442,7 +442,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         module_style: ModuleStyle,
         outer_funcs: Option<Name>,
         shape_dsl_def: Option<Arc<ShapeDslFunction>>,
-        uses_shape_dsl_ir_name: Option<(Name, ShortIdentifier)>,
+        uses_shape_dsl_ir_name: Option<ShortIdentifier>,
         errors: &ErrorCollector,
     ) -> Arc<UndecoratedFunction> {
         let defining_cls = class_key.and_then(|k| self.get_idx(*k).0.dupe());
@@ -589,7 +589,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Resolve the IR function reference from @uses_shape_dsl(ir_fn) and
         // populate `flags.shape_transform` with the DSL function it points to.
-        if let Some((_name, ir_identifier)) = uses_shape_dsl_ir_name {
+        if let Some(ir_identifier) = uses_shape_dsl_ir_name {
             let ir_type = self.get(&Key::BoundName(ir_identifier)).arc_clone_ty();
             if let Type::Function(func) = &ir_type
                 && let FunctionKind::ShapeDsl(_, dsl_fn, fn_closure) = &func.metadata.kind

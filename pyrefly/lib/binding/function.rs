@@ -823,7 +823,7 @@ impl<'a> BindingsBuilder<'a> {
             let first_arg = call.arguments.args.first()?;
             // Must be a simple name (not a dotted path or arbitrary expression).
             let name_expr = first_arg.as_name_expr()?;
-            Some((name_expr.id.clone(), ShortIdentifier::expr_name(name_expr)))
+            Some(ShortIdentifier::expr_name(name_expr))
         });
 
         // Convert the function to DSL IR before `function_header` takes `returns`
