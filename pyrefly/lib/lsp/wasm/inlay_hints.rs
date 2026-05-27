@@ -139,6 +139,22 @@ impl<'a> Transaction<'a> {
         };
         let bindings = self.get_bindings(handle)?;
         let stdlib = self.get_stdlib(handle);
+        let make_type_hint =
+            |prefix: &str, position: TextSize, ty: &Type, insertable: bool| -> InlayHintData {
+                let type_parts = ty.get_types_with_locations(Some(&stdlib));
+                let label_parts = once((prefix.to_owned(), None))
+                    .chain(
+                        type_parts
+                            .iter()
+                            .map(|(text, loc)| (text.clone(), loc.clone())),
+                    )
+                    .collect();
+                InlayHintData {
+                    position,
+                    label_parts,
+                    insertable,
+                }
+            };
         let mut res = Vec::new();
         for idx in bindings.keys::<Key>() {
             match bindings.idx_to_key(idx) {
@@ -159,20 +175,12 @@ impl<'a> Transaction<'a> {
                                 {
                                     ty = return_ty;
                                 }
-                                // Use get_types_with_locations to get type parts with location info
-                                let type_parts = ty.get_types_with_locations(Some(&stdlib));
-                                let label_parts = once((" -> ".to_owned(), None))
-                                    .chain(
-                                        type_parts
-                                            .iter()
-                                            .map(|(text, loc)| (text.clone(), loc.clone())),
-                                    )
-                                    .collect();
-                                res.push(InlayHintData {
-                                    position: fun.def.parameters.range.end(),
-                                    label_parts,
-                                    insertable: true,
-                                });
+                                res.push(make_type_hint(
+                                    " -> ",
+                                    fun.def.parameters.range.end(),
+                                    &ty,
+                                    true,
+                                ));
                             }
                         }
                         _ => {}
@@ -222,20 +230,7 @@ impl<'a> Transaction<'a> {
                         is_unpacked && !ty.is_any()
                     };
                     if should_show {
-                        // Use get_types_with_locations to get type parts with location info
-                        let type_parts = ty.get_types_with_locations(Some(&stdlib));
-                        let label_parts = once((": ".to_owned(), None))
-                            .chain(
-                                type_parts
-                                    .iter()
-                                    .map(|(text, loc)| (text.clone(), loc.clone())),
-                            )
-                            .collect();
-                        res.push(InlayHintData {
-                            position: key.range().end(),
-                            label_parts,
-                            insertable: !is_unpacked,
-                        });
+                        res.push(make_type_hint(": ", key.range().end(), &ty, !is_unpacked));
                     }
                 }
                 _ => {}
@@ -281,19 +276,7 @@ impl<'a> Transaction<'a> {
                         None => !ty.is_any(),
                     };
                     if should_show {
-                        let type_parts = ty.get_types_with_locations(Some(&stdlib));
-                        let label_parts = once((": ".to_owned(), None))
-                            .chain(
-                                type_parts
-                                    .iter()
-                                    .map(|(text, loc)| (text.clone(), loc.clone())),
-                            )
-                            .collect();
-                        res.push(InlayHintData {
-                            position: field.range.end(),
-                            label_parts,
-                            insertable: true,
-                        });
+                        res.push(make_type_hint(": ", field.range.end(), &ty, true));
                     }
                 }
             }
