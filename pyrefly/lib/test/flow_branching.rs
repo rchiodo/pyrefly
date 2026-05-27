@@ -2752,3 +2752,50 @@ def f(a: int) -> int:
     return 9
     "#,
 );
+
+fn env_try_except_typevar() -> TestEnv {
+    let mut t = TestEnv::new();
+    t.add(
+        "compat_typing",
+        r#"
+from typing import TypeVar
+try:
+    from typing import AnyStr
+except ImportError:
+    AnyStr = TypeVar("AnyStr", str, bytes)
+__all__ = ["AnyStr"]
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_merge_compatible_typevars,
+    env_try_except_typevar(),
+    r#"
+from typing import assert_type
+from collections.abc import Iterable
+from compat_typing import AnyStr
+
+def process(lines: Iterable[AnyStr]) -> None:
+    pass
+
+patterns: list[str] = ["*.pyc"]
+process(lines=patterns)
+    "#,
+);
+
+testcase!(
+    test_do_not_merge_incompatible_typevars,
+    r#"
+from typing import TypeVar
+
+try:
+    T = TypeVar("T", str, bytes)
+except:
+    T = TypeVar("T", int, float)
+
+def f(x: T) -> T:  # E: not in scope  # E: not in scope
+    return x
+    "#,
+);
