@@ -1881,23 +1881,70 @@ fn infer_call(
     sigs: &FnRetTypes,
     errors: &mut Vec<String>,
 ) -> DslType {
-    // Infer all arguments for logging, regardless of whether we need them.
-    for arg in args {
-        infer_expr(arg, env, sigs, errors);
-    }
+    // Infer all arguments (undefined-variable detection, etc.).
+    let arg_tys: Vec<DslType> = args
+        .iter()
+        .map(|a| infer_expr(a, env, sigs, errors))
+        .collect();
     match func {
         DslCallTarget::Builtin(builtin) => match builtin {
             // prod/sum reduce a list of dims to a single dim.
             DslBuiltin::Prod | DslBuiltin::Sum => {
-                let arg_ty = infer_expr(&args[0], env, sigs, errors);
-                element_type(&arg_ty, errors)
+                if arg_tys.len() != 1 {
+                    errors.push(format!(
+                        "{} takes exactly 1 argument, got {}",
+                        builtin,
+                        arg_tys.len()
+                    ));
+                    return DslType::Int;
+                }
+                element_type(&arg_tys[0], errors)
             }
-            DslBuiltin::Str => DslType::Str,
-            DslBuiltin::ParseEinsumEquation => DslType::List(Box::new(DslType::List(Box::new(
-                DslType::List(Box::new(DslType::Int)),
-            )))),
-            DslBuiltin::Len => DslType::Int,
-            DslBuiltin::Range => DslType::List(Box::new(DslType::Int)),
+            DslBuiltin::Str => {
+                if arg_tys.len() != 1 {
+                    errors.push(format!(
+                        "str() takes exactly 1 argument, got {}",
+                        arg_tys.len()
+                    ));
+                }
+                DslType::Str
+            }
+            DslBuiltin::ParseEinsumEquation => {
+                if arg_tys.len() != 1 {
+                    errors.push(format!(
+                        "parse_einsum_equation() takes exactly 1 argument, got {}",
+                        arg_tys.len()
+                    ));
+                }
+                DslType::List(Box::new(DslType::List(Box::new(DslType::List(Box::new(
+                    DslType::Int,
+                ))))))
+            }
+            DslBuiltin::Len => {
+                if arg_tys.len() != 1 {
+                    errors.push(format!(
+                        "len() takes exactly 1 argument, got {}",
+                        arg_tys.len()
+                    ));
+                    return DslType::Int;
+                }
+                if !matches!(arg_tys[0], DslType::List(_)) {
+                    errors.push(format!(
+                        "len() requires a list argument, got {}",
+                        arg_tys[0]
+                    ));
+                }
+                DslType::Int
+            }
+            DslBuiltin::Range => {
+                if arg_tys.len() != 1 {
+                    errors.push(format!(
+                        "range() takes exactly 1 argument, got {}",
+                        arg_tys.len()
+                    ));
+                }
+                DslType::List(Box::new(DslType::Int))
+            }
             DslBuiltin::Zip | DslBuiltin::Enumerate => {
                 errors.push(format!(
                     "{} should only appear as comprehension iterator",
@@ -1964,6 +2011,9 @@ fn infer_expr(
         }
         DslExpr::Slice { base, lower, upper } => {
             let base_ty = infer_expr(base, env, sigs, errors);
+            if !matches!(base_ty, DslType::List(_)) {
+                errors.push(format!("slice requires a list operand, got {}", base_ty));
+            }
             if let Some(l) = lower {
                 infer_expr(l, env, sigs, errors);
             }
@@ -2076,7 +2126,10 @@ fn check_body(body: &DslBody, env: &TypeEnv, sigs: &FnRetTypes, errors: &mut Vec
             infer_expr(expr, env, sigs, errors);
         }
         DslBody::Raise(expr) => {
-            infer_expr(expr, env, sigs, errors);
+            let ty = infer_expr(expr, env, sigs, errors);
+            if !matches!(ty, DslType::Str) {
+                errors.push(format!("raise expression must be a string, got {}", ty));
+            }
         }
     }
 }
@@ -2348,10 +2401,9 @@ fn eval_dsl_expr(
                         Ok(Val::List(items[lo..hi].to_vec()))
                     }
                 }
-                _ => panic!(
-                    "DSL bug: {op_name}: cannot slice {}",
-                    base_val.variant_name()
-                ),
+                _ => Err(ShapeError::Unsupported {
+                    message: format!("{op_name}: cannot slice {}", base_val.variant_name()),
+                }),
             }
         }
 
@@ -2360,18 +2412,18 @@ fn eval_dsl_expr(
             // Short-circuit and/or (Python semantics).
             match op {
                 DslOp::And => {
-                    if !lval.as_bool() {
+                    if !val_as_bool(&lval, op_name)? {
                         return Ok(Val::Bool(false));
                     }
                     let rval = eval_dsl_expr(right, env, fns, op_name)?;
-                    return Ok(Val::Bool(rval.as_bool()));
+                    return Ok(Val::Bool(val_as_bool(&rval, op_name)?));
                 }
                 DslOp::Or => {
-                    if lval.as_bool() {
+                    if val_as_bool(&lval, op_name)? {
                         return Ok(Val::Bool(true));
                     }
                     let rval = eval_dsl_expr(right, env, fns, op_name)?;
-                    return Ok(Val::Bool(rval.as_bool()));
+                    return Ok(Val::Bool(val_as_bool(&rval, op_name)?));
                 }
                 _ => {}
             }
@@ -2382,7 +2434,7 @@ fn eval_dsl_expr(
         DslExpr::UnaryOp { op, operand } => {
             let val = eval_dsl_expr(operand, env, fns, op_name)?;
             match op {
-                DslUnaryOp::Not => Ok(Val::Bool(!val.as_bool())),
+                DslUnaryOp::Not => Ok(Val::Bool(!val_as_bool(&val, op_name)?)),
                 DslUnaryOp::Neg => {
                     match &val {
                         Val::Int(n) => Ok(Val::Int(-n)),
@@ -2394,7 +2446,9 @@ fn eval_dsl_expr(
                                 ty.clone(),
                             )))))
                         }
-                        _ => panic!("DSL bug: {op_name}: cannot negate {}", val.variant_name()),
+                        _ => Err(ShapeError::Unsupported {
+                            message: format!("{op_name}: cannot negate {}", val.variant_name()),
+                        }),
                     }
                 }
             }
@@ -2482,7 +2536,7 @@ fn eval_dsl_expr(
         }
 
         DslExpr::IfExpr { body, test, orelse } => {
-            if eval_dsl_expr(test, env, fns, op_name)?.as_bool() {
+            if val_as_bool(&eval_dsl_expr(test, env, fns, op_name)?, op_name)? {
                 eval_dsl_expr(body, env, fns, op_name)
             } else {
                 eval_dsl_expr(orelse, env, fns, op_name)
@@ -2496,6 +2550,22 @@ fn eval_dsl_expr(
         }
 
         DslExpr::Unknown => Ok(Val::None), // sentinel for fixture fallback
+    }
+}
+
+/// Return the inner bool from a `Val::Bool`, or `Err(ShapeError::Unsupported)` if
+/// the value is not boolean.  Used in place of `Val::as_bool()` throughout the
+/// evaluator so that ill-typed DSL code produces a graceful fallback rather than
+/// a Rust panic.
+fn val_as_bool(val: &Val, op_name: &str) -> Result<bool, ShapeError> {
+    match val {
+        Val::Bool(b) => Ok(*b),
+        other => Err(ShapeError::Unsupported {
+            message: format!(
+                "{op_name}: expected a bool value, got {}",
+                other.variant_name()
+            ),
+        }),
     }
 }
 
@@ -2689,24 +2759,47 @@ fn eval_binop(lval: &Val, op: DslOp, rval: &Val, op_name: &str) -> Result<Val, S
                 Ok(dim_val(canonicalize(Type::Size(SizeExpr::floor_div(a, b)))))
             }
         },
-        DslOp::Mod => {
-            let a = lval.as_int();
-            let b = rval.as_int();
-            if b == 0 {
-                return Err(ShapeError::ShapeComputation {
-                    message: format!("{op_name}: modulo by zero"),
-                });
+        DslOp::Mod => match (lval, rval) {
+            (Val::Int(a), Val::Int(b)) => {
+                if *b == 0 {
+                    return Err(ShapeError::ShapeComputation {
+                        message: format!("{op_name}: modulo by zero"),
+                    });
+                }
+                Ok(Val::Int(a % b))
             }
-            Ok(Val::Int(a % b))
-        }
+            _ => Err(ShapeError::Unsupported {
+                message: format!("{op_name}: % not supported on non-integer values"),
+            }),
+        },
 
         // --- Comparison ---
         DslOp::Eq => Ok(Val::Bool(val_eq(lval, rval))),
         DslOp::NotEq => Ok(Val::Bool(!val_eq(lval, rval))),
-        DslOp::Lt => Ok(Val::Bool(lval.as_int() < rval.as_int())),
-        DslOp::LtE => Ok(Val::Bool(lval.as_int() <= rval.as_int())),
-        DslOp::Gt => Ok(Val::Bool(lval.as_int() > rval.as_int())),
-        DslOp::GtE => Ok(Val::Bool(lval.as_int() >= rval.as_int())),
+        DslOp::Lt => match (lval, rval) {
+            (Val::Int(a), Val::Int(b)) => Ok(Val::Bool(a < b)),
+            _ => Err(ShapeError::Unsupported {
+                message: format!("{op_name}: < not supported on non-integer values"),
+            }),
+        },
+        DslOp::LtE => match (lval, rval) {
+            (Val::Int(a), Val::Int(b)) => Ok(Val::Bool(a <= b)),
+            _ => Err(ShapeError::Unsupported {
+                message: format!("{op_name}: <= not supported on non-integer values"),
+            }),
+        },
+        DslOp::Gt => match (lval, rval) {
+            (Val::Int(a), Val::Int(b)) => Ok(Val::Bool(a > b)),
+            _ => Err(ShapeError::Unsupported {
+                message: format!("{op_name}: > not supported on non-integer values"),
+            }),
+        },
+        DslOp::GtE => match (lval, rval) {
+            (Val::Int(a), Val::Int(b)) => Ok(Val::Bool(a >= b)),
+            _ => Err(ShapeError::Unsupported {
+                message: format!("{op_name}: >= not supported on non-integer values"),
+            }),
+        },
 
         // And/Or are short-circuited in eval_dsl_expr, never reach here.
         DslOp::And | DslOp::Or => unreachable!("and/or are short-circuited in eval_dsl_expr"),
@@ -2933,12 +3026,16 @@ fn eval_call(
             }
             // Fill defaults for remaining params
             for param in fn_def.params.iter().skip(args.len()) {
-                let default = param.default.as_ref().unwrap_or_else(|| {
-                    panic!(
-                        "DSL bug: {op_name}: missing arg `{}` for function `{name}`",
-                        param.name
-                    )
-                });
+                let default =
+                    param
+                        .default
+                        .as_ref()
+                        .ok_or_else(|| ShapeError::ShapeComputation {
+                            message: format!(
+                                "{op_name}: missing required argument `{}` for function `{name}`",
+                                param.name
+                            ),
+                        })?;
                 call_env.insert(param.name.clone(), const_to_val(default));
             }
             eval_dsl_body(&fn_def.body, &mut call_env, fns, op_name).map(|(val, _is_unbounded)| val)
@@ -2968,11 +3065,15 @@ fn eval_dsl_body(
             } else {
                 // Tuple unpacking
                 let items = val.as_list();
-                assert_eq!(
-                    items.len(),
-                    vars.len(),
-                    "DSL bug: {op_name}: unpack length mismatch"
-                );
+                if items.len() != vars.len() {
+                    return Err(ShapeError::ShapeComputation {
+                        message: format!(
+                            "{op_name}: tuple unpack expected {} values but got {}",
+                            vars.len(),
+                            items.len()
+                        ),
+                    });
+                }
                 for (var, item) in vars.iter().zip(items.iter()) {
                     env.insert(var.clone(), item.clone());
                 }
@@ -2984,7 +3085,7 @@ fn eval_dsl_body(
             then_body,
             rest,
         } => {
-            if eval_dsl_expr(cond, env, fns, op_name)?.as_bool() {
+            if val_as_bool(&eval_dsl_expr(cond, env, fns, op_name)?, op_name)? {
                 let mut then_env = env.clone();
                 eval_dsl_body(then_body, &mut then_env, fns, op_name)
             } else {
@@ -2998,9 +3099,18 @@ fn eval_dsl_body(
         }
         DslBody::Raise(expr) => {
             let msg = eval_dsl_expr(expr, env, fns, op_name)?;
-            Err(ShapeError::ShapeComputation {
-                message: msg.as_str_val().to_owned(),
-            })
+            let text = match msg {
+                Val::Str(s) => s,
+                other => {
+                    return Err(ShapeError::Unsupported {
+                        message: format!(
+                            "{op_name}: raise value must be a string, got {}",
+                            other.variant_name()
+                        ),
+                    });
+                }
+            };
+            Err(ShapeError::ShapeComputation { message: text })
         }
     }
 }
@@ -3097,8 +3207,7 @@ fn val_to_type(
                     .unwrap_or_else(|| expected_return_type.clone())
             }
             _ => panic!(
-                "DSL bug: {op_name}: expected Shape for Tensor return, got {}",
-                val.variant_name()
+                "DSL bug: {op_name}: expected Shape for Tensor return (declared -> {actual_result_type}), got {val:?}",
             ),
         },
 
@@ -3120,8 +3229,7 @@ fn val_to_type(
         DslType::Int => match val {
             Val::Int(n) => Lit::Int(LitInt::new(n)).to_implicit_type(),
             _ => panic!(
-                "DSL bug: {op_name}: expected Int for int return, got {}",
-                val.variant_name()
+                "DSL bug: {op_name}: expected Int for int return (declared -> {actual_result_type}), got {val:?}",
             ),
         },
 
@@ -3134,8 +3242,7 @@ fn val_to_type(
         DslType::Bool => match val {
             Val::Bool(b) => Lit::Bool(b).to_implicit_type(),
             _ => panic!(
-                "DSL bug: {op_name}: expected Bool for bool return, got {}",
-                val.variant_name()
+                "DSL bug: {op_name}: expected Bool for bool return (declared -> {actual_result_type}), got {val:?}",
             ),
         },
 
@@ -3163,8 +3270,7 @@ fn val_to_type(
                 }
             }
             panic!(
-                "DSL bug: {op_name}: no union variant matched return val {}",
-                val.variant_name()
+                "DSL bug: {op_name}: no union variant matched return val {val:?} (declared -> {actual_result_type})",
             );
         }
 
