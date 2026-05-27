@@ -44,6 +44,14 @@ def kwargs_ir(x: int, **kwargs) -> int:  # E: @shape_dsl_function: **kwargs para
 @shape_dsl_function
 def calls_undefined(x: int) -> int:  # E: @shape_dsl_function type error: undefined function: nonexistent
     return nonexistent(x)  # E: Could not find name `nonexistent`
+
+@shape_dsl_function
+def bad_no_ret(x: int):  # E: @shape_dsl_function type error: DSL function bad_no_ret must have a return type
+    return x
+
+@shape_dsl_function
+def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefined function: missing_one  # E: @shape_dsl_function type error: undefined function: missing_two
+    return missing_one(x) + missing_two(x)  # E: Could not find name `missing_one`  # E: Could not find name `missing_two`
 "#,
     );
     env.add_with_path(
@@ -52,7 +60,8 @@ def calls_undefined(x: int) -> int:  # E: @shape_dsl_function type error: undefi
         r#"
 from typing import overload
 from shape_extensions import uses_shape_dsl
-from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir
+from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir
+import my_shapes
 
 @uses_shape_dsl(identity_ir)
 def plain_fn(x: int) -> int: ...
@@ -81,6 +90,18 @@ def bad_syntax_fn(x: int) -> int: ...
 
 @uses_shape_dsl(kwargs_ir)
 def kwargs_fn(x: int) -> int: ...
+
+@uses_shape_dsl(calls_undefined)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def calls_undefined_fn(x: int) -> int: ...
+
+@uses_shape_dsl(bad_no_ret)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def no_ret_fn(x: int) -> int: ...
+
+@uses_shape_dsl(two_errors_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def two_errors_fn(x: int) -> int: ...
+
+@uses_shape_dsl(my_shapes.identity_ir)
+def dotted_fn(x: int) -> int: ...
 
 "#,
     );
@@ -175,10 +196,60 @@ assert_type(kwargs_fn(1), Literal[1])
 "#,
 );
 
-// The `calls_undefined` function in my_shapes.pyi calls `nonexistent()`,
-// which produces a type error diagnostic (tested by the `# E:` annotation
-// on its definition). No separate test case is needed here — the error is
-// validated by every test that uses `shape_dsl_env()`.
+testcase!(
+    test_shape_dsl_uses_failing_function,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import calls_undefined_fn
+
+# calls_undefined is rejected because its body calls an undefined helper. The
+# consumer also gets rejected as a DSL use-site and falls back to its declared
+# return type.
+assert_type(calls_undefined_fn(1), int)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_function_requires_return_annotation,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import no_ret_fn
+
+# bad_no_ret is not accepted as a DSL function without a return annotation, so
+# no_ret_fn falls back to its declared return type.
+assert_type(no_ret_fn(1), int)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_reports_multiple_errors,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import two_errors_fn
+
+# two_errors_ir reports both undefined helper names from the same DSL body, and
+# the consumer falls back to the declared return type.
+assert_type(two_errors_fn(1), int)
+"#,
+);
+
+testcase!(
+    bug =
+        "dotted-name arguments to @uses_shape_dsl currently silent-noop; should emit a diagnostic",
+    test_shape_dsl_dotted_name_silent_noop,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import dotted_fn
+
+# Dotted-name arguments are currently ignored without a diagnostic, so no shape
+# transform is applied and the declared return type is used.
+assert_type(dotted_fn(1), int)
+"#,
+);
 
 // ── Recursion-safety tests ────────────────────────────────────────────────────
 
