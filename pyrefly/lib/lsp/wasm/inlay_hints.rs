@@ -243,8 +243,9 @@ impl<'a> Transaction<'a> {
         }
 
         // Inlay hints for unannotated class attributes defined in methods (e.g. self.x = value in __init__)
-        if inlay_hint_config.variable_types {
-            let answers = self.get_answers(handle);
+        if inlay_hint_config.variable_types
+            && let Some(answers) = self.get_answers(handle)
+        {
             for field_idx in bindings.keys::<KeyClassField>() {
                 let field = bindings.get(field_idx);
                 if let ClassFieldDefinition::DefinedInMethod {
@@ -253,52 +254,46 @@ impl<'a> Transaction<'a> {
                     ..
                 } = &field.definition
                 {
-                    let class_field = answers
-                        .as_ref()
-                        .and_then(|a| a.get_idx::<KeyClassField>(field_idx));
-                    if let Some(class_field) = class_field {
-                        let ty = answers
-                            .as_ref()
-                            .unwrap()
-                            .solver()
-                            .for_display(class_field.ty());
-                        let expr = match value.as_ref() {
-                            ExprOrBinding::Expr(e) => Some(e),
-                            ExprOrBinding::Binding(_) => None,
-                        };
-                        // Suppress self.x = x where the RHS is a bare name matching the
-                        // attribute name. The type is already visible at the parameter.
-                        if let Some(Expr::Name(name)) = expr
-                            && *name.id() == *field.name
-                        {
-                            continue;
-                        }
-                        let class_name = if let Type::ClassType(cls) = &ty
-                            && cls.targs().is_empty()
-                        {
-                            Some(cls.name())
-                        } else {
-                            None
-                        };
-                        let should_show = match expr {
-                            Some(e) => is_interesting(e, &ty, class_name),
-                            None => !ty.is_any(),
-                        };
-                        if should_show {
-                            let type_parts = ty.get_types_with_locations(Some(&stdlib));
-                            let label_parts = once((": ".to_owned(), None))
-                                .chain(
-                                    type_parts
-                                        .iter()
-                                        .map(|(text, loc)| (text.clone(), loc.clone())),
-                                )
-                                .collect();
-                            res.push(InlayHintData {
-                                position: field.range.end(),
-                                label_parts,
-                                insertable: true,
-                            });
-                        }
+                    let Some(class_field) = answers.get_idx::<KeyClassField>(field_idx) else {
+                        continue;
+                    };
+                    let ty = answers.solver().for_display(class_field.ty());
+                    let expr = match value.as_ref() {
+                        ExprOrBinding::Expr(e) => Some(e),
+                        ExprOrBinding::Binding(_) => None,
+                    };
+                    // Suppress self.x = x where the RHS is a bare name matching the
+                    // attribute name. The type is already visible at the parameter.
+                    if let Some(Expr::Name(name)) = expr
+                        && *name.id() == *field.name
+                    {
+                        continue;
+                    }
+                    let class_name = if let Type::ClassType(cls) = &ty
+                        && cls.targs().is_empty()
+                    {
+                        Some(cls.name())
+                    } else {
+                        None
+                    };
+                    let should_show = match expr {
+                        Some(e) => is_interesting(e, &ty, class_name),
+                        None => !ty.is_any(),
+                    };
+                    if should_show {
+                        let type_parts = ty.get_types_with_locations(Some(&stdlib));
+                        let label_parts = once((": ".to_owned(), None))
+                            .chain(
+                                type_parts
+                                    .iter()
+                                    .map(|(text, loc)| (text.clone(), loc.clone())),
+                            )
+                            .collect();
+                        res.push(InlayHintData {
+                            position: field.range.end(),
+                            label_parts,
+                            insertable: true,
+                        });
                     }
                 }
             }
