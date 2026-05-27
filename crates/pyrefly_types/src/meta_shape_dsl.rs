@@ -37,6 +37,8 @@ use ruff_python_ast::Number;
 use ruff_python_ast::Operator as RuffOperator;
 use ruff_python_ast::Stmt;
 use ruff_python_ast::UnaryOp as RuffUnaryOp;
+use ruff_text_size::Ranged;
+use ruff_text_size::TextRange;
 
 use crate::callable::Derived;
 use crate::dimension::ShapeError;
@@ -370,6 +372,19 @@ pub trait MetaShapeFunction: Debug + Send + Sync {
     }
 }
 
+// Section: Compile error type
+
+/// A structured error from DSL compilation (parsing or type-checking), carrying
+/// the source range of the problematic construct so callers can emit precise
+/// diagnostics without resorting to a function-wide fallback range.
+#[derive(Debug, Clone)]
+pub struct DslCompileError {
+    /// Source span of the construct that caused the error.
+    pub range: TextRange,
+    /// Human-readable description of the error.
+    pub message: String,
+}
+
 // Section: Grammar-aligned data types
 
 /// Binary operators: arithmetic, comparison, and logical.
@@ -563,6 +578,9 @@ enum DslExpr {
 #[derive(Debug, Clone)]
 pub(crate) struct DslFnDef {
     name: String,
+    /// Source range of the function name identifier; used to attach type-check
+    /// errors to a precise location even when working from DSL IR.
+    name_range: TextRange,
     params: Vec<DslParam>,
     return_type: Option<DslType>,
     body: DslBody,
@@ -937,35 +955,51 @@ fn extract_comp_vars(target: &Expr) -> Result<Vec<String>, String> {
 
 /// Extract the error message expression from a `raise Error(expr)` statement.
 /// The expression is converted to a DslExpr and evaluated at runtime.
-fn extract_error_expr(exc: &Expr) -> Result<DslExpr, String> {
+fn extract_error_expr(exc: &Expr) -> Result<DslExpr, DslCompileError> {
     if let Expr::Call(call) = exc
         && let Expr::Name(n) = call.func.as_ref()
     {
         if n.id.as_str() != "Error" {
-            return Err(format!("DSL raise must use Error(), got {}()", n.id));
+            return Err(DslCompileError {
+                range: exc.range(),
+                message: format!("DSL raise must use Error(), got {}()", n.id),
+            });
         }
         if call.arguments.args.len() != 1 {
-            return Err(format!(
-                "Error() must have exactly one argument, got {}",
-                call.arguments.args.len()
-            ));
+            return Err(DslCompileError {
+                range: exc.range(),
+                message: format!(
+                    "Error() must have exactly one argument, got {}",
+                    call.arguments.args.len()
+                ),
+            });
         }
         return convert_expr(&call.arguments.args[0]);
     }
-    Err("expected raise Error(expr) in DSL".to_owned())
+    Err(DslCompileError {
+        range: exc.range(),
+        message: "expected raise Error(expr) in DSL".to_owned(),
+    })
 }
 
 /// Convert a sequence of Python statements into a DslBody.
 /// The grammar's body is a recursive structure: assignments and ifs have
 /// continuations, while return and raise are terminals.
-fn convert_body(stmts: &[Stmt]) -> Result<DslBody, String> {
+fn convert_body(stmts: &[Stmt]) -> Result<DslBody, DslCompileError> {
     if stmts.is_empty() {
-        return Err("empty body in DSL function".to_owned());
+        return Err(DslCompileError {
+            range: TextRange::default(),
+            message: "empty body in DSL function".to_owned(),
+        });
     }
 
+    let range = stmts[0].range();
     match &stmts[0] {
         Stmt::Assign(assign) => {
-            let vars = extract_assign_vars(&assign.targets)?;
+            let vars = extract_assign_vars(&assign.targets).map_err(|msg| DslCompileError {
+                range,
+                message: msg,
+            })?;
             let expr = convert_expr(&assign.value)?;
             let rest = convert_body(&stmts[1..])?;
             Ok(DslBody::Assign {
@@ -976,7 +1010,10 @@ fn convert_body(stmts: &[Stmt]) -> Result<DslBody, String> {
         }
         Stmt::If(if_stmt) => {
             if !if_stmt.elif_else_clauses.is_empty() {
-                return Err("DSL if must not have elif/else (use early returns)".to_owned());
+                return Err(DslCompileError {
+                    range,
+                    message: "DSL if must not have elif/else (use early returns)".to_owned(),
+                });
             }
             let cond = convert_expr(&if_stmt.test)?;
             let then_body = convert_body(&if_stmt.body)?;
@@ -988,38 +1025,47 @@ fn convert_body(stmts: &[Stmt]) -> Result<DslBody, String> {
             })
         }
         Stmt::Return(ret) => {
-            let value = ret
-                .value
-                .as_ref()
-                .ok_or_else(|| "DSL return must have a value".to_owned())?;
+            let value = ret.value.as_ref().ok_or_else(|| DslCompileError {
+                range,
+                message: "DSL return must have a value".to_owned(),
+            })?;
             Ok(DslBody::Return(convert_expr(value)?))
         }
         Stmt::Raise(raise) => {
-            let exc = raise
-                .exc
-                .as_ref()
-                .ok_or_else(|| "DSL raise must have an exception".to_owned())?;
+            let exc = raise.exc.as_ref().ok_or_else(|| DslCompileError {
+                range,
+                message: "DSL raise must have an exception".to_owned(),
+            })?;
             Ok(DslBody::Raise(extract_error_expr(exc)?))
         }
-        _ => Err(format!(
-            "unexpected statement in DSL body: {:?}",
-            std::mem::discriminant(&stmts[0])
-        )),
+        _ => Err(DslCompileError {
+            range,
+            message: format!(
+                "unexpected statement in DSL body: {:?}",
+                std::mem::discriminant(&stmts[0])
+            ),
+        }),
     }
 }
 
 /// Convert a ruff expression into a DslExpr.
-fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
+fn convert_expr(expr: &Expr) -> Result<DslExpr, DslCompileError> {
+    let range = expr.range();
     match expr {
         // Constants
         Expr::NoneLiteral(_) => Ok(DslExpr::Const(DslConst::None)),
         Expr::BooleanLiteral(b) => Ok(DslExpr::Const(DslConst::Bool(b.value))),
         Expr::NumberLiteral(n) => match &n.value {
-            Number::Int(i) => Ok(DslExpr::Const(DslConst::Int(
-                i.as_i64()
-                    .ok_or_else(|| format!("int literal too large: {}", i))?,
-            ))),
-            _ => Err("non-int number in DSL expression".to_owned()),
+            Number::Int(i) => Ok(DslExpr::Const(DslConst::Int(i.as_i64().ok_or_else(
+                || DslCompileError {
+                    range,
+                    message: format!("int literal too large: {}", i),
+                },
+            )?))),
+            _ => Err(DslCompileError {
+                range,
+                message: "non-int number in DSL expression".to_owned(),
+            }),
         },
         Expr::StringLiteral(s) => Ok(DslExpr::Const(DslConst::Str(s.value.to_str().to_owned()))),
         Expr::EllipsisLiteral(_) => Ok(DslExpr::Ellipsis),
@@ -1036,10 +1082,13 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
         // Attribute access: only x.shape is supported
         Expr::Attribute(attr) => {
             if attr.attr.as_str() != "shape" {
-                return Err(format!(
-                    "only .shape attribute access is supported in DSL, got .{}",
-                    attr.attr
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "only .shape attribute access is supported in DSL, got .{}",
+                        attr.attr
+                    ),
+                });
             }
             Ok(DslExpr::Shape(Box::new(convert_expr(&attr.value)?)))
         }
@@ -1085,13 +1134,19 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
         // List comprehension
         Expr::ListComp(comp) => {
             if comp.generators.len() != 1 {
-                return Err(format!(
-                    "DSL list comprehension must have exactly one generator, got {}",
-                    comp.generators.len()
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "DSL list comprehension must have exactly one generator, got {}",
+                        comp.generators.len()
+                    ),
+                });
             }
             let generator = &comp.generators[0];
-            let vars = extract_comp_vars(&generator.target)?;
+            let vars = extract_comp_vars(&generator.target).map_err(|msg| DslCompileError {
+                range: generator.target.range(),
+                message: msg,
+            })?;
             let iter = convert_expr(&generator.iter)?;
             let cond = if generator.ifs.is_empty() {
                 None
@@ -1134,10 +1189,10 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
                 RuffOperator::FloorDiv => DslOp::FloorDiv,
                 RuffOperator::Mod => DslOp::Mod,
                 _ => {
-                    return Err(format!(
-                        "unsupported binary operator in DSL: {:?}",
-                        binop.op
-                    ));
+                    return Err(DslCompileError {
+                        range,
+                        message: format!("unsupported binary operator in DSL: {:?}", binop.op),
+                    });
                 }
             };
             Ok(DslExpr::BinOp {
@@ -1152,7 +1207,12 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
             let op = match unary.op {
                 RuffUnaryOp::Not => DslUnaryOp::Not,
                 RuffUnaryOp::USub => DslUnaryOp::Neg,
-                _ => return Err(format!("unsupported unary operator in DSL: {:?}", unary.op)),
+                _ => {
+                    return Err(DslCompileError {
+                        range,
+                        message: format!("unsupported unary operator in DSL: {:?}", unary.op),
+                    });
+                }
             };
             Ok(DslExpr::UnaryOp {
                 op,
@@ -1167,7 +1227,10 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
                 RuffBoolOp::Or => DslOp::Or,
             };
             if boolop.values.len() < 2 {
-                return Err("BoolOp must have at least 2 values".to_owned());
+                return Err(DslCompileError {
+                    range,
+                    message: "BoolOp must have at least 2 values".to_owned(),
+                });
             }
             let mut result = convert_expr(&boolop.values[0])?;
             for value in &boolop.values[1..] {
@@ -1183,7 +1246,10 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
         // Comparison: dispatch to BinOp or In
         Expr::Compare(cmp) => {
             if cmp.ops.len() != 1 {
-                return Err("DSL does not support chained comparisons".to_owned());
+                return Err(DslCompileError {
+                    range,
+                    message: "DSL does not support chained comparisons".to_owned(),
+                });
             }
             let left = convert_expr(&cmp.left)?;
             let right = convert_expr(&cmp.comparators[0])?;
@@ -1208,10 +1274,13 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
                         RuffCmpOp::Gt => DslOp::Gt,
                         RuffCmpOp::GtE => DslOp::GtE,
                         _ => {
-                            return Err(format!(
-                                "unsupported comparison op in DSL: {:?}",
-                                cmp.ops[0]
-                            ));
+                            return Err(DslCompileError {
+                                range,
+                                message: format!(
+                                    "unsupported comparison op in DSL: {:?}",
+                                    cmp.ops[0]
+                                ),
+                            });
                         }
                     };
                     Ok(DslExpr::BinOp {
@@ -1230,10 +1299,13 @@ fn convert_expr(expr: &Expr) -> Result<DslExpr, String> {
             orelse: Box::new(convert_expr(&if_expr.orelse)?),
         }),
 
-        _ => Err(format!(
-            "unexpected expression in DSL: {:?}",
-            std::mem::discriminant(expr)
-        )),
+        _ => Err(DslCompileError {
+            range,
+            message: format!(
+                "unexpected expression in DSL: {:?}",
+                std::mem::discriminant(expr)
+            ),
+        }),
     }
 }
 
@@ -1250,49 +1322,66 @@ fn dotted_name(expr: &Expr) -> Option<String> {
 }
 
 /// Convert a function call expression, dispatching special forms.
-fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
-    // Extract function name for dispatch. Supports simple names (`len`),
-    // single-dotted names (`Tensor`), and multi-dotted names
-    // (`shape_extensions.dsl.prod`).
-    let func_name = dotted_name(&call.func)
-        .ok_or_else(|| format!("unsupported call target: {:?}", call.func))?;
+fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, DslCompileError> {
+    let range = call.range();
+    let func_name = dotted_name(&call.func).ok_or_else(|| DslCompileError {
+        range,
+        message: format!("unsupported call target: {:?}", call.func),
+    })?;
 
     match func_name.as_str() {
         // Special forms with non-call syntax — keep as dedicated DslExpr variants
         "isinstance" => {
             if call.arguments.args.len() != 2 {
-                return Err(format!(
-                    "isinstance() takes exactly 2 arguments, got {}",
-                    call.arguments.args.len()
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "isinstance() takes exactly 2 arguments, got {}",
+                        call.arguments.args.len()
+                    ),
+                });
             }
             Ok(DslExpr::IsInstance {
                 expr: Box::new(convert_expr(&call.arguments.args[0])?),
-                ty: convert_type_constructor(&call.arguments.args[1])?,
+                ty: convert_type_constructor(&call.arguments.args[1]).map_err(|msg| {
+                    DslCompileError {
+                        range: call.arguments.args[1].range(),
+                        message: msg,
+                    }
+                })?,
             })
         }
         "Tensor" => {
             // Tensor(shape=expr) — keyword argument
             if !call.arguments.args.is_empty() {
-                return Err("Tensor() uses keyword arg shape=, not positional args".to_owned());
+                return Err(DslCompileError {
+                    range,
+                    message: "Tensor() uses keyword arg shape=, not positional args".to_owned(),
+                });
             }
             if call.arguments.keywords.len() != 1 {
-                return Err(format!(
-                    "Tensor() takes exactly one keyword arg, got {}",
-                    call.arguments.keywords.len()
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "Tensor() takes exactly one keyword arg, got {}",
+                        call.arguments.keywords.len()
+                    ),
+                });
             }
             let kw = &call.arguments.keywords[0];
             let kw_name = kw
                 .arg
                 .as_ref()
-                .ok_or_else(|| "Tensor keyword must be named".to_owned())?
+                .ok_or_else(|| DslCompileError {
+                    range,
+                    message: "Tensor keyword must be named".to_owned(),
+                })?
                 .as_str();
             if kw_name != "shape" {
-                return Err(format!(
-                    "Tensor() keyword must be 'shape', got '{}'",
-                    kw_name
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!("Tensor() keyword must be 'shape', got '{}'", kw_name),
+                });
             }
             Ok(DslExpr::TensorNew(Box::new(convert_expr(&kw.value)?)))
         }
@@ -1300,10 +1389,13 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
         // Builtins validated at parse time
         "len" => {
             if call.arguments.args.len() != 1 {
-                return Err(format!(
-                    "len() takes exactly 1 argument, got {}",
-                    call.arguments.args.len()
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "len() takes exactly 1 argument, got {}",
+                        call.arguments.args.len()
+                    ),
+                });
             }
             Ok(DslExpr::Call {
                 func: DslCallTarget::Builtin(DslBuiltin::Len),
@@ -1312,10 +1404,13 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
         }
         "range" => {
             if call.arguments.args.len() != 1 {
-                return Err(format!(
-                    "range() takes exactly 1 argument in DSL, got {}",
-                    call.arguments.args.len()
-                ));
+                return Err(DslCompileError {
+                    range,
+                    message: format!(
+                        "range() takes exactly 1 argument in DSL, got {}",
+                        call.arguments.args.len()
+                    ),
+                });
             }
             Ok(DslExpr::Call {
                 func: DslCallTarget::Builtin(DslBuiltin::Range),
@@ -1366,8 +1461,9 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, String> {
 }
 
 /// Convert a ruff StmtFunctionDef into a DslFnDef.
-fn convert_fndef(func: &ruff_python_ast::StmtFunctionDef) -> Result<DslFnDef, String> {
+fn convert_fndef(func: &ruff_python_ast::StmtFunctionDef) -> Result<DslFnDef, DslCompileError> {
     let name = func.name.to_string();
+    let name_range = func.name.range();
 
     let params: Vec<DslParam> = func
         .parameters
@@ -1375,37 +1471,59 @@ fn convert_fndef(func: &ruff_python_ast::StmtFunctionDef) -> Result<DslFnDef, St
         .iter()
         .map(|p| {
             let param_name = p.parameter.name.to_string();
+            let param_range = p.parameter.name.range();
             let ty = p
                 .parameter
                 .annotation
                 .as_ref()
-                .map(|a| convert_type_annotation(a))
+                .map(|a| {
+                    convert_type_annotation(a).map_err(|msg| DslCompileError {
+                        range: a.range(),
+                        message: msg,
+                    })
+                })
                 .transpose()?
-                .ok_or_else(|| {
-                    format!(
+                .ok_or_else(|| DslCompileError {
+                    range: param_range,
+                    message: format!(
                         "DSL parameter '{}' in function '{}' must have a type annotation",
                         param_name, name
-                    )
+                    ),
                 })?;
-            let default = p.default.as_ref().map(|d| convert_default(d)).transpose()?;
+            let default = p
+                .default
+                .as_ref()
+                .map(|d| {
+                    convert_default(d).map_err(|msg| DslCompileError {
+                        range: d.range(),
+                        message: msg,
+                    })
+                })
+                .transpose()?;
             Ok(DslParam {
                 name: param_name,
                 ty,
                 default,
             })
         })
-        .collect::<Result<_, String>>()?;
+        .collect::<Result<_, DslCompileError>>()?;
 
     let return_type = func
         .returns
         .as_ref()
-        .map(|r| convert_type_annotation(r))
+        .map(|r| {
+            convert_type_annotation(r).map_err(|msg| DslCompileError {
+                range: r.range(),
+                message: msg,
+            })
+        })
         .transpose()?;
 
     let body = convert_body(&func.body)?;
 
     Ok(DslFnDef {
         name,
+        name_range,
         params,
         return_type,
         body,
@@ -1649,13 +1767,16 @@ fn narrow(cond: &DslExpr, env: &TypeEnv, errors: &mut Vec<String>) -> (TypeEnv, 
 }
 
 /// Build function return type map from DSL definitions.
-fn build_fn_ret_types(fndefs: &[DslFnDef], errors: &mut Vec<String>) -> FnRetTypes {
+fn build_fn_ret_types(fndefs: &[DslFnDef], errors: &mut Vec<DslCompileError>) -> FnRetTypes {
     fndefs
         .iter()
         .filter_map(|f| match &f.return_type {
             Some(rt) => Some((f.name.clone(), rt.clone())),
             None => {
-                errors.push(format!("DSL function {} must have a return type", f.name));
+                errors.push(DslCompileError {
+                    range: f.name_range,
+                    message: format!("DSL function {} must have a return type", f.name),
+                });
                 None
             }
         })
@@ -1962,15 +2083,20 @@ fn check_body(body: &DslBody, env: &TypeEnv, sigs: &FnRetTypes, errors: &mut Vec
 
 /// Type-check all DSL function definitions. Returns `Err` with collected
 /// error messages if type errors are found.
-fn type_check_program(fndefs: &[DslFnDef]) -> Result<(), Vec<String>> {
-    let mut errors = Vec::new();
+fn type_check_program(fndefs: &[DslFnDef]) -> Result<(), Vec<DslCompileError>> {
+    let mut errors: Vec<DslCompileError> = Vec::new();
     let sigs = build_fn_ret_types(fndefs, &mut errors);
     for fndef in fndefs {
+        let mut fn_errors: Vec<String> = Vec::new();
         let mut env = TypeEnv::new();
         for param in &fndef.params {
             env.insert(param.name.clone(), param.ty.clone());
         }
-        check_body(&fndef.body, &env, &sigs, &mut errors);
+        check_body(&fndef.body, &env, &sigs, &mut fn_errors);
+        errors.extend(fn_errors.into_iter().map(|message| DslCompileError {
+            range: fndef.name_range,
+            message,
+        }));
     }
     if errors.is_empty() {
         Ok(())
@@ -3350,21 +3476,25 @@ fn collect_call_targets_expr(expr: &DslExpr, targets: &mut HashSet<String>) {
 ///
 /// Intended to be called with a per-caller transitive closure (root +
 /// its resolved helpers), not the full module.
-pub fn validate_shape_dsl_functions(fns: &[Arc<ShapeDslFunction>]) -> Result<(), Vec<String>> {
+pub fn validate_shape_dsl_functions(
+    fns: &[Arc<ShapeDslFunction>],
+) -> Result<(), Vec<DslCompileError>> {
     // Reject recursive cycles before running the type checker. The DSL
     // evaluator does not support recursion and would infinite-loop at a
     // call site if a cycle reached the interpreter.
     if has_dsl_cycle(fns) {
-        let root_name = fns
+        let root_fn = fns
             .first()
             // has_dsl_cycle returned true ⟹ fns is non-empty.
-            .expect("non-empty closure when a cycle is detected")
-            .name();
-        return Err(vec![format!(
-            "DSL function '{}' is recursive (or part of a recursive cycle); \
-             recursion is not supported in shape DSL",
-            root_name
-        )]);
+            .expect("non-empty closure when a cycle is detected");
+        return Err(vec![DslCompileError {
+            range: root_fn.inner.name_range,
+            message: format!(
+                "DSL function '{}' is recursive (or part of a recursive cycle); \
+                 recursion is not supported in shape DSL",
+                root_fn.name()
+            ),
+        }]);
     }
     let defs: Vec<DslFnDef> = fns.iter().map(|f| (*f.inner).clone()).collect();
     type_check_program(&defs)
@@ -3507,7 +3637,7 @@ impl ShapeTransformRef {
 /// syntax outside the DSL subset.
 pub fn convert_shape_dsl_function(
     func: &ruff_python_ast::StmtFunctionDef,
-) -> Result<ShapeDslFunction, String> {
+) -> Result<ShapeDslFunction, DslCompileError> {
     let fndef = convert_fndef(func)?;
     Ok(ShapeDslFunction {
         inner: Arc::new(fndef),

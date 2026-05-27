@@ -31,9 +31,9 @@ def double_ir(x: int) -> int:
 
 def not_a_dsl_fn(x: int) -> int: ...
 
-@shape_dsl_function  # E: @shape_dsl_function: unexpected statement in DSL body
+@shape_dsl_function
 def bad_syntax_ir(x: int) -> int:
-    while x > 0:
+    while x > 0:  # E: @shape_dsl_function: unexpected statement in DSL body
         x = x - 1
     return x
 

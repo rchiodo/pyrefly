@@ -866,11 +866,11 @@ impl<'a> BindingsBuilder<'a> {
                         .push_shape_dsl(func_name.id.clone(), Arc::clone(&dsl_fn));
                     Some(dsl_fn)
                 }
-                Err(msg) => {
+                Err(err) => {
                     self.error(
-                        x.range,
+                        err.range,
                         ErrorKind::InvalidArgument,
-                        format!("@shape_dsl_function: {msg}"),
+                        format!("@shape_dsl_function: {}", err.message),
                     );
                     None
                 }

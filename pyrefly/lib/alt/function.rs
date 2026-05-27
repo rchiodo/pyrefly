@@ -550,12 +550,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let module_dsl_fns = self.bindings().metadata().shape_dsl_functions();
             let helpers = compute_transitive_helpers(&dsl_fn, module_dsl_fns);
             if let Err(type_errors) = validate_shape_dsl_functions(&helpers) {
-                for msg in &type_errors {
+                for err in &type_errors {
                     self.error(
                         errors,
-                        def.name.range,
+                        err.range,
                         ErrorKind::InvalidArgument,
-                        format!("@shape_dsl_function type error: {msg}"),
+                        format!("@shape_dsl_function type error: {}", err.message),
                     );
                 }
                 // Fall back to a normal function — the DSL evaluator must
