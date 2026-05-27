@@ -3161,14 +3161,13 @@ impl MetaShapeFunction for DslMetaShapeFunction {
 // the grammar-aligned `DslFnDef` internals.
 //
 // Constraint: the public surface never returns `Arc<DslFnDef>`. Callers store
-// `ShapeDslFunction` / `ShapeDslProgram` opaquely; only code inside
-// `pyrefly_types` (e.g. `tensor_ops_registry`) may reach the underlying
-// `DslFnDef` via the `pub(crate)` fields.
+// `ShapeDslFunction` opaquely; only code inside `pyrefly_types` may reach the
+// underlying `DslFnDef` via the `pub(crate)` fields.
 
 /// A single DSL function that has been lowered from its Python AST.
 ///
-/// This is a cheap (one `Arc`) opaque handle. It is the unit produced by
-/// [`convert_shape_dsl_function`] and consumed by [`build_shape_dsl_program`].
+/// This is a cheap (one `Arc`) opaque handle produced by
+/// [`convert_shape_dsl_function`] and consumed by [`validate_shape_dsl_functions`].
 #[derive(Debug, Clone)]
 pub struct ShapeDslFunction {
     pub(crate) inner: Arc<DslFnDef>,
@@ -3407,10 +3406,10 @@ fn is_self_reachable(start: &str, adj: &HashMap<String, Vec<String>>) -> bool {
         if curr == start {
             return true;
         }
-        if visited.insert(curr) {
-            if let Some(nexts) = adj.get(curr) {
-                stack.extend(nexts.iter().map(String::as_str));
-            }
+        if visited.insert(curr)
+            && let Some(nexts) = adj.get(curr)
+        {
+            stack.extend(nexts.iter().map(String::as_str));
         }
     }
     false
@@ -3497,31 +3496,12 @@ impl ShapeTransformRef {
     }
 }
 
-/// A bundle of DSL functions that have been validated together as a program.
-///
-/// The functions held by a `ShapeDslProgram` are guaranteed to have passed
-/// `type_check_program` against the program's own signature set. The factory
-/// [`make_meta_shape_function`] takes a `&ShapeDslProgram` (not raw pieces)
-/// precisely to enforce that callers can only build a `MetaShapeFunction`
-/// from validated DSL.
-///
-/// The names used as keys for helper resolution are the *local* names a
-/// caller's body refers to. Programs are populated with
-/// `[self_dsl_fn, ...resolved_callees]` where each callee's `name` field
-/// has already been rewritten (or annotated) to its caller-local form. This
-/// API does not perform that rewriting itself — it accepts programs that
-/// already satisfy that constraint.
-#[derive(Debug, Clone)]
-pub struct ShapeDslProgram {
-    pub(crate) fns: Vec<Arc<DslFnDef>>,
-}
-
 /// Convert a single Python function definition into a [`ShapeDslFunction`].
 ///
 /// This is pure AST-to-IR lowering — it does not parse source text or run
 /// the type checker. The output is a single opaque handle; the caller is
 /// expected to combine handles from this function (and possibly other
-/// modules) into a [`ShapeDslProgram`] via [`build_shape_dsl_program`].
+/// modules) via [`validate_shape_dsl_functions`].
 ///
 /// Returns `Err` with a terse description if the function body uses Python
 /// syntax outside the DSL subset.
@@ -3532,58 +3512,6 @@ pub fn convert_shape_dsl_function(
     Ok(ShapeDslFunction {
         inner: Arc::new(fndef),
     })
-}
-
-/// Bundle a set of [`ShapeDslFunction`]s into a validated [`ShapeDslProgram`].
-///
-/// Type-checks the bundle as a whole, building the global signature map that
-/// `infer_call` needs in order to resolve cross-function calls. Type errors
-/// are intentionally discarded here because this entry point is used by
-/// test/fixture code; the production path goes through
-/// `validate_shape_dsl_functions` which propagates errors as diagnostics.
-pub fn build_shape_dsl_program(fns: impl IntoIterator<Item = ShapeDslFunction>) -> ShapeDslProgram {
-    let fns: Vec<Arc<DslFnDef>> = fns.into_iter().map(|f| f.inner).collect();
-    // Clone the Arc'd defs into a temporary slice for `type_check_program`.
-    let view: Vec<DslFnDef> = fns.iter().map(|f| (**f).clone()).collect();
-    // Errors intentionally discarded — see doc comment.
-    let _ = type_check_program(&view);
-    ShapeDslProgram { fns }
-}
-
-/// Construct a [`MetaShapeFunction`] keyed at `root_name` from a validated
-/// [`ShapeDslProgram`].
-///
-/// The factory takes a `&ShapeDslProgram` (not raw pieces) so that a caller
-/// cannot build a `MetaShapeFunction` from un-type-checked DSL — the only
-/// way to obtain a `ShapeDslProgram` is via [`build_shape_dsl_program`],
-/// which runs the type checker.
-///
-/// `root_name` selects which function inside the program is the entry point
-/// (the one whose parameters get bound from call-site arguments). All
-/// functions in the program — including `root_name` — become part of the
-/// resulting `fn_lookup`, which the interpreter consults for cross-function
-/// calls. The lookup is keyed by each function's `name`, which the caller
-/// is responsible for setting to the caller-local name; see
-/// [`ShapeDslProgram`] for that invariant.
-///
-/// Returns `None` if no function in the program has `name == root_name`.
-pub fn make_meta_shape_function(
-    program: &ShapeDslProgram,
-    root_name: &str,
-) -> Option<Box<dyn MetaShapeFunction>> {
-    let fn_def = program
-        .fns
-        .iter()
-        .find(|f| f.name == root_name)
-        .map(Arc::clone)?;
-    let fn_lookup: Arc<HashMap<String, Arc<DslFnDef>>> = Arc::new(
-        program
-            .fns
-            .iter()
-            .map(|f| (f.name.clone(), Arc::clone(f)))
-            .collect(),
-    );
-    Some(Box::new(DslMetaShapeFunction { fn_def, fn_lookup }))
 }
 
 #[cfg(test)]

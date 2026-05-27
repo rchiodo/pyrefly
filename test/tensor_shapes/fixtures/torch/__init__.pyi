@@ -6,14 +6,9 @@
 """
 Comprehensive type stubs for PyTorch with shape inference.
 
-Shape inference is handled by meta-shape functions registered in the type checker.
-This stub file only defines the basic tensor class and operations that don't use
-meta-shapes (like broadcasting arithmetic and matmul).
-
-For operations handled by meta-shapes, see pyrefly_types/src/meta_shape.rs:
-- torch.reshape, torch.cat, torch.broadcast_to
-- torch.squeeze, torch.unsqueeze, torch.transpose, torch.permute
-- torch.sum, torch.mean, torch.prod, torch.min, torch.max, torch.all, torch.any
+Shape inference is declared via @uses_shape_dsl(ir_fn) decorators. The IR
+functions are defined in torch/_shapes.pyi and evaluated by the DSL interpreter
+in crates/pyrefly_types/src/meta_shape_dsl.rs.
 """
 
 import builtins
