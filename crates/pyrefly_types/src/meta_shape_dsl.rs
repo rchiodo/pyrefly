@@ -1544,7 +1544,18 @@ fn convert_fndef(func: &ruff_python_ast::StmtFunctionDef) -> Result<DslFnDef, Ds
 type TypeEnv = HashMap<String, DslType>;
 
 /// Function return types, keyed by function name.
-type FnRetTypes = HashMap<String, DslType>;
+///
+/// Each entry carries the declared return type plus the min/max argument
+/// count so that call-site arg-count mismatches can be caught at compile time.
+struct FnSig {
+    ret_type: DslType,
+    /// Number of required parameters (those without a default value).
+    min_args: usize,
+    /// Total number of parameters (required + optional).
+    max_args: usize,
+}
+
+type FnRetTypes = HashMap<String, FnSig>;
 
 /// The type `int | symint`, representing a tensor dimension.
 fn dim_type() -> DslType {
@@ -1812,12 +1823,26 @@ fn narrow(cond: &DslExpr, env: &TypeEnv, errors: &mut Vec<String>) -> (TypeEnv, 
     }
 }
 
-/// Build function return type map from DSL definitions.
+/// Build function signature map from DSL definitions.
+///
+/// Records the return type plus the min/max argument count (for compile-time
+/// arg-count validation in `infer_call`).
 fn build_fn_ret_types(fndefs: &[DslFnDef], errors: &mut Vec<DslCompileError>) -> FnRetTypes {
     fndefs
         .iter()
         .filter_map(|f| match &f.return_type {
-            Some(rt) => Some((f.name.clone(), rt.clone())),
+            Some(rt) => {
+                let min_args = f.params.iter().filter(|p| p.default.is_none()).count();
+                let max_args = f.params.len();
+                Some((
+                    f.name.clone(),
+                    FnSig {
+                        ret_type: rt.clone(),
+                        min_args,
+                        max_args,
+                    },
+                ))
+            }
             None => {
                 errors.push(DslCompileError {
                     range: f.name_range,
@@ -2000,7 +2025,28 @@ fn infer_call(
             }
         },
         DslCallTarget::UserDefined(name) => match sigs.get(name) {
-            Some(ty) => ty.clone(),
+            Some(sig) => {
+                let n = args.len();
+                if n < sig.min_args {
+                    if sig.min_args == sig.max_args {
+                        errors.push(format!(
+                            "'{}' takes exactly {} argument(s), got {}",
+                            name, sig.min_args, n
+                        ));
+                    } else {
+                        errors.push(format!(
+                            "'{}' requires at least {} argument(s), got {}",
+                            name, sig.min_args, n
+                        ));
+                    }
+                } else if n > sig.max_args {
+                    errors.push(format!(
+                        "'{}' takes at most {} argument(s), got {}",
+                        name, sig.max_args, n
+                    ));
+                }
+                sig.ret_type.clone()
+            }
             None => {
                 errors.push(format!("undefined function: {}", name));
                 DslType::Int
@@ -3093,18 +3139,16 @@ fn eval_call(
             for (param, arg) in fn_def.params.iter().zip(args.iter()) {
                 call_env.insert(param.name.clone(), arg.clone());
             }
-            // Fill defaults for remaining params
+            // Fill defaults for remaining params; missing-required-arg errors
+            // are already caught at compile time by infer_call, so reaching
+            // here with too few args is a DSL bug rather than a user error.
             for param in fn_def.params.iter().skip(args.len()) {
-                let default =
-                    param
-                        .default
-                        .as_ref()
-                        .ok_or_else(|| ShapeError::ShapeComputation {
-                            message: format!(
-                                "{op_name}: missing required argument `{}` for function `{name}`",
-                                param.name
-                            ),
-                        })?;
+                let default = param.default.as_ref().unwrap_or_else(|| {
+                    unreachable!(
+                        "DSL bug: {op_name}: missing required argument \
+                             for function `{name}` — should have been caught by infer_call"
+                    )
+                });
                 call_env.insert(param.name.clone(), const_to_val(default));
             }
             eval_dsl_body(&fn_def.body, &mut call_env, fns, op_name).map(|(val, _is_unbounded)| val)

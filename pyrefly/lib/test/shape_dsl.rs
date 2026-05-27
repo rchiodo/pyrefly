@@ -66,6 +66,18 @@ def unknown_fallback_ir(x: int) -> int:
     return Unknown
 
 @shape_dsl_function
+def helper_exact_one_ir(x: int) -> int:
+    return x
+
+@shape_dsl_function
+def too_few_args_ir() -> int:  # E: @shape_dsl_function type error: 'helper_exact_one_ir' takes exactly 1 argument(s), got 0
+    return helper_exact_one_ir()
+
+@shape_dsl_function
+def too_many_args_ir(x: int) -> int:  # E: @shape_dsl_function type error: 'helper_exact_one_ir' takes at most 1 argument(s), got 2
+    return helper_exact_one_ir(x, x)
+
+@shape_dsl_function
 def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefined function: missing_one  # E: @shape_dsl_function type error: undefined function: missing_two
     return missing_one(x) + missing_two(x)  # E: Could not find name `missing_one`  # E: Could not find name `missing_two`
 "#,
@@ -76,7 +88,7 @@ def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefine
         r#"
 from typing import overload
 from shape_extensions import uses_shape_dsl
-from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir, returns_wrong_type_ir, dims_as_scalar_union_ir, unknown_fallback_ir
+from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir, returns_wrong_type_ir, dims_as_scalar_union_ir, unknown_fallback_ir, helper_exact_one_ir, too_few_args_ir, too_many_args_ir
 import my_shapes
 
 @uses_shape_dsl(identity_ir)
@@ -124,6 +136,15 @@ def dims_as_scalar_union_fn(x: tuple[int, int]) -> tuple[int, int]: ...
 
 @uses_shape_dsl(unknown_fallback_ir)
 def unknown_fallback_fn(x: int) -> int: ...
+
+@uses_shape_dsl(helper_exact_one_ir)
+def helper_exact_one_fn(x: int) -> int: ...
+
+@uses_shape_dsl(too_few_args_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def too_few_args_fn() -> int: ...
+
+@uses_shape_dsl(too_many_args_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def too_many_args_fn(x: int) -> int: ...
 
 @uses_shape_dsl(my_shapes.identity_ir)
 def dotted_fn(x: int) -> int: ...
@@ -412,5 +433,31 @@ from my_lib import unknown_fallback_fn
 # Unknown is the DSL's explicit fixture fallback sentinel. It should not make
 # the DSL function invalid just because it evaluates to Val::None internally.
 assert_type(unknown_fallback_fn(1), int)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_arg_count_too_few,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import too_few_args_fn
+
+# too_few_args_ir calls helper_exact_one_ir() with 0 args but it needs 1,
+# so the DSL compile-time check fires and the consumer falls back to int.
+assert_type(too_few_args_fn(), int)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_arg_count_too_many,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import too_many_args_fn
+
+# too_many_args_ir calls helper_exact_one_ir(x, x) with 2 args but it takes 1,
+# so the DSL compile-time check fires and the consumer falls back to int.
+assert_type(too_many_args_fn(1), int)
 "#,
 );
