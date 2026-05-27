@@ -118,6 +118,7 @@ pub struct TestEnv {
     not_required_key_access_error: bool,
     pytorch_efficiency_lint_error: bool,
     incompatible_comparison_error: bool,
+    string_as_iterable_warning: bool,
     strict_callable_subtyping: bool,
     spec_compliant_overloads: bool,
     default_require_level: Require,
@@ -151,6 +152,7 @@ impl TestEnv {
             not_required_key_access_error: false,
             pytorch_efficiency_lint_error: false,
             incompatible_comparison_error: false,
+            string_as_iterable_warning: false,
             strict_callable_subtyping: false,
             spec_compliant_overloads: false,
             default_require_level: Require::Exports,
@@ -305,6 +307,11 @@ impl TestEnv {
         self
     }
 
+    pub fn enable_string_as_iterable_warning(mut self) -> Self {
+        self.string_as_iterable_warning = true;
+        self
+    }
+
     pub fn enable_strict_callable_subtyping(mut self) -> Self {
         self.strict_callable_subtyping = true;
         self
@@ -445,6 +452,9 @@ impl TestEnv {
         }
         if self.incompatible_comparison_error {
             errors.set_error_severity(ErrorKind::IncompatibleComparison, Severity::Error);
+        }
+        if self.string_as_iterable_warning {
+            errors.set_error_severity(ErrorKind::StringAsIterable, Severity::Warn);
         }
         config.extra_file_extensions = self.extra_file_extensions.clone();
         let mut sourcedb = MapDatabase::new(config.get_sys_info());

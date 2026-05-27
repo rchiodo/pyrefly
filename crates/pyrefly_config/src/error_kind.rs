@@ -303,6 +303,8 @@ pub enum ErrorKind {
     RedundantCondition,
     /// Raised by a call to reveal_type().
     RevealType,
+    /// Passing a string to something that expects an iterable of strings.
+    StringAsIterable,
     /// DEPRECATED: use [ImplicitAnyAttribute] (`implicit-any-attribute`) instead.
     /// Kept so that existing `# pyrefly: ignore[unannotated-attribute]` comments
     /// and config entries continue to work. This variant is never emitted by
@@ -468,6 +470,7 @@ impl ErrorKind {
             ErrorKind::RedundantCast => Severity::Warn,
             ErrorKind::RedundantCondition => Severity::Warn,
             ErrorKind::RevealType => Severity::Info,
+            ErrorKind::StringAsIterable => Severity::Ignore,
             ErrorKind::UnannotatedAttribute => Severity::Ignore,
             ErrorKind::UnannotatedParameter => Severity::Ignore,
             ErrorKind::UnannotatedReturn => Severity::Ignore,
@@ -489,6 +492,13 @@ impl ErrorKind {
     /// per-kind severity overrides (e.g. `--ignore reveal-type`).
     pub fn is_directive(self) -> bool {
         matches!(self, ErrorKind::RevealType)
+    }
+
+    /// A soft error is a warning that should not influence overload selection
+    /// or other type-inference decisions. The type check itself passed, but the
+    /// code pattern is suspicious.
+    pub fn is_soft(self) -> bool {
+        matches!(self, ErrorKind::StringAsIterable)
     }
 
     /// Returns the public documentation URL for this error kind.
