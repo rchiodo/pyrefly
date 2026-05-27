@@ -540,3 +540,19 @@ f(d, 42)
 assert_type(d, dict[str, int])
     "#,
 );
+
+testcase!(
+    test_container_literal_no_implicit_any,
+    TestEnv::new().enable_implicit_any_error(),
+    r#"
+from typing import assert_type
+
+foo = {"a": 1, "b": None}
+assert_type(foo["a"], int)
+assert_type(foo["b"], None)
+assert_type(foo, dict[str, int | None])
+
+bar = [1, None]
+assert_type(bar, list[int | None])
+    "#,
+);

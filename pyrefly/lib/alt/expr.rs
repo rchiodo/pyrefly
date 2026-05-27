@@ -1346,6 +1346,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             .as_ref()
                             .is_some_and(|k| k.as_string_literal_expr().is_some())
                 });
+            let has_non_none_value = items
+                .iter()
+                .any(|x| x.key.is_some() && !x.value.is_none_literal_expr());
             let mut key_tys = Vec::new();
             let mut value_tys = Vec::new();
             items.iter().for_each(|x| match &x.key {
@@ -1376,7 +1379,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         typed_dict_fields_map.insert(
                             key_name,
                             TypedDictField {
-                                ty: if value_t.is_none() {
+                                ty: if value_t.is_none() && !has_non_none_value {
                                     self.heap.mk_union(vec![
                                         self.heap.mk_none(),
                                         self.solver()
