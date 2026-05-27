@@ -3087,7 +3087,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         match subset_result {
             Ok(()) => {
-                self.warn_if_string_as_iterable(got, want, loc, errors);
+                self.check_string_as_iterable(got, want, loc, errors);
                 true
             }
             Err(error) => {
@@ -3111,7 +3111,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .is_subset_eq(got, want, self.type_order(), Some(call_context))
         {
             Ok(()) => {
-                self.warn_if_string_as_iterable(got, want, loc, errors);
+                self.check_string_as_iterable(got, want, loc, errors);
                 true
             }
             Err(error) => {
@@ -3121,9 +3121,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Warn when `str` is passed where `Iterable[str]` or `Sequence[str]` is expected.
+    /// Check when `str` is passed where `Iterable[str]` or `Sequence[str]` is expected.
     /// While `str` is technically iterable, iterating by character is rarely intended.
-    fn warn_if_string_as_iterable(
+    fn check_string_as_iterable(
         &self,
         got: &Type,
         want: &Type,
