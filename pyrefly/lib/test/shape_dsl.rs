@@ -86,10 +86,12 @@ def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefine
         "my_lib",
         "my_lib.pyi",
         r#"
-from typing import overload
+from typing import Any, overload
 from shape_extensions import uses_shape_dsl
 from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir, returns_wrong_type_ir, dims_as_scalar_union_ir, unknown_fallback_ir, helper_exact_one_ir, too_few_args_ir, too_many_args_ir
 import my_shapes
+
+non_literal: Any
 
 @uses_shape_dsl(identity_ir)
 def plain_fn(x: int) -> int: ...
@@ -145,6 +147,10 @@ def too_few_args_fn() -> int: ...
 
 @uses_shape_dsl(too_many_args_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
 def too_many_args_fn(x: int) -> int: ...
+
+class BadCaptureInit:
+    @uses_shape_dsl(identity_ir, capture_init=["x", non_literal])  # E: `capture_init` entries must be string literals
+    def forward(self, x: int) -> int: ...
 
 @uses_shape_dsl(my_shapes.identity_ir)
 def dotted_fn(x: int) -> int: ...
@@ -459,5 +465,17 @@ from my_lib import too_many_args_fn
 # too_many_args_ir calls helper_exact_one_ir(x, x) with 2 args but it takes 1,
 # so the DSL compile-time check fires and the consumer falls back to int.
 assert_type(too_many_args_fn(1), int)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_capture_init_requires_string_literals,
+    shape_dsl_env(),
+    r#"
+from my_lib import BadCaptureInit
+
+# capture_init is read during class binding. Non-literal entries are rejected
+# instead of silently dropping them from the captured __init__ field list.
+BadCaptureInit()
 "#,
 );

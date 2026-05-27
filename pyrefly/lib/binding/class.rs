@@ -561,7 +561,7 @@ impl<'a> BindingsBuilder<'a> {
     /// Scan a class body for a `forward` method decorated with
     /// `@uses_shape_dsl(..., capture_init=[...])` and return the list of `__init__`
     /// parameter names to capture for shape inference.
-    fn extract_capture_init(&self, body: &[Stmt]) -> Option<Vec<Name>> {
+    fn extract_capture_init(&mut self, body: &[Stmt]) -> Option<Vec<Name>> {
         let forward = body
             .iter()
             .filter_map(|stmt| stmt.as_function_def_stmt())
@@ -582,8 +582,16 @@ impl<'a> BindingsBuilder<'a> {
                 .elts
                 .iter()
                 .filter_map(|elt| {
-                    elt.as_string_literal_expr()
-                        .map(|s| Name::new(s.value.to_str()))
+                    if let Some(s) = elt.as_string_literal_expr() {
+                        Some(Name::new(s.value.to_str()))
+                    } else {
+                        self.error(
+                            elt.range(),
+                            ErrorKind::InvalidArgument,
+                            "`capture_init` entries must be string literals".to_owned(),
+                        );
+                        None
+                    }
                 })
                 .collect();
             Some(names)
