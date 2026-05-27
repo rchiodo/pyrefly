@@ -15,7 +15,11 @@ fn shape_dsl_env() -> TestEnv {
         "my_shapes",
         "my_shapes.pyi",
         r#"
+from typing import Any
 from shape_extensions.dsl import shape_dsl_function
+
+class symint: ...
+Unknown: Any = ...
 
 @shape_dsl_function
 def identity_ir(x: int) -> int:
@@ -50,6 +54,18 @@ def bad_no_ret(x: int):  # E: @shape_dsl_function type error: DSL function bad_n
     return x
 
 @shape_dsl_function
+def returns_wrong_type_ir(x: int) -> bool:  # E: @shape_dsl_function type error: return expression type int is not compatible with declared return type bool
+    return x  # E: Returned type `int` is not assignable to declared return type `bool`
+
+@shape_dsl_function
+def dims_as_scalar_union_ir(x: list[int | symint]) -> int | symint:
+    return [d for d in x]  # E: Returned type `list[int | symint]` is not assignable to declared return type `int | symint`
+
+@shape_dsl_function
+def unknown_fallback_ir(x: int) -> int:
+    return Unknown
+
+@shape_dsl_function
 def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefined function: missing_one  # E: @shape_dsl_function type error: undefined function: missing_two
     return missing_one(x) + missing_two(x)  # E: Could not find name `missing_one`  # E: Could not find name `missing_two`
 "#,
@@ -60,7 +76,7 @@ def two_errors_ir(x: int) -> int:  # E: @shape_dsl_function type error: undefine
         r#"
 from typing import overload
 from shape_extensions import uses_shape_dsl
-from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir
+from my_shapes import identity_ir, double_ir, not_a_dsl_fn, bad_syntax_ir, kwargs_ir, calls_undefined, bad_no_ret, two_errors_ir, returns_wrong_type_ir, dims_as_scalar_union_ir, unknown_fallback_ir
 import my_shapes
 
 @uses_shape_dsl(identity_ir)
@@ -99,6 +115,15 @@ def no_ret_fn(x: int) -> int: ...
 
 @uses_shape_dsl(two_errors_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
 def two_errors_fn(x: int) -> int: ...
+
+@uses_shape_dsl(returns_wrong_type_ir)  # E: `@uses_shape_dsl` argument does not resolve to a `@shape_dsl_function`
+def returns_wrong_type_fn(x: int) -> bool: ...
+
+@uses_shape_dsl(dims_as_scalar_union_ir)
+def dims_as_scalar_union_fn(x: tuple[int, int]) -> tuple[int, int]: ...
+
+@uses_shape_dsl(unknown_fallback_ir)
+def unknown_fallback_fn(x: int) -> int: ...
 
 @uses_shape_dsl(my_shapes.identity_ir)
 def dotted_fn(x: int) -> int: ...
@@ -346,5 +371,46 @@ from recursive_lib import triple_fn
 # triple_ir → triple_mid → triple_leaf is a valid depth-3 chain with no
 # cycles.  triple_leaf(x) = x+x+x, so triple_fn(4) evaluates to Literal[12].
 assert_type(triple_fn(4), Literal[12])
+"#,
+);
+
+testcase!(
+    test_shape_dsl_wrong_return_type,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import returns_wrong_type_fn
+
+# returns_wrong_type_ir is declared `-> bool` but its body returns an `int`
+# expression, so it fails the compile-time return-type check and
+# returns_wrong_type_fn falls back to its declared bool return type.
+assert_type(returns_wrong_type_fn(1), bool)
+"#,
+);
+
+testcase!(
+    test_shape_dsl_list_return_for_scalar_union,
+    shape_dsl_env(),
+    r#"
+from typing import Literal, assert_type
+from my_lib import dims_as_scalar_union_fn
+
+# Tensor.size() uses this shape: the DSL annotation is the scalar dimension
+# type `int | symint`, but returning a list of dimensions means "produce a
+# concrete tuple of dimensions".
+assert_type(dims_as_scalar_union_fn((1, 2)), tuple[Literal[1], Literal[2]])
+"#,
+);
+
+testcase!(
+    test_shape_dsl_unknown_return_fallback,
+    shape_dsl_env(),
+    r#"
+from typing import assert_type
+from my_lib import unknown_fallback_fn
+
+# Unknown is the DSL's explicit fixture fallback sentinel. It should not make
+# the DSL function invalid just because it evaluates to Val::None internally.
+assert_type(unknown_fallback_fn(1), int)
 "#,
 );

@@ -1669,6 +1669,52 @@ fn narrow_away(ty: &DslType, con: DslTypeCon, errors: &mut Vec<String>) -> DslTy
     }
 }
 
+/// Check whether an inferred return-expression type is compatible with the
+/// function's declared return type, at the granularity needed by `val_to_type`.
+///
+/// "Compatible" means: if the evaluator produces a `Val` consistent with
+/// `inferred`, then `val_to_type(..., declared, ...)` will not hit an
+/// `unreachable!` arm.  Used by `check_body` to validate `return`
+/// expressions at compile time, making those arms sound.
+fn return_type_compatible(inferred: &DslType, declared: &DslType) -> bool {
+    // Union inferred: every possible runtime Val must be covered by `declared`.
+    if let DslType::Union(variants) = inferred {
+        return variants.iter().all(|v| return_type_compatible(v, declared));
+    }
+    // list[int | symint] -> int | symint: existing dynamic dimension tuple
+    // behaviour for APIs such as Tensor.size() with no dim argument.
+    if let (DslType::List(inner), DslType::Union(variants)) = (inferred, declared)
+        && variants
+            .iter()
+            .all(|v| matches!(v, DslType::Int | DslType::SymInt))
+    {
+        return return_type_compatible(inner, declared);
+    }
+    // Union declared: the inferred Val must match at least one variant.
+    if let DslType::Union(variants) = declared {
+        return variants.iter().any(|v| return_type_compatible(inferred, v));
+    }
+    match (inferred, declared) {
+        _ if inferred == declared => true,
+        // Val::Int is valid for a declared SymInt via val_to_scalar_type.
+        (DslType::Int, DslType::SymInt) => true,
+        (DslType::List(inferred_inner), DslType::List(declared_inner)) => {
+            return_type_compatible(inferred_inner, declared_inner)
+        }
+        // list[Tensor] → Tensor: existing dynamic multi-tensor return behaviour
+        // where some ops return [t1, t2] despite declaring `-> Tensor`.
+        (DslType::List(inner), DslType::Tensor) if matches!(inner.as_ref(), DslType::Tensor) => {
+            true
+        }
+        // List expressions are backed by Val::List, same as Tuple at runtime.
+        // Check that the list element type is compatible with every tuple element.
+        (DslType::List(inner), DslType::Tuple(elements)) => {
+            elements.iter().all(|e| return_type_compatible(inner, e))
+        }
+        _ => false,
+    }
+}
+
 /// Narrow a type to exclude None.
 fn narrow_away_none(ty: &DslType, errors: &mut Vec<String>) -> DslType {
     match ty {
@@ -2098,7 +2144,17 @@ fn infer_expr(
 
 /// Type-check a function body, updating the environment through assignments
 /// and narrowing through conditionals.
-fn check_body(body: &DslBody, env: &TypeEnv, sigs: &FnRetTypes, errors: &mut Vec<String>) {
+///
+/// `ret_ty` is the declared return type of the enclosing function, used to
+/// validate `return` expressions at compile time.  Pass `None` when the
+/// function has no return annotation (an error already reported elsewhere).
+fn check_body(
+    body: &DslBody,
+    env: &TypeEnv,
+    sigs: &FnRetTypes,
+    ret_ty: Option<&DslType>,
+    errors: &mut Vec<String>,
+) {
     match body {
         DslBody::Assign { vars, expr, rest } => {
             let ty = infer_expr(expr, env, sigs, errors);
@@ -2111,7 +2167,7 @@ fn check_body(body: &DslBody, env: &TypeEnv, sigs: &FnRetTypes, errors: &mut Vec
                     new_env.insert(var.clone(), elem.clone());
                 }
             }
-            check_body(rest, &new_env, sigs, errors);
+            check_body(rest, &new_env, sigs, ret_ty, errors);
         }
         DslBody::If {
             cond,
@@ -2119,11 +2175,20 @@ fn check_body(body: &DslBody, env: &TypeEnv, sigs: &FnRetTypes, errors: &mut Vec
             rest,
         } => {
             let (then_env, else_env) = narrow(cond, env, errors);
-            check_body(then_body, &then_env, sigs, errors);
-            check_body(rest, &else_env, sigs, errors);
+            check_body(then_body, &then_env, sigs, ret_ty, errors);
+            check_body(rest, &else_env, sigs, ret_ty, errors);
         }
         DslBody::Return(expr) => {
-            infer_expr(expr, env, sigs, errors);
+            let expr_ty = infer_expr(expr, env, sigs, errors);
+            if let Some(ret_ty) = ret_ty
+                && !matches!(expr, DslExpr::Unknown)
+                && !return_type_compatible(&expr_ty, ret_ty)
+            {
+                errors.push(format!(
+                    "return expression type {} is not compatible with declared return type {}",
+                    expr_ty, ret_ty
+                ));
+            }
         }
         DslBody::Raise(expr) => {
             let ty = infer_expr(expr, env, sigs, errors);
@@ -2145,7 +2210,11 @@ fn type_check_program(fndefs: &[DslFnDef]) -> Result<(), Vec<DslCompileError>> {
         for param in &fndef.params {
             env.insert(param.name.clone(), param.ty.clone());
         }
-        check_body(&fndef.body, &env, &sigs, &mut fn_errors);
+        // Pass the declared return type so check_body can validate return exprs.
+        // Functions without a return annotation already have an error from
+        // build_fn_ret_types; we still type-check the body for other errors.
+        let ret_ty = fndef.return_type.as_ref();
+        check_body(&fndef.body, &env, &sigs, ret_ty, &mut fn_errors);
         errors.extend(fn_errors.into_iter().map(|message| DslCompileError {
             range: fndef.name_range,
             message,
@@ -3197,7 +3266,9 @@ fn val_to_type(
             Val::Shape(s) => inject_shape(s, expected_return_type),
             // Some ops conditionally return a tuple of tensors despite
             // declaring `-> Tensor` (e.g. min_max_median_ir returns
-            // [Tensor, Tensor] when dim is given).
+            // [Tensor, Tensor] when dim is given).  return_type_compatible
+            // allows list[Tensor] for a declared Tensor return, so this path
+            // is guarded by check_body's static validation.
             Val::List(items) => {
                 let shapes: Vec<TensorShape> = items.iter().map(|v| v.as_shape().clone()).collect();
                 if shapes.len() == 1 {
@@ -3206,8 +3277,10 @@ fn val_to_type(
                 inject_shapes_into_tuple(shapes, expected_return_type)
                     .unwrap_or_else(|| expected_return_type.clone())
             }
-            _ => panic!(
-                "DSL bug: {op_name}: expected Shape for Tensor return (declared -> {actual_result_type}), got {val:?}",
+            _ => unreachable!(
+                "validated by check_body: Tensor return but got {:?} (op: {})",
+                val.variant_name(),
+                op_name,
             ),
         },
 
@@ -3228,8 +3301,10 @@ fn val_to_type(
         // comes solely from DSL evaluation.
         DslType::Int => match val {
             Val::Int(n) => Lit::Int(LitInt::new(n)).to_implicit_type(),
-            _ => panic!(
-                "DSL bug: {op_name}: expected Int for int return (declared -> {actual_result_type}), got {val:?}",
+            _ => unreachable!(
+                "validated by check_body: expected Int for int return, got {:?} (op: {})",
+                val.variant_name(),
+                op_name,
             ),
         },
 
@@ -3241,8 +3316,10 @@ fn val_to_type(
 
         DslType::Bool => match val {
             Val::Bool(b) => Lit::Bool(b).to_implicit_type(),
-            _ => panic!(
-                "DSL bug: {op_name}: expected Bool for bool return (declared -> {actual_result_type}), got {val:?}",
+            _ => unreachable!(
+                "validated by check_body: expected Bool for bool return, got {:?} (op: {})",
+                val.variant_name(),
+                op_name,
             ),
         },
 
@@ -3263,14 +3340,19 @@ fn val_to_type(
                     | (DslType::SymInt, Val::Int(_))
                     | (DslType::SymInt, Val::Dim(_))
                     | (DslType::Tensor, Val::Shape(_))
-                    | (DslType::Bool, Val::Bool(_)) => {
+                    | (DslType::Bool, Val::Bool(_))
+                    | (DslType::Str, Val::Str(_))
+                    | (DslType::None, Val::None) => {
                         return val_to_type(val, is_unbounded, v, expected_return_type, op_name);
                     }
                     _ => continue,
                 }
             }
-            panic!(
-                "DSL bug: {op_name}: no union variant matched return val {val:?} (declared -> {actual_result_type})",
+            unreachable!(
+                "validated by check_body: no union variant matched return val {:?} (declared -> {}, op: {})",
+                val.variant_name(),
+                actual_result_type,
+                op_name,
             );
         }
 
