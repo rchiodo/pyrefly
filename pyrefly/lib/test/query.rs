@@ -80,6 +80,41 @@ fn is_named_shape_with_args(shape: &Value, name: &str, arg_names: &[&str]) -> bo
             })
 }
 
+fn unspecified_type_arg_count(shape: &Value) -> Option<u64> {
+    shape
+        .get("unspecified_type_arg_count")
+        .and_then(Value::as_u64)
+}
+
+fn contains_named_shape_with_unspecified_type_arg_count(
+    shape: &Value,
+    name: &str,
+    unspecified_count: u64,
+) -> bool {
+    if is_named_shape_with_args(shape, name, &[])
+        && unspecified_type_arg_count(shape) == Some(unspecified_count)
+    {
+        return true;
+    }
+
+    ["args", "bounds", "params"].iter().any(|field| {
+        shape
+            .get(field)
+            .and_then(Value::as_array)
+            .is_some_and(|children| {
+                children.iter().any(|child| {
+                    contains_named_shape_with_unspecified_type_arg_count(
+                        child,
+                        name,
+                        unspecified_count,
+                    )
+                })
+            })
+    }) || shape.get("return_type").is_some_and(|child| {
+        contains_named_shape_with_unspecified_type_arg_count(child, name, unspecified_count)
+    })
+}
+
 #[test]
 fn test_simple_int_annotation() {
     let tdir = TempDir::new().unwrap();
@@ -201,6 +236,45 @@ def apply(f: Callable[[int, str], bool], x: T) -> bool:
                     })
         }),
         "Expected a structured TypeVar shape with a bound:\n{shapes:#?}",
+    );
+}
+
+#[test]
+fn test_type_shapes_include_unspecified_type_arg_count_for_generic_classes() {
+    let tdir = TempDir::new().unwrap();
+    let file_path = tdir.path().join("main.py");
+    let code = r#"from typing import Generic, TypeVar
+
+T = TypeVar("T")
+
+class Box(Generic[T]):
+    pass
+
+bare = Box
+value: Box[int] = Box()
+"#;
+    fs_anyhow::write(&file_path, code).unwrap();
+
+    let query = create_query();
+    let module_name = ModuleName::from_str("main");
+    let path = ModulePath::filesystem(file_path.clone());
+
+    let errors = query.add_files(vec![(module_name, path.clone())]);
+    assert!(errors.is_empty(), "Unexpected errors: {:?}", errors);
+
+    let shapes = type_shape_values(query.get_type_shapes_in_file(module_name, path).unwrap());
+    assert!(
+        shapes.iter().any(|shape| {
+            contains_named_shape_with_unspecified_type_arg_count(shape, "main.Box", 1)
+        }),
+        "Expected bare generic class `Box` to report one unspecified type arg:\n{shapes:#?}",
+    );
+    assert!(
+        shapes.iter().any(|shape| {
+            is_named_shape_with_args(shape, "main.Box", &["builtins.int"])
+                && unspecified_type_arg_count(shape).is_none()
+        }),
+        "Expected instantiated `Box[int]` to omit unspecified type args:\n{shapes:#?}",
     );
 }
 
