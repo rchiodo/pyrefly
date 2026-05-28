@@ -3205,3 +3205,28 @@ def f(x: tuple[int, str] | int):
         assert_type(x, tuple[int, str])
 "#,
 );
+
+testcase!(
+    test_narrow_preserved_in_nested_def_after_branch_merge,
+    r#"
+from typing import assert_type
+
+def f() -> int | None:
+    return 1
+
+def a():
+    val = f()
+    if val is not None:
+        if val:
+            assert_type(val, int)
+        assert_type(val, int)
+        def inner() -> None:
+            assert_type(val, int)
+
+def b():
+    val = f()
+    if val is not None:
+        def inner() -> None:
+            assert_type(val, int)
+"#,
+);

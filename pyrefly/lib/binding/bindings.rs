@@ -1351,14 +1351,11 @@ impl<'a> BindingsBuilder<'a> {
                     .map(FlowStyle::assume_initialized)
                     .unwrap_or(FlowStyle::Other);
                 self.scopes.define_in_current_flow(hashed_name, idx, style);
-                if let Some(narrow_idx) = capture_info.narrow_idx {
-                    // Only propagate type-guard narrows (isinstance, is not None,
-                    // etc.), not assignment narrows from subscript/attribute writes.
-                    // Assignment narrows track mutations and should not leak into
-                    // nested scopes.
-                    if matches!(self.idx_to_binding(narrow_idx), Some(Binding::Narrow(..))) {
-                        self.scopes.narrow_in_current_flow(hashed_name, narrow_idx);
-                    }
+                if let Some(narrow_idx) = capture_info.narrow_idx
+                    && let Some((_, Some(Binding::Narrow(_, _, _)))) =
+                        self.get_original_binding(narrow_idx)
+                {
+                    self.scopes.narrow_in_current_flow(hashed_name, narrow_idx);
                 }
             }
         }
