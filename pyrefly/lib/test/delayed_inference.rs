@@ -556,3 +556,20 @@ bar = [1, None]
 assert_type(bar, list[int | None])
     "#,
 );
+
+// Regression test: narrowing reads (like `item not in values`) should not block
+// first-use inference. The `append` call after the narrowing should pin
+// the empty list's element type.
+testcase!(
+    test_narrowing_does_not_block_first_use_inference,
+    TestEnv::new().enable_implicit_any_error(),
+    r#"
+from typing import assert_type
+
+values = []
+for item in [1, 1, 2, 2, 3]:
+    if item not in values:
+        values.append(item)
+assert_type(values, list[int])
+    "#,
+);

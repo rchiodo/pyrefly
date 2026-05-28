@@ -1531,13 +1531,9 @@ impl<'a> BindingsBuilder<'a> {
                 {
                     self.mark_first_use(def_idx, current_idx);
                 }
-            } else {
-                // Narrowing or other reads: mark as DoesNotPin if still undetermined.
-                if matches!(first_use, FirstUse::Undetermined) {
-                    self.mark_does_not_pin_if_first_use(def_idx);
-                }
             }
-
+            // Narrowing reads leave first_use as Undetermined so that the next
+            // non-narrowing read can still become the first use for pinning.
             // All partial type reads forward to the NameAssign (def_idx).
             self.insert_binding_idx(deferred.bound_name_idx, Binding::ForwardToFirstUse(def_idx));
         } else {
@@ -1896,10 +1892,11 @@ impl<'a> BindingsBuilder<'a> {
         usage: &Usage,
     ) {
         for (name, (op, op_range)) in narrow_ops.0.iter_hashed() {
-            // Narrowing operations should not pin partial types
+            // Narrowing operations should not pin partial types, but they also
+            // should not permanently block pinning. Leave the first-use state
+            // as Undetermined so a subsequent non-narrowing read can still pin.
             let mut narrowing_usage = Usage::narrowing_from(usage);
             if let Some(initial_idx) = self.lookup_name(name, &mut narrowing_usage).found() {
-                self.mark_does_not_pin_if_first_use(initial_idx);
                 let narrowed_idx = self.insert_binding(
                     Key::Narrow(Box::new((name.into_key().clone(), *op_range, use_location))),
                     Binding::Narrow(initial_idx, Box::new(op.clone()), use_location),
