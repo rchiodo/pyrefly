@@ -733,8 +733,13 @@ impl ConfigFile {
 
 impl ConfigFile {
     pub const PYREFLY_FILE_NAME: &str = "pyrefly.toml";
+    pub const PYREFLY_HIDDEN_FILE_NAME: &str = ".pyrefly.toml";
     pub const PYPROJECT_FILE_NAME: &str = "pyproject.toml";
-    pub const CONFIG_FILE_NAMES: &[&str] = &[Self::PYREFLY_FILE_NAME, Self::PYPROJECT_FILE_NAME];
+    pub const CONFIG_FILE_NAMES: &[&str] = &[
+        Self::PYREFLY_FILE_NAME,
+        Self::PYREFLY_HIDDEN_FILE_NAME,
+        Self::PYPROJECT_FILE_NAME,
+    ];
     /// Files that don't contain pyrefly-specific config information but indicate that we're at the
     /// root of a Python project, which should be added to the search path.
     pub const ADDITIONAL_ROOT_FILE_NAMES: &[&str] = &["mypy.ini", "pyrightconfig.json"];
