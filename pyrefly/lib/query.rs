@@ -193,6 +193,11 @@ pub enum TypeShapeKind {
         args: Vec<TypeShape>,
         #[serde(skip_serializing_if = "Option::is_none")]
         unspecified_type_arg_count: Option<usize>,
+        /// Direct traits carried by the outer Pyrefly `Type` variant. These
+        /// are not populated from class metadata for definitions or type
+        /// objects.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        traits: Vec<TypeShapeTrait>,
     },
     /// A callable type represented by parameter types and return type.
     Callable {
@@ -204,6 +209,25 @@ pub enum TypeShapeKind {
         name: String,
         bounds: Vec<TypeShape>,
     },
+}
+
+/// Traits surfaced for named type shapes when Pyrefly directly represents the
+/// queried value as a specialized `Type` variant.
+///
+/// Typed-dict traits are emitted for value-position typed dict shapes built
+/// from `Type::TypedDict` or `Type::PartialTypedDict`, including anonymous
+/// typed dicts. They are not emitted for typed-dict class definitions or
+/// type-position/class-position shapes that would require class metadata
+/// lookups.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TypeShapeTrait {
+    /// A non-partial typed dict value shape.
+    TypedDict,
+    /// A partial typed dict value shape. This is mutually exclusive with
+    /// `TypedDict`; callers checking for any typed dict should check both
+    /// traits.
+    PartialTypedDict,
 }
 
 /// Thin wrapper around `LinedBuffer::python_ast_range_for_expr` that accepts
@@ -535,10 +559,20 @@ fn named_type_shape_kind_with_unspecified_type_arg_count(
     args: Vec<TypeShape>,
     unspecified_type_arg_count: Option<usize>,
 ) -> TypeShapeKind {
+    named_type_shape_kind_with_traits(name, args, unspecified_type_arg_count, Vec::new())
+}
+
+fn named_type_shape_kind_with_traits(
+    name: impl Into<String>,
+    args: Vec<TypeShape>,
+    unspecified_type_arg_count: Option<usize>,
+    traits: Vec<TypeShapeTrait>,
+) -> TypeShapeKind {
     TypeShapeKind::Named {
         name: name.into(),
         args,
         unspecified_type_arg_count,
+        traits,
     }
 }
 
@@ -580,12 +614,33 @@ fn typed_dict_shape(
                 .iter()
                 .map(|ty| type_to_shape(context, ty))
                 .collect::<Vec<_>>();
-            named_type_shape_kind(qname_to_string(inner.qname()), args)
+            named_type_shape_kind_with_traits(
+                qname_to_string(inner.qname()),
+                args,
+                None,
+                typed_dict_traits(is_partial),
+            )
         }
-        TypedDict::Anonymous(_) if is_partial => {
-            named_type_shape_kind("NonTotalTypedDictionary", Vec::new())
-        }
-        TypedDict::Anonymous(_) => named_type_shape_kind("TypedDictionary", Vec::new()),
+        TypedDict::Anonymous(_) if is_partial => named_type_shape_kind_with_traits(
+            "NonTotalTypedDictionary",
+            Vec::new(),
+            None,
+            typed_dict_traits(is_partial),
+        ),
+        TypedDict::Anonymous(_) => named_type_shape_kind_with_traits(
+            "TypedDictionary",
+            Vec::new(),
+            None,
+            typed_dict_traits(is_partial),
+        ),
+    }
+}
+
+fn typed_dict_traits(is_partial: bool) -> Vec<TypeShapeTrait> {
+    if is_partial {
+        vec![TypeShapeTrait::PartialTypedDict]
+    } else {
+        vec![TypeShapeTrait::TypedDict]
     }
 }
 
