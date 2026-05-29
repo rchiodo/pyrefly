@@ -3460,16 +3460,20 @@ impl<'a> CallGraphVisitor<'a> {
                     )),
                 },
             ),
-            Some(Stmt::AnnAssign(assign)) if assign.target.range() == subscript_range => (
-                dunder::SETITEM,
-                Origin {
-                    kind: OriginKind::SubscriptSetItem,
-                    location: self.pysa_location(TextRange::new(
-                        subscript_range.start(),
-                        assign.range().end(),
-                    )),
-                },
-            ),
+            Some(Stmt::AnnAssign(assign))
+                if assign.target.range() == subscript_range && assign.value.is_some() =>
+            {
+                (
+                    dunder::SETITEM,
+                    Origin {
+                        kind: OriginKind::SubscriptSetItem,
+                        location: self.pysa_location(TextRange::new(
+                            subscript_range.start(),
+                            assign.range().end(),
+                        )),
+                    },
+                )
+            }
             Some(Stmt::For(stmt_for)) if stmt_for.target.range() == subscript_range => (
                 dunder::SETITEM,
                 Origin {
