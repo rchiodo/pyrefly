@@ -303,6 +303,9 @@ impl<'a> TypeDisplayContext<'a> {
     /// Formats a `TParam` with its restriction and default.
     /// e.g. `T: int = bool`
     fn fmt_tparam(&self, param: &Quantified, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if param.is_param_spec() {
+            write!(f, "**")?;
+        }
         write!(f, "{}", param.name)?;
         match param.restriction() {
             Restriction::Bound(ty) => write!(f, ": {}", self.display_internal(ty))?,
@@ -2115,6 +2118,29 @@ pub mod tests {
         );
     }
 
+    #[test]
+    fn test_display_param_spec() {
+        let tparams = fake_tparams(vec![
+            fake_tparam(0, "T", QuantifiedKind::TypeVar),
+            fake_tparam(1, "P", QuantifiedKind::ParamSpec),
+            fake_tparam(2, "R", QuantifiedKind::TypeVar),
+        ]);
+        let method = fake_generic_bound_method("foo", "MyClass", "my.module", tparams);
+        let mut ctx = TypeDisplayContext::new(&[&method]);
+        assert_eq!(
+            ctx.display(&method).to_string(),
+            "[T, **P, R](self: Any, x: Any, y: Any) -> None"
+        );
+        ctx.set_lsp_display_mode(LspDisplayMode::Hover);
+        assert_eq!(
+            ctx.display(&method).to_string(),
+            r#"def foo[T, **P, R](
+    self: Any,
+    x: Any,
+    y: Any
+) -> None: ..."#
+        );
+    }
     #[test]
     fn test_display_overload() {
         let class = fake_class("TestClass", "test", 0);

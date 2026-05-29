@@ -245,7 +245,7 @@ from typing import Callable, reveal_type
 def identity[**P, T](x: Callable[P, T]) -> Callable[P, T]:
     return x
 result = identity(identity)
-reveal_type(result)  # E: revealed type: [P, T](x: (ParamSpec(P)) -> T) -> (ParamSpec(P)) -> T
+reveal_type(result)  # E: revealed type: [**P, T](x: (ParamSpec(P)) -> T) -> (ParamSpec(P)) -> T
 "#,
 );
 
