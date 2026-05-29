@@ -64,28 +64,23 @@ impl Restriction {
         matches!(self, Self::Bound(_) | Self::Constraints(_))
     }
 
-    fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+    fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap, kind: QuantifiedKind) -> Type {
         match self {
             Self::Bound(t) => t.clone(),
             Self::Constraints(ts) => unions(ts.clone(), heap),
-            Self::Unrestricted => stdlib.object().clone().to_type(),
+            Self::Unrestricted => match kind {
+                QuantifiedKind::TypeVar => stdlib.object().clone().to_type(),
+                QuantifiedKind::ParamSpec => Type::Ellipsis,
+                QuantifiedKind::TypeVarTuple => Type::any_tuple(),
+            },
         }
     }
 }
 
 impl Quantified {
-    /// The upper bound of this type parameter as a type, accounting for the parameter's kind.
-    /// For TypeVar the bound is `object`, for ParamSpec it's `...` (any params), and for
-    /// TypeVarTuple it's an unbounded tuple. Explicit bounds and constraints are used as-is.
+    /// The upper bound of this type parameter as a type.
     pub fn upper_bound(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
-        match &self.restriction {
-            Restriction::Unrestricted => match self.kind {
-                QuantifiedKind::TypeVar => stdlib.object().clone().to_type(),
-                QuantifiedKind::ParamSpec => Type::Ellipsis,
-                QuantifiedKind::TypeVarTuple => Type::any_tuple(),
-            },
-            r => r.as_type(stdlib, heap),
-        }
+        self.restriction.as_type(stdlib, heap, self.kind)
     }
 }
 
@@ -208,9 +203,9 @@ impl TypeVar {
     }
 
     /// The upper bound of this legacy TypeVar as a type.
-    /// TypeVar is always of TypeVar kind, so unrestricted defaults to `object`.
     pub fn upper_bound(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
-        self.restriction().as_type(stdlib, heap)
+        self.restriction()
+            .as_type(stdlib, heap, QuantifiedKind::TypeVar)
     }
 
     pub fn type_eq_inner(&self, other: &Self, ctx: &mut TypeEqCtx) -> bool {
