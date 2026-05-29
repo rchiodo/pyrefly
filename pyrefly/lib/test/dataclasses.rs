@@ -1457,7 +1457,7 @@ from dataclasses import dataclass, field
 @dataclass
 class C:
     x: int = 1
-    y: int = field(kw_only=True) # E: No matching overload found for function `dataclasses.field`
+    y: int = field(kw_only=True)
     z: int # E: Dataclass field `z` without a default may not follow dataclass field with a default
 C(5, y=2) # E: Missing argument `z` in function `C.__init__`
 C(5, y=2, z=3)

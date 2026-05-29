@@ -139,7 +139,7 @@ Definition Result:
 4 | def f(x: list[int], y: str, z: Literal[42]):
                                     ^
 Definition Result:
-249 | Literal: _SpecialForm
+255 | Literal: _SpecialForm
       ^^^^^^^
 
 8 | yyy = f([1, 2, 3], "test", 42)
@@ -594,7 +594,7 @@ Definition Result:
 6 | foo: Literal[1] = 1
              ^
 Definition Result:
-249 | Literal: _SpecialForm
+255 | Literal: _SpecialForm
       ^^^^^^^
 
 8 | bar = f([1], "", 42)
@@ -1243,7 +1243,7 @@ Definition Result:
 10 | def f(x: A[B, Path]) -> None:
                    ^
 Definition Result:
-182 | class Path(PurePath):
+185 | class Path(PurePath):
             ^^^^
 "#
         .trim(),
@@ -1485,13 +1485,13 @@ Definition Result:
 25 | dict["foo"]
             ^
 Definition Result:
-3632 |     def __getitem__(self, key: _KT, /) -> _VT:
+3738 |     def __getitem__(self, key: _KT, /) -> _VT:
                ^^^^^^^^^^^
 
 27 | dict["bar"]
             ^
 Definition Result:
-3632 |     def __getitem__(self, key: _KT, /) -> _VT:
+3738 |     def __getitem__(self, key: _KT, /) -> _VT:
                ^^^^^^^^^^^
 "#
         .trim(),
