@@ -659,15 +659,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             if p.annotation().is_none() {
                 let name = p.name().as_str();
-                self.error(
-                    errors,
-                    p.name().range(),
-                    ErrorKind::ImplicitAnyParameter,
-                    format!(
-                        "`{}` is missing an annotation for parameter `{name}`",
-                        stmt.name
-                    ),
-                );
+                if !Ast::is_intentionally_unused(name) {
+                    self.error(
+                        errors,
+                        p.name().range(),
+                        ErrorKind::ImplicitAnyParameter,
+                        format!(
+                            "`{}` is missing an annotation for parameter `{name}`",
+                            stmt.name
+                        ),
+                    );
+                }
             }
         }
         // Only validate TypeGuard/TypeIs functions when they have an explicit return annotation.

@@ -414,6 +414,16 @@ impl Ast {
         name.starts_with("__") && !name.ends_with("__")
     }
 
+    // Parameters and variables that are prefixed (but not suffixed) with a single underscore
+    // are potentially unused, so we should skip some diagnostics/errors.
+    // Examples: `_`, `_x`
+    // Non-examples: `x`, `__x__`, `__x`, `_x_`
+    pub fn is_intentionally_unused(name: &str) -> bool {
+        name.starts_with('_')
+            && !name.starts_with("__")
+            && (name.len() == 1 || !name.ends_with('_'))
+    }
+
     pub fn is_list_literal_or_comprehension(expr: &Expr) -> bool {
         matches!(expr, Expr::List(_) | Expr::ListComp(_))
     }

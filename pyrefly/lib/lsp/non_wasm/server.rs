@@ -205,6 +205,7 @@ use pyrefly_build::source_db::SourceDatabase;
 use pyrefly_config::config::ConfigSource;
 use pyrefly_config::error_kind::Severity;
 use pyrefly_python::PYTHON_EXTENSIONS;
+use pyrefly_python::ast::Ast;
 use pyrefly_python::module::TextRangeWithModule;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_name::ModuleNameWithKind;
@@ -5241,6 +5242,9 @@ impl Server {
         if let Some(bindings) = transaction.get_bindings(handle) {
             let module_info = bindings.module();
             for unused in bindings.unused_parameters() {
+                if Ast::is_intentionally_unused(unused.name.as_str()) {
+                    continue;
+                }
                 let lsp_range = module_info.to_lsp_range(unused.range);
                 items.push(Diagnostic {
                     range: lsp_range,
@@ -5289,6 +5293,9 @@ impl Server {
         if let Some(bindings) = transaction.get_bindings(handle) {
             let module_info = bindings.module();
             for unused in bindings.unused_variables() {
+                if Ast::is_intentionally_unused(unused.name.as_str()) {
+                    continue;
+                }
                 let lsp_range = module_info.to_lsp_range(unused.range);
                 items.push(Diagnostic {
                     range: lsp_range,
