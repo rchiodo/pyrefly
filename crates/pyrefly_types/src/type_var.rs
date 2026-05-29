@@ -24,6 +24,8 @@ use ruff_python_ast::Identifier;
 use crate::equality::TypeEq;
 use crate::equality::TypeEqCtx;
 use crate::heap::TypeHeap;
+use crate::quantified::Quantified;
+use crate::quantified::QuantifiedKind;
 use crate::simplify::unions;
 use crate::stdlib::Stdlib;
 use crate::types::Type;
@@ -62,11 +64,27 @@ impl Restriction {
         matches!(self, Self::Bound(_) | Self::Constraints(_))
     }
 
-    pub(crate) fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+    fn as_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
         match self {
             Self::Bound(t) => t.clone(),
             Self::Constraints(ts) => unions(ts.clone(), heap),
             Self::Unrestricted => stdlib.object().clone().to_type(),
+        }
+    }
+}
+
+impl Quantified {
+    /// The upper bound of this type parameter as a type, accounting for the parameter's kind.
+    /// For TypeVar the bound is `object`, for ParamSpec it's `...` (any params), and for
+    /// TypeVarTuple it's an unbounded tuple. Explicit bounds and constraints are used as-is.
+    pub fn upper_bound(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+        match &self.restriction {
+            Restriction::Unrestricted => match self.kind {
+                QuantifiedKind::TypeVar => stdlib.object().clone().to_type(),
+                QuantifiedKind::ParamSpec => Type::Ellipsis,
+                QuantifiedKind::TypeVarTuple => Type::any_tuple(),
+            },
+            r => r.as_type(stdlib, heap),
         }
     }
 }
