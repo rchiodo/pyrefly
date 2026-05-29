@@ -370,6 +370,8 @@ impl Quantified {
         Fmt(move |f| {
             if self.is_param_spec() {
                 write!(f, "**")?;
+            } else if self.is_type_var_tuple() {
+                write!(f, "*")?;
             }
             write!(f, "{}", self.name)?;
             match self.restriction() {

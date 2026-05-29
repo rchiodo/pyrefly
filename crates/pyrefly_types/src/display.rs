@@ -305,6 +305,8 @@ impl<'a> TypeDisplayContext<'a> {
     fn fmt_tparam(&self, param: &Quantified, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if param.is_param_spec() {
             write!(f, "**")?;
+        } else if param.is_type_var_tuple() {
+            write!(f, "*")?;
         }
         write!(f, "{}", param.name)?;
         match param.restriction() {
@@ -2141,6 +2143,31 @@ pub mod tests {
 ) -> None: ..."#
         );
     }
+
+    #[test]
+    fn test_display_type_var_tuple() {
+        let tparams = fake_tparams(vec![
+            fake_tparam(0, "T", QuantifiedKind::TypeVar),
+            fake_tparam(1, "Ts", QuantifiedKind::TypeVarTuple),
+            fake_tparam(2, "R", QuantifiedKind::TypeVar),
+        ]);
+        let method = fake_generic_bound_method("foo", "MyClass", "my.module", tparams);
+        let mut ctx = TypeDisplayContext::new(&[&method]);
+        assert_eq!(
+            ctx.display(&method).to_string(),
+            "[T, *Ts, R](self: Any, x: Any, y: Any) -> None"
+        );
+        ctx.set_lsp_display_mode(LspDisplayMode::Hover);
+        assert_eq!(
+            ctx.display(&method).to_string(),
+            r#"def foo[T, *Ts, R](
+    self: Any,
+    x: Any,
+    y: Any
+) -> None: ..."#
+        );
+    }
+
     #[test]
     fn test_display_overload() {
         let class = fake_class("TestClass", "test", 0);

@@ -221,7 +221,7 @@ from typing import Callable, reveal_type
 def identity_tuple[*Ts, R](x: Callable[[*Ts], R]) -> Callable[[*Ts], R]:
     return x
 result = identity_tuple(identity_tuple)
-reveal_type(result)  # E: revealed type: [Ts, R](**tuple[(**tuple[*Ts]) -> R]) -> (**tuple[*Ts]) -> R
+reveal_type(result)  # E: revealed type: [*Ts, R](**tuple[(**tuple[*Ts]) -> R]) -> (**tuple[*Ts]) -> R
 "#,
 );
 
