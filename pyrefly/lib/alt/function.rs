@@ -1943,7 +1943,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn subst_function(&self, tparams: &TParams, func: Function) -> Function {
         let mp = tparams
             .as_vec()
-            .map(|p| (p, p.bound_type(self.stdlib, self.heap)));
+            .map(|p| (p, p.upper_bound(self.stdlib, self.heap)));
         match self
             .heap
             .mk_function(func)

@@ -509,7 +509,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     result = if let Type::Quantified(q) = &result
                         && let Restriction::Constraints(_) = q.restriction()
                     {
-                        let concrete = q.bound_type(self.stdlib, self.heap);
+                        let concrete = q.upper_bound(self.stdlib, self.heap);
                         self.subtract(&concrete, &right)
                     } else {
                         self.subtract(&result, &right)
@@ -647,7 +647,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 for q in quantifieds {
                     // The only time it's safe to simplify a quantified away is when the entire intersection is Never.
                     let intersection = narrow(
-                        &q.bound_type(self.stdlib, self.heap),
+                        &q.upper_bound(self.stdlib, self.heap),
                         right_unwrapped.clone(),
                     );
                     res.push(if matches!(&intersection, Type::Type(t) if t.is_never()) {

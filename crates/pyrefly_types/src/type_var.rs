@@ -191,7 +191,7 @@ impl TypeVar {
 
     /// The upper bound of this legacy TypeVar as a type.
     /// TypeVar is always of TypeVar kind, so unrestricted defaults to `object`.
-    pub fn bound_type(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
+    pub fn upper_bound(&self, stdlib: &Stdlib, heap: &TypeHeap) -> Type {
         self.restriction().as_type(stdlib, heap)
     }
 

@@ -3244,7 +3244,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 t1_p
             }
         };
-        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
+        let bound = q.upper_bound(self.type_order.stdlib(), &self.solver.heap);
         // For constrained TypeVars, promote to the matching constraint type.
         if let Restriction::Constraints(ref constraints) = q.restriction {
             // Try promoted type first, then fall back to original (for literal bounds).
@@ -3396,8 +3396,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
                             let r1_restricted = q1.restriction().is_restricted();
                             let r2_restricted = q2.restriction().is_restricted();
-                            let b1 = q1.bound_type(self.type_order.stdlib(), &self.solver.heap);
-                            let b2 = q2.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                            let b1 = q1.upper_bound(self.type_order.stdlib(), &self.solver.heap);
+                            let b2 = q2.upper_bound(self.type_order.stdlib(), &self.solver.heap);
                             drop(variable1);
                             drop(variable2);
 
@@ -3507,7 +3507,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::PartialQuantified(q) => {
                         let name = q.name.clone();
                         let restriction = q.restriction().clone();
-                        let bound = q.bound_type(self.type_order.stdlib(), &self.solver.heap);
+                        let bound = q.upper_bound(self.type_order.stdlib(), &self.solver.heap);
                         drop(v1_ref);
 
                         // For constrained TypeVars, promote to the matching constraint type
