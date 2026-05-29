@@ -1235,7 +1235,7 @@ a = True if # E: Parse
 testcase!(
     test_syntax_error_resulting_in_empty_defintion,
     r#"
-@:a=1 # E: Parse # E: Could not find name `a`
+@:a=1 # E: Parse
     "#,
 );
 
@@ -1887,7 +1887,7 @@ testcase!(
     test_crash_on_decorator_assign,
     r#"
 from typing import TypeVar
-@T=TypeVar()  # E: Expected newline, found `=`
+@T=TypeVar()  # E: Expected newline, found `=` # E: Missing argument `name`
 "#,
 );
 

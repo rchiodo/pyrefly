@@ -46,6 +46,7 @@ use ruff_python_parser::parse_unchecked;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use thin_vec::ThinVec;
 
 use crate::sys_info::PythonVersion;
 
@@ -177,7 +178,7 @@ impl Ast {
     /// Like `if_branches`, but returns owned values.
     pub fn if_branches_owned(
         x: StmtIf,
-    ) -> impl Iterator<Item = (TextRange, Option<Expr>, Vec<Stmt>)> {
+    ) -> impl Iterator<Item = (TextRange, Option<Expr>, ThinVec<Stmt>)> {
         let first = iter::once((x.range, Some(*x.test), x.body));
         let elses = x
             .elif_else_clauses

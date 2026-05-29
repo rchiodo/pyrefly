@@ -2940,7 +2940,7 @@ impl<'a> CallGraphVisitor<'a> {
         }
         call_arguments
             .unwrap()
-            .arguments_source_order()
+            .iter_source_order()
             .enumerate()
             .filter_map(|(index, argument)| {
                 let argument = match argument {

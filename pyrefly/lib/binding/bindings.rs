@@ -39,6 +39,7 @@ use ruff_python_ast::StmtClassDef;
 use ruff_python_ast::TypeParam;
 use ruff_python_ast::TypeParams;
 use ruff_python_ast::name::Name;
+use ruff_python_parser::semantic_errors::LazyImportContext;
 use ruff_python_parser::semantic_errors::SemanticSyntaxChecker;
 use ruff_python_parser::semantic_errors::SemanticSyntaxContext;
 use ruff_python_parser::semantic_errors::SemanticSyntaxError;
@@ -49,6 +50,7 @@ use ruff_text_size::TextSize;
 use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
+use thin_vec::ThinVec;
 use vec1::Vec1;
 
 use crate::binding::binding::AnnotationTarget;
@@ -774,7 +776,16 @@ impl Bindings {
             | SemanticSyntaxErrorKind::NonlocalAndGlobal(_)
             | SemanticSyntaxErrorKind::AnnotatedGlobal(_)
             | SemanticSyntaxErrorKind::AnnotatedNonlocal(_)
-            | SemanticSyntaxErrorKind::NonlocalWithoutBinding(_) => false,
+            | SemanticSyntaxErrorKind::NonlocalWithoutBinding(_)
+            // Newly added by the ruff upgrade; left disabled to preserve existing behavior.
+            // pyrefly does not model `lazy` imports, and the others need triage before enabling.
+            | SemanticSyntaxErrorKind::LazyImportNotAllowed { .. }
+            | SemanticSyntaxErrorKind::LazyImportStar
+            | SemanticSyntaxErrorKind::LazyFutureImport
+            | SemanticSyntaxErrorKind::NamedExpressionInComprehensionIterable
+            | SemanticSyntaxErrorKind::NamedExpressionInClassBodyComprehension
+            | SemanticSyntaxErrorKind::TypeParameterDefaultOrder(_)
+            | SemanticSyntaxErrorKind::ReturnInGenerator => false,
         }
     }
 }
@@ -1102,7 +1113,7 @@ impl<'a> BindingsBuilder<'a> {
         );
     }
 
-    pub fn stmts(&mut self, xs: Vec<Stmt>, parent: &NestingContext) {
+    pub fn stmts(&mut self, xs: ThinVec<Stmt>, parent: &NestingContext) {
         let mut iter = xs.into_iter().peekable();
         while let Some(x) = iter.next() {
             if let Stmt::Assign(assign) = &x
@@ -2345,8 +2356,20 @@ impl<'a> SemanticSyntaxContext for BindingsBuilder<'a> {
         self.scopes.in_function_scope()
     }
 
-    fn in_generator_scope(&self) -> bool {
+    fn in_generator_context(&self) -> bool {
         self.scopes.in_generator_expression()
+    }
+
+    fn in_class_body_comprehension(&self) -> bool {
+        // Only used by ruff to emit `NamedExpressionInClassBodyComprehension`, which pyrefly
+        // does not currently enable (see `should_emit_semantic_syntax_error`). Returning `false`
+        // suppresses that check; revisit if pyrefly starts emitting it.
+        false
+    }
+
+    fn lazy_import_context(&self) -> Option<LazyImportContext> {
+        // pyrefly does not model `lazy` imports, so there is never a lazy-import context.
+        None
     }
 
     fn in_notebook(&self) -> bool {

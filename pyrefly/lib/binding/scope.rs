@@ -37,6 +37,7 @@ use starlark_map::Hashed;
 use starlark_map::small_map::Entry;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
+use thin_vec::ThinVec;
 use vec1::Vec1;
 
 use crate::binding::binding::Binding;
@@ -3660,7 +3661,7 @@ impl<'a> BindingsBuilder<'a> {
         &mut self,
         range: TextRange,
         narrow_ops: &NarrowOps,
-        orelse: Vec<Stmt>,
+        orelse: ThinVec<Stmt>,
         parent: &NestingContext,
         is_while_true: bool,
         loop_definitely_runs: bool,

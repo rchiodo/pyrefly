@@ -33,6 +33,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
+use thin_vec::ThinVec;
 use vec1::Vec1;
 
 use crate::binding::binding::Binding;
@@ -995,7 +996,9 @@ impl<'a> BindingsBuilder<'a> {
             Expr::DictComp(x) => {
                 self.with_await_context(AwaitContext::General, |this| {
                     this.bind_comprehensions(x.range, &mut x.generators, usage, false);
-                    this.ensure_expr(&mut x.key, usage);
+                    if let Some(key) = &mut x.key {
+                        this.ensure_expr(key, usage);
+                    }
                     this.ensure_expr(&mut x.value, usage);
                     this.scopes.pop();
                 });
@@ -1330,7 +1333,7 @@ impl<'a> BindingsBuilder<'a> {
 
     pub fn ensure_and_bind_decorators(
         &mut self,
-        decorators: Vec<Decorator>,
+        decorators: ThinVec<Decorator>,
         usage: &mut Usage,
     ) -> Vec<Idx<KeyDecorator>> {
         let mut decorator_keys = Vec::with_capacity(decorators.len());

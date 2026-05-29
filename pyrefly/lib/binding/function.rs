@@ -35,6 +35,7 @@ use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
+use thin_vec::ThinVec;
 
 use crate::binding::binding::AnnotationTarget;
 use crate::binding::binding::Binding;
@@ -159,7 +160,7 @@ impl<'a> SelfAttrNames<'a> {
     fn find(
         func_name: &Identifier,
         parameters: &mut Box<Parameters>,
-        body: Vec<Stmt>,
+        body: ThinVec<Stmt>,
     ) -> Option<SelfAssignments> {
         let self_name = if let Some(p) = parameters.iter_non_variadic_params().next() {
             &p.parameter.name.id
@@ -306,7 +307,7 @@ impl<'a> BindingsBuilder<'a> {
     fn function_body_scope(
         &mut self,
         parameters: &mut Box<Parameters>,
-        body: Vec<Stmt>,
+        body: ThinVec<Stmt>,
         range: TextRange,
         func_name: &Identifier,
         parent: &NestingContext,
@@ -364,7 +365,7 @@ impl<'a> BindingsBuilder<'a> {
     fn unchecked_function_body_scope(
         &mut self,
         parameters: &mut Box<Parameters>,
-        body: Vec<Stmt>,
+        body: ThinVec<Stmt>,
         range: TextRange,
         func_name: &Identifier,
         undecorated_idx: Idx<KeyUndecoratedFunction>,
@@ -561,7 +562,7 @@ impl<'a> BindingsBuilder<'a> {
         );
     }
 
-    fn decorators(&mut self, decorator_list: Vec<Decorator>, usage: &mut Usage) -> Decorators {
+    fn decorators(&mut self, decorator_list: ThinVec<Decorator>, usage: &mut Usage) -> Decorators {
         let mut is_overload = false;
         let mut is_override = false;
         let mut has_no_type_check = false;
@@ -600,7 +601,7 @@ impl<'a> BindingsBuilder<'a> {
     fn function_body(
         &mut self,
         parameters: &mut Box<Parameters>,
-        body: Vec<Stmt>,
+        body: ThinVec<Stmt>,
         decorators: &Decorators,
         range: TextRange,
         is_async: bool,

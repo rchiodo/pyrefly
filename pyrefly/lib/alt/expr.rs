@@ -637,7 +637,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             .map(|hint| HintRef::new(value_hint, hint.errors()))
                     });
                     self.ifs_infer(&x.generators, errors);
-                    let key_ty = self.expr_infer_with_hint_promote(&x.key, key_hint, errors);
+                    // `key` is only `None` for a syntactically invalid dict comprehension
+                    // (parser error recovery); the parser already reports the syntax error.
+                    let key_ty = match &x.key {
+                        Some(key) => self.expr_infer_with_hint_promote(key, key_hint, errors),
+                        None => self.heap.mk_any_error(),
+                    };
                     let value_ty = self.expr_infer_with_hint_promote(&x.value, value_hint, errors);
                     self.heap.mk_class_type(self.stdlib.dict(key_ty, value_ty))
                 },
