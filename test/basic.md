@@ -34,13 +34,8 @@ $ touch $TMPDIR/pyrefly.toml && \
 ## No errors on our Python code
 
 ```scrut {output_stream: stderr}
-$ PYREFLY_PY_COPY=$(mktemp -d -p /tmp pyrefly_python.XXXXXX) && \
-> cp -R $PYREFLY_PY/. $PYREFLY_PY_COPY && \
-> $PYREFLY check $PYREFLY_PY_COPY && rm -rf $PYREFLY_PY_COPY
+$ touch $(dirname $PYREFLY_PY)/pyrefly.toml && $PYREFLY check $PYREFLY_PY
  INFO 0 errors
-No `pyrefly.toml` found — using preset `basic`.
-Run `pyrefly init` to continue setting up Pyrefly.
-Docs: * (glob)
 [0]
 ```
 
