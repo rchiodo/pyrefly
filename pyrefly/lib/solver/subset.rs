@@ -99,6 +99,16 @@ fn ok_or(b: bool, e: SubsetError) -> Result<(), SubsetError> {
     b.then_some(()).ok_or(e)
 }
 
+/// Return whether `type[ty]` is broad enough to accept an arbitrary class object.
+fn accepts_all_class_objects(ty: &Type) -> bool {
+    match ty {
+        Type::Any(_) => true,
+        Type::ClassType(cls) if cls.is_builtin("object") => true,
+        Type::Union(union) => union.members.iter().any(accepts_all_class_objects),
+        _ => false,
+    }
+}
+
 /// Check if a param list has both `*args: Any` and `**kwargs: Any`
 fn has_any_args_and_kwargs(args: &[Param]) -> bool {
     let has_vararg_any = args
@@ -2292,11 +2302,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             ),
             (
                 Type::ClassType(class),
-                Type::Type(_)
+                want @ (Type::Type(_)
                 | Type::ClassDef(_)
                 | Type::BoundMethod(_)
                 | Type::Callable(_)
-                | Type::Function(_),
+                | Type::Function(_)),
             ) => {
                 let type_type = self.type_order.stdlib().builtins_type();
                 if class == type_type {
@@ -2307,8 +2317,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     .as_superclass(class, type_type.class_object())
                     && got_as_type.targs().is_empty()
                 {
-                    // The class extends unparameterized `type`
-                    Ok(())
+                    match want {
+                        Type::Type(type_want) if accepts_all_class_objects(type_want) => Ok(()),
+                        // A bare metaclass value proves that it is some class object, but not
+                        // which class object.
+                        Type::Type(_) | Type::ClassDef(_) => Err(SubsetError::Other),
+                        // A class extending unparameterized `type` satisfies callable-like wants.
+                        Type::BoundMethod(_) | Type::Callable(_) | Type::Function(_) => Ok(()),
+                        _ => unreachable!("guarded by outer match on class-object-like wants"),
+                    }
                 } else {
                     Err(SubsetError::Other)
                 }
