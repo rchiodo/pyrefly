@@ -345,6 +345,17 @@ use crate::state::subscriber::Subscriber;
 use crate::types::class::ClassDefIndex;
 use crate::types::class::ClassType;
 
+enum RequestError {
+    Cancelled,
+    Internal(String),
+}
+
+impl From<Cancelled> for RequestError {
+    fn from(Cancelled: Cancelled) -> Self {
+        RequestError::Cancelled
+    }
+}
+
 pub struct InitializeInfo {
     pub params: InitializeParams,
     pub supports_diagnostic_markdown: bool,
@@ -2264,7 +2275,7 @@ impl Server {
                                 &params.query,
                                 telemetry,
                                 telemetry_event,
-                            ))),
+                            )?)),
                         ));
                     }
                 } else if let Some(params) = as_request::<DocumentDiagnosticRequest>(&x) {
@@ -4676,7 +4687,7 @@ impl Server {
             FindDefinitionItemWithDocstring,
             &dyn Telemetry,
             &TelemetryEvent,
-        ) -> Result<T, Cancelled>
+        ) -> Result<T, RequestError>
         + Send
         + Sync
         + 'static,
@@ -4725,12 +4736,21 @@ impl Server {
                             Ok(Some(transform_result(results))),
                         )));
                     }
-                    Err(Cancelled) => {
+                    Err(RequestError::Cancelled) => {
                         let message = format!("Request {request_id} is canceled");
                         info!("{message}");
                         server.connection.send(Message::Response(Response::new_err(
                             request_id,
                             ErrorCode::RequestCanceled as i32,
+                            message,
+                        )));
+                    }
+                    Err(RequestError::Internal(detail)) => {
+                        let message = format!("Request {request_id} failed: {detail}");
+                        tracing::warn!("{message}");
+                        server.connection.send(Message::Response(Response::new_err(
+                            request_id,
+                            ErrorCode::InternalError as i32,
                             message,
                         )));
                     }
@@ -4806,12 +4826,14 @@ impl Server {
                         include_declaration,
                     );
 
-                    let external_results = ext_handle
-                        .map(|h| h.join().unwrap_or_default())
-                        .unwrap_or_default();
+                    let external_results = ext_handle.and_then(|h| h.join().ok());
                     (local_results, external_results)
                 });
 
+                let external_results = external_results
+                    .transpose()
+                    .map_err(|e| RequestError::Internal(e.to_string()))?
+                    .unwrap_or_default();
                 Ok((local_results?, external_results))
             },
             move |results: (Vec<(ModuleInfo, Vec<TextRange>)>, Vec<(Url, Vec<Range>)>)| {
@@ -5153,7 +5175,7 @@ impl Server {
         query: &str,
         telemetry: &impl Telemetry,
         telemetry_event: &mut TelemetryEvent,
-    ) -> Vec<SymbolInformation> {
+    ) -> anyhow::Result<Vec<SymbolInformation>> {
         let external_provider = self.external_references.clone();
         let workspace_uri = self
             .initialize_params
@@ -5194,11 +5216,11 @@ impl Server {
                 })
                 .collect();
 
-            let external_results = ext_handle
-                .map(|h| h.join().unwrap_or_default())
-                .unwrap_or_default();
+            let external_results = ext_handle.and_then(|h| h.join().ok());
             (local_results, external_results)
         });
+
+        let external_results = external_results.transpose()?.unwrap_or_default();
 
         // Local results take priority; skip external results for files already covered.
         let local_uris: HashSet<Url> = local_results
@@ -5211,7 +5233,7 @@ impl Server {
                 merged.push(sym);
             }
         }
-        merged
+        Ok(merged)
     }
 
     fn append_unreachable_diagnostics(
@@ -5758,14 +5780,14 @@ impl Server {
                 // Run local and external searches in parallel.
                 let (local_results, external_calls) = std::thread::scope(|s| {
                     let ext_handle = qualified_name.as_ref().map(|qname| {
-                        s.spawn(|| {
+                        s.spawn(|| -> anyhow::Result<_> {
                             let external_refs = external_references.find_references(
                                 qname,
                                 &source_uri,
                                 Duration::from_secs(10),
                                 Some(sub_task_telemetry),
-                            );
-                            convert_external_references_to_incoming_calls(external_refs)
+                            )?;
+                            Ok(convert_external_references_to_incoming_calls(external_refs))
                         })
                     });
 
@@ -5776,12 +5798,14 @@ impl Server {
                             &target_def,
                         );
 
-                    let external_calls = ext_handle
-                        .map(|h| h.join().unwrap_or_default())
-                        .unwrap_or_default();
+                    let external_calls = ext_handle.and_then(|h| h.join().ok());
                     (local_results, external_calls)
                 });
 
+                let external_calls = external_calls
+                    .transpose()
+                    .map_err(|e| RequestError::Internal(e.to_string()))?
+                    .unwrap_or_default();
                 Ok((local_results?, external_calls))
             },
             move |(local_callers, external_calls): (
