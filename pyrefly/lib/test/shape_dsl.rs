@@ -49,6 +49,8 @@ class ImportAliasArray[*Shape]: ...
 
 @se.shaped_array(shape="Shape")
 class ModuleAliasArray[DType, *Shape]: ...
+
+class PlainArray[*Shape]: ...
 "#,
     );
     let (state, handle) = env.to_state();
@@ -60,6 +62,7 @@ class ModuleAliasArray[DType, *Shape]: ...
             .expect("shaped array shape should be present");
         assert_shaped_array_shape(shape);
     }
+    assert!(!get_class_metadata("PlainArray", &main, &state).is_shaped_array());
 }
 
 testcase!(

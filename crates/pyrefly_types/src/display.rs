@@ -1406,7 +1406,7 @@ pub mod tests {
     use crate::class::Class;
     use crate::class::ClassDefIndex;
     use crate::class::ClassType;
-    use crate::heap::TypeHeap;
+    use crate::dimension::SizeExpr;
     use crate::literal::Lit;
     use crate::literal::LitEnum;
     use crate::literal::LitStyle;
@@ -1415,6 +1415,8 @@ pub mod tests {
     use crate::quantified::QuantifiedIdentity;
     use crate::quantified::QuantifiedKind;
     use crate::quantified::QuantifiedOrigin;
+    use crate::tensor::TensorShape;
+    use crate::tensor::TensorType;
     use crate::tuple::Tuple;
     use crate::type_alias::TypeAlias;
     use crate::type_alias::TypeAliasData;
@@ -1509,6 +1511,17 @@ pub mod tests {
                 metadata: FuncMetadata::method(&class, Name::new(method_name)),
             }),
         }))
+    }
+
+    #[test]
+    fn test_display_tensor_type_uses_base_class_name() {
+        let array = ClassType::new(fake_class("Array", "arrays", 0), TArgs::default());
+        let shaped =
+            TensorType::new(array.clone(), TensorShape::new(vec![SizeExpr::Literal(2)])).to_type();
+        let shapeless = TensorType::shapeless(array).to_type();
+
+        assert_eq!(shaped.to_string(), "Array[2]");
+        assert_eq!(shapeless.to_string(), "Array");
     }
 
     fn fake_generic_bound_method(

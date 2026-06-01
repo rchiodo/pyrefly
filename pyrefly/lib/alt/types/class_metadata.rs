@@ -365,6 +365,10 @@ impl ClassMetadata {
         self.capture_init.as_deref()
     }
 
+    pub fn is_shaped_array(&self) -> bool {
+        self.shaped_array_shape.is_some()
+    }
+
     pub fn shaped_array_shape(&self) -> Option<&Quantified> {
         self.shaped_array_shape.as_ref()
     }

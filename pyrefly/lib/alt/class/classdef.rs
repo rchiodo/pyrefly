@@ -10,6 +10,7 @@ use std::sync::Arc;
 use dupe::Dupe;
 use pyrefly_python::nesting_context::NestingContext;
 use pyrefly_types::callable::Callable;
+use pyrefly_types::quantified::Quantified;
 use pyrefly_types::special_form::SpecialForm;
 use ruff_python_ast::Identifier;
 use ruff_python_ast::name::Name;
@@ -100,6 +101,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     pub fn get_metadata_for_class(&self, cls: &Class) -> Arc<ClassMetadata> {
         self.get_from_class(cls, &KeyClassMetadata(cls.index()))
             .unwrap_or_else(|| Arc::new(ClassMetadata::recursive()))
+    }
+
+    pub fn shaped_array_shape_for_class(&self, cls: &Class) -> Option<Quantified> {
+        // Shaped-array registration is explicit per class. Do not inherit this
+        // metadata through the MRO; subclasses must opt in with their own
+        // `@shaped_array` decorator so registration has no base-class side effects.
+        self.get_metadata_for_class(cls)
+            .shaped_array_shape()
+            .cloned()
+    }
+
+    pub fn shaped_array_shape_for_class_type(&self, cls: &ClassType) -> Option<Quantified> {
+        self.shaped_array_shape_for_class(cls.class_object())
     }
 
     pub fn get_abstract_members_for_class(&self, cls: &Class) -> Arc<AbstractClassMembers> {
