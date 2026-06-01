@@ -118,6 +118,10 @@ fn compute_errors(
     config.root.permissive_ignores = Some(true);
     config.root.check_unannotated_defs = Some(false);
     config.root.infer_return_types = Some(InferReturnTypes::Annotated);
+    if report_pysa.is_some() {
+        config.root.check_unannotated_defs = Some(true);
+        config.root.infer_return_types = Some(InferReturnTypes::Checked);
+    }
     let mut error_config = ErrorDisplayConfig::default();
     error_config.set_error_severity(ErrorKind::Deprecated, Severity::Ignore);
     error_config.set_error_severity(ErrorKind::UnusedIgnore, Severity::Info);
