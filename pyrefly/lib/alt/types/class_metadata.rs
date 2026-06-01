@@ -15,6 +15,7 @@ use dupe::Dupe;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::VisitMut;
 use pyrefly_types::callable::Deprecation;
+use pyrefly_types::quantified::Quantified;
 use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_util::display::commas_iter;
 use pyrefly_util::visit::VisitMut;
@@ -77,6 +78,7 @@ pub struct ClassMetadata {
     /// `__init__` parameter names to capture for shape inference, extracted from
     /// `@uses_shape_dsl(..., capture_init=[...])` on a `forward` method.
     capture_init: Option<Vec<Name>>,
+    shaped_array_shape: Option<Quantified>,
 }
 
 impl VisitMut<Type> for ClassMetadata {
@@ -99,6 +101,9 @@ impl VisitMut<Type> for ClassMetadata {
         }
         if let Some(dataclass_transform_metadata) = &mut self.dataclass_transform_metadata {
             dataclass_transform_metadata.visit_mut(f);
+        }
+        if let Some(shaped_array_shape) = &mut self.shaped_array_shape {
+            shaped_array_shape.visit_mut(f);
         }
     }
 }
@@ -136,6 +141,7 @@ impl ClassMetadata {
         is_metaclass: bool,
         slots_info: Option<SlotsInfo>,
         capture_init: Option<Vec<Name>>,
+        shaped_array_shape: Option<Quantified>,
     ) -> ClassMetadata {
         ClassMetadata {
             metaclass,
@@ -163,6 +169,7 @@ impl ClassMetadata {
             is_metaclass,
             slots_info,
             capture_init,
+            shaped_array_shape,
         }
     }
 
@@ -193,6 +200,7 @@ impl ClassMetadata {
             is_metaclass: false,
             slots_info: None,
             capture_init: None,
+            shaped_array_shape: None,
         }
     }
 
@@ -355,6 +363,10 @@ impl ClassMetadata {
 
     pub fn capture_init(&self) -> Option<&[Name]> {
         self.capture_init.as_deref()
+    }
+
+    pub fn shaped_array_shape(&self) -> Option<&Quantified> {
+        self.shaped_array_shape.as_ref()
     }
 }
 

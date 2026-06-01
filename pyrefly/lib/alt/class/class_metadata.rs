@@ -58,6 +58,7 @@ use crate::binding::base_class::BaseClass;
 use crate::binding::base_class::BaseClassExpr;
 use crate::binding::base_class::BaseClassGeneric;
 use crate::binding::base_class::BaseClassGenericKind;
+use crate::binding::binding::BindingShapedArrayMetadata;
 use crate::binding::binding::ClassFieldDefinition;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
@@ -130,6 +131,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         pydantic_before_validator_fields: &[Name],
         django_field_info: &DjangoFieldInfo,
         capture_init: Option<&[Name]>,
+        shaped_array_metadata: Option<&BindingShapedArrayMetadata>,
         errors: &ErrorCollector,
     ) -> ClassMetadata {
         // Get class decorators.
@@ -482,6 +484,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // up a cross-module class's __slots__ in the wrong module's bindings
         // could match a completely different class.
         let slots_info = self.extract_slots_info(cls);
+        let shaped_array_shape = self.shaped_array_shape(cls, shaped_array_metadata, errors);
 
         ClassMetadata::new(
             bases,
@@ -509,7 +512,46 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_metaclass,
             slots_info,
             capture_init.map(|names| names.to_vec()),
+            shaped_array_shape,
         )
+    }
+
+    fn shaped_array_shape(
+        &self,
+        cls: &Class,
+        metadata: Option<&BindingShapedArrayMetadata>,
+        errors: &ErrorCollector,
+    ) -> Option<Quantified> {
+        let BindingShapedArrayMetadata { shape_name, range } = metadata?;
+        let tparams = self.get_class_tparams(cls);
+        match tparams.iter().find(|param| param.name() == shape_name) {
+            Some(param) if param.kind == QuantifiedKind::TypeVarTuple => Some(param.clone()),
+            Some(param) => {
+                self.error(
+                    errors,
+                    *range,
+                    ErrorKind::InvalidAnnotation,
+                    format!(
+                        "Shape parameter `{}` must be a `TypeVarTuple`, got `{}`",
+                        shape_name, param.kind
+                    ),
+                );
+                None
+            }
+            None => {
+                self.error(
+                    errors,
+                    *range,
+                    ErrorKind::InvalidAnnotation,
+                    format!(
+                        "Shape parameter `{}` is not a type parameter of class `{}`",
+                        shape_name,
+                        cls.name()
+                    ),
+                );
+                None
+            }
+        }
     }
 
     fn extract_slots_info(&self, cls: &Class) -> Option<SlotsInfo> {

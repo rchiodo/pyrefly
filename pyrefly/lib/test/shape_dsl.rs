@@ -5,8 +5,116 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_types::quantified::Quantified;
+use pyrefly_types::quantified::QuantifiedKind;
+
+use crate::test::class_keywords::get_class_metadata;
 use crate::test::util::TestEnv;
 use crate::testcase;
+
+fn shaped_array_env() -> TestEnv {
+    let mut env = TestEnv::new();
+    env.add_with_path(
+        "shape_extensions",
+        "shape_extensions.pyi",
+        r#"
+from typing import Any
+
+shaped_array: Any
+"#,
+    );
+    env
+}
+
+fn assert_shaped_array_shape(shape: &Quantified) {
+    assert_eq!(shape.name().as_str(), "Shape");
+    assert_eq!(shape.kind, QuantifiedKind::TypeVarTuple);
+}
+
+#[test]
+fn test_shaped_array_imports_are_metadata() {
+    let mut env = shaped_array_env();
+    env.add(
+        "main",
+        r#"
+import shape_extensions as se
+from shape_extensions import shaped_array
+from shape_extensions import shaped_array as shaped_array_alias
+
+@shaped_array(shape="Shape")
+class ImportedArray[*Shape]: ...
+
+@shaped_array_alias(shape="Shape")
+class ImportAliasArray[*Shape]: ...
+
+@se.shaped_array(shape="Shape")
+class ModuleAliasArray[DType, *Shape]: ...
+"#,
+    );
+    let (state, handle) = env.to_state();
+    let main = handle("main");
+    for class_name in ["ImportedArray", "ImportAliasArray", "ModuleAliasArray"] {
+        let metadata = get_class_metadata(class_name, &main, &state);
+        let shape = metadata
+            .shaped_array_shape()
+            .expect("shaped array shape should be present");
+        assert_shaped_array_shape(shape);
+    }
+}
+
+testcase!(
+    test_shaped_array_invalid_metadata,
+    shaped_array_env(),
+    r#"
+from shape_extensions import shaped_array
+from typing import Any, Generic, TypeVarTuple
+
+kwargs: Any = {}
+
+@shaped_array  # E: `@shaped_array` requires a `shape` keyword argument
+class BareDecorator[*Shape]: ...
+
+@shaped_array()  # E: `@shaped_array` requires a `shape` keyword argument
+class MissingShape[*Shape]: ...
+
+@shaped_array("Shape")  # E: `@shaped_array` expects `shape` as a keyword argument
+class PositionalShape[*Shape]: ...
+
+@shaped_array(dtype="Shape")  # E: Unexpected keyword argument `dtype` for `@shaped_array`; expected `shape`
+class WrongShapeKeyword[*Shape]: ...
+
+@shaped_array(shape="Shape", **kwargs)  # E: Unpacking is not supported in `@shaped_array`
+class KwargsShape[*Shape]: ...
+
+@shaped_array(shape="Shape", shape="Shape")  # E: Parse error: Duplicate keyword argument "shape"
+class DuplicateShapeKeyword[*Shape]: ...
+
+@shaped_array(shape=123)  # E: `@shaped_array` `shape` argument must be a string literal
+class NonStringShape[*Shape]: ...
+
+@shaped_array(shape="Shape")  # E: Shape parameter `Shape` must be a scoped (PEP-695-style) type parameter of class `NoTypeParams`
+class NoTypeParams: ...
+
+Shape = TypeVarTuple("Shape")
+
+@shaped_array(shape="Shape")  # E: Shape parameter `Shape` must be a scoped (PEP-695-style) type parameter of class `LegacyGeneric`
+class LegacyGeneric(Generic[*Shape]): ...
+
+@shaped_array(shape="Shape")
+@shaped_array(shape="Shape")  # E: Duplicate `@shaped_array` decorator
+class DuplicateDecorator[*Shape]: ...
+
+@shaped_array  # E: `@shaped_array` requires a `shape` keyword argument
+@shaped_array(shape="Shape")  # E: Duplicate `@shaped_array` decorator
+class DuplicateDecoratorAfterInvalid[*Shape]: ...
+
+@shaped_array(shape="Missing")  # E: Shape parameter `Missing` is not a type parameter of class `ShapeNotFound`
+class ShapeNotFound[*Shape]: ...
+
+@shaped_array(shape="DType")  # E: Shape parameter `DType` must be a `TypeVarTuple`, got `TypeVar`
+class ShapeNotTypeVarTuple[*Shape, DType]: ...
+"#,
+);
 
 fn shape_dsl_env() -> TestEnv {
     let path = std::env::var("SHAPE_DSL_TEST_PATH").expect("SHAPE_DSL_TEST_PATH must be set");

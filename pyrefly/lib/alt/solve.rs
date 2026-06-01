@@ -348,6 +348,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             pydantic_before_validator_fields,
             django_field_info,
             capture_init,
+            shaped_array_metadata,
         } = binding;
         let metadata = match &self.get_idx(*k).0 {
             None => ClassMetadata::recursive(),
@@ -361,6 +362,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 pydantic_before_validator_fields,
                 django_field_info,
                 capture_init.as_deref(),
+                shaped_array_metadata.as_deref(),
                 errors,
             ),
         };

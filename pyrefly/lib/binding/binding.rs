@@ -120,7 +120,7 @@ assert_words!(BindingAnnotation, 15);
 assert_words!(BindingClass, 11);
 assert_words!(BindingTParams, 10);
 assert_words!(BindingClassBaseType, 3);
-assert_words!(BindingClassMetadata, 13);
+assert_words!(BindingClassMetadata, 14);
 assert_bytes!(BindingClassMro, 4);
 assert_bytes!(BindingAbstractClassCheck, 4);
 assert_bytes!(BindingClassSubscriptSymmetry, 4);
@@ -3155,6 +3155,13 @@ impl DisplayWith<Bindings> for BindingConsistentOverrideCheck {
     }
 }
 
+/// Information about a class that is marked as using array shapes (for shape typing).
+#[derive(Clone, Debug)]
+pub struct BindingShapedArrayMetadata {
+    pub shape_name: Name,
+    pub range: TextRange,
+}
+
 /// Binding for the class's metadata (anything obtained directly from base classes,
 /// except for the MRO which is kept separate to avoid cycles).
 #[derive(Clone, Debug)]
@@ -3179,6 +3186,8 @@ pub struct BindingClassMetadata {
     /// `__init__` parameter names to capture for shape inference, extracted from
     /// `@uses_shape_dsl(..., capture_init=[...])` on a `forward` method.
     pub capture_init: Option<Box<[Name]>>,
+    /// Shape parameter requested by `@shaped_array(shape="...")`.
+    pub shaped_array_metadata: Option<Box<BindingShapedArrayMetadata>>,
 }
 
 impl DisplayWith<Bindings> for BindingClassMetadata {
