@@ -211,14 +211,13 @@ pub enum TypeShapeKind {
     },
 }
 
-/// Traits surfaced for named type shapes when Pyrefly directly represents the
-/// queried value as a specialized `Type` variant.
+/// Traits surfaced for collapsed `named` shapes when the outer Pyrefly `Type`
+/// already carries a value-shape property.
 ///
-/// Typed-dict traits are emitted for value-position typed dict shapes built
-/// from `Type::TypedDict` or `Type::PartialTypedDict`, including anonymous
-/// typed dicts. They are not emitted for typed-dict class definitions or
-/// type-position/class-position shapes that would require class metadata
-/// lookups.
+/// These traits are emitted for value shapes such as `Type::Tuple`,
+/// `Type::TypedDict`, and `Type::PartialTypedDict`.
+/// They are not synthesized from class metadata, and therefore are not emitted
+/// for class/type-position shapes that would require metadata lookup.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TypeShapeTrait {
@@ -228,6 +227,8 @@ pub enum TypeShapeTrait {
     /// `TypedDict`; callers checking for any typed dict should check both
     /// traits.
     PartialTypedDict,
+    /// A tuple value shape.
+    Tuple,
 }
 
 /// Thin wrapper around `LinedBuffer::python_ast_range_for_expr` that accepts
@@ -414,7 +415,12 @@ fn type_shape_kind(context: &TypeShapeContext, ty: &Type) -> TypeShapeKind {
                     .collect(),
             )
         }
-        Type::Tuple(tuple) => named_type_shape_kind("typing.Tuple", tuple_args(context, tuple)),
+        Type::Tuple(tuple) => named_type_shape_kind_with_traits(
+            "typing.Tuple",
+            tuple_args(context, tuple),
+            None,
+            vec![TypeShapeTrait::Tuple],
+        ),
         Type::Literal(literal) => named_type_shape_kind(
             "typing.Literal",
             vec![named_leaf(literal.value.to_string())],
