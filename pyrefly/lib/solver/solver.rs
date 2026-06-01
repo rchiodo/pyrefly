@@ -110,6 +110,8 @@ impl Bounds {
         self.upper.extend(other.upper);
     }
 
+    /// Unused, but part of a trait we need.
+    #[expect(dead_code)]
     fn is_empty(&self) -> bool {
         self.lower.is_empty() && self.upper.is_empty()
     }
