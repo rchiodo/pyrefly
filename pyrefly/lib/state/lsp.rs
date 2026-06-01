@@ -984,6 +984,16 @@ impl<'a> Transaction<'a> {
         position: TextSize,
         for_display: bool,
     ) -> Option<Type> {
+        self.get_type_at_impl_with_options(handle, position, for_display, true)
+    }
+
+    fn get_type_at_impl_with_options(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+        for_display: bool,
+        coerce_callees: bool,
+    ) -> Option<Type> {
         match self.identifier_at(handle, position) {
             Some(IdentifierWithContext {
                 identifier: id,
@@ -1001,20 +1011,24 @@ impl<'a> Transaction<'a> {
                     return None;
                 }
                 let mut ty = self.get_type_for_surface(handle, &key, for_display)?;
-                let call_args_range = self.callee_at(handle, position).and_then(
-                    |ExprCall {
-                         func, arguments, ..
-                     }| (func.range() == id.range).then_some(arguments.range),
-                );
-                if let Some(arguments_range) = call_args_range {
-                    if let Some(ret) = self.get_chosen_overload_trace_for_surface(
-                        handle,
-                        arguments_range,
-                        for_display,
-                    ) {
-                        return Some(ret);
+                if coerce_callees {
+                    let call_args_range = self.callee_at(handle, position).and_then(
+                        |ExprCall {
+                             func, arguments, ..
+                         }| {
+                            (func.range() == id.range).then_some(arguments.range)
+                        },
+                    );
+                    if let Some(arguments_range) = call_args_range {
+                        if let Some(ret) = self.get_chosen_overload_trace_for_surface(
+                            handle,
+                            arguments_range,
+                            for_display,
+                        ) {
+                            return Some(ret);
+                        }
+                        ty = self.coerce_type_to_callable(handle, ty);
                     }
-                    ty = self.coerce_type_to_callable(handle, ty);
                 }
                 Some(ty)
             }
@@ -1183,6 +1197,24 @@ impl<'a> Transaction<'a> {
 
     pub fn get_type_at_for_display(&self, handle: &Handle, position: TextSize) -> Option<Type> {
         self.get_type_at_impl(handle, position, true)
+    }
+
+    /// Like `get_type_at`, but returns the raw bound type of an identifier
+    /// without coercing-to-callable or substituting in the chosen-overload
+    /// trace when the identifier appears in a call position.
+    ///
+    /// This preserves the declaration link (e.g. for `print` in `print(...)`,
+    /// returns the underlying `Function`/`Overload` referencing `builtins.pyi`
+    /// rather than a synthesized `Callable` for the matched overload). It is
+    /// intended for clients (such as the TSP `getComputedType` endpoint) that
+    /// re-resolve declarations on their side and need the wire type to carry
+    /// the original source declaration.
+    pub fn get_type_at_preserving_declaration(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+    ) -> Option<Type> {
+        self.get_type_at_impl_with_options(handle, position, false, false)
     }
 
     fn get_result_type_at_impl(
