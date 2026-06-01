@@ -38,6 +38,44 @@ class Tensor[*Shape]: ...
     env
 }
 
+fn shaped_array_env_with_numpy() -> TestEnv {
+    let path = std::env::var("SHAPE_DSL_TEST_PATH").expect("SHAPE_DSL_TEST_PATH must be set");
+    let mut env = TestEnv::new_with_site_package_paths(&[&path]);
+    env.add_with_path(
+        "shape_extensions",
+        "shape_extensions/__init__.pyi",
+        r#"
+from typing import Any, Callable
+
+shaped_array: Any
+def uses_shape_dsl(ir_fn: Callable[..., Any], *, capture_init: list[str] | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+"#,
+    );
+    env.add_with_path(
+        "numpy",
+        "numpy/__init__.pyi",
+        r#"
+from shape_extensions import uses_shape_dsl
+from shape_extensions import shaped_array
+from shape_extensions.dsl import Tensor, shape_dsl_function
+
+@shape_dsl_function
+def add_leading_axis_ir(x: Tensor) -> Tensor:
+    return Tensor(shape=[1] + x.shape)
+
+@shaped_array(shape="Shape")
+class ndarray[DType, *Shape]:
+    shape: tuple[*Shape]
+    def copy(self) -> ndarray[DType, *Shape]: ...
+    def item(self) -> DType: ...
+
+@uses_shape_dsl(add_leading_axis_ir)
+def add_leading_axis[DType, *Shape](x: ndarray[DType, *Shape]) -> ndarray[DType, *Shape]: ...
+"#,
+    );
+    env
+}
+
 fn assert_shaped_array_shape(shape: &Quantified) {
     assert_eq!(shape.name().as_str(), "Shape");
     assert_eq!(shape.kind, QuantifiedKind::TypeVarTuple);
@@ -228,6 +266,23 @@ def f(x: Tensor[2, 3], y: Tensor) -> None:
     reveal_type(y)  # E: revealed type: Tensor
     reveal_type(x[0])  # E: revealed type: Tensor[3]
     reveal_type(y[0])  # E: revealed type: Tensor
+"#,
+);
+
+testcase!(
+    test_numpy_shaped_array_fixture,
+    shaped_array_env_with_numpy(),
+    r#"
+import numpy as np
+from typing import reveal_type
+
+def f(x: np.ndarray[float, 2, 3]) -> None:
+    reveal_type(x)  # E: revealed type: ndarray[2, 3]
+    reveal_type(x.copy())  # E: revealed type: ndarray[2, 3]
+    reveal_type(x.item())  # E: revealed type: float
+    reveal_type(x.shape)  # E: revealed type: tuple[Literal[2], Literal[3]]
+    reveal_type(x[0])  # E: revealed type: ndarray[3]
+    reveal_type(np.add_leading_axis(x))  # E: revealed type: ndarray[1, 2, 3]
 "#,
 );
 
