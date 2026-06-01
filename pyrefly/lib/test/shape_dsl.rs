@@ -26,6 +26,18 @@ shaped_array: Any
     env
 }
 
+fn shaped_array_env_with_torch() -> TestEnv {
+    let mut env = shaped_array_env();
+    env.add_with_path(
+        "torch",
+        "torch.pyi",
+        r#"
+class Tensor[*Shape]: ...
+"#,
+    );
+    env
+}
+
 fn assert_shaped_array_shape(shape: &Quantified) {
     assert_eq!(shape.name().as_str(), "Shape");
     assert_eq!(shape.kind, QuantifiedKind::TypeVarTuple);
@@ -116,6 +128,106 @@ class ShapeNotFound[*Shape]: ...
 
 @shaped_array(shape="DType")  # E: Shape parameter `DType` must be a `TypeVarTuple`, got `TypeVar`
 class ShapeNotTypeVarTuple[*Shape, DType]: ...
+"#,
+);
+
+testcase!(
+    test_shaped_array_annotation_parsing,
+    shaped_array_env(),
+    r#"
+from shape_extensions import shaped_array
+from typing import reveal_type
+
+@shaped_array(shape="Shape")
+class Array[DType, *Shape]:
+    def __init__(self) -> None: ...
+    def dtype(self) -> DType: ...
+
+class Cpu: ...
+class Gpu: ...
+
+@shaped_array(shape="Shape")
+class ArrayWithDevice[DType, *Shape, Device: (Gpu, Cpu)]:
+    def dtype(self) -> DType: ...
+    def device(self) -> Device: ...
+
+@shaped_array(shape="Shape")
+class SuffixArray[*Shape, DType]:
+    def dtype(self) -> DType: ...
+
+def f(
+    x: Array[int, 2, 3],
+    y: Array[int],
+    z: Array[int, 2, *tuple[int, ...]],
+    w: ArrayWithDevice[str, 2, 3, Cpu],
+    w_scalar: ArrayWithDevice[str, Gpu],
+    suffix: SuffixArray[2, 3, str],
+    suffix_scalar: SuffixArray[str],
+) -> None:
+    reveal_type(x)  # E: revealed type: Array[2, 3]
+    reveal_type(x.dtype())  # E: revealed type: int
+    reveal_type(y)  # E: revealed type: Array[()]
+    reveal_type(y.dtype())  # E: revealed type: int
+    reveal_type(z)  # E: revealed type: Array[2, *tuple[int, ...]]
+    reveal_type(z.dtype())  # E: revealed type: int
+    reveal_type(w)  # E: revealed type: ArrayWithDevice[2, 3]
+    reveal_type(w.dtype())  # E: revealed type: str
+    reveal_type(w.device())  # E: revealed type: Cpu
+    reveal_type(w_scalar)  # E: revealed type: ArrayWithDevice[()]
+    reveal_type(w_scalar.dtype())  # E: revealed type: str
+    reveal_type(w_scalar.device())  # E: revealed type: Gpu
+    reveal_type(suffix)  # E: revealed type: SuffixArray[2, 3]
+    reveal_type(suffix.dtype())  # E: revealed type: str
+    reveal_type(suffix_scalar)  # E: revealed type: SuffixArray[()]
+    reveal_type(suffix_scalar.dtype())  # E: revealed type: str
+
+def g(x: Array) -> None:
+    reveal_type(x)  # E: revealed type: Array
+
+def bad_arg_count(x: ArrayWithDevice[int]) -> None:  # E: Expected 3 type arguments for `ArrayWithDevice`, got 1
+    pass
+"#,
+);
+
+testcase!(
+    test_shaped_array_indexing_and_bare_values,
+    shaped_array_env(),
+    r#"
+from shape_extensions import shaped_array
+from typing import reveal_type
+
+@shaped_array(shape="Shape")
+class Array[DType, *Shape]:
+    def __init__(self) -> None: ...
+    def dtype(self) -> DType: ...
+
+def annotations(concrete: Array[int, 2, 3], scalar: Array[int], shapeless: Array) -> None:
+    reveal_type(concrete[0])  # E: revealed type: Array[3]
+    reveal_type(concrete[:])  # E: revealed type: Array[2, 3]
+    reveal_type(concrete[0].dtype())  # E: revealed type: int
+    scalar[0]  # E: Cannot index scalar tensor (rank 0)
+    reveal_type(shapeless)  # E: revealed type: Array
+    reveal_type(shapeless[0])  # E: revealed type: Array
+
+def values() -> None:
+    value = Array()
+    reveal_type(value)  # E: revealed type: Array[Unknown, *tuple[Unknown, ...]]
+    reveal_type(value[0])  # E: revealed type: Array
+"#,
+);
+
+testcase!(
+    test_torch_tensor_fallback_still_parses_shapes,
+    shaped_array_env_with_torch(),
+    r#"
+from typing import reveal_type
+from torch import Tensor
+
+def f(x: Tensor[2, 3], y: Tensor) -> None:
+    reveal_type(x)  # E: revealed type: Tensor[2, 3]
+    reveal_type(y)  # E: revealed type: Tensor
+    reveal_type(x[0])  # E: revealed type: Tensor[3]
+    reveal_type(y[0])  # E: revealed type: Tensor
 "#,
 );
 

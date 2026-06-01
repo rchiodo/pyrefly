@@ -89,6 +89,7 @@ use crate::types::callable::ParamList;
 use crate::types::callable::Params;
 use crate::types::callable::Required;
 use crate::types::class::Class;
+use crate::types::class::ClassType;
 use crate::types::facet::FacetKind;
 use crate::types::literal::Lit;
 use crate::types::param_spec::ParamSpec;
@@ -2318,9 +2319,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ),
                     }
                 }
-                // Tensor type parsing: Tensor[2, 3] syntax
-                Type::ClassDef(ref cls) if self.is_tensor_class(cls) => {
-                    Type::type_of(self.parse_tensor_type(cls, xs, errors))
+                // Shaped-array type parsing: Tensor[2, 3] and registered array classes.
+                Type::ClassDef(ref cls) if self.is_shaped_array_class(cls) => {
+                    Type::type_of(self.parse_shaped_array_type(cls, xs, range, errors))
                 }
                 // Jaxtyping annotation parsing: Float[Tensor, "batch channels"] syntax
                 Type::ClassDef(ref cls)
@@ -2538,31 +2539,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::Tensor(ref tensor_type) => {
                     self.infer_tensor_index(tensor_type, slice, range, errors)
                 }
-                // Shapeless tensor as ClassType: use tensor indexing logic
-                // e.g., x: Tensor then x[0] should still work
-                Type::ClassType(ref cls) if self.is_tensor_class(cls.class_object()) => {
-                    // Extract shape dimensions from the ClassType's type arguments
-                    // E.g., Tensor[10, 20] has targs [10, 20]
-                    let targs = cls.targs().as_slice();
-
-                    let is_shapeless = match targs {
-                        [] => true,
-                        [Type::Tuple(Tuple::Unbounded(f))] => f.is_any(),
-                        _ => false,
-                    };
-                    if is_shapeless {
-                        // Shapeless tensor class - create shapeless TensorType and use tensor indexing
-                        let tensor_type = TensorType::shapeless(cls.clone());
-                        self.infer_tensor_index(&tensor_type, slice, range, errors)
-                    } else {
-                        // Build TensorShape from type arguments
-                        let shape_dims: Vec<Type> = targs.to_vec();
-                        let tensor_shape = TensorShape::from_types(shape_dims);
-
-                        // Create TensorType with the class as base_class
-                        let tensor_type = TensorType::new(cls.clone(), tensor_shape);
-                        self.infer_tensor_index(&tensor_type, slice, range, errors)
-                    }
+                // Shaped arrays that have not gone through annotation
+                // canonicalization still use tensor indexing logic.
+                Type::ClassType(ref cls) if self.is_shaped_array_class(cls.class_object()) => {
+                    let tensor_type = self.shaped_array_classtype_to_tensor_type(cls);
+                    self.infer_tensor_index(&tensor_type, slice, range, errors)
                 }
                 Type::ClassType(ref cls) | Type::SelfType(ref cls)
                     if let Some(tuple) = self.as_tuple(cls)
@@ -2924,6 +2905,63 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         cls.has_toplevel_qname("torch", "Tensor")
     }
 
+    /// Check if a class should use shaped-array type parsing.
+    fn is_shaped_array_class(&self, cls: &Class) -> bool {
+        self.is_tensor_class(cls) || self.shaped_array_shape_for_class(cls).is_some()
+    }
+
+    fn shaped_array_classtype_to_tensor_type(&self, cls: &ClassType) -> TensorType {
+        if self.is_tensor_class(cls.class_object()) {
+            let targs = cls.targs().as_slice();
+            let is_shapeless = match targs {
+                [] => true,
+                [Type::Tuple(Tuple::Unbounded(f))] => f.is_any(),
+                _ => false,
+            };
+            if is_shapeless {
+                return TensorType::shapeless(cls.clone());
+            }
+            return TensorType::new(cls.clone(), TensorShape::from_types(targs.to_vec()));
+        }
+
+        let shape_param = self
+            .shaped_array_shape_for_class_type(cls)
+            .expect("registered shaped-array class should have shape metadata");
+        let shape_idx = self
+            .get_class_tparams(cls.class_object())
+            .iter()
+            .position(|param| param == &shape_param)
+            .expect("shaped-array metadata should refer to a class type parameter");
+        let shape_arg = cls
+            .targs()
+            .as_slice()
+            .get(shape_idx)
+            .expect("class type should have an argument for each type parameter");
+        match shape_arg {
+            Type::Tuple(Tuple::Concrete(dims)) => {
+                TensorType::new(cls.clone(), TensorShape::from_types(dims.clone()))
+            }
+            Type::Tuple(Tuple::Unpacked(unpacked)) => {
+                let (prefix, middle, suffix) = &**unpacked;
+                TensorType::new(
+                    cls.clone(),
+                    TensorShape::unpacked(prefix.clone(), middle.clone(), suffix.clone()),
+                )
+            }
+            Type::Tuple(Tuple::Unbounded(dim)) if dim.is_any() => {
+                TensorType::shapeless(cls.clone())
+            }
+            Type::Tuple(Tuple::Unbounded(_)) => TensorType::new(
+                cls.clone(),
+                TensorShape::unpacked(Vec::new(), shape_arg.clone(), Vec::new()),
+            ),
+            _ => unreachable!(
+                "registered TypeVarTuple argument should be stored as a tuple, got `{}`",
+                self.for_display(shape_arg.clone())
+            ),
+        }
+    }
+
     /// Check if a class is a Dim class (shape_extensions.Dim)
     fn is_symint_class(&self, cls: &Class) -> bool {
         cls.has_toplevel_qname("shape_extensions", "Dim")
@@ -3093,8 +3131,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Parse Tensor[2, 3] or Tensor["batch", 2, 3] or Tensor[N + M, K] or Tensor[2, *Shape, 4] into a TensorType
-    fn parse_tensor_type(&self, cls: &Class, shape_args: &[Expr], errors: &ErrorCollector) -> Type {
+    /// Parse a shape argument list like `[2, 3]`, `[N + M, K]`, or `[2, *Shape, 4]`.
+    ///
+    /// Returns both the tensor shape and the flattened type arguments to feed to
+    /// the class's `TypeVarTuple` parameter.
+    fn parse_tensor_shape_args(
+        &self,
+        shape_args: &[Expr],
+        errors: &ErrorCollector,
+    ) -> Option<(TensorShape, Vec<Type>)> {
         // Check if any argument is a starred expression (unpacked TypeVarTuple)
         let star = shape_args
             .iter()
@@ -3102,7 +3147,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .find(|(_, arg)| matches!(arg, Expr::Starred(_)));
 
         if let Some((star_idx, Expr::Starred(ExprStarred { value, .. }))) = star {
-            // Handle variadic shape: Tensor[2, *Shape, 4]
+            // Handle variadic shape: [2, *Shape, 4]
             // Verify there's only one starred expression
             if let Some(second) = shape_args[star_idx + 1..]
                 .iter()
@@ -3114,17 +3159,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ErrorKind::InvalidAnnotation,
                     "Tensor shape can have at most one unpacked TypeVarTuple".to_owned(),
                 );
-                return Type::any_error();
+                return None;
             }
 
             // Parse prefix and suffix dimensions
-            let Some(prefix) = self.parse_dimension_list(&shape_args[..star_idx], errors) else {
-                return Type::any_error();
-            };
-            let Some(suffix) = self.parse_dimension_list(&shape_args[star_idx + 1..], errors)
-            else {
-                return Type::any_error();
-            };
+            let prefix = self.parse_dimension_list(&shape_args[..star_idx], errors)?;
+            let suffix = self.parse_dimension_list(&shape_args[star_idx + 1..], errors)?;
 
             // Parse the starred expression
             let middle_ty = self.expr_untype(value, TypeFormContext::TypeArgument, errors);
@@ -3140,21 +3180,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         self.for_display(middle_ty)
                     ),
                 );
-                return Type::any_error();
+                return None;
             };
 
-            // Create the base class type
-            let base_class = self.promote_nontypeddict_silently_to_classtype(cls);
+            let mut targs = prefix.clone();
+            targs.push(self.heap.mk_unpack(middle_ty.clone()));
+            targs.extend(suffix.clone());
 
-            // Create variadic tensor shape
-            let tensor_shape = TensorShape::unpacked(prefix, middle_ty, suffix);
-            let tensor_type = TensorType::new(base_class, tensor_shape);
-
-            return tensor_type.to_type();
+            return Some((TensorShape::unpacked(prefix, middle_ty, suffix), targs));
         }
 
         // No starred expression - parse as concrete shape
-        let Some(dims) = self.parse_dimension_list(shape_args, errors) else {
+        let dims = self.parse_dimension_list(shape_args, errors)?;
+        Some((TensorShape::from_types(dims.clone()), dims))
+    }
+
+    /// Parse torch's legacy `Tensor[...]` syntax, preserving its existing base-class behavior.
+    fn parse_tensor_type(&self, cls: &Class, shape_args: &[Expr], errors: &ErrorCollector) -> Type {
+        let Some((tensor_shape, _)) = self.parse_tensor_shape_args(shape_args, errors) else {
             return Type::any_error();
         };
 
@@ -3162,10 +3205,69 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let base_class = self.promote_nontypeddict_silently_to_classtype(cls);
 
         // Create the tensor type
-        let tensor_shape = TensorShape::from_types(dims);
         let tensor_type = TensorType::new(base_class, tensor_shape);
 
         tensor_type.to_type()
+    }
+
+    /// Parse a registered shaped-array annotation.
+    ///
+    /// The shape segment is determined by the class's registered `TypeVarTuple`
+    /// parameter, so `Array[DType, *Shape]` and `Array[*Shape, DType]` split
+    /// their subscripts differently.
+    fn parse_registered_shaped_array_type(
+        &self,
+        cls: &Class,
+        args: &[Expr],
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Type {
+        let shape_param = self
+            .shaped_array_shape_for_class(cls)
+            .expect("registered shaped-array class should have shape metadata");
+        let tparams = self.get_class_tparams(cls);
+        let shape_idx = tparams
+            .iter()
+            .position(|param| param == &shape_param)
+            .expect("shaped-array metadata should refer to a class type parameter");
+        let suffix_count = tparams.len() - shape_idx - 1;
+        let shape_start = shape_idx.min(args.len());
+        let shape_end = args.len().saturating_sub(suffix_count).max(shape_start);
+
+        let prefix_targs = args[..shape_start]
+            .iter()
+            .map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors));
+        let suffix_targs = args[shape_end..]
+            .iter()
+            .map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors));
+
+        let Some((tensor_shape, shape_targs)) =
+            self.parse_tensor_shape_args(&args[shape_start..shape_end], errors)
+        else {
+            return Type::any_error();
+        };
+        let class_targs = prefix_targs
+            .chain(shape_targs)
+            .chain(suffix_targs)
+            .collect();
+        let base_class = self.specialize_nontypeddict_to_classtype(cls, class_targs, range, errors);
+
+        TensorType::new(base_class, tensor_shape).to_type()
+    }
+
+    /// Parse Tensor[2, 3] or registered Array[DType, 2, 3] into a TensorType.
+    fn parse_shaped_array_type(
+        &self,
+        cls: &Class,
+        args: &[Expr],
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Type {
+        if self.is_tensor_class(cls) {
+            self.parse_tensor_type(cls, args, errors)
+        } else {
+            self.parse_registered_shaped_array_type(cls, args, range, errors)
+        }
     }
 
     /// Parse Dim[3], Dim[N], Dim[N+1] into Type::Dim(...)

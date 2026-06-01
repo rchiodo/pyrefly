@@ -104,9 +104,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     pub fn shaped_array_shape_for_class(&self, cls: &Class) -> Option<Quantified> {
-        // Shaped-array registration is explicit per class. Do not inherit this
-        // metadata through the MRO; subclasses must opt in with their own
-        // `@shaped_array` decorator so registration has no base-class side effects.
+        // Shaped-array registration is explicit per class, via the `@shaped_array` decorator.
         self.get_metadata_for_class(cls)
             .shaped_array_shape()
             .cloned()

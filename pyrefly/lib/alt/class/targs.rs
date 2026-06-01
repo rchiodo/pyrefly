@@ -55,6 +55,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         )
     }
 
+    /// Specialize a non-TypedDict class and return the underlying `ClassType`.
+    ///
+    /// This is for callers that wrap the class in another type form but still need
+    /// ordinary class type-argument validation and substitution.
+    pub(crate) fn specialize_nontypeddict_to_classtype(
+        &self,
+        cls: &Class,
+        targs: Vec<Type>,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> ClassType {
+        ClassType::new(
+            cls.dupe(),
+            self.create_targs(
+                cls.name(),
+                self.get_class_tparams(cls),
+                targs,
+                range,
+                true,
+                errors,
+            ),
+        )
+    }
+
     fn specialize_impl(
         &self,
         cls: &Class,

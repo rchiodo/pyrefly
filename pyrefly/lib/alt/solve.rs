@@ -5657,11 +5657,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     return Some(self.heap.mk_dim(cls.targs().as_slice()[0].clone()));
                 }
-                // Canonicalize bare Tensor to Type::Tensor(shapeless) for consistency.
-                // Subscripted Tensor[2, 3] is already converted to Type::Tensor in
-                // parse_tensor_type, so only the bare case reaches here.
+                // Canonicalize bare shaped-array types to Type::Tensor(shapeless)
+                // for consistency. Subscripted arrays are already converted to
+                // Type::Tensor in parse_shaped_array_type, so only the bare case
+                // reaches here. Keep the torch name fallback until the fixture is
+                // explicitly registered with `@shaped_array`.
                 if let Type::ClassType(cls) = t.as_ref()
-                    && cls.has_qname("torch", "Tensor")
+                    && (cls.has_qname("torch", "Tensor")
+                        || self.shaped_array_shape_for_class_type(cls).is_some())
                 {
                     return Some(TensorType::shapeless(cls.clone()).to_type());
                 }
