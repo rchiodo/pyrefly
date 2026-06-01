@@ -1748,6 +1748,7 @@ impl<'a> Transaction<'a> {
                 );
                 defs
             }
+            // Workaround so functions decorated with `functools.lru_cache` go to definition on the source, not the decorator.
             Type::ClassType(class) if class.has_qname("functools", "_lru_cache_wrapper") => {
                 vec![]
             }
