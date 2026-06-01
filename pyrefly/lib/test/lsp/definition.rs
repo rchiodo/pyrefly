@@ -2926,6 +2926,70 @@ Definition Result:
 }
 
 #[test]
+fn goto_def_cached_function_call_goes_to_function() {
+    let code = r#"
+from functools import cache, lru_cache
+import functools
+
+@cache
+def cached_add(a: int, b: int) -> int:
+    return a + b
+
+@lru_cache
+def bare_lru_add(a: int, b: int) -> int:
+    return a + b
+
+@lru_cache(maxsize=None)
+def called_lru_add(a: int, b: int) -> int:
+    return a + b
+
+@functools.lru_cache(maxsize=128)
+def qualified_lru_add(a: int, b: int) -> int:
+    return a + b
+
+cached_add(1, 2)
+# ^
+bare_lru_add(1, 2)
+# ^
+called_lru_add(1, 2)
+# ^
+qualified_lru_add(1, 2)
+# ^
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert_eq!(
+        r#"
+# main.py
+21 | cached_add(1, 2)
+       ^
+Definition Result:
+6 | def cached_add(a: int, b: int) -> int:
+        ^^^^^^^^^^
+
+23 | bare_lru_add(1, 2)
+       ^
+Definition Result:
+10 | def bare_lru_add(a: int, b: int) -> int:
+         ^^^^^^^^^^^^
+
+25 | called_lru_add(1, 2)
+       ^
+Definition Result:
+14 | def called_lru_add(a: int, b: int) -> int:
+         ^^^^^^^^^^^^^^
+
+27 | qualified_lru_add(1, 2)
+       ^
+Definition Result:
+18 | def qualified_lru_add(a: int, b: int) -> int:
+         ^^^^^^^^^^^^^^^^^
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
 fn goto_def_class_name_without_call_goes_to_class() {
     let code = r#"
 class Baz:
