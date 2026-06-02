@@ -3191,7 +3191,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .with_detail(format!("Did you mean `{replacement}`?"))
                 .with_quick_fix(ErrorQuickFix::ReplaceWithEnumMember { replacement });
         }
+        if Self::type_contains_none(got) && !Self::type_contains_none(want) {
+            let hint = match tcc().kind {
+                TypeCheckKind::ExplicitFunctionReturn => {
+                    format!(
+                        "The return type does not allow `None`. \
+                         Either handle the `None` case or change the return type to `{} | None`.",
+                        self.for_display(want.clone()),
+                    )
+                }
+                TypeCheckKind::ImplicitFunctionReturn(_) => {
+                    // For implicit returns (missing return statement), the error message
+                    // "Function declared to return X, but one or more paths are missing
+                    // an explicit return" is already clear. Adding a None hint here is
+                    // confusing because the user didn't explicitly return None.
+                    // Skip the hint for implicit returns.
+                    builder.emit();
+                    return;
+                }
+                TypeCheckKind::AnnAssign
+                | TypeCheckKind::AnnotatedName(_)
+                | TypeCheckKind::Attribute(_) => {
+                    format!(
+                        "The declared type does not allow `None`. \
+                         Either narrow with an `is not None` check or change the type to `{} | None`.",
+                        self.for_display(want.clone()),
+                    )
+                }
+                _ => "The type includes `None` which is not accepted here. \
+                     Narrow the type with an `is not None` check."
+                    .to_owned(),
+            };
+            builder = builder.with_detail(hint);
+        }
         builder.emit();
+    }
+
+    /// Returns true if the type is `None` or a union containing `None`.
+    fn type_contains_none(ty: &Type) -> bool {
+        match ty {
+            Type::None => true,
+            Type::Union(u) => u.members.iter().any(|m| matches!(m, Type::None)),
+            _ => false,
+        }
     }
 
     pub fn distribute_over_union(&self, ty: &Type, mut f: impl FnMut(&Type) -> Type) -> Type {

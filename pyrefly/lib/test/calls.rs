@@ -560,3 +560,31 @@ extra = {"debug": True}
 Config(name="test", value=42, **extra)
     "#,
 );
+
+testcase!(
+    test_bad_argument_type_none_hint,
+    r#"
+def takes_str(x: str) -> None: ...
+
+maybe: str | None = "hello"
+takes_str(maybe)  # E: Argument `str | None` is not assignable to parameter `x` with type `str` in function `takes_str`\n  The type includes `None` which is not accepted here. Narrow the type with an `is not None` check.
+
+if maybe is not None:
+    takes_str(maybe)  # OK — narrowed
+    "#,
+);
+
+testcase!(
+    test_bad_assignment_none_hint,
+    r#"
+x: str = None  # E: `None` is not assignable to `str`\n  The declared type does not allow `None`. Either narrow with an `is not None` check or change the type to `str | None`.
+    "#,
+);
+
+testcase!(
+    test_bad_return_none_hint,
+    r#"
+def foo() -> str:
+    return None  # E: Returned type `None` is not assignable to declared return type `str`\n  The return type does not allow `None`. Either handle the `None` case or change the return type to `str | None`.
+    "#,
+);
