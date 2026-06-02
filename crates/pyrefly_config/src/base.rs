@@ -166,6 +166,7 @@ impl Preset {
                 let errors = HashMap::from([
                     (ErrorKind::ImplicitAny, Severity::Error),
                     (ErrorKind::MissingOverrideDecorator, Severity::Error),
+                    (ErrorKind::PotentialBadKeywordArgument, Severity::Error),
                     (ErrorKind::UnusedIgnore, Severity::Error),
                 ]);
                 ConfigBase {
