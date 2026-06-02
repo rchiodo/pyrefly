@@ -1702,7 +1702,6 @@ impl Solver {
         &self,
         branch_value: &Variable,
         existing_name: Option<Name>,
-        _var: Var,
     ) -> Name {
         existing_name
             .or_else(|| match branch_value {
@@ -1753,7 +1752,6 @@ impl Solver {
                                 self.quantified_name_for_var(
                                     branch_value,
                                     solved_var.quantified_name.clone(),
-                                    *var,
                                 )
                             })
                         })
