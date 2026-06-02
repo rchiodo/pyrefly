@@ -67,6 +67,7 @@ use crate::commands::util::CommandExitStatus;
 use crate::config::error_kind::Severity;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::Error;
+use crate::error::error::ErrorRenderer;
 use crate::error::error::print_error_counts;
 use crate::error::legacy::LegacyError;
 use crate::error::legacy::LegacyErrors;
@@ -455,11 +456,11 @@ fn write_error_text_to_file(
     errors: &[Error],
     verbose: bool,
 ) -> anyhow::Result<()> {
-    let mut file = BufWriter::new(File::create(path)?);
+    let mut renderer = ErrorRenderer::plain(BufWriter::new(File::create(path)?));
     for e in errors {
-        e.write_line(&mut file, relative_to, verbose)?;
+        renderer.write(e, relative_to, verbose)?;
     }
-    file.flush()?;
+    renderer.flush()?;
     Ok(())
 }
 
@@ -468,9 +469,14 @@ fn write_error_text_to_console(
     errors: &[Error],
     verbose: bool,
 ) -> anyhow::Result<()> {
+    let stdout = stdout();
+    let color_choice = stdout.current_choice();
+    let mut renderer = ErrorRenderer::new(BufWriter::new(stdout.lock()), color_choice);
     for error in errors {
-        error.print_colors(relative_to, verbose);
+        renderer.write(error, relative_to, verbose)?;
+        renderer.flush()?;
     }
+    renderer.flush()?;
     Ok(())
 }
 

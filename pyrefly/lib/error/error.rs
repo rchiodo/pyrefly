@@ -73,69 +73,115 @@ impl Ranged for Error {
     }
 }
 
-impl Error {
-    pub fn write_line(
-        &self,
-        mut f: impl Write,
-        project_root: &Path,
-        verbose: bool,
-    ) -> io::Result<()> {
-        if verbose && self.severity.is_enabled() {
-            writeln!(
-                f,
-                "{} {} [{}]",
-                self.severity.label(),
-                self.msg_header,
-                self.error_kind.to_name(),
-            )?;
-            let origin = self.path_string_with_fragment(project_root);
-            let snippet = self.get_source_snippet(&origin);
-            let renderer = Renderer::plain();
-            writeln!(f, "{}", renderer.render(snippet))?;
-            if let Some(details) = &self.msg_details {
-                writeln!(f, "{details}")?;
+#[derive(Debug)]
+pub struct ErrorRenderer<W> {
+    writer: W,
+    mode: ErrorRenderMode,
+    snippets: Renderer,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ErrorRenderMode {
+    Plain,
+    Color,
+}
+
+impl<W: Write> ErrorRenderer<W> {
+    pub fn new(writer: W, color_choice: anstream::ColorChoice) -> Self {
+        match color_choice {
+            anstream::ColorChoice::Never => Self::plain(writer),
+            anstream::ColorChoice::Always
+            | anstream::ColorChoice::AlwaysAnsi
+            | anstream::ColorChoice::Auto => Self::styled(writer),
+        }
+    }
+
+    pub fn plain(writer: W) -> Self {
+        Self {
+            writer,
+            mode: ErrorRenderMode::Plain,
+            snippets: Renderer::plain(),
+        }
+    }
+
+    pub fn styled(writer: W) -> Self {
+        Self {
+            writer,
+            mode: ErrorRenderMode::Color,
+            snippets: Renderer::styled(),
+        }
+    }
+
+    pub fn write(&mut self, error: &Error, project_root: &Path, verbose: bool) -> io::Result<()> {
+        if !error.severity.is_enabled() {
+            return Ok(());
+        }
+        let origin = error.path_string_with_fragment(project_root);
+        if verbose {
+            self.write_header(error)?;
+            let snippet = error.get_source_snippet(&origin);
+            self.write_snippet(snippet)?;
+            if let Some(details) = &error.msg_details {
+                writeln!(self.writer, "{details}")?;
             }
-        } else if self.severity.is_enabled() {
-            writeln!(
-                f,
-                "{} {}:{}: {} [{}]",
-                self.severity.label(),
-                self.path_string_with_fragment(project_root),
-                self.display_range,
-                self.msg_header,
-                self.error_kind.to_name(),
-            )?;
+        } else {
+            self.write_concise(error, &origin)?;
         }
         Ok(())
     }
 
-    pub fn print_colors(&self, project_root: &Path, verbose: bool) {
-        if verbose && self.severity.is_enabled() {
-            anstream::println!(
+    pub fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+
+    fn write_header(&mut self, error: &Error) -> io::Result<()> {
+        match self.mode {
+            ErrorRenderMode::Plain => writeln!(
+                self.writer,
+                "{} {} [{}]",
+                error.severity.label(),
+                error.msg_header,
+                error.error_kind.to_name(),
+            ),
+            ErrorRenderMode::Color => writeln!(
+                self.writer,
                 "{} {} {}",
-                self.severity.painted(),
-                Paint::new(&*self.msg_header),
-                Paint::dim(format!("[{}]", self.error_kind().to_name()).as_str()),
-            );
-            let origin = self.path_string_with_fragment(project_root);
-            let snippet = self.get_source_snippet(&origin);
-            let renderer = Renderer::styled();
-            anstream::println!("{}", renderer.render(snippet));
-            if let Some(details) = &self.msg_details {
-                anstream::println!("{details}");
-            }
-        } else if self.severity.is_enabled() {
-            anstream::println!(
-                "{} {}:{}: {} {}",
-                self.severity.painted(),
-                Paint::blue(&self.path_string_with_fragment(project_root)),
-                Paint::dim(self.display_range()),
-                Paint::new(&*self.msg_header),
-                Paint::dim(format!("[{}]", self.error_kind().to_name()).as_str()),
-            );
+                error.severity.painted(),
+                Paint::new(&*error.msg_header),
+                Paint::dim(format!("[{}]", error.error_kind().to_name()).as_str()),
+            ),
         }
     }
 
+    fn write_concise(&mut self, error: &Error, origin: &str) -> io::Result<()> {
+        match self.mode {
+            ErrorRenderMode::Plain => writeln!(
+                self.writer,
+                "{} {}:{}: {} [{}]",
+                error.severity.label(),
+                origin,
+                error.display_range,
+                error.msg_header,
+                error.error_kind.to_name(),
+            ),
+            ErrorRenderMode::Color => writeln!(
+                self.writer,
+                "{} {}:{}: {} {}",
+                error.severity.painted(),
+                Paint::blue(origin),
+                Paint::dim(error.display_range()),
+                Paint::new(&*error.msg_header),
+                Paint::dim(format!("[{}]", error.error_kind().to_name()).as_str()),
+            ),
+        }
+    }
+
+    fn write_snippet<'a>(&mut self, snippet: Message<'a>) -> io::Result<()> {
+        writeln!(self.writer, "{}", self.snippets.render(snippet))
+    }
+}
+
+impl Error {
     /// Return the path with a cell fragment if the error is in a notebook cell.
     fn path_string_with_fragment(&self, project_root: &Path) -> String {
         let path = self.path().as_path();
@@ -310,10 +356,15 @@ impl Error {
 }
 
 #[cfg(test)]
-pub fn print_errors(project_root: &Path, errors: &[Error]) {
+pub fn print_errors(project_root: &Path, errors: &[Error]) -> io::Result<()> {
+    let stdout = anstream::stdout();
+    let color_choice = stdout.current_choice();
+    let mut renderer = ErrorRenderer::new(stdout.lock(), color_choice);
     for err in errors {
-        err.print_colors(project_root, true);
+        renderer.write(err, project_root, true)?;
+        renderer.flush()?;
     }
+    Ok(())
 }
 
 fn count_error_kinds(errors: &[Error]) -> Vec<(ErrorKind, usize)> {
@@ -446,7 +497,7 @@ impl Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -455,6 +506,15 @@ mod tests {
 
     use super::*;
     use crate::test::util::TestEnv;
+
+    fn render_error(error: &Error, root: &Path, verbose: bool) -> String {
+        let mut output = Vec::new();
+        {
+            let mut renderer = ErrorRenderer::plain(&mut output);
+            renderer.write(error, root, verbose).unwrap();
+        }
+        str::from_utf8(&output).unwrap().to_owned()
+    }
 
     #[test]
     fn test_error_render() {
@@ -471,21 +531,12 @@ mod tests {
             ErrorKind::BadReturn,
         );
         let root = PathBuf::new();
-        let mut normal = Vec::new();
-        error
-            .write_line(&mut Cursor::new(&mut normal), root.as_path(), false)
-            .unwrap();
-        let mut verbose = Vec::new();
-        error
-            .write_line(&mut Cursor::new(&mut verbose), root.as_path(), true)
-            .unwrap();
+        let normal = render_error(&error, root.as_path(), false);
+        let verbose = render_error(&error, root.as_path(), true);
 
+        assert_eq!(normal, "ERROR test.py:2:5-13: bad return [bad-return]\n");
         assert_eq!(
-            str::from_utf8(&normal).unwrap(),
-            "ERROR test.py:2:5-13: bad return [bad-return]\n"
-        );
-        assert_eq!(
-            str::from_utf8(&verbose).unwrap(),
+            verbose,
             r#"ERROR bad return [bad-return]
  --> test.py:2:5
   |
@@ -511,14 +562,11 @@ mod tests {
             Vec::new(),
             ErrorKind::BadReturn,
         );
-        let mut output = Vec::new();
         let root = PathBuf::new();
-        error
-            .write_line(&mut Cursor::new(&mut output), root.as_path(), true)
-            .unwrap();
+        let output = render_error(&error, root.as_path(), true);
 
         assert_eq!(
-            str::from_utf8(&output).unwrap(),
+            output,
             r#"ERROR oops [bad-return]
   --> test.py:1:1
    |
@@ -565,13 +613,10 @@ mod tests {
             "has type `int`".to_owned(),
         );
         let root = PathBuf::new();
-        let mut output = Vec::new();
-        error
-            .write_line(&mut Cursor::new(&mut output), root.as_path(), true)
-            .unwrap();
+        let output = render_error(&error, root.as_path(), true);
 
         assert_eq!(
-            str::from_utf8(&output).unwrap(),
+            output,
             r#"ERROR `*` is not supported between `int | str` and `int` [unsupported-operation]
  --> test.py:1:1
   |

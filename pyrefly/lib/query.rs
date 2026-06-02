@@ -8,7 +8,6 @@
 //! Query interface for pyrefly. Just experimenting for the moment - not intended for external use.
 
 use core::panic;
-use std::io::Cursor;
 use std::iter;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -95,6 +94,7 @@ use crate::binding::binding::KeyDecoratedFunction;
 use crate::binding::binding::KeyTParams;
 use crate::binding::bindings::Bindings;
 use crate::config::finder::ConfigFinder;
+use crate::error::error::ErrorRenderer;
 use crate::module::module_info::ModuleInfo;
 use crate::state::load::FileContents;
 use crate::state::lsp::DefinitionMetadata;
@@ -1511,9 +1511,12 @@ impl Query {
         output_errors.map(|e| {
             // We deliberately don't have a Display for `Error`, to encourage doing the right thing.
             // But we just hack something up as this code is experimental.
-            let mut s = Cursor::new(Vec::new());
-            e.write_line(&mut s, project_root.as_path(), false).unwrap();
-            String::from_utf8_lossy(&s.into_inner()).into_owned()
+            let mut s = Vec::new();
+            {
+                let mut renderer = ErrorRenderer::plain(&mut s);
+                renderer.write(e, project_root.as_path(), false).unwrap();
+            }
+            String::from_utf8_lossy(&s).into_owned()
         })
     }
 
@@ -1888,9 +1891,9 @@ impl Query {
         if !errors.ordinary.is_empty() {
             let mut res = Vec::new();
             let project_root = PathBuf::new();
+            let mut renderer = ErrorRenderer::plain(&mut res);
             for e in errors.ordinary {
-                e.write_line(&mut Cursor::new(&mut res), project_root.as_path(), true)
-                    .unwrap();
+                renderer.write(&e, project_root.as_path(), true).unwrap();
             }
             return Err(format!(
                 "{}\n\nSource code:\n{snippet}",
