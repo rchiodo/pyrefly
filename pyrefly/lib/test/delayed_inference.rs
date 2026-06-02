@@ -573,3 +573,16 @@ for item in [1, 1, 2, 2, 3]:
 assert_type(values, list[int])
     "#,
 );
+
+testcase!(
+    test_list_of_or,
+    r#"
+from typing import assert_type, Sequence
+def f(x: Sequence[object] | None):
+    y = list(x or [])  # this should *not* pin on first use
+    assert_type(y, list[object])
+    y.append(1)
+    y.append("")
+    assert_type(y, list[object])
+    "#,
+);
