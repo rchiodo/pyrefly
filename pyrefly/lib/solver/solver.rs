@@ -110,8 +110,6 @@ impl Bounds {
         self.upper.extend(other.upper);
     }
 
-    /// Unused, but part of a trait we need.
-    #[expect(dead_code)]
     fn is_empty(&self) -> bool {
         self.lower.is_empty() && self.upper.is_empty()
     }
@@ -152,6 +150,7 @@ struct WitnessCaptures {
 }
 
 impl WitnessCaptures {
+    #[cfg(debug_assertions)]
     fn is_empty(&self) -> bool {
         self.overload.is_empty() && self.generic.is_empty()
     }
