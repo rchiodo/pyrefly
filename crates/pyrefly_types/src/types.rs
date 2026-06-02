@@ -48,6 +48,7 @@ use crate::class::ClassKind;
 use crate::class::ClassType;
 use crate::dimension;
 use crate::dimension::SizeExpr;
+use crate::equality::TypeEq;
 use crate::equality::TypeEqCtx;
 use crate::heap::TypeHeap;
 use crate::keywords::DataclassTransformMetadata;
@@ -695,7 +696,7 @@ impl Ord for NNModuleType {
     }
 }
 
-impl pyrefly_util::visit::Visit<Type> for NNModuleType {
+impl Visit<Type> for NNModuleType {
     fn recurse<'a>(&'a self, f: &mut dyn FnMut(&'a Type)) {
         self.class.recurse(f);
         for (_, ty) in self.fields.iter() {
@@ -704,7 +705,7 @@ impl pyrefly_util::visit::Visit<Type> for NNModuleType {
     }
 }
 
-impl pyrefly_util::visit::VisitMut<Type> for NNModuleType {
+impl VisitMut<Type> for NNModuleType {
     fn recurse_mut(&mut self, f: &mut dyn FnMut(&mut Type)) {
         self.class.recurse_mut(f);
         for (_, ty) in self.fields.iter_mut() {
@@ -713,7 +714,7 @@ impl pyrefly_util::visit::VisitMut<Type> for NNModuleType {
     }
 }
 
-impl crate::equality::TypeEq for NNModuleType {
+impl TypeEq for NNModuleType {
     fn type_eq(&self, other: &Self, ctx: &mut TypeEqCtx) -> bool {
         crate::equality::TypeEq::type_eq(&self.class, &other.class, ctx)
             && self.fields.len() == other.fields.len()
