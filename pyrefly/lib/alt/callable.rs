@@ -930,11 +930,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Missing positional-only arguments, split by whether the corresponding parameters
         // in the callable have names. E.g., functions declared with `def` have named posonly
         // parameters and `typing.Callable`s have unnamed ones.
-        let mut missing_unnamed_posonly: usize = 0;
-        let mut missing_named_posonly: SmallSet<&Name> = SmallSet::new();
-        let mut kwparams: OrderedMap<&Name, (&Type, bool)> = OrderedMap::new();
-        let mut kwargs: Option<(Option<&Name>, &Type)> = None;
-        let mut kwargs_is_unpack: bool = false;
+        let mut missing_unnamed_posonly = 0;
+        let mut missing_named_posonly = SmallSet::new();
+        let mut kwparams = OrderedMap::new();
+        let mut kwargs = None;
+        let mut kwargs_is_unpack = false;
         loop {
             let p = match rparams.pop() {
                 Some(p) => p,
