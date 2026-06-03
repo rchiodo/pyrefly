@@ -647,6 +647,26 @@ def foo(a: T) -> T:
 );
 
 testcase!(
+    test_constraints_with_custom_add,
+    r#"
+from typing import assert_type, TypeVar
+class A1:
+    pass
+class A2:
+    def __radd__(self, other: "MyNum") -> str: ...
+class MyNum:
+    def __add__(self, other: A1) -> int: ...
+T = TypeVar("T", bound=MyNum)
+U = TypeVar("U", A1, A2)
+
+def f(x: T, y: U):
+    # T + A1 -> MyNum.__add__(A1) -> int
+    # T + A2 -> A2.__radd__(MyNum) -> str
+    assert_type(x + y, int | str)
+    "#,
+);
+
+testcase!(
     test_multiple_args_upper_bound,
     r#"
 from typing import assert_type

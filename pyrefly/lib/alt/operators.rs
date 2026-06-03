@@ -407,6 +407,48 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         matches!(ty, Type::Literal(f) if f.value == Lit::Int(LitInt::new(0)))
     }
 
+    fn on_quantified(&self, q: &Quantified, f: &dyn Fn(&Type) -> Type) -> Type {
+        if let Restriction::Constraints(constraints) = &q.restriction {
+            self.unions(constraints.map(f))
+        } else {
+            f(&q.upper_bound(self.stdlib, self.heap))
+        }
+    }
+
+    fn on_quantifieds(
+        &self,
+        left: &Type,
+        right: &Type,
+        f: &dyn Fn(&Type, &Type) -> Type,
+    ) -> Option<Type> {
+        match (left, right) {
+            (Type::Quantified(left_q), Type::Quantified(right_q))
+                if matches!(left_q.restriction(), Restriction::Constraints(_))
+                    && left_q == right_q =>
+            {
+                Some(self.on_quantified(left_q, &|constraint| f(constraint, constraint)))
+            }
+            // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
+            (Type::Quantified(left_q), _)
+                if matches!(
+                    left_q.restriction(),
+                    Restriction::Constraints(_) | Restriction::Bound(Type::Union(_))
+                ) =>
+            {
+                Some(self.on_quantified(left_q, &|left_restriction| f(left_restriction, right)))
+            }
+            (_, Type::Quantified(right_q))
+                if matches!(
+                    right_q.restriction(),
+                    Restriction::Constraints(_) | Restriction::Bound(Type::Union(_))
+                ) =>
+            {
+                Some(self.on_quantified(right_q, &|right_restriction| f(left, right_restriction)))
+            }
+            _ => None,
+        }
+    }
+
     fn binop_types(&self, x: &ExprBinOp, lhs: &Type, rhs: &Type, errors: &ErrorCollector) -> Type {
         let left_range = x.left.range();
         let right_range = x.right.range();
@@ -531,29 +573,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     }
                 } else {
-                    match (lhs, rhs) {
-                        (Type::Quantified(left_q), Type::Quantified(right_q))
-                            if left_q == right_q
-                                && let Restriction::Constraints(constraints) =
-                                    &left_q.restriction =>
-                        {
-                            self.unions(constraints.map(|constraint| {
-                                self.binop_types(x, constraint, constraint, errors)
-                            }))
-                        }
-                        // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
-                        (Type::Quantified(left_q), _)
-                            if let Some(left_restriction) = self.as_union_restriction(left_q) =>
-                        {
-                            self.binop_types(x, &left_restriction, rhs, errors)
-                        }
-                        (_, Type::Quantified(right_q))
-                            if let Some(right_restriction) = self.as_union_restriction(right_q) =>
-                        {
-                            self.binop_types(x, lhs, &right_restriction, errors)
-                        }
-                        _ => binop_call(x.op, lhs, rhs, x.range),
-                    }
+                    self.on_quantifieds(lhs, rhs, &|left, right| {
+                        self.binop_types(x, left, right, errors)
+                    })
+                    .unwrap_or_else(|| binop_call(x.op, lhs, rhs, x.range))
                 }
             })
         })
@@ -686,16 +709,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.unions(results)
     }
 
-    /// Returns the restriction on the given Quantified if the restriction is a union
-    fn as_union_restriction(&self, q: &Quantified) -> Option<Type> {
-        let restriction = q.upper_bound(self.stdlib, self.heap);
-        if matches!(restriction, Type::Union(_)) {
-            Some(restriction)
-        } else {
-            None
-        }
-    }
-
     fn compare_types(
         &self,
         x: &ExprCompare,
@@ -713,48 +726,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // This mirrors the same check in binop_infer.
                     (Type::Any(style), _) => style.propagate(),
                     (_, Type::Any(style)) => style.propagate(),
-                    (Type::Quantified(left_q), Type::Quantified(right_q))
-                        if left_q == right_q
-                            && let Restriction::Constraints(constraints) = &left_q.restriction =>
-                    {
-                        self.unions(constraints.map(|constraint| {
+                    _ if let Some(ret_if_quantified) =
+                        self.on_quantifieds(left, right, &|left, right| {
                             self.compare_types(
                                 x,
                                 op,
-                                constraint,
-                                constraint,
+                                left,
+                                right,
                                 current_left_range,
                                 current_right_range,
                                 errors,
                             )
-                        }))
-                    }
-                    // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
-                    (Type::Quantified(left_q), _)
-                        if let Some(left_restriction) = self.as_union_restriction(left_q) =>
+                        }) =>
                     {
-                        self.compare_types(
-                            x,
-                            op,
-                            &left_restriction,
-                            right,
-                            current_left_range,
-                            current_right_range,
-                            errors,
-                        )
-                    }
-                    (_, Type::Quantified(right_q))
-                        if let Some(right_restriction) = self.as_union_restriction(right_q) =>
-                    {
-                        self.compare_types(
-                            x,
-                            op,
-                            left,
-                            &right_restriction,
-                            current_left_range,
-                            current_right_range,
-                            errors,
-                        )
+                        ret_if_quantified
                     }
                     _ => {
                         let context = || {
