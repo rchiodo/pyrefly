@@ -27,7 +27,7 @@ serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0.140", features = ["alloc", "float_roundtrip", "raw_value", "unbounded_depth"] }
 serde_jsonrc = "0.1"
 serde_with = { version = "3.20.0", features = ["hex", "json", "macros"], default-features = false }
-starlark_map = "0.13.0"
+starlark_map = "0.13"
 thiserror = "2.0.18"
 toml = { version = "0.9.12", features = ["preserve_order"] }
 toml_edit = { version = "0.23.1", features = ["serde"] }
