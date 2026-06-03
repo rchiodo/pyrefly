@@ -1743,7 +1743,7 @@ impl Type {
         sigs
     }
 
-    fn widen_one_implicit_literal(ty: &mut Type, stdlib: &Stdlib) {
+    fn promote_one_implicit_literal(ty: &mut Type, stdlib: &Stdlib) {
         match &*ty {
             Type::Literal(lit) if lit.style == LitStyle::Implicit => {
                 *ty = lit.value.general_class_type(stdlib).clone().to_type()
@@ -1758,10 +1758,10 @@ impl Type {
         match &mut self {
             Type::Union(union) => {
                 for member in &mut union.members {
-                    Self::widen_one_implicit_literal(member, stdlib);
+                    Self::promote_one_implicit_literal(member, stdlib);
                 }
             }
-            _ => Self::widen_one_implicit_literal(&mut self, stdlib),
+            _ => Self::promote_one_implicit_literal(&mut self, stdlib),
         }
         self
     }
@@ -1778,7 +1778,7 @@ impl Type {
             f(ty);
         }
         g(&mut self, &mut |ty| {
-            Self::widen_one_implicit_literal(ty, stdlib)
+            Self::promote_one_implicit_literal(ty, stdlib)
         });
         self
     }
