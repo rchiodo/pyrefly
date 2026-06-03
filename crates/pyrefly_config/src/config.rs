@@ -1401,9 +1401,6 @@ impl ConfigFile {
             match build_system.get_source_db(root.to_path_buf())? {
                 Ok(source_db) => {
                     self.source_db = Some(source_db);
-                    self.fallback_search_path = FallbackSearchPath::DirectoryRelative(
-                        DirectoryRelativeFallbackSearchPathCache::new(Some(root)),
-                    );
                     None
                 }
                 Err(error) => Some(error),
@@ -3272,32 +3269,23 @@ output-format = "omit-errors"
         }
     }
 
-    /// When `[build-system]` is present and `get_source_db` succeeds,
-    /// `configure()` unconditionally sets `fallback_search_path` to
-    /// `DirectoryRelative` — it does not consult `enable_fallback_search_path`.
-    /// This test documents that current behavior: even with
-    /// `enable_fallback_search_path = false` (the default), the build-system
-    /// code path still populates the fallback.
+    /// When `[build-system]` is present but `enable_fallback_search_path` is
+    /// false (the default), `configure()` must not populate
+    /// `fallback_search_path`. The build-system code path respects the flag
+    /// just like the non-build-system path does.
     #[test]
-    fn test_build_system_sets_fallback_without_opt_in() {
+    fn test_build_system_no_fallback_without_opt_in() {
         let root = TempDir::new().unwrap();
         let mut config = config_with_build_system(root.path(), false);
         assert!(!config.enable_fallback_search_path);
         config.configure();
 
-        match &config.fallback_search_path {
-            FallbackSearchPath::DirectoryRelative(cache) => {
-                assert_eq!(
-                    cache.up_to.as_deref(),
-                    Some(root.path()),
-                    "build-system fallback walk should be bounded by the config root"
-                );
-            }
-            other => panic!(
-                "expected DirectoryRelative fallback_search_path from build-system \
-                 configure even with enable_fallback_search_path = false, got {other:?}"
-            ),
-        }
+        assert!(
+            matches!(config.fallback_search_path, FallbackSearchPath::Empty),
+            "build-system configure must not set fallback_search_path \
+             when enable_fallback_search_path is false; got {:?}",
+            config.fallback_search_path,
+        );
     }
 
     /// When `[build-system]` is present AND `enable_fallback_search_path` is
