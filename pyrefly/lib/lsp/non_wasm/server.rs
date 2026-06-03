@@ -6359,30 +6359,88 @@ impl TspInterface for Server {
         let position =
             module_info.from_lsp_position(lsp_types::Position { line, character }, notebook_cell);
 
-        // Walk the AST nodes covering the cursor position to find a
-        // surrounding context that gives a contextual expected type.
-        // Currently we recognize:
-        //   * The RHS value of an annotated assignment (`x: T = <cursor>`)
-        //     — the expected type is the LHS-declared type `T`.
-        // Other contexts (call arguments, return positions, etc.) fall back
-        // to the inferred type at position, which may not be the contextual
-        // expected type but is what callers historically received.
+        // Walk the AST nodes covering the cursor position from innermost to
+        // outermost looking for a surrounding context that supplies a
+        // contextual expected type. The first match wins, so inner contexts
+        // (e.g. a call argument inside an annotated assignment) take
+        // precedence over outer ones.
+        //
+        // Recognized contexts:
+        //   * Call argument (positional or keyword) — the parameter type
+        //     declared by the callee.
+        //   * `return <expr>` — the enclosing function's return annotation.
+        //   * Parameter default `def f(x: T = <expr>)` — the parameter's
+        //     own annotation `T`.
+        //   * Annotated assignment RHS `x: T = <expr>` — the LHS type `T`.
+        //
+        // Other contexts (yield expressions, container literal elements
+        // under an annotation, etc.) fall back to the inferred type at the
+        // cursor.
         if let Some(module) = transaction.get_ast(&handle) {
             let covering_nodes = pyrefly_python::ast::Ast::locate_node(&module, position);
             for node in &covering_nodes {
-                if let ruff_python_ast::AnyNodeRef::StmtAnnAssign(ann) = node
-                    && let Some(value) = ann.value.as_deref()
-                    && value.range().contains_inclusive(position)
-                    && let ruff_python_ast::Expr::Name(target_name) = ann.target.as_ref()
-                {
-                    // Asking for the type at the LHS target name returns the
-                    // declared (annotated) type of the binding.
-                    let target_position = target_name.range.start();
-                    if let Some(ty) =
-                        transaction.get_type_at_preserving_declaration(&handle, target_position)
+                use ruff_python_ast::AnyNodeRef;
+                use ruff_python_ast::Expr;
+                match node {
+                    AnyNodeRef::ExprCall(call)
+                        if call.arguments.range.contains_inclusive(position) =>
                     {
-                        return Some(ty);
+                        if let Some(ty) = transaction.expected_call_argument_type(&handle, position)
+                        {
+                            return Some(ty);
+                        }
                     }
+                    AnyNodeRef::StmtReturn(ret)
+                        if ret
+                            .value
+                            .as_deref()
+                            .is_some_and(|v| v.range().contains_inclusive(position)) =>
+                    {
+                        // Find the innermost enclosing function and use its
+                        // return annotation, if present.
+                        for outer in &covering_nodes {
+                            if let AnyNodeRef::StmtFunctionDef(func) = outer
+                                && let Some(returns) = func.returns.as_deref()
+                                && let Some(ty) =
+                                    transaction.get_type_trace(&handle, returns.range())
+                            {
+                                return Some(ty);
+                            }
+                        }
+                    }
+                    AnyNodeRef::ParameterWithDefault(param_with_default)
+                        if param_with_default
+                            .default
+                            .as_deref()
+                            .is_some_and(|d| d.range().contains_inclusive(position)) =>
+                    {
+                        // The default value of an annotated parameter has the
+                        // parameter's annotation as its expected type.
+                        if let Some(annotation) = param_with_default.parameter.annotation.as_deref()
+                            && let Some(ty) =
+                                transaction.get_type_trace(&handle, annotation.range())
+                        {
+                            return Some(ty);
+                        }
+                    }
+                    AnyNodeRef::StmtAnnAssign(ann)
+                        if ann
+                            .value
+                            .as_deref()
+                            .is_some_and(|v| v.range().contains_inclusive(position)) =>
+                    {
+                        if let Expr::Name(target_name) = ann.target.as_ref() {
+                            // Asking for the type at the LHS target name returns the
+                            // declared (annotated) type of the binding.
+                            let target_position = target_name.range.start();
+                            if let Some(ty) = transaction
+                                .get_type_at_preserving_declaration(&handle, target_position)
+                            {
+                                return Some(ty);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

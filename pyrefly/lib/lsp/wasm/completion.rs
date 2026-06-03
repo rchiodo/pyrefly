@@ -478,7 +478,11 @@ impl Transaction<'_> {
         }
     }
 
-    fn expected_call_argument_type(&self, handle: &Handle, position: TextSize) -> Option<Type> {
+    pub(crate) fn expected_call_argument_type(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+    ) -> Option<Type> {
         let CallInfo {
             callables,
             chosen_overload_index,
