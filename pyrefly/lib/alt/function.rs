@@ -58,6 +58,7 @@ use crate::alt::types::decorated_function::DecoratedFunction;
 use crate::alt::types::decorated_function::Decorator;
 use crate::alt::types::decorated_function::SpecialDecorator;
 use crate::alt::types::decorated_function::UndecoratedFunction;
+use crate::alt::unwrap::HintRef;
 use crate::binding::binding::Binding;
 use crate::binding::binding::FunctionDefData;
 use crate::binding::binding::FunctionParameter;
@@ -975,10 +976,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(default) => {
                 let display =
                     default_display_for_expr(default, self.module().code_at(default.range()));
+                let ty = match check {
+                    Some((expected_ty, tcc)) => {
+                        let mut qs = SmallSet::new();
+                        expected_ty.collect_quantifieds(&mut qs);
+                        if qs.is_empty() {
+                            self.expr(default, check, errors)
+                        } else {
+                            let owner = Owner::new();
+                            let upper_mp = qs
+                                .iter()
+                                .map(|q| (*q, owner.push(q.upper_bound(self.stdlib, self.heap))))
+                                .collect();
+                            let upper_ty = expected_ty.clone().subst(&upper_mp);
+                            // Check if the default is compatible with the parameter type.
+                            let default_errors = self.error_collector();
+                            self.expr(default, Some((&upper_ty, tcc)), &default_errors);
+                            if default_errors.is_empty() {
+                                // The default is compatible; re-infer using the original expected
+                                // type so that Quantifieds (which will be freshened on each call)
+                                // end up in the default.
+                                self.expr_infer_with_hint(
+                                    default,
+                                    Some(HintRef::soft(expected_ty)),
+                                    errors,
+                                )
+                            } else {
+                                errors.extend(default_errors);
+                                // The default is not compatible; use the parameter type to avoid
+                                // cascading errors on calls.
+                                expected_ty.clone()
+                            }
+                        }
+                    }
+                    None => self.expr(default, None, errors),
+                };
                 // Mark literals as explicit so we don't promote them.
-                let ty = self
-                    .expr(default, check, errors)
-                    .with_literal_style(LitStyle::Explicit);
+                let ty = ty.with_literal_style(LitStyle::Explicit);
                 Required::Optional(Some(match display {
                     Some(d) => DefaultValue::with_display(ty, d),
                     None => DefaultValue::new(ty),

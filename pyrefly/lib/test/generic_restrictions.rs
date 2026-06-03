@@ -1338,16 +1338,16 @@ def g(x: T | None) -> T | int:
 );
 
 testcase!(
-    bug = "Function signatures are incorrectly rejected, wrong asserted types",
+    bug = "wrong asserted types",
     test_unrestricted_typevar_param_with_default,
     r#"
 from typing import assert_type
 
-def f1[T](x: T = 0) -> T: ...  # E: `Literal[0]` is not assignable to parameter `x` with type `T`
+def f1[T](x: T = 0) -> T: ...
 assert_type(f1(), int)  # E: assert_type(Unknown, int)
 assert_type(f1(""), str)
 
-def f2[T](x: T, y: T = 0) -> T: ...  # E: `Literal[0]` is not assignable to parameter `y` with type `T`
+def f2[T](x: T, y: T = 0) -> T: ...
 assert_type(f2(1), int)
 assert_type(f2(""), int | str)  # E: assert_type(str, int | str)
     "#,
@@ -1367,7 +1367,7 @@ def f2[T: (int, str)](x: T, y: T = 0) -> T: ...
 assert_type(f2(1), int)
 f2("")  # should be an error!
 
-def f_bad[T: (int, str)](x: T = b"") -> T: ...  # E: `Literal[b'']` is not assignable to parameter `x` with type `T`
+def f_bad[T: (int, str)](x: T = b"") -> T: ...  # E: `Literal[b'']` is not assignable to parameter `x` with type `int | str`
 # T is left unsolved
 reveal_type(f_bad())  # E: revealed type: @_
 assert_type(f_bad(0), int)
@@ -1375,18 +1375,18 @@ assert_type(f_bad(0), int)
 );
 
 testcase!(
-    bug = "Function signatures are incorrectly rejected, wrong asserted type",
+    bug = "wrong asserted type",
     test_bounded_typevar_param_with_default,
     r#"
 from typing import assert_type, reveal_type
 
-def f1[T: int](x: T = 0) -> T: ...  # E: `Literal[0]` is not assignable to parameter `x` with type `T`
+def f1[T: int](x: T = 0) -> T: ...
 assert_type(f1(), int)  # E: assert_type(Unknown, int)
 
-def f2[T: int](x: T, y: T = 0) -> T: ...  # E: `Literal[0]` is not assignable to parameter `y` with type `T`
+def f2[T: int](x: T, y: T = 0) -> T: ...
 assert_type(f2(1), int)
 
-def f_bad[T: int](x: T = "") -> T: ...  # E: `Literal['']` is not assignable to parameter `x` with type `T`
+def f_bad[T: int](x: T = "") -> T: ...  # E: `Literal['']` is not assignable to parameter `x` with type `int`
 # T is left unsolved
 reveal_type(f_bad())  # E: revealed type: @_
 assert_type(f_bad(0), int)
@@ -1394,11 +1394,11 @@ assert_type(f_bad(0), int)
 );
 
 testcase!(
-    bug = "Function signature is incorrectly rejected, wrong asserted type",
+    bug = "wrong asserted type",
     test_param_with_nested_typevar_and_default,
     r#"
 from typing import Sequence, assert_type
-def f[T](x: Sequence[T] = (0,)) -> T: ...  # E: `tuple[Literal[0]]` is not assignable to parameter `x` with type `Sequence[T]`
+def f[T](x: Sequence[T] = (0,)) -> T: ...
 assert_type(f(), int)  # E: assert_type(Unknown, int)
 assert_type(f([""]), str)
     "#,
@@ -1407,7 +1407,7 @@ assert_type(f([""]), str)
 // Note: in Python, mutable function parameter defaults are wildly unsafe and heavily discouraged.
 // We still want to make sure Pyrefly behaves sensibly, even on this bad code pattern.
 testcase!(
-    bug = "Incorrectly rejects f3 signature, wrong asserted type",
+    bug = "wrong asserted type",
     test_typevar_param_with_mutable_default,
     r#"
 from typing import assert_type, reveal_type
@@ -1420,11 +1420,11 @@ assert_type(f1([0]), int)
 def f2[T](x: T, y: list[T] = []) -> T: ...
 assert_type(f2(0), int)
 
-def f3[T](x: list[T] = [""]) -> T: ...  # E: `list[str]` is not assignable to parameter `x` with type `list[T]`
+def f3[T](x: list[T] = [""]) -> T: ...
 assert_type(f3(), str)  # E: assert_type(Unknown, str)
 assert_type(f3([0]), int)
 
-def f_bad[T: int](x: list[T] = [""]) -> T: ...  # E: `list[str]` is not assignable to parameter `x` with type `list[T]`
+def f_bad[T: int](x: list[T] = [""]) -> T: ...  # E: `list[str]` is not assignable to parameter `x` with type `list[int]`
 # T is left unsolved
 reveal_type(f_bad())  # E: revealed type: @_
     "#,
