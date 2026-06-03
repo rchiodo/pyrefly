@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use dupe::Dupe;
 use pyrefly_python::dunder;
+use pyrefly_types::literal::LitStyle;
 use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::special_form::SpecialForm;
@@ -1099,10 +1100,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
 
         let infer_type_or_expr = |toe: TypeOrExpr, errors: &ErrorCollector| -> Type {
-            match toe {
+            let ty = match toe {
                 TypeOrExpr::Type(ty, _) => ty.clone(),
                 TypeOrExpr::Expr(e) => self.expr_infer(e, errors),
-            }
+            };
+            // NNModule fields carry captured constructor args (e.g., padding=Literal[1]) that DSL
+            // forward functions need as literals to compute output shapes.
+            ty.with_literal_style(LitStyle::Explicit)
         };
 
         let mut fields = SmallMap::new();
