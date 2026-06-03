@@ -631,6 +631,15 @@ impl Solver {
         )
     }
 
+    /// Returns true if the given type is a Var that points to a partial variable.
+    pub fn is_partial(&self, ty: &Type) -> bool {
+        if let Type::Var(v) = ty {
+            self.var_is_partial(*v)
+        } else {
+            false
+        }
+    }
+
     /// Witnesses track both origin and deferred vars for residual plumbing,
     /// but overload branch capture snapshots only quantified vars. Only
     /// quantified vars can carry the per-branch residual candidates that we
@@ -1329,19 +1338,6 @@ impl Solver {
             .0
             .iter()
             .any(|(v, state)| state.error.is_none() && lock.contains_key(v))
-    }
-
-    /// Returns true if the given type is a Var that points to a partial
-    /// (PartialQuantified or PartialContained) variable.
-    pub fn is_partial(&self, ty: &Type) -> bool {
-        if let Type::Var(v) = ty {
-            matches!(
-                *self.variables.lock().get(*v),
-                Variable::PartialQuantified(_) | Variable::PartialContained(_)
-            )
-        } else {
-            false
-        }
     }
 
     /// Add a bound to the variable if it is a Quantified or Unwrap.
