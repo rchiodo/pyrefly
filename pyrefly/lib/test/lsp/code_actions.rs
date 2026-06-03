@@ -4,6 +4,8 @@
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
+use std::collections::HashMap;
+use std::fs;
 
 use pretty_assertions::assert_eq;
 use pyrefly_build::handle::Handle;
@@ -16,6 +18,7 @@ use crate::state::lsp::ImportFormat;
 use crate::state::lsp::LocalRefactorCodeAction;
 use crate::state::require::Require;
 use crate::state::state::State;
+use crate::test::util::TestEnv;
 use crate::test::util::extract_cursors_for_test;
 use crate::test::util::get_batched_lsp_operations_report_allow_error;
 use crate::test::util::mk_multi_file_state;
@@ -457,14 +460,35 @@ fn compute_module_member_move_actions(
     ModuleInfo,
     Vec<Vec<(Module, TextRange, String)>>,
     Vec<String>,
-    std::collections::HashMap<String, ModuleInfo>,
+    HashMap<String, ModuleInfo>,
 ) {
     let (handles, state) =
         mk_multi_file_state_assert_no_errors(code_by_module, Require::Everything);
+    compute_module_member_move_actions_from_state(
+        &handles,
+        &state,
+        code_by_module,
+        module_name,
+        selection,
+    )
+}
+
+fn compute_module_member_move_actions_from_state(
+    handles: &HashMap<&'static str, Handle>,
+    state: &State,
+    code_by_module: &[(&'static str, &str)],
+    module_name: &'static str,
+    selection: TextRange,
+) -> (
+    ModuleInfo,
+    Vec<Vec<(Module, TextRange, String)>>,
+    Vec<String>,
+    HashMap<String, ModuleInfo>,
+) {
     let handle = handles.get(module_name).unwrap();
     let transaction = state.transaction();
     let module_info = transaction.get_module_info(handle).unwrap();
-    let mut module_infos = std::collections::HashMap::new();
+    let mut module_infos = HashMap::new();
     for (name, _) in code_by_module {
         if let Some(handle) = handles.get(*name)
             && let Some(info) = transaction.get_module_info(handle)
@@ -3266,6 +3290,77 @@ def foo():
 "#;
     assert_eq!(expected_a.trim(), updated_a.trim());
     assert_eq!(expected_b.trim(), updated_b.trim());
+}
+
+#[test]
+fn move_module_member_to_sibling_keeps_consumer_import_pointing_to_source() {
+    let temp = tempfile::tempdir().unwrap();
+    let code_a = r#"
+# MOVE-START
+def foo():
+    return 1
+# MOVE-END
+"#;
+    let code_b = "";
+    let code_c = r#"
+from a import foo
+def use_foo():
+    from a import foo
+    return foo()
+
+x = foo()
+"#;
+    fs::write(temp.path().join("a.py"), code_a).unwrap();
+    fs::write(temp.path().join("b.py"), code_b).unwrap();
+    fs::write(temp.path().join("c.py"), code_c).unwrap();
+
+    let mut env = TestEnv::new();
+    env.add_real_path("a", temp.path().join("a.py"));
+    env.add_real_path("b", temp.path().join("b.py"));
+    env.add_real_path("c", temp.path().join("c.py"));
+    let (state, handle_for_module) = env
+        .with_default_require_level(Require::Everything)
+        .to_state();
+    let handles = HashMap::from([
+        ("a", handle_for_module("a")),
+        ("b", handle_for_module("b")),
+        ("c", handle_for_module("c")),
+    ]);
+
+    let selection = find_marked_range_with(code_a, "# MOVE-START", "# MOVE-END");
+    let (module_info, actions, titles, module_infos) =
+        compute_module_member_move_actions_from_state(
+            &handles,
+            &state,
+            &[("a", code_a), ("b", code_b), ("c", code_c)],
+            "a",
+            selection,
+        );
+    let move_to_b = titles
+        .iter()
+        .position(|title| title == "Move `foo` to `b`")
+        .expect("expected move to b action");
+    let updated_a = apply_refactor_edits_for_module(&module_info, &actions[move_to_b]);
+    let updated_b = apply_refactor_edits_for_module(
+        module_infos.get("b").expect("missing module b"),
+        &actions[move_to_b],
+    );
+    let updated_c = apply_refactor_edits_for_module(
+        module_infos.get("c").expect("missing module c"),
+        &actions[move_to_b],
+    );
+    let expected_a = r#"
+# MOVE-START
+from b import foo
+# MOVE-END
+"#;
+    let expected_b = r#"
+def foo():
+    return 1
+"#;
+    assert_eq!(expected_a.trim(), updated_a.trim());
+    assert_eq!(expected_b.trim(), updated_b.trim());
+    assert_eq!(code_c.trim(), updated_c.trim());
 }
 
 #[test]
