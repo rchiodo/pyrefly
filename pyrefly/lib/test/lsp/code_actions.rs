@@ -3358,9 +3358,19 @@ from b import foo
 def foo():
     return 1
 "#;
+    let expected_c = r#"
+from b import foo
+
+def use_foo():
+    from b import foo
+
+    return foo()
+
+x = foo()
+"#;
     assert_eq!(expected_a.trim(), updated_a.trim());
     assert_eq!(expected_b.trim(), updated_b.trim());
-    assert_eq!(code_c.trim(), updated_c.trim());
+    assert_eq!(expected_c.trim(), updated_c.trim());
 }
 
 #[test]
