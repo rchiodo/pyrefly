@@ -409,7 +409,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn on_quantified(&self, q: &Quantified, f: &dyn Fn(&Type) -> Type) -> Type {
         if let Restriction::Constraints(constraints) = &q.restriction {
-            self.unions(constraints.map(f))
+            let mut all_constraints_preserved = true;
+            let res = self.unions(constraints.map(|constraint| {
+                let res = f(constraint);
+                all_constraints_preserved &= res == *constraint;
+                res
+            }));
+            // If f returned the constraint unchanged for every constraint,
+            // the result is the input quantified.
+            if all_constraints_preserved {
+                q.clone().to_type(self.heap)
+            } else {
+                res
+            }
         } else {
             f(&q.upper_bound(self.stdlib, self.heap))
         }
