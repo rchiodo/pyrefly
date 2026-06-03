@@ -3565,10 +3565,8 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             &*v1_current
                             && t.is_none()
                         {
-                            let widened = self
-                                .solver
-                                .heap
-                                .mk_union(vec![t.clone(), Type::any_implicit()]);
+                            let widened =
+                                unions(vec![t.clone(), Type::any_implicit()], &self.solver.heap);
                             drop(v1_current);
                             variables.update(*v1, Variable::Answer(widened));
                         }
@@ -3581,9 +3579,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         // container will later hold some other (unknown) type, analogous
                         // to how `self.x = None` is inferred as `None | Any` for attributes.
                         let answer = if t2.is_none() {
-                            self.solver
-                                .heap
-                                .mk_union(vec![t2.clone(), Type::any_implicit()])
+                            unions(vec![t2.clone(), Type::any_implicit()], &self.solver.heap)
                         } else {
                             t2.clone()
                         };
@@ -3670,10 +3666,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         // the PartialContained behavior (see comment there).
                         let variables = self.solver.variables.lock();
                         if answer.is_none() {
-                            let widened = self
-                                .solver
-                                .heap
-                                .mk_union(vec![answer.clone(), Type::any_implicit()]);
+                            let widened = unions(
+                                vec![answer.clone(), Type::any_implicit()],
+                                &self.solver.heap,
+                            );
                             variables.update(*v2, Variable::Answer(widened));
                         } else {
                             variables.update(*v2, Variable::Answer(answer));
@@ -3688,7 +3684,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         // Widen None to None | Any (see comment at the other
                         // PartialContained pinning site above).
                         let answer = if t1_p.is_none() {
-                            self.solver.heap.mk_union(vec![t1_p, Type::any_implicit()])
+                            unions(vec![t1_p, Type::any_implicit()], &self.solver.heap)
                         } else {
                             t1_p
                         };

@@ -1386,7 +1386,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             key_name,
                             TypedDictField {
                                 ty: if value_t.is_none() && !has_non_none_value {
-                                    self.heap.mk_union(vec![
+                                    self.unions(vec![
                                         self.heap.mk_none(),
                                         self.solver()
                                             .fresh_partial_contained(self.uniques, x.value.range())

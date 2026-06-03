@@ -931,7 +931,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             expected_types.push(self.heap.mk_none());
             expected = "`BaseException` or `None`"
         }
-        if !self.is_subset_eq(&actual_type, &self.heap.mk_union(expected_types)) {
+        if !self.is_subset_eq(&actual_type, &self.unions(expected_types)) {
             self.error(
                 errors,
                 range,
