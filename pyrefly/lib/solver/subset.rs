@@ -1292,62 +1292,57 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         } else {
             let argument_side = self.active_call_context.argument_side();
             let can_synthesize_witness = !matches!(argument_side, ArgumentSide::NotAnalyzingACall);
-            if can_synthesize_witness {
-                let eligible_vars: Vec<Var> = want
+            if can_synthesize_witness
+                && let eligible_vars = want
                     .collect_maybe_placeholder_vars()
                     .into_iter()
                     .filter(|v| self.solver.var_is_quantified(*v))
-                    .collect();
-                if eligible_vars.is_empty() {
-                    any(overload.signatures.iter(), |l| match l {
-                        OverloadType::Function(_) => self.is_subset_eq(&l.as_type(), want),
-                        OverloadType::Forall(forall) => {
-                            let fresh_forall = self.instantiate_fresh_forall(
-                                Forall {
-                                    tparams: forall.tparams.clone(),
-                                    body: Forallable::Function(forall.body.clone()),
-                                },
-                                want,
-                            );
-                            let vars = fresh_forall.handle.vars().to_vec();
-                            match self
-                                .solver
-                                .with_snapshot(&vars, || self.is_subset_forall(fresh_forall, want))
-                            {
-                                SubsetWithSnapshotResult::Ok => Ok(()),
-                                SubsetWithSnapshotResult::Err(e) => Err(e),
-                            }
-                        }
-                    })
-                    .is_ok()
-                } else {
-                    let overload_type = Type::Overload(overload.clone());
-                    let synthesized = ResidualWitnessContext::for_overload(
-                        &overload_type,
-                        &eligible_vars,
-                        argument_side,
-                    );
-                    self.with_active_call_context(
-                        self.active_call_context
-                            .clone()
-                            .with_residual_witness(synthesized),
-                        |me| {
-                            let (witness, captured_vars) =
+                    .collect::<Vec<_>>()
+                && !eligible_vars.is_empty()
+            {
+                let overload_type = Type::Overload(overload.clone());
+                let synthesized = ResidualWitnessContext::for_overload(
+                    &overload_type,
+                    &eligible_vars,
+                    argument_side,
+                );
+                self.with_active_call_context(
+                    self.active_call_context
+                        .clone()
+                        .with_residual_witness(synthesized),
+                    |me| {
+                        let (witness, captured_vars) =
                             me.witness_and_captured_vars_for_overload().expect(
                                 "synthesized overload witness must be active for capture probing",
                             );
-                            me.is_subset_overload_with_active_witness(
-                                &witness,
-                                &captured_vars,
-                                overload,
-                                want,
-                            )
-                        },
-                    )
-                }
+                        me.is_subset_overload_with_active_witness(
+                            &witness,
+                            &captured_vars,
+                            overload,
+                            want,
+                        )
+                    },
+                )
             } else {
-                any(overload.signatures.iter(), |l| {
-                    self.is_subset_eq(&l.as_type(), want)
+                any(overload.signatures.iter(), |l| match l {
+                    OverloadType::Function(_) => self.is_subset_eq(&l.as_type(), want),
+                    OverloadType::Forall(forall) => {
+                        let fresh_forall = self.instantiate_fresh_forall(
+                            Forall {
+                                tparams: forall.tparams.clone(),
+                                body: Forallable::Function(forall.body.clone()),
+                            },
+                            want,
+                        );
+                        let vars = fresh_forall.handle.vars().to_vec();
+                        match self
+                            .solver
+                            .with_snapshot(&vars, || self.is_subset_forall(fresh_forall, want))
+                        {
+                            SubsetWithSnapshotResult::Ok => Ok(()),
+                            SubsetWithSnapshotResult::Err(e) => Err(e),
+                        }
+                    }
                 })
                 .is_ok()
             }
