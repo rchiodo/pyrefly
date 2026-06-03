@@ -23,6 +23,7 @@ use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
 use pyrefly_types::dimension::SizeExpr;
+use pyrefly_types::literal::LitStyle;
 use pyrefly_types::meta_shape_dsl::ShapeDslFunction;
 use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::meta_shape_dsl::validate_shape_dsl_functions;
@@ -1064,7 +1065,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // This has to happen after the param type has been computed because we do
             // want to promote literals while inferring the type.
             required = Required::Optional(Some(DefaultValue {
-                ty: default_val.ty.explicit_literals(),
+                ty: default_val.ty.with_literal_style(LitStyle::Explicit),
                 ..default_val
             }));
         }

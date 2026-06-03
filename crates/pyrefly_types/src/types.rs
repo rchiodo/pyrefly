@@ -1825,12 +1825,12 @@ impl Type {
         })
     }
 
-    pub fn explicit_literals(self) -> Self {
+    pub fn with_literal_style(self, style: LitStyle) -> Self {
         self.transform(&mut |ty| {
             if let Type::Literal(lit) = ty {
-                lit.style = LitStyle::Explicit;
-            } else if let Type::LiteralString(style) = ty {
-                *style = LitStyle::Explicit;
+                lit.style = style;
+            } else if let Type::LiteralString(lit_style) = ty {
+                *lit_style = style;
             }
         })
     }
