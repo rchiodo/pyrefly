@@ -2044,6 +2044,7 @@ testcase!(
     r#"
 def f(x: int = "test"): # E: Default `Literal['test']` is not assignable to parameter `x` with type `int`
     pass
+f()  # Make sure we don't get a cascading bad-argument-type error
 "#,
 );
 

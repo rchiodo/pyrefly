@@ -910,3 +910,14 @@ assert_type(result, str | Any)
 assert_type(c, C[Any])
     "#,
 );
+
+testcase!(
+    test_overload_residual_in_param_default,
+    r#"
+from typing import Callable, assert_type
+class A(int): ...
+def f[T](x: int, y: Callable[[int], T] = A) -> T:
+    return y(x)
+assert_type(f(0), A)
+    "#,
+);

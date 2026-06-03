@@ -1752,3 +1752,26 @@ reveal_type(Real)  # E: revealed type: type[SubReal]
 Real("example.com", port=443)
 "#,
 );
+
+fn env_typevar_param_with_default() -> TestEnv {
+    TestEnv::one(
+        "foo",
+        r#"
+from types import MappingProxyType
+from typing import Mapping
+class Base[VT]:
+    def _update(self, kw: Mapping[str, VT] = MappingProxyType({})) -> None: ...
+    "#,
+    )
+}
+
+testcase!(
+    test_import_class_with_typevar_param_with_default,
+    env_typevar_param_with_default(),
+    r#"
+import foo
+class Child(foo.Base):
+    def put(self):
+        return self._update()
+    "#,
+);

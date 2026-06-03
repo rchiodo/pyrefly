@@ -12634,8 +12634,8 @@
     {
       "code": -2,
       "column": 18,
-      "concise_description": "`tuple[@_, ...]` is not assignable to `TypeForm[Any]`",
-      "description": "`tuple[@_, ...]` is not assignable to `TypeForm[Any]`",
+      "concise_description": "`tuple[Unknown, ...]` is not assignable to `TypeForm[Any]`",
+      "description": "`tuple[Unknown, ...]` is not assignable to `TypeForm[Any]`",
       "line": 67,
       "name": "bad-assignment",
       "severity": "error",

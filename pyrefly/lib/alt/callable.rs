@@ -11,6 +11,7 @@ use std::mem;
 use itertools::Itertools;
 use pyrefly_python::dunder;
 use pyrefly_types::callable::FunctionKind;
+use pyrefly_types::literal::LitStyle;
 use pyrefly_types::meta_shape_dsl::MetaShapeFunction;
 use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::tuple::Tuple;
@@ -935,6 +936,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut kwparams = OrderedMap::new();
         let mut kwargs = None;
         let mut kwargs_is_unpack = false;
+        // Parameters with default values that are not matched to call args.
+        let mut default_check = Vec::new();
         loop {
             let p = match rparams.pop() {
                 Some(p) => p,
@@ -968,15 +971,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             };
             match p {
-                Param::PosOnly(name, _, required) => {
-                    if required == &Required::Required {
+                Param::PosOnly(name, ty, required) => match required {
+                    Required::Required => {
                         if let Some(name) = name {
                             missing_named_posonly.insert(name);
                         } else {
                             missing_unnamed_posonly += 1;
                         }
                     }
-                }
+                    Required::Optional(Some(default)) => {
+                        default_check.push((name.as_ref(), ty, default))
+                    }
+                    Required::Optional(None) => {}
+                },
                 Param::Varargs(_, Type::Unpack(unpacked)) => {
                     // If we have a TypeVarTuple *args with no matched arguments, resolve it to empty tuple
                     self.is_subset_eq(unpacked, &self.heap.mk_concrete_tuple(Vec::new()));
@@ -1262,7 +1269,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             }
                         }
                     }
-                    Required::Optional(_) => {}
+                    Required::Optional(Some(default)) => {
+                        default_check.push((Some(name), want, default))
+                    }
+                    Required::Optional(None) => {}
                 }
                 for (ty, range) in &splat_kwargs {
                     self.check_type_with_call_context(
@@ -1281,6 +1291,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     );
                 }
             }
+        }
+        for (name, ty, default) in default_check {
+            // `ty` may contain type variables, so we record quantified bounds from the default and
+            // check for inconsistent solutions. We mark any literals in the default as implicit so
+            // that type variables get solved to promoted types (`int` rather than `Literal[N]`).
+            let default_ty = default.ty.clone().with_literal_style(LitStyle::Implicit);
+            self.check_type_with_call_context(
+                &default_ty,
+                ty,
+                arguments_range,
+                call_errors,
+                &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
+                        name.cloned(),
+                        callable_name.cloned(),
+                    ))
+                },
+                call_context,
+            );
         }
         let num_extra_positional_args = extra_positional_args.len();
         if let Some(arg_range) = extra_arg_pos
