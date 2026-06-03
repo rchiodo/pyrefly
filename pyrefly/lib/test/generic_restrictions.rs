@@ -633,6 +633,20 @@ def add2[T: int | float](x: T, y: T) -> T:
 );
 
 testcase!(
+    bug = "Spurious errors",
+    test_multiple_binops_with_constrained_typevar,
+    r#"
+from typing import TypeVar
+
+T = TypeVar("T", str, int)
+
+def foo(a: T) -> T:
+    doubled = 2 * a
+    return a + doubled  # E: `+` is not supported between `str` and `int`  # E: `+` is not supported between `int` and `str`
+    "#,
+);
+
+testcase!(
     test_multiple_args_upper_bound,
     r#"
 from typing import assert_type
