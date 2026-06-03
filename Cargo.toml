@@ -8,6 +8,13 @@ lto = true
 codegen-units = 1
 strip = "debuginfo"
 
+[profile.dev]
+debug = 1
+
+[profile.dbg]
+debug = true
+inherits = "dev"
+
 [workspace]
 members = [
   "crates/pyrefly_build",
