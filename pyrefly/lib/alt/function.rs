@@ -975,7 +975,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(default) => {
                 let display =
                     default_display_for_expr(default, self.module().code_at(default.range()));
-                let ty = self.expr(default, check, errors);
+                // Mark literals as explicit so we don't promote them.
+                let ty = self
+                    .expr(default, check, errors)
+                    .with_literal_style(LitStyle::Explicit);
                 Required::Optional(Some(match display {
                     Some(d) => DefaultValue::with_display(ty, d),
                     None => DefaultValue::new(ty),
@@ -997,7 +1000,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> ParamTypeResult {
         // We only want to use self for the first param, so take & replace with None
         let self_type = std::mem::take(self_type);
-        let (ty, mut required, is_unannotated) = match self.bindings().get_function_param(name) {
+        let (ty, required, is_unannotated) = match self.bindings().get_function_param(name) {
             FunctionParameter::Annotated(idx) => {
                 let param_ty = self.get_idx(*idx).annotation.get_type().clone();
                 let annot_range = self.annotation_range(*idx);
@@ -1052,6 +1055,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         default_val
                             .ty
                             .clone()
+                            .with_literal_style(LitStyle::Implicit)
                             .promote_implicit_literals(self.stdlib),
                     )
                 } else {
@@ -1060,15 +1064,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 (ty, required, true)
             }
         };
-        if let Required::Optional(Some(default_val)) = required {
-            // Mark literals as explicit so we don't promote them.
-            // This has to happen after the param type has been computed because we do
-            // want to promote literals while inferring the type.
-            required = Required::Optional(Some(DefaultValue {
-                ty: default_val.ty.with_literal_style(LitStyle::Explicit),
-                ..default_val
-            }));
-        }
         ParamTypeResult {
             ty,
             required,
