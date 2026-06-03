@@ -451,6 +451,25 @@ pub trait TspInterface: Send + Sync + 'static {
         character: u32,
     ) -> Option<pyrefly_types::types::Type>;
 
+    /// Return the contextually expected type at the given position in a file.
+    ///
+    /// Unlike [`Self::get_type_at_position`], which returns the inferred
+    /// type of the expression at the cursor, this returns the type that the
+    /// surrounding context demands. For example, in
+    /// `e: Literal["a", "b"] = "<cursor>"`, the expected type at the
+    /// cursor is `Literal["a", "b"]` (from the LHS annotation), not the
+    /// inferred type of the empty string literal.
+    ///
+    /// Returns `None` when the URI cannot be resolved, the position is invalid,
+    /// or no contextual expected type is available at that location. Callers
+    /// may fall back to [`Self::get_type_at_position`] in that case.
+    fn get_expected_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type>;
+
     /// Resolve the source range of a function name from its `FuncDefIndex`.
     ///
     /// Uses the binding table to look up `KeyUndecoratedFunctionRange` for
@@ -6319,6 +6338,55 @@ impl TspInterface for Server {
         // call position. This keeps the function's `Declaration::Regular`
         // intact on the wire, which TSP clients need to re-resolve the
         // signature (parameters, overloads) from source.
+        transaction.get_type_at_preserving_declaration(&handle, position)
+    }
+
+    fn get_expected_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type> {
+        let url = Url::parse(uri)
+            .ok()
+            .or_else(|| Url::from_file_path(uri).ok())?;
+        let path = self.path_for_uri_or_notebook_cell(&url)?;
+        let notebook_cell = self.maybe_get_code_cell_index(&url);
+
+        let handle = make_open_handle(&self.state, &path);
+        let transaction = self.state.transaction();
+        let module_info = transaction.get_module_info(&handle)?;
+        let position =
+            module_info.from_lsp_position(lsp_types::Position { line, character }, notebook_cell);
+
+        // Walk the AST nodes covering the cursor position to find a
+        // surrounding context that gives a contextual expected type.
+        // Currently we recognize:
+        //   * The RHS value of an annotated assignment (`x: T = <cursor>`)
+        //     — the expected type is the LHS-declared type `T`.
+        // Other contexts (call arguments, return positions, etc.) fall back
+        // to the inferred type at position, which may not be the contextual
+        // expected type but is what callers historically received.
+        if let Some(module) = transaction.get_ast(&handle) {
+            let covering_nodes = pyrefly_python::ast::Ast::locate_node(&module, position);
+            for node in &covering_nodes {
+                if let ruff_python_ast::AnyNodeRef::StmtAnnAssign(ann) = node
+                    && let Some(value) = ann.value.as_deref()
+                    && value.range().contains_inclusive(position)
+                    && let ruff_python_ast::Expr::Name(target_name) = ann.target.as_ref()
+                {
+                    // Asking for the type at the LHS target name returns the
+                    // declared (annotated) type of the binding.
+                    let target_position = target_name.range.start();
+                    if let Some(ty) =
+                        transaction.get_type_at_preserving_declaration(&handle, target_position)
+                    {
+                        return Some(ty);
+                    }
+                }
+            }
+        }
+
         transaction.get_type_at_preserving_declaration(&handle, position)
     }
 

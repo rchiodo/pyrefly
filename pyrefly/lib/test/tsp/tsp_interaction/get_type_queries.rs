@@ -341,6 +341,93 @@ fn test_get_expected_type_stale_snapshot() {
     tsp.shutdown();
 }
 
+/// Helper to send a getExpectedType request and return a successful (non-null) result.
+fn get_expected_type_ok(
+    tsp: &mut TspInteraction,
+    file_uri: &str,
+    line: u32,
+    character: u32,
+    snapshot: i32,
+) -> serde_json::Value {
+    tsp.server
+        .get_expected_type(file_uri, line, character, snapshot);
+    let resp = tsp.client.receive_response_skip_notifications();
+    assert!(
+        resp.error.is_none(),
+        "Expected success, got error: {:?}",
+        resp.error
+    );
+    let result = resp.result.expect("Expected result");
+    assert!(!result.is_null(), "Expected non-null type result");
+    result
+}
+
+#[test]
+fn test_get_expected_type_on_rhs_returns_lhs_annotation_union() {
+    // For `x: int | str = 42`, the expected type at the RHS position is
+    // the union `int | str` declared on the LHS, NOT the inferred type
+    // (Literal[42]) of the RHS expression.
+    //                          1111111
+    //                0123456789012345678
+    let source = "x: int | str = 42\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Position 15 is the `4` in `42`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 15, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    // Sanity check: getComputedType at the same position narrows to the
+    // RHS literal type (Class), confirming the two methods disagree here.
+    let computed = get_computed_type_ok(&mut tsp, &file_uri, 0, 15, snapshot);
+    assert_kind(&computed, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_on_rhs_string_literal_annotation() {
+    // For `e: Literal["a", "b"] = "a"`, the expected type at the RHS
+    // string literal should be the annotated `Literal["a", "b"]` (a
+    // Union of literal classes), not just `Literal["a"]`.
+    //                                     1111111111222222
+    //                           01234567890123456789012345
+    let source = "from typing import Literal\ne: Literal[\"a\", \"b\"] = \"a\"\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 1, position 24 lands inside the RHS string literal `"a"`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 1, 24, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_falls_back_outside_annotated_rhs() {
+    // No annotated assignment surrounds the cursor → expected type
+    // falls back to the type at the cursor (`Literal[42]` → Class).
+    let (mut tsp, file_uri, snapshot) = setup_project("x = 42\n");
+
+    // Position 4 is the `4` in `42`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 4, snapshot);
+    assert_kind(&expected, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_on_lhs_returns_declared_type() {
+    // When the cursor is on the LHS target of an annotated assignment,
+    // the value range does not contain it, so the expected type is just
+    // the declared type at that position (which is the annotation).
+    let (mut tsp, file_uri, snapshot) = setup_project("x: int | str = 42\n");
+
+    // Position 0 is the `x` target.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 0, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
 // =======================================================================
 // Cross-cutting: all three methods agree
 // =======================================================================
