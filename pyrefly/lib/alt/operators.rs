@@ -14,8 +14,8 @@ use pyrefly_types::lit_int::LitInt;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::quantified::QuantifiedKind;
-use pyrefly_types::tensor::TensorType;
-use pyrefly_types::tensor::broadcast_shapes;
+use pyrefly_types::shaped_array::ShapedArrayType;
+use pyrefly_types::shaped_array::broadcast_shapes;
 use pyrefly_types::type_var::Restriction;
 use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::CmpOp;
@@ -442,8 +442,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // regardless of the other operand's type. Without this, e.g.
                 // Tensor[B, 1] / (2**n - 1.0) loses shape because 2**n is Any.
                 if (lhs.is_any() || rhs.is_any())
-                    && !matches!(lhs, Type::Tensor(_))
-                    && !matches!(rhs, Type::Tensor(_))
+                    && !matches!(lhs, Type::ShapedArray(_))
+                    && !matches!(rhs, Type::ShapedArray(_))
                 {
                     if let Type::Any(style) = &rhs {
                         return style.propagate();
@@ -482,11 +482,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         | Operator::Mod
                         | Operator::Pow
                         | Operator::FloorDiv
-                ) && let Type::Tensor(l_tensor) = lhs
-                    && let Type::Tensor(r_tensor) = rhs
+                ) && let Type::ShapedArray(l_shaped_array) = lhs
+                    && let Type::ShapedArray(r_shaped_array) = rhs
                 {
                     // Tensor element-wise operations with broadcasting
-                    self.broadcast_tensor_binop(l_tensor, r_tensor, x.range, errors)
+                    self.broadcast_shaped_array_binop(
+                        l_shaped_array,
+                        r_shaped_array,
+                        x.range,
+                        errors,
+                    )
                 } else if let Some(result) = self.try_symint_binop(x.op, lhs, rhs) {
                     result
                 } else if x.op == Operator::Pow
@@ -845,7 +850,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::ClassType(_)
                 | Type::SelfType(_)
                 | Type::Quantified(_)
-                | Type::Tensor(_)
+                | Type::ShapedArray(_)
                 | Type::NNModule(_) => {
                     self.call_method_or_error(t, method, x.range, &[], &[], errors, Some(&context))
                 }
@@ -1009,15 +1014,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// broadcast_shapes handles all shape variants: Concrete shapes are broadcast
     /// precisely, Unpacked shapes match suffix then middles then prefixes, and
     /// mixed Concrete+Unpacked aligns against the suffix.
-    fn broadcast_tensor_binop(
+    fn broadcast_shaped_array_binop(
         &self,
-        left: &TensorType,
-        right: &TensorType,
+        left: &ShapedArrayType,
+        right: &ShapedArrayType,
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
         match broadcast_shapes(&left.shape, &right.shape) {
-            Ok(result_shape) => TensorType::new(left.base_class.clone(), result_shape).to_type(),
+            Ok(result_shape) => {
+                ShapedArrayType::new(left.base_class.clone(), result_shape).to_type()
+            }
             Err(err) => {
                 self.error(
                     errors,

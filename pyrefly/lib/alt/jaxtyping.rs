@@ -45,9 +45,9 @@ use std::sync::Arc;
 use dupe::Dupe;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::quantified::QuantifiedKind;
-use pyrefly_types::tensor::TensorShape;
-use pyrefly_types::tensor::TensorSyntax;
-use pyrefly_types::tensor::TensorType;
+use pyrefly_types::shaped_array::ShapedArrayShape;
+use pyrefly_types::shaped_array::ShapedArraySyntax;
+use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::types::TParams;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
@@ -97,7 +97,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .any(|name| cls.has_toplevel_qname("jaxtyping", name))
     }
 
-    /// Parse a jaxtyping annotation like `Float[Tensor, "batch channels"]` into a TensorType.
+    /// Parse a jaxtyping annotation like `Float[Tensor, "batch channels"]` into a ShapedArrayType.
     pub fn parse_jaxtyping_annotation(
         &self,
         xs: &[Expr],
@@ -119,12 +119,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Resolve xs[0] as the base array type (e.g., torch.Tensor).
         // With tensor_shapes enabled and shared fixtures, bare `Tensor` in a type
-        // argument position resolves to Type::Tensor(shapeless). We extract the
+        // argument position resolves to Type::ShapedArray(shapeless). We extract the
         // base_class from it and apply the jaxtyping shape string instead.
         let base_type = self.expr_untype(&xs[0], TypeFormContext::TypeArgument, errors);
         let base_class = match &base_type {
-            Type::Tensor(tensor_type) if tensor_type.is_shapeless() => {
-                tensor_type.base_class.clone()
+            Type::ShapedArray(shaped_array_type) if shaped_array_type.is_shapeless() => {
+                shaped_array_type.base_class.clone()
             }
             _ => {
                 return self.error(
@@ -157,9 +157,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let tokens: Vec<&str> = shape_str.split_whitespace().collect();
         if tokens.is_empty() {
             // Empty shape string means scalar tensor (rank 0), like Tensor[()]
-            let tensor_shape = TensorShape::from_types(vec![]);
-            return TensorType::new(base_class, tensor_shape)
-                .with_syntax(TensorSyntax::Jaxtyping)
+            let shaped_array_shape = ShapedArrayShape::from_types(vec![]);
+            return ShapedArrayType::new(base_class, shaped_array_shape)
+                .with_syntax(ShapedArraySyntax::Jaxtyping)
                 .to_type();
         }
 
@@ -200,16 +200,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Type::Quantified(Box::new(q))
             };
 
-            let tensor_shape = TensorShape::unpacked(prefix, middle, suffix);
-            TensorType::new(base_class, tensor_shape)
-                .with_syntax(TensorSyntax::Jaxtyping)
+            let shaped_array_shape = ShapedArrayShape::unpacked(prefix, middle, suffix);
+            ShapedArrayType::new(base_class, shaped_array_shape)
+                .with_syntax(ShapedArraySyntax::Jaxtyping)
                 .to_type()
         } else {
             // Concrete shape: all tokens are non-variadic dims
             let dims = self.parse_jaxtyping_dim_tokens(&tokens);
-            let tensor_shape = TensorShape::from_types(dims);
-            TensorType::new(base_class, tensor_shape)
-                .with_syntax(TensorSyntax::Jaxtyping)
+            let shaped_array_shape = ShapedArrayShape::from_types(dims);
+            ShapedArrayType::new(base_class, shaped_array_shape)
+                .with_syntax(ShapedArraySyntax::Jaxtyping)
                 .to_type()
         }
     }
@@ -333,12 +333,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             {
                 jaxtyping_extras.push(q.as_ref().clone());
             }
-            if let Type::Tensor(tensor_type) = ty
-                && !tensor_type.is_shapeless()
+            if let Type::ShapedArray(shaped_array_type) = ty
+                && !shaped_array_type.is_shapeless()
             {
-                match tensor_type.syntax {
-                    TensorSyntax::Native => has_native = true,
-                    TensorSyntax::Jaxtyping => has_jaxtyping = true,
+                match shaped_array_type.syntax {
+                    ShapedArraySyntax::Native => has_native = true,
+                    ShapedArraySyntax::Jaxtyping => has_jaxtyping = true,
                 }
             }
         });

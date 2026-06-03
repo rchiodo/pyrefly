@@ -571,7 +571,7 @@ impl<'a> TypeDisplayContext<'a> {
                     output.write_str("]")
                 }
             },
-            Type::Tensor(tensor) => output.write_str(&format!("{}", tensor)),
+            Type::ShapedArray(shaped_array) => output.write_str(&format!("{}", shaped_array)),
             Type::NNModule(module) => {
                 // Display as the class name (e.g., MaxPool2d)
                 self.fmt_helper_generic(&Type::ClassType(module.class.clone()), false, output)
@@ -1415,8 +1415,8 @@ pub mod tests {
     use crate::quantified::QuantifiedIdentity;
     use crate::quantified::QuantifiedKind;
     use crate::quantified::QuantifiedOrigin;
-    use crate::tensor::TensorShape;
-    use crate::tensor::TensorType;
+    use crate::shaped_array::ShapedArrayShape;
+    use crate::shaped_array::ShapedArrayType;
     use crate::tuple::Tuple;
     use crate::type_alias::TypeAlias;
     use crate::type_alias::TypeAliasData;
@@ -1514,11 +1514,14 @@ pub mod tests {
     }
 
     #[test]
-    fn test_display_tensor_type_uses_base_class_name() {
+    fn test_display_shaped_array_type_uses_base_class_name() {
         let array = ClassType::new(fake_class("Array", "arrays", 0), TArgs::default());
-        let shaped =
-            TensorType::new(array.clone(), TensorShape::new(vec![SizeExpr::Literal(2)])).to_type();
-        let shapeless = TensorType::shapeless(array).to_type();
+        let shaped = ShapedArrayType::new(
+            array.clone(),
+            ShapedArrayShape::new(vec![SizeExpr::Literal(2)]),
+        )
+        .to_type();
+        let shapeless = ShapedArrayType::shapeless(array).to_type();
 
         assert_eq!(shaped.to_string(), "Array[2]");
         assert_eq!(shapeless.to_string(), "Array");

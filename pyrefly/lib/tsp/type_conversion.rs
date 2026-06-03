@@ -307,7 +307,9 @@ impl TypeConverter<'_> {
             PyreflyType::SuperInstance(si) => self.convert_class_type(&si.0, TypeFlags::INSTANCE),
 
             // --- Tensor → ClassType from base_class ---
-            PyreflyType::Tensor(t) => self.convert_class_type(&t.base_class, TypeFlags::INSTANCE),
+            PyreflyType::ShapedArray(t) => {
+                self.convert_class_type(&t.base_class, TypeFlags::INSTANCE)
+            }
 
             // --- NNModule → ClassType from class ---
             PyreflyType::NNModule(m) => self.convert_class_type(&m.class, TypeFlags::INSTANCE),

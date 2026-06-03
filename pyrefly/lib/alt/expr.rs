@@ -21,13 +21,13 @@ use pyrefly_types::callable::FunctionKind;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::literal::LitStyle;
-use pyrefly_types::tensor::IndexOp;
-use pyrefly_types::tensor::TensorShape;
-use pyrefly_types::tensor::TensorType;
-use pyrefly_types::tensor::index_shape_int;
-use pyrefly_types::tensor::index_shape_multi;
-use pyrefly_types::tensor::index_shape_slice;
-use pyrefly_types::tensor::index_shape_tensor;
+use pyrefly_types::shaped_array::IndexOp;
+use pyrefly_types::shaped_array::ShapedArrayShape;
+use pyrefly_types::shaped_array::ShapedArrayType;
+use pyrefly_types::shaped_array::index_shape_int;
+use pyrefly_types::shaped_array::index_shape_multi;
+use pyrefly_types::shaped_array::index_shape_slice;
+use pyrefly_types::shaped_array::index_shape_tensor;
 use pyrefly_types::typed_dict::AnonymousTypedDictInner;
 use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_types::typed_dict::TypedDict;
@@ -840,7 +840,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // Extract the receiver type from the already-resolved BoundMethod
         // rather than re-inferring the base expression.
         let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::Tensor(_))
+            matches!(&bm.obj, Type::ShapedArray(_))
                 || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
         } else {
             false
@@ -882,7 +882,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return;
         }
         let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::Tensor(_))
+            matches!(&bm.obj, Type::ShapedArray(_))
                 || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
         } else {
             false
@@ -921,7 +921,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 continue;
             };
             let arg_ty = self.expr_infer(arg, errors);
-            let is_tensor = matches!(&arg_ty, Type::Tensor(_))
+            let is_tensor = matches!(&arg_ty, Type::ShapedArray(_))
                 || matches!(&arg_ty, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"));
             if is_tensor {
                 errors
@@ -962,7 +962,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return;
         }
         let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::Tensor(_))
+            matches!(&bm.obj, Type::ShapedArray(_))
                 || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
         } else {
             false
@@ -2536,14 +2536,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     )
                 }
                 // Tensor indexing: tensor[0] reduces dimensionality
-                Type::Tensor(ref tensor_type) => {
-                    self.infer_tensor_index(tensor_type, slice, range, errors)
+                Type::ShapedArray(ref shaped_array_type) => {
+                    self.infer_shaped_array_index(shaped_array_type, slice, range, errors)
                 }
                 // Shaped arrays that have not gone through annotation
                 // canonicalization still use tensor indexing logic.
                 Type::ClassType(ref cls) if self.is_shaped_array_class(cls.class_object()) => {
-                    let tensor_type = self.shaped_array_classtype_to_tensor_type(cls);
-                    self.infer_tensor_index(&tensor_type, slice, range, errors)
+                    let shaped_array_type = self.shaped_array_classtype_to_shaped_array_type(cls);
+                    self.infer_shaped_array_index(&shaped_array_type, slice, range, errors)
                 }
                 Type::ClassType(ref cls) | Type::SelfType(ref cls)
                     if let Some(tuple) = self.as_tuple(cls)
@@ -2671,9 +2671,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Handle tensor indexing operations
     /// - Integer index: reduces dimensionality by 1 (removes first dimension)
     /// - Slice: preserves dimensionality (keeps all dimensions)
-    fn infer_tensor_index(
+    fn infer_shaped_array_index(
         &self,
-        tensor_type: &TensorType,
+        shaped_array_type: &ShapedArrayType,
         index: &Expr,
         range: TextRange,
         errors: &ErrorCollector,
@@ -2699,7 +2699,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 // Wrap in Mul(-1, ...) WITHOUT canonicalizing.
                 // This preserves the structural signal for adjust_negative.
-                // The final canonicalization happens in TensorShape::from_types.
+                // The final canonicalization happens in ShapedArrayShape::from_types.
                 return Type::Size(SizeExpr::Mul(
                     Box::new(Type::Size(SizeExpr::Literal(-1))),
                     Box::new(inner_dim),
@@ -2742,9 +2742,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if matches!(&idx_ty, Type::None) {
                 return Some(IndexOp::NewAxis);
             }
-            if let Type::Tensor(ref idx_tensor) = idx_ty {
-                if let TensorShape::Concrete(dims) = &idx_tensor.shape {
-                    return Some(IndexOp::TensorIndex(dims.clone()));
+            if let Type::ShapedArray(ref idx_shaped_array) = idx_ty {
+                if let ShapedArrayShape::Concrete(dims) = &idx_shaped_array.shape {
+                    return Some(IndexOp::ShapedArrayIndex(dims.clone()));
                 }
                 return None; // shapeless index tensor → bail
             }
@@ -2792,32 +2792,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let start = lower.as_ref().map(|e| to_dim(e));
                 let stop = upper.as_ref().map(|e| to_dim(e));
                 let step_val = step.as_ref().and_then(|e| to_step(e));
-                match index_shape_slice(&tensor_type.shape, start, stop, step_val) {
-                    Ok(shape) => TensorType::new(tensor_type.base_class.clone(), shape).to_type(),
+                match index_shape_slice(&shaped_array_type.shape, start, stop, step_val) {
+                    Ok(shape) => {
+                        ShapedArrayType::new(shaped_array_type.base_class.clone(), shape).to_type()
+                    }
                     Err(err) => self.error(errors, range, ErrorKind::BadIndex, err.to_string()),
                 }
             }
             // Bare ellipsis: tensor[...] - preserves entire shape
-            Expr::EllipsisLiteral(_) => tensor_type.clone().to_type(),
+            Expr::EllipsisLiteral(_) => shaped_array_type.clone().to_type(),
             // None index: tensor[None] - inserts a new dimension of size 1 at the front
             Expr::NoneLiteral(_) => {
                 let one = self.heap.mk_size(SizeExpr::Literal(1));
                 let mut new_dims = vec![one];
-                match &tensor_type.shape {
-                    TensorShape::Concrete(dims) => {
+                match &shaped_array_type.shape {
+                    ShapedArrayShape::Concrete(dims) => {
                         new_dims.extend(dims.iter().cloned());
-                        TensorType::new(
-                            tensor_type.base_class.clone(),
-                            TensorShape::from_types(new_dims),
+                        ShapedArrayType::new(
+                            shaped_array_type.base_class.clone(),
+                            ShapedArrayShape::from_types(new_dims),
                         )
                         .to_type()
                     }
-                    TensorShape::Unpacked(f) => {
+                    ShapedArrayShape::Unpacked(f) => {
                         let (prefix, middle, suffix) = &**f;
                         new_dims.extend(prefix.iter().cloned());
-                        TensorType::new(
-                            tensor_type.base_class.clone(),
-                            TensorShape::Unpacked(Box::new((
+                        ShapedArrayType::new(
+                            shaped_array_type.base_class.clone(),
+                            ShapedArrayShape::Unpacked(Box::new((
                                 new_dims,
                                 middle.clone(),
                                 suffix.clone(),
@@ -2855,16 +2857,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let pre_ops: Option<Vec<IndexOp>> = pre_exprs.iter().map(&classify).collect();
                 let post_ops: Option<Vec<IndexOp>> = post_exprs.iter().map(classify).collect();
                 let (Some(pre_ops), Some(post_ops)) = (pre_ops, post_ops) else {
-                    return TensorType::shapeless(tensor_type.base_class.clone()).to_type();
+                    return ShapedArrayType::shapeless(shaped_array_type.base_class.clone())
+                        .to_type();
                 };
 
                 match index_shape_multi(
-                    &tensor_type.shape,
+                    &shaped_array_type.shape,
                     &pre_ops,
                     &post_ops,
                     ellipsis_pos.is_some(),
                 ) {
-                    Ok(shape) => TensorType::new(tensor_type.base_class.clone(), shape).to_type(),
+                    Ok(shape) => {
+                        ShapedArrayType::new(shaped_array_type.base_class.clone(), shape).to_type()
+                    }
                     Err(err) => self.error(errors, range, ErrorKind::BadIndex, err.to_string()),
                 }
             }
@@ -2875,26 +2880,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     || matches!(&idx_type, Type::ClassType(cls) if cls.is_builtin("int"));
 
                 if is_int_index {
-                    match index_shape_int(&tensor_type.shape) {
+                    match index_shape_int(&shaped_array_type.shape) {
                         Ok(shape) => {
-                            TensorType::new(tensor_type.base_class.clone(), shape).to_type()
+                            ShapedArrayType::new(shaped_array_type.base_class.clone(), shape)
+                                .to_type()
                         }
                         Err(err) => self.error(errors, range, ErrorKind::BadIndex, err.to_string()),
                     }
-                } else if let Type::Tensor(ref idx_tensor) = idx_type {
+                } else if let Type::ShapedArray(ref idx_shaped_array) = idx_type {
                     // Tensor indexing: tensor[index_tensor] replaces first dim with index shape
-                    let TensorShape::Concrete(idx_dims) = &idx_tensor.shape else {
-                        return TensorType::shapeless(tensor_type.base_class.clone()).to_type();
+                    let ShapedArrayShape::Concrete(idx_dims) = &idx_shaped_array.shape else {
+                        return ShapedArrayType::shapeless(shaped_array_type.base_class.clone())
+                            .to_type();
                     };
-                    match index_shape_tensor(&tensor_type.shape, idx_dims) {
+                    match index_shape_tensor(&shaped_array_type.shape, idx_dims) {
                         Ok(shape) => {
-                            TensorType::new(tensor_type.base_class.clone(), shape).to_type()
+                            ShapedArrayType::new(shaped_array_type.base_class.clone(), shape)
+                                .to_type()
                         }
                         Err(err) => self.error(errors, range, ErrorKind::BadIndex, err.to_string()),
                     }
                 } else {
                     // Unknown index type - return shapeless
-                    TensorType::shapeless(tensor_type.base_class.clone()).to_type()
+                    ShapedArrayType::shapeless(shaped_array_type.base_class.clone()).to_type()
                 }
             }
         }
@@ -2910,7 +2918,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.is_tensor_class(cls) || self.shaped_array_shape_for_class(cls).is_some()
     }
 
-    fn shaped_array_classtype_to_tensor_type(&self, cls: &ClassType) -> TensorType {
+    fn shaped_array_classtype_to_shaped_array_type(&self, cls: &ClassType) -> ShapedArrayType {
         if self.is_tensor_class(cls.class_object()) {
             let targs = cls.targs().as_slice();
             let is_shapeless = match targs {
@@ -2919,9 +2927,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ => false,
             };
             if is_shapeless {
-                return TensorType::shapeless(cls.clone());
+                return ShapedArrayType::shapeless(cls.clone());
             }
-            return TensorType::new(cls.clone(), TensorShape::from_types(targs.to_vec()));
+            return ShapedArrayType::new(cls.clone(), ShapedArrayShape::from_types(targs.to_vec()));
         }
 
         let shape_param = self
@@ -2939,21 +2947,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .expect("class type should have an argument for each type parameter");
         match shape_arg {
             Type::Tuple(Tuple::Concrete(dims)) => {
-                TensorType::new(cls.clone(), TensorShape::from_types(dims.clone()))
+                ShapedArrayType::new(cls.clone(), ShapedArrayShape::from_types(dims.clone()))
             }
             Type::Tuple(Tuple::Unpacked(unpacked)) => {
                 let (prefix, middle, suffix) = &**unpacked;
-                TensorType::new(
+                ShapedArrayType::new(
                     cls.clone(),
-                    TensorShape::unpacked(prefix.clone(), middle.clone(), suffix.clone()),
+                    ShapedArrayShape::unpacked(prefix.clone(), middle.clone(), suffix.clone()),
                 )
             }
             Type::Tuple(Tuple::Unbounded(dim)) if dim.is_any() => {
-                TensorType::shapeless(cls.clone())
+                ShapedArrayType::shapeless(cls.clone())
             }
-            Type::Tuple(Tuple::Unbounded(_)) => TensorType::new(
+            Type::Tuple(Tuple::Unbounded(_)) => ShapedArrayType::new(
                 cls.clone(),
-                TensorShape::unpacked(Vec::new(), shape_arg.clone(), Vec::new()),
+                ShapedArrayShape::unpacked(Vec::new(), shape_arg.clone(), Vec::new()),
             ),
             _ => unreachable!(
                 "registered TypeVarTuple argument should be stored as a tuple, got `{}`",
@@ -3135,11 +3143,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// Returns both the tensor shape and the flattened type arguments to feed to
     /// the class's `TypeVarTuple` parameter.
-    fn parse_tensor_shape_args(
+    fn parse_shaped_array_shape_args(
         &self,
         shape_args: &[Expr],
         errors: &ErrorCollector,
-    ) -> Option<(TensorShape, Vec<Type>)> {
+    ) -> Option<(ShapedArrayShape, Vec<Type>)> {
         // Check if any argument is a starred expression (unpacked TypeVarTuple)
         let star = shape_args
             .iter()
@@ -3187,27 +3195,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             targs.push(self.heap.mk_unpack(middle_ty.clone()));
             targs.extend(suffix.clone());
 
-            return Some((TensorShape::unpacked(prefix, middle_ty, suffix), targs));
+            return Some((ShapedArrayShape::unpacked(prefix, middle_ty, suffix), targs));
         }
 
         // No starred expression - parse as concrete shape
         let dims = self.parse_dimension_list(shape_args, errors)?;
-        Some((TensorShape::from_types(dims.clone()), dims))
+        Some((ShapedArrayShape::from_types(dims.clone()), dims))
     }
 
     /// Parse torch's legacy `Tensor[...]` syntax, preserving its existing base-class behavior.
     fn parse_tensor_type(&self, cls: &Class, shape_args: &[Expr], errors: &ErrorCollector) -> Type {
-        let Some((tensor_shape, _)) = self.parse_tensor_shape_args(shape_args, errors) else {
+        let Some((shaped_array_shape, _)) = self.parse_shaped_array_shape_args(shape_args, errors)
+        else {
             return Type::any_error();
         };
 
         // Create the base class type (with default type arguments if needed)
         let base_class = self.promote_nontypeddict_silently_to_classtype(cls);
 
-        // Create the tensor type
-        let tensor_type = TensorType::new(base_class, tensor_shape);
+        // Create the shaped-array type.
+        let shaped_array_type = ShapedArrayType::new(base_class, shaped_array_shape);
 
-        tensor_type.to_type()
+        shaped_array_type.to_type()
     }
 
     /// Parse a registered shaped-array annotation.
@@ -3241,8 +3250,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .iter()
             .map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors));
 
-        let Some((tensor_shape, shape_targs)) =
-            self.parse_tensor_shape_args(&args[shape_start..shape_end], errors)
+        let Some((shaped_array_shape, shape_targs)) =
+            self.parse_shaped_array_shape_args(&args[shape_start..shape_end], errors)
         else {
             return Type::any_error();
         };
@@ -3252,10 +3261,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .collect();
         let base_class = self.specialize_nontypeddict_to_classtype(cls, class_targs, range, errors);
 
-        TensorType::new(base_class, tensor_shape).to_type()
+        ShapedArrayType::new(base_class, shaped_array_shape).to_type()
     }
 
-    /// Parse Tensor[2, 3] or registered Array[DType, 2, 3] into a TensorType.
+    /// Parse Tensor[2, 3] or registered Array[DType, 2, 3] into a ShapedArrayType.
     fn parse_shaped_array_type(
         &self,
         cls: &Class,

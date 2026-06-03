@@ -59,10 +59,10 @@ use crate::literal::Literal;
 use crate::module::ModuleType;
 use crate::param_spec::ParamSpec;
 use crate::quantified::Quantified;
+use crate::shaped_array::ShapedArrayType;
 use crate::simplify::unions;
 use crate::special_form::SpecialForm;
 use crate::stdlib::Stdlib;
-use crate::tensor::TensorType;
 use crate::tuple::Tuple;
 use crate::type_alias::TypeAliasData;
 use crate::type_var::Restriction;
@@ -643,7 +643,7 @@ impl VisitMut<Type> for Union {
 
 /// An nn.Module instance with captured constructor arguments.
 ///
-/// Analogous to how `TensorType` wraps `ClassType` + shape info, `NNModuleType`
+/// Analogous to how `ShapedArrayType` wraps `ClassType` + shape info, `NNModuleType`
 /// wraps `ClassType` + a field map of captured init args. This allows DSL forward
 /// functions to access constructor parameters (e.g., `kernel_size`, `stride`)
 /// directly from the type, without requiring every shape-relevant parameter to
@@ -783,9 +783,9 @@ pub enum Type {
     /// For a TypedDict type `C`, `Partial[C]` represents an object with any subset of read-write
     /// keys from `C`, where each present key has the same value type as in `C`.
     PartialTypedDict(TypedDict),
-    /// Tensor type with shape information
+    /// Shaped-array type with shape information.
     /// Example: Tensor[2, 3] represents a 2x3 tensor
-    Tensor(Box<TensorType>),
+    ShapedArray(Box<ShapedArrayType>),
     /// nn.Module instance with captured constructor arguments.
     /// Wraps a ClassType + field map of init args, enabling DSL forward
     /// functions to access shape-relevant constructor parameters directly.
@@ -903,7 +903,7 @@ impl Visit for Type {
             Type::ClassType(x) => x.visit(f),
             Type::TypedDict(x) => x.visit(f),
             Type::PartialTypedDict(x) => x.visit(f),
-            Type::Tensor(x) => x.visit(f),
+            Type::ShapedArray(x) => x.visit(f),
             Type::NNModule(x) => x.visit(f),
             Type::Size(x) => x.visit(f),
             Type::Dim(x) => x.visit(f),
@@ -959,7 +959,7 @@ impl VisitMut for Type {
             Type::ClassType(x) => x.visit_mut(f),
             Type::TypedDict(x) => x.visit_mut(f),
             Type::PartialTypedDict(x) => x.visit_mut(f),
-            Type::Tensor(x) => x.visit_mut(f),
+            Type::ShapedArray(x) => x.visit_mut(f),
             Type::NNModule(x) => x.visit_mut(f),
             Type::Size(x) => x.visit_mut(f),
             Type::Dim(x) => x.visit_mut(f),

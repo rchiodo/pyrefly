@@ -24,127 +24,127 @@ use crate::tuple::Tuple;
 use crate::types::Type;
 
 // ============================================================================
-// Tensor Types
+// Shaped Array Types
 // ============================================================================
 
-/// Whether a tensor type was constructed using native (`Tensor[N, M]`) or
+/// Whether a shaped-array type was constructed using native (`Tensor[N, M]`) or
 /// jaxtyping (`Float[Tensor, "N M"]`) syntax. Controls display rendering and
 /// enables diagnostic checks (e.g., mixing both syntaxes in one function).
 ///
 /// Transparent to equality, hashing, and ordering — syntax does not affect
-/// type identity. Two tensor types with different syntax but identical base
+/// type identity. Two shaped-array types with different syntax but identical base
 /// class and shape are considered equal.
 #[derive(Debug, Clone, Copy, Default)]
 #[derive(Visit, VisitMut)]
-pub enum TensorSyntax {
+pub enum ShapedArraySyntax {
     #[default]
     Native,
     Jaxtyping,
 }
 
 // Syntax is a display/diagnostic concern, not a type identity concern.
-// All trait impls treat every TensorSyntax value as equal.
+// All trait impls treat every ShapedArraySyntax value as equal.
 
-impl PartialEq for TensorSyntax {
+impl PartialEq for ShapedArraySyntax {
     fn eq(&self, _other: &Self) -> bool {
         true
     }
 }
 
-impl Eq for TensorSyntax {}
+impl Eq for ShapedArraySyntax {}
 
-impl Hash for TensorSyntax {
+impl Hash for ShapedArraySyntax {
     fn hash<H: Hasher>(&self, _state: &mut H) {}
 }
 
-impl PartialOrd for TensorSyntax {
+impl PartialOrd for ShapedArraySyntax {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for TensorSyntax {
+impl Ord for ShapedArraySyntax {
     fn cmp(&self, _other: &Self) -> Ordering {
         Ordering::Equal
     }
 }
 
-impl crate::equality::TypeEq for TensorSyntax {
+impl crate::equality::TypeEq for ShapedArraySyntax {
     fn type_eq(&self, _other: &Self, _ctx: &mut crate::equality::TypeEqCtx) -> bool {
         true
     }
 }
 
-/// A tensor type with shape information
+/// A class instance with shape information.
 /// Example: Tensor[2, 3] represents a 2x3 tensor
 /// Example: Tensor (no brackets) represents a shapeless tensor (Unpacked with tuple[Unknown, ...])
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
-pub struct TensorType {
-    /// Base tensor class (e.g., torch.Tensor)
+pub struct ShapedArrayType {
+    /// Base shaped-array class (e.g., torch.Tensor)
     pub base_class: ClassType,
-    /// Shape dimensions. Shapeless tensors use Unpacked([], tuple[Unknown, ...], []).
-    pub shape: TensorShape,
+    /// Shape dimensions. Shapeless arrays use Unpacked([], tuple[Unknown, ...], []).
+    pub shape: ShapedArrayShape,
     /// Whether this type was constructed from native or jaxtyping syntax.
-    pub syntax: TensorSyntax,
+    pub syntax: ShapedArraySyntax,
 }
 
-impl TensorType {
-    /// Create tensor type with shape information (defaults to Native syntax)
-    pub fn new(base_class: ClassType, shape: TensorShape) -> Self {
+impl ShapedArrayType {
+    /// Create a shaped-array type with shape information (defaults to Native syntax).
+    pub fn new(base_class: ClassType, shape: ShapedArrayShape) -> Self {
         Self {
             base_class,
             shape,
-            syntax: TensorSyntax::Native,
+            syntax: ShapedArraySyntax::Native,
         }
     }
 
-    /// Create shapeless tensor type (compatible with any shape)
+    /// Create a shapeless shaped-array type (compatible with any shape).
     /// Represented as Unpacked([], tuple[Unknown, ...], [])
     pub fn shapeless(base_class: ClassType) -> Self {
         Self {
             base_class,
-            shape: TensorShape::Unpacked(Box::new((vec![], Type::any_tuple(), vec![]))),
-            syntax: TensorSyntax::Native,
+            shape: ShapedArrayShape::Unpacked(Box::new((vec![], Type::any_tuple(), vec![]))),
+            syntax: ShapedArraySyntax::Native,
         }
     }
 
-    /// Set the syntax for this tensor type.
-    pub fn with_syntax(mut self, syntax: TensorSyntax) -> Self {
+    /// Set the syntax for this shaped-array type.
+    pub fn with_syntax(mut self, syntax: ShapedArraySyntax) -> Self {
         self.syntax = syntax;
         self
     }
 
     pub fn to_type(self) -> Type {
-        Type::Tensor(Box::new(self))
+        Type::ShapedArray(Box::new(self))
     }
 
     /// Returns rank if shape is concrete, None for variadic/shapeless
     pub fn rank(&self) -> Option<usize> {
         match &self.shape {
-            TensorShape::Concrete(dims) => Some(dims.len()),
-            TensorShape::Unpacked(_) => None,
+            ShapedArrayShape::Concrete(dims) => Some(dims.len()),
+            ShapedArrayShape::Unpacked(_) => None,
         }
     }
 
-    /// Returns true if tensor has no shape information
+    /// Returns true if the shaped array has no shape information.
     /// (represented as Unpacked([], tuple[Unknown/Any, ...], []))
     pub fn is_shapeless(&self) -> bool {
         is_shapeless(&self.shape)
     }
 }
 
-impl Display for TensorType {
+impl Display for ShapedArrayType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.syntax {
-            TensorSyntax::Native => {
+            ShapedArraySyntax::Native => {
                 if self.is_shapeless() {
                     write!(f, "{}", self.base_class.name())
                 } else {
                     write!(f, "{}[{}]", self.base_class.name(), self.shape)
                 }
             }
-            TensorSyntax::Jaxtyping => {
+            ShapedArraySyntax::Jaxtyping => {
                 write!(
                     f,
                     "Shaped[{}, \"{}\"]",
@@ -156,11 +156,11 @@ impl Display for TensorType {
     }
 }
 
-/// Shape of a tensor
+/// Shape of a shaped array.
 /// Similar to Tuple, supports unpacked TypeVarTuple for variadic shapes
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(Visit, VisitMut, TypeEq)]
-pub enum TensorShape {
+pub enum ShapedArrayShape {
     /// Concrete shape: Tensor[2, 3, 4]
     /// List of dimensions, where each dimension is a Type
     /// Can be Type::Size(SizeExpr::Literal(n)), Type::Var(...), Type::Quantified(...), or Type::Any(...)
@@ -170,7 +170,7 @@ pub enum TensorShape {
     Unpacked(Box<(Vec<Type>, Type, Vec<Type>)>),
 }
 
-impl TensorShape {
+impl ShapedArrayShape {
     pub fn new(dims: Vec<SizeExpr>) -> Self {
         Self::Concrete(
             dims.into_iter()
@@ -416,7 +416,7 @@ fn fmt_jaxtyping_size_expr(expr: &SizeExpr) -> String {
     }
 }
 
-impl Display for TensorShape {
+impl Display for ShapedArrayShape {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Concrete(dims) => {
@@ -445,8 +445,8 @@ impl Display for TensorShape {
 }
 
 /// Check if a shape is shapeless: Unpacked([], tuple[Any,...], [])
-fn is_shapeless(shape: &TensorShape) -> bool {
-    if let TensorShape::Unpacked(unpacked) = shape {
+fn is_shapeless(shape: &ShapedArrayShape) -> bool {
+    if let ShapedArrayShape::Unpacked(unpacked) = shape {
         let (prefix, middle, suffix) = &**unpacked;
         return prefix.is_empty()
             && suffix.is_empty()
@@ -469,17 +469,20 @@ fn is_shapeless(shape: &TensorShape) -> bool {
 ///    - unpacked + unpacked → if same TypeVarTuple with no extra suffix, broadcast prefixes;
 ///      if either is unbounded, shapeless; otherwise error
 /// 3. Assemble result from step 2 output + broadcast suffix.
-pub fn broadcast_shapes(a: &TensorShape, b: &TensorShape) -> Result<TensorShape, ShapeError> {
+pub fn broadcast_shapes(
+    a: &ShapedArrayShape,
+    b: &ShapedArrayShape,
+) -> Result<ShapedArrayShape, ShapeError> {
     match (a, b) {
-        (TensorShape::Concrete(a_dims), TensorShape::Concrete(b_dims)) => {
+        (ShapedArrayShape::Concrete(a_dims), ShapedArrayShape::Concrete(b_dims)) => {
             broadcast_concrete(a_dims, b_dims)
         }
-        (TensorShape::Concrete(concrete), TensorShape::Unpacked(u))
-        | (TensorShape::Unpacked(u), TensorShape::Concrete(concrete)) => {
+        (ShapedArrayShape::Concrete(concrete), ShapedArrayShape::Unpacked(u))
+        | (ShapedArrayShape::Unpacked(u), ShapedArrayShape::Concrete(concrete)) => {
             let (prefix, middle, suffix) = &**u;
             broadcast_concrete_with_unpacked(concrete, prefix, middle, suffix)
         }
-        (TensorShape::Unpacked(au), TensorShape::Unpacked(bu)) => {
+        (ShapedArrayShape::Unpacked(au), ShapedArrayShape::Unpacked(bu)) => {
             let (ap, am, a_suf) = &**au;
             let (bp, bm, b_suf) = &**bu;
             broadcast_unpacked_with_unpacked(ap, am, a_suf, bp, bm, b_suf)
@@ -504,7 +507,7 @@ fn broadcast_concrete_with_unpacked(
     prefix: &[Type],
     middle: &Type,
     suffix: &[Type],
-) -> Result<TensorShape, ShapeError> {
+) -> Result<ShapedArrayShape, ShapeError> {
     let matched = concrete.len().min(suffix.len());
 
     // Build result suffix: unmatched suffix dims on the left pass through,
@@ -521,14 +524,14 @@ fn broadcast_concrete_with_unpacked(
 
     if remaining.is_empty() {
         // All concrete dims consumed → preserve prefix + middle
-        Ok(TensorShape::Unpacked(Box::new((
+        Ok(ShapedArrayShape::Unpacked(Box::new((
             prefix.to_vec(),
             middle.clone(),
             result_suffix,
         ))))
     } else if is_unbounded_middle(middle) {
         // Can't align remaining concrete with unbounded middle
-        Ok(TensorShape::Unpacked(Box::new((
+        Ok(ShapedArrayShape::Unpacked(Box::new((
             vec![],
             Type::any_tuple(),
             result_suffix,
@@ -554,7 +557,7 @@ fn broadcast_unpacked_with_unpacked(
     bp: &[Type],
     bm: &Type,
     b_suf: &[Type],
-) -> Result<TensorShape, ShapeError> {
+) -> Result<ShapedArrayShape, ShapeError> {
     let matched = a_suf.len().min(b_suf.len());
 
     // Broadcast matched suffix pairs (right-aligned)
@@ -576,17 +579,17 @@ fn broadcast_unpacked_with_unpacked(
     if !has_extra && am_canon == bm_canon && !is_unbounded_middle(am) {
         // Same TypeVarTuple, no extra suffix → cancel middles, broadcast prefixes
         let prefix = match broadcast_concrete(ap, bp)? {
-            TensorShape::Concrete(dims) => dims,
+            ShapedArrayShape::Concrete(dims) => dims,
             _ => unreachable!(),
         };
-        Ok(TensorShape::Unpacked(Box::new((
+        Ok(ShapedArrayShape::Unpacked(Box::new((
             prefix,
             am.clone(),
             result_suffix,
         ))))
     } else if is_unbounded_middle(am) || is_unbounded_middle(bm) {
         // At least one unbounded middle → can't determine alignment
-        Ok(TensorShape::Unpacked(Box::new((
+        Ok(ShapedArrayShape::Unpacked(Box::new((
             vec![],
             Type::any_tuple(),
             result_suffix,
@@ -596,7 +599,7 @@ fn broadcast_unpacked_with_unpacked(
         // batch dims rather than producing a hard error. At runtime the middles
         // are often identical (e.g. two Linear.forward calls on the same batch)
         // but the checker can't prove it.
-        Ok(TensorShape::Unpacked(Box::new((
+        Ok(ShapedArrayShape::Unpacked(Box::new((
             vec![],
             Type::any_tuple(),
             result_suffix,
@@ -605,8 +608,8 @@ fn broadcast_unpacked_with_unpacked(
 }
 
 /// Broadcast two concrete dimension lists following NumPy/PyTorch rules.
-/// Returns a Concrete TensorShape.
-fn broadcast_concrete(a_dims: &[Type], b_dims: &[Type]) -> Result<TensorShape, ShapeError> {
+/// Returns a Concrete ShapedArrayShape.
+fn broadcast_concrete(a_dims: &[Type], b_dims: &[Type]) -> Result<ShapedArrayShape, ShapeError> {
     let max_rank = a_dims.len().max(b_dims.len());
     let mut result_dims = Vec::with_capacity(max_rank);
 
@@ -639,7 +642,7 @@ fn broadcast_concrete(a_dims: &[Type], b_dims: &[Type]) -> Result<TensorShape, S
 
     // Reverse to get left-to-right order
     result_dims.reverse();
-    Ok(TensorShape::from_types(result_dims))
+    Ok(ShapedArrayShape::from_types(result_dims))
 }
 
 /// Broadcast a single pair of dimensions.
@@ -667,7 +670,7 @@ fn broadcast_dim(a_ty: &Type, b_ty: &Type, position: usize) -> Result<Type, Shap
 }
 
 // ============================================================================
-// Tensor Indexing / Slicing
+// Shaped Array Indexing / Slicing
 // ============================================================================
 
 /// A single index operation, pre-classified by the type checker.
@@ -687,7 +690,7 @@ pub enum IndexOp {
         step: Option<Type>,
     },
     /// Tensor index: replaces dimension with the index tensor's dims
-    TensorIndex(Vec<Type>),
+    ShapedArrayIndex(Vec<Type>),
     /// Tuple/list fancy index: dimension becomes known size or unknown.
     /// `Some(n)` for concrete tuple of length n, `None` for list/unknown.
     Fancy(Option<i64>),
@@ -698,24 +701,24 @@ pub enum IndexOp {
 
 /// Apply a single integer index — removes first dimension.
 /// E.g. `Tensor[10, 20][i]` -> `Tensor[20]`
-pub fn index_shape_int(shape: &TensorShape) -> Result<TensorShape, ShapeError> {
+pub fn index_shape_int(shape: &ShapedArrayShape) -> Result<ShapedArrayShape, ShapeError> {
     match shape {
-        TensorShape::Concrete(dims) => {
+        ShapedArrayShape::Concrete(dims) => {
             if dims.is_empty() {
                 return Err(ShapeError::ScalarIndex);
             }
-            Ok(TensorShape::Concrete(dims[1..].to_vec()))
+            Ok(ShapedArrayShape::Concrete(dims[1..].to_vec()))
         }
-        TensorShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
+        ShapedArrayShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
             let (prefix, middle, suffix) = &**unpacked;
-            Ok(TensorShape::Unpacked(Box::new((
+            Ok(ShapedArrayShape::Unpacked(Box::new((
                 prefix[1..].to_vec(),
                 middle.clone(),
                 suffix.clone(),
             ))))
         }
         // First dim is in variadic middle; can't determine result
-        TensorShape::Unpacked(_) => Ok(shapeless_shape()),
+        ShapedArrayShape::Unpacked(_) => Ok(shapeless_shape()),
     }
 }
 
@@ -723,13 +726,13 @@ pub fn index_shape_int(shape: &TensorShape) -> Result<TensorShape, ShapeError> {
 /// E.g. `Tensor[10, 20][2:5]` -> `Tensor[3, 20]`
 /// With step: `Tensor[100][::2]` -> `Tensor[50]` (ceil_div(100, 2))
 pub fn index_shape_slice(
-    shape: &TensorShape,
+    shape: &ShapedArrayShape,
     start: Option<Type>,
     stop: Option<Type>,
     step: Option<Type>,
-) -> Result<TensorShape, ShapeError> {
+) -> Result<ShapedArrayShape, ShapeError> {
     match shape {
-        TensorShape::Concrete(dims) => {
+        ShapedArrayShape::Concrete(dims) => {
             if dims.is_empty() {
                 return Err(ShapeError::ScalarIndex);
             }
@@ -742,9 +745,9 @@ pub fn index_shape_slice(
             let new_first_dim = apply_step(range_dim, step);
             let mut new_dims = vec![new_first_dim];
             new_dims.extend_from_slice(&dims[1..]);
-            Ok(TensorShape::from_types(new_dims))
+            Ok(ShapedArrayShape::from_types(new_dims))
         }
-        TensorShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
+        ShapedArrayShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
             let (prefix, middle, suffix) = &**unpacked;
             let start = adjust_negative(
                 start.unwrap_or_else(|| Type::Size(SizeExpr::Literal(0))),
@@ -755,44 +758,44 @@ pub fn index_shape_slice(
             let new_first_dim = apply_step(range_dim, step);
             let mut new_prefix = vec![new_first_dim];
             new_prefix.extend_from_slice(&prefix[1..]);
-            Ok(TensorShape::Unpacked(Box::new((
+            Ok(ShapedArrayShape::Unpacked(Box::new((
                 new_prefix,
                 middle.clone(),
                 suffix.clone(),
             ))))
         }
         // Empty prefix: dim0 is hidden in the variadic middle
-        TensorShape::Unpacked(_) => Ok(shapeless_shape()),
+        ShapedArrayShape::Unpacked(_) => Ok(shapeless_shape()),
     }
 }
 
 /// Apply tensor-as-index — replaces first dim with index tensor's dims.
 /// E.g. `Tensor[B, D1, D2][Tensor[T]]` -> `Tensor[T, D1, D2]`
 pub fn index_shape_tensor(
-    shape: &TensorShape,
+    shape: &ShapedArrayShape,
     idx_dims: &[Type],
-) -> Result<TensorShape, ShapeError> {
+) -> Result<ShapedArrayShape, ShapeError> {
     match shape {
-        TensorShape::Concrete(dims) => {
+        ShapedArrayShape::Concrete(dims) => {
             if dims.is_empty() {
                 return Err(ShapeError::ScalarIndex);
             }
             let mut new_dims = idx_dims.to_vec();
             new_dims.extend_from_slice(&dims[1..]);
-            Ok(TensorShape::from_types(new_dims))
+            Ok(ShapedArrayShape::from_types(new_dims))
         }
-        TensorShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
+        ShapedArrayShape::Unpacked(unpacked) if !unpacked.0.is_empty() => {
             let (prefix, middle, suffix) = &**unpacked;
             let mut new_prefix = idx_dims.to_vec();
             new_prefix.extend_from_slice(&prefix[1..]);
-            Ok(TensorShape::Unpacked(Box::new((
+            Ok(ShapedArrayShape::Unpacked(Box::new((
                 new_prefix,
                 middle.clone(),
                 suffix.clone(),
             ))))
         }
         // First dim is in variadic middle; can't determine result
-        TensorShape::Unpacked(_) => Ok(shapeless_shape()),
+        ShapedArrayShape::Unpacked(_) => Ok(shapeless_shape()),
     }
 }
 
@@ -809,13 +812,13 @@ fn ops_dims_consumed(ops: &[IndexOp]) -> usize {
 /// `post_ops` are applied from the end (only when `has_ellipsis` is true).
 /// Dims between pre and post (the ellipsis range) are preserved.
 pub fn index_shape_multi(
-    shape: &TensorShape,
+    shape: &ShapedArrayShape,
     pre_ops: &[IndexOp],
     post_ops: &[IndexOp],
     has_ellipsis: bool,
-) -> Result<TensorShape, ShapeError> {
+) -> Result<ShapedArrayShape, ShapeError> {
     match shape {
-        TensorShape::Concrete(shape_dims) => {
+        ShapedArrayShape::Concrete(shape_dims) => {
             let pre_consumed = ops_dims_consumed(pre_ops);
             let post_consumed = ops_dims_consumed(post_ops);
             let total_consumed = pre_consumed + post_consumed;
@@ -845,9 +848,9 @@ pub fn index_shape_multi(
             }
             new_dims.extend(post_result);
 
-            Ok(TensorShape::from_types(new_dims))
+            Ok(ShapedArrayShape::from_types(new_dims))
         }
-        TensorShape::Unpacked(unpacked) => {
+        ShapedArrayShape::Unpacked(unpacked) => {
             let (prefix, middle, suffix) = &**unpacked;
             let pre_consumed = ops_dims_consumed(pre_ops);
             let post_consumed = ops_dims_consumed(post_ops);
@@ -868,7 +871,7 @@ pub fn index_shape_multi(
             let mut result_suffix = remaining_suffix.to_vec();
             result_suffix.extend(post_result);
 
-            Ok(TensorShape::Unpacked(Box::new((
+            Ok(ShapedArrayShape::Unpacked(Box::new((
                 result_prefix,
                 middle.clone(),
                 result_suffix,
@@ -878,8 +881,8 @@ pub fn index_shape_multi(
 }
 
 /// Create a shapeless shape (compatible with any shape).
-fn shapeless_shape() -> TensorShape {
-    TensorShape::Unpacked(Box::new((vec![], Type::any_tuple(), vec![])))
+fn shapeless_shape() -> ShapedArrayShape {
+    ShapedArrayShape::Unpacked(Box::new((vec![], Type::any_tuple(), vec![])))
 }
 
 /// Adjust a negative slice bound by adding dim size (Python negative index semantics).
@@ -982,7 +985,7 @@ fn apply_index_op(op: &IndexOp, dim: &Type) -> Option<Type> {
             let range_dim = sub_dim(stop, start);
             Some(apply_step(range_dim, step.clone()))
         }
-        IndexOp::TensorIndex(idx_dims) => {
+        IndexOp::ShapedArrayIndex(idx_dims) => {
             // Multi-axis tensor indexing: this case shouldn't appear in apply_index_op
             // since tensor indexing replaces dims entirely. Treat as fancy.
             if idx_dims.is_empty() {
@@ -1001,7 +1004,7 @@ fn apply_index_op(op: &IndexOp, dim: &Type) -> Option<Type> {
 
 /// Apply a sequence of `IndexOp`s to a slice of dimensions.
 /// `NewAxis` ops insert a dim of size 1 without consuming a shape dimension.
-/// `TensorIndex` ops broadcast together: the first emits the index dims,
+/// `ShapedArrayIndex` ops broadcast together: the first emits the index dims,
 /// subsequent ones with the same shape consume a dim without emitting.
 /// Other ops consume one shape dimension each.
 /// Returns (result_dims, number_of_shape_dims_consumed).
@@ -1014,7 +1017,7 @@ fn apply_ops_to_dims(ops: &[IndexOp], dims: &[Type]) -> Result<(Vec<Type>, usize
             IndexOp::NewAxis => {
                 new_dims.push(Type::Size(SizeExpr::Literal(1)));
             }
-            IndexOp::TensorIndex(idx_dims) => {
+            IndexOp::ShapedArrayIndex(idx_dims) => {
                 if dim_idx >= dims.len() {
                     return Err(ShapeError::TooManyIndices {
                         got: dim_idx + 1,

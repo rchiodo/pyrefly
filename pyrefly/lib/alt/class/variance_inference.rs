@@ -16,7 +16,7 @@ use pyrefly_derive::VisitMut;
 use pyrefly_python::dunder;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::heap::TypeHeap;
-use pyrefly_types::tensor::TensorShape;
+use pyrefly_types::shaped_array::ShapedArrayShape;
 use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use starlark_map::small_map::SmallMap;
@@ -214,18 +214,18 @@ fn on_type(
                 on_type(variance, inj, ty, on_edge, on_var);
             }
         }
-        Type::Tensor(tensor) => {
+        Type::ShapedArray(tensor) => {
             // Tensor dimensions are invariant - Tensor[2, 3] is not a subtype of Tensor[3, 2]
             let mut visit_dim = |ty: &Type| {
                 on_type(Variance::Invariant, inj, ty, on_edge, on_var);
             };
             match &tensor.shape {
-                TensorShape::Concrete(dims) => {
+                ShapedArrayShape::Concrete(dims) => {
                     for dim in dims {
                         visit_dim(dim);
                     }
                 }
-                TensorShape::Unpacked(f) => {
+                ShapedArrayShape::Unpacked(f) => {
                     let (prefix, middle, suffix) = &**f;
                     for dim in prefix {
                         visit_dim(dim);

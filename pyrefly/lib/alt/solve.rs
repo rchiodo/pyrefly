@@ -17,7 +17,7 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::short_identifier::ShortIdentifier;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::facet::FacetKind;
-use pyrefly_types::tensor::TensorType;
+use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::type_alias::TypeAliasData;
 use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_types::type_alias::TypeAliasRef;
@@ -5657,16 +5657,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     return Some(self.heap.mk_dim(cls.targs().as_slice()[0].clone()));
                 }
-                // Canonicalize bare shaped-array types to Type::Tensor(shapeless)
+                // Canonicalize bare shaped-array types to Type::ShapedArray(shapeless)
                 // for consistency. Subscripted arrays are already converted to
-                // Type::Tensor in parse_shaped_array_type, so only the bare case
+                // Type::ShapedArray in parse_shaped_array_type, so only the bare case
                 // reaches here. Keep the torch name fallback until the fixture is
                 // explicitly registered with `@shaped_array`.
                 if let Type::ClassType(cls) = t.as_ref()
                     && (cls.has_qname("torch", "Tensor")
                         || self.shaped_array_shape_for_class_type(cls).is_some())
                 {
-                    return Some(TensorType::shapeless(cls.clone()).to_type());
+                    return Some(ShapedArrayType::shapeless(cls.clone()).to_type());
                 }
                 // Normalize type[NoneType] as None
                 if let Type::ClassType(cls) = t.as_ref()
@@ -5729,7 +5729,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Dim, SizeExpr, and Tensor are already type forms
             ty @ Type::Dim(_) => Some(ty),
             ty @ Type::Size(_) => Some(ty),
-            ty @ Type::Tensor(_) => Some(ty),
+            ty @ Type::ShapedArray(_) => Some(ty),
             ty @ Type::NNModule(_) => Some(ty),
             // Handle bare class definitions (e.g., Dim, Module) by canonicalizing them to type forms
             Type::ClassDef(cls) => {

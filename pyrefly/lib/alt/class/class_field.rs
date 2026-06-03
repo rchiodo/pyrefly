@@ -25,8 +25,8 @@ use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::heap::TypeHeap;
 use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::read_only::IsFinalVariableInitialized;
+use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::simplify::unions;
-use pyrefly_types::tensor::TensorType;
 use pyrefly_types::type_var::PreInferenceVariance;
 use pyrefly_types::type_var::Restriction;
 use pyrefly_types::typed_dict::TypedDictInner;
@@ -3832,10 +3832,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .map(|field| self.as_instance_attribute(name, &field, &Instance::of_self_type(cls)))
     }
 
-    /// Look up an attribute on a tensor instance, substituting Self with the full tensor type.
-    pub fn get_tensor_attribute(&self, tensor: &TensorType, name: &Name) -> Option<ClassAttribute> {
-        self.get_class_member(tensor.base_class.class_object(), name)
-            .map(|field| self.as_instance_attribute(name, &field, &Instance::of_tensor(tensor)))
+    /// Look up an attribute on a shaped-array instance, substituting Self with the full type.
+    pub fn get_shaped_array_attribute(
+        &self,
+        shaped_array: &ShapedArrayType,
+        name: &Name,
+    ) -> Option<ClassAttribute> {
+        self.get_class_member(shaped_array.base_class.class_object(), name)
+            .map(|field| {
+                self.as_instance_attribute(name, &field, &Instance::of_shaped_array(shaped_array))
+            })
     }
 
     pub fn get_protocol_attribute(

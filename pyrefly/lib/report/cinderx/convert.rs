@@ -433,7 +433,7 @@ pub(crate) fn type_to_structured(
         | Type::TypeVarTuple(_)
         | Type::TypeForm(_)
         | Type::ElementOfTypeVarTuple(_)
-        | Type::Tensor(_)
+        | Type::ShapedArray(_)
         | Type::NNModule(_)
         | Type::Size(_)
         | Type::Dim(_) => insert_simple_other_form("typing.Any", table),

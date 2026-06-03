@@ -535,7 +535,7 @@ fn type_shape_kind(context: &TypeShapeContext, ty: &Type) -> TypeShapeKind {
         Type::Ellipsis => named_type_shape_kind("...", Vec::new()),
         Type::Materialization => named_type_shape_kind("Materialization", Vec::new()),
         Type::Var(_) => named_type_shape_kind("typing.Any", Vec::new()),
-        Type::Tensor(_) => named_type_shape_kind("Tensor", Vec::new()),
+        Type::ShapedArray(_) => named_type_shape_kind("Tensor", Vec::new()),
         Type::NNModule(module) => {
             let args = module
                 .class

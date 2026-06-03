@@ -19,9 +19,9 @@ use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::dimension::contains_var_in_type;
 use pyrefly_types::literal::Lit;
 use pyrefly_types::read_only::ReadOnlyReason;
+use pyrefly_types::shaped_array::ShapedArrayShape;
+use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::special_form::SpecialForm;
-use pyrefly_types::tensor::TensorShape;
-use pyrefly_types::tensor::TensorType;
 use pyrefly_types::typed_dict::ANONYMOUS_TYPED_DICT;
 use pyrefly_types::typed_dict::AnonymousTypedDictInner;
 use pyrefly_types::typed_dict::ExtraItem;
@@ -1675,7 +1675,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
                 // Check if the expanded "want" side contains unbound Vars in nested positions
                 if contains_var_in_type(&want_expanded) {
-                    return Err(SubsetError::TensorShape(
+                    return Err(SubsetError::ShapedArrayShape(
                         ShapeError::nested_type_var_not_inferred(),
                     ));
                 }
@@ -1688,12 +1688,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 if got_canonical == want_canonical {
                     Ok(())
                 } else {
-                    Err(SubsetError::TensorShape(ShapeError::structural_mismatch(
-                        got_str,
-                        got_canonical.to_string(),
-                        want_str,
-                        want_canonical.to_string(),
-                    )))
+                    Err(SubsetError::ShapedArrayShape(
+                        ShapeError::structural_mismatch(
+                            got_str,
+                            got_canonical.to_string(),
+                            want_str,
+                            want_canonical.to_string(),
+                        ),
+                    ))
                 }
             }
             // Size <: Quantified - expand, canonicalize Size, and compare
@@ -1706,12 +1708,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 if got_canonical == want_canonical {
                     Ok(())
                 } else {
-                    Err(SubsetError::TensorShape(ShapeError::structural_mismatch(
-                        Type::Size(s.clone()).to_string(),
-                        got_canonical.to_string(),
-                        Type::Quantified(q.clone()).to_string(),
-                        want_canonical.to_string(),
-                    )))
+                    Err(SubsetError::ShapedArrayShape(
+                        ShapeError::structural_mismatch(
+                            Type::Size(s.clone()).to_string(),
+                            got_canonical.to_string(),
+                            Type::Quantified(q.clone()).to_string(),
+                            want_canonical.to_string(),
+                        ),
+                    ))
                 }
             }
             // Quantified <: Size - expand Size, canonicalize, and compare
@@ -1723,12 +1727,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 if got_canonical == want_canonical {
                     Ok(())
                 } else {
-                    Err(SubsetError::TensorShape(ShapeError::structural_mismatch(
-                        Type::Quantified(q.clone()).to_string(),
-                        got_canonical.to_string(),
-                        Type::Size(s.clone()).to_string(),
-                        want_canonical.to_string(),
-                    )))
+                    Err(SubsetError::ShapedArrayShape(
+                        ShapeError::structural_mismatch(
+                            Type::Quantified(q.clone()).to_string(),
+                            got_canonical.to_string(),
+                            Type::Size(s.clone()).to_string(),
+                            want_canonical.to_string(),
+                        ),
+                    ))
                 }
             }
             (t1, Type::Quantified(q)) => match q.restriction() {
@@ -1936,11 +1942,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 }
             }
             // Tensor type checking
-            (Type::Tensor(got_tensor), Type::Tensor(want_tensor)) => {
-                self.is_subset_tensor(got_tensor, want_tensor)
+            (Type::ShapedArray(got_shaped_array), Type::ShapedArray(want_shaped_array)) => {
+                self.is_subset_shaped_array(got_shaped_array, want_shaped_array)
             }
             // Tensor is subtype of its base class
-            (Type::Tensor(tensor), Type::ClassType(cls)) => self.is_subset_eq(
+            (Type::ShapedArray(tensor), Type::ClassType(cls)) => self.is_subset_eq(
                 &tensor.base_class.clone().to_type(),
                 &Type::ClassType(cls.clone()),
             ),
@@ -2512,7 +2518,11 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         Ok(())
     }
 
-    fn is_subset_tensor(&mut self, got: &TensorType, want: &TensorType) -> Result<(), SubsetError> {
+    fn is_subset_shaped_array(
+        &mut self,
+        got: &ShapedArrayType,
+        want: &ShapedArrayType,
+    ) -> Result<(), SubsetError> {
         // Check base class compatibility
         self.is_subset_eq(
             &got.base_class.clone().to_type(),
@@ -2529,14 +2539,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
     /// Delegates to is_subset_eq for each dimension pair.
     fn bind_tensor_dimensions(
         &mut self,
-        got_shape: &TensorShape,
-        want_shape: &TensorShape,
+        got_shape: &ShapedArrayShape,
+        want_shape: &ShapedArrayShape,
     ) -> Result<(), SubsetError> {
         match (got_shape, want_shape) {
             // Both concrete: check rank equality and iterate through dimension pairs
-            (TensorShape::Concrete(got_dims), TensorShape::Concrete(want_dims)) => {
+            (ShapedArrayShape::Concrete(got_dims), ShapedArrayShape::Concrete(want_dims)) => {
                 if got_dims.len() != want_dims.len() {
-                    return Err(SubsetError::TensorShape(ShapeError::rank_mismatch(
+                    return Err(SubsetError::ShapedArrayShape(ShapeError::rank_mismatch(
                         got_dims.len(),
                         want_dims.len(),
                     )));
@@ -2546,7 +2556,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 }
             }
             // Concrete got, Unpacked want: bind the TypeVarTuple to the corresponding slice
-            (TensorShape::Concrete(got_dims), TensorShape::Unpacked(want_unpacked)) => {
+            (ShapedArrayShape::Concrete(got_dims), ShapedArrayShape::Unpacked(want_unpacked)) => {
                 let (want_prefix, want_middle, want_suffix) = &**want_unpacked;
                 // Example: got = Tensor[2, 3, 5, 4], want = Tensor[2, *Ts, 4]
                 // Should bind Ts to (3, 5)
@@ -2554,7 +2564,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 // Check bounds: got must have at least as many dims as prefix + suffix
                 let min_required = want_prefix.len() + want_suffix.len();
                 if got_dims.len() < min_required {
-                    return Err(SubsetError::TensorShape(ShapeError::rank_mismatch(
+                    return Err(SubsetError::ShapedArrayShape(ShapeError::rank_mismatch(
                         got_dims.len(),
                         min_required,
                     )));
@@ -2596,7 +2606,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             //   got extras: prefix=[B], suffix=[D] → tuple[B, *Cs, D]
             //   want extras: none → *Qs directly
             //   check: tuple[B, *Cs, D] <: *Qs
-            (TensorShape::Unpacked(got_unpacked), TensorShape::Unpacked(want_unpacked)) => {
+            (
+                ShapedArrayShape::Unpacked(got_unpacked),
+                ShapedArrayShape::Unpacked(want_unpacked),
+            ) => {
                 let (got_prefix, got_middle, got_suffix) = &**got_unpacked;
                 let (want_prefix, want_middle, want_suffix) = &**want_unpacked;
                 let matched_prefix = got_prefix.len().min(want_prefix.len());
@@ -2626,12 +2639,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
                 // Reject cross-structural cases: extras must all be on one side.
                 if has_got_extras && has_want_extras {
-                    return Err(SubsetError::TensorShape(ShapeError::StructuralMismatch {
-                        got: format!("{}", got_shape),
-                        got_canonical: format!("{}", got_shape),
-                        want: format!("{}", want_shape),
-                        want_canonical: format!("{}", want_shape),
-                    }));
+                    return Err(SubsetError::ShapedArrayShape(
+                        ShapeError::StructuralMismatch {
+                            got: format!("{}", got_shape),
+                            got_canonical: format!("{}", got_shape),
+                            want: format!("{}", want_shape),
+                            want_canonical: format!("{}", want_shape),
+                        },
+                    ));
                 }
 
                 // Fold extras into the middle on whichever side has them.
@@ -2658,12 +2673,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             //   - Bind prefix: A <: 1, B <: 2
             //   - Bind suffix: C <: 5, D <: 6
             //   - Bind middle: Ts := (3, 4)
-            (TensorShape::Unpacked(got_unpacked), TensorShape::Concrete(want_dims)) => {
+            (ShapedArrayShape::Unpacked(got_unpacked), ShapedArrayShape::Concrete(want_dims)) => {
                 let (got_prefix, got_middle, got_suffix) = &**got_unpacked;
                 // Check bounds: want must have at least as many dims as prefix + suffix
                 let min_required = got_prefix.len() + got_suffix.len();
                 if want_dims.len() < min_required {
-                    return Err(SubsetError::TensorShape(ShapeError::rank_mismatch(
+                    return Err(SubsetError::ShapedArrayShape(ShapeError::rank_mismatch(
                         min_required,
                         want_dims.len(),
                     )));

@@ -48,8 +48,8 @@ use crate::equality::TypeEq;
 use crate::equality::TypeEqCtx;
 use crate::lit_int::LitInt;
 use crate::literal::Lit;
-use crate::tensor::TensorShape;
-use crate::tensor::TensorType;
+use crate::shaped_array::ShapedArrayShape;
+use crate::shaped_array::ShapedArrayType;
 use crate::tuple::Tuple;
 use crate::types::Type;
 
@@ -69,7 +69,7 @@ enum Val {
     /// Single tensor dimension — a symbolic `Type` (SizeExpr, Quantified, etc.).
     Dim(Type),
     /// Full tensor shape with concrete rank.
-    Shape(TensorShape),
+    Shape(ShapedArrayShape),
     /// Homogeneous list. Elements are all the same variant (Int, Dim, Shape, …).
     List(Vec<Val>),
     /// Variadic shape: prefix dims + variadic middle + suffix dims.
@@ -125,9 +125,9 @@ impl Val {
         }
     }
 
-    /// Extract as `&TensorShape`. Panics if not `Shape` — the DSL type checker
+    /// Extract as `&ShapedArrayShape`. Panics if not `Shape` — the DSL type checker
     /// guarantees this won't happen for well-typed DSL code.
-    pub fn as_shape(&self) -> &TensorShape {
+    pub fn as_shape(&self) -> &ShapedArrayShape {
         match self {
             Val::Shape(s) => s,
             _ => panic!("IR bug: expected Shape, got {}", self.variant_name()),
@@ -172,26 +172,26 @@ impl Val {
 mod extract {
     use crate::dimension::SizeExpr;
     use crate::literal::Lit;
-    use crate::tensor::TensorShape;
+    use crate::shaped_array::ShapedArrayShape;
     use crate::tuple::Tuple;
     use crate::types::Type;
 
-    /// Extract a TensorShape from a Type.
+    /// Extract a ShapedArrayShape from a Type.
     /// Returns None for non-tensors and shapeless tensors.
     /// Allows both Concrete and Unpacked shapes through so DSL ops that
     /// support variadic shapes (e.g., slicing) can operate on them.
-    pub fn concrete_tensor_shape(ty: &Type) -> Option<TensorShape> {
+    pub fn shaped_array_shape(ty: &Type) -> Option<ShapedArrayShape> {
         match ty {
-            Type::Tensor(tensor) => match &tensor.shape {
-                TensorShape::Concrete(_) => Some(tensor.shape.clone()),
-                TensorShape::Unpacked(_) => {
+            Type::ShapedArray(shaped_array) => match &shaped_array.shape {
+                ShapedArrayShape::Concrete(_) => Some(shaped_array.shape.clone()),
+                ShapedArrayShape::Unpacked(_) => {
                     // Allow unpacked shapes through — the DSL evaluator handles
                     // them via Val::Unpacked. Shapeless tensors (Unpacked with
                     // any_tuple middle and empty prefix/suffix) still return None.
-                    if tensor.is_shapeless() {
+                    if shaped_array.is_shapeless() {
                         None
                     } else {
-                        Some(tensor.shape.clone())
+                        Some(shaped_array.shape.clone())
                     }
                 }
             },
@@ -205,7 +205,7 @@ mod extract {
                 if let Type::Tuple(Tuple::Concrete(elems)) = &targs.as_slice()[0] {
                     let dims: Vec<Type> = elems.iter().filter_map(dimension).collect();
                     if dims.len() == elems.len() && !dims.is_empty() {
-                        return Some(TensorShape::from_types(dims));
+                        return Some(ShapedArrayShape::from_types(dims));
                     }
                 }
                 None
@@ -301,7 +301,7 @@ mod extract {
     /// Extract list or tuple of tensor shapes.
     /// Handles both list[Tensor[...]] and tuple[Tensor[...], ...].
     /// Returns None for list types (can't determine element count) or unbounded tuples.
-    pub fn tensor_list(ty: &Type) -> Option<Vec<TensorShape>> {
+    pub fn shaped_array_list(ty: &Type) -> Option<Vec<ShapedArrayShape>> {
         use crate::tuple::Tuple;
 
         match ty {
@@ -315,18 +315,18 @@ mod extract {
             Type::Tuple(Tuple::Unbounded(_)) => None,
             // tuple[Tensor[...], Tensor[...], ...] - concrete, extract all
             Type::Tuple(Tuple::Concrete(elems)) => {
-                // Check if first element is a tensor
+                // Check if first element is a shaped array.
                 if let Some(first) = elems.first() {
-                    let is_tensor = match first {
-                        Type::Tensor(_) => true,
+                    let is_shaped_array = match first {
+                        Type::ShapedArray(_) => true,
                         Type::ClassType(ct) => ct.has_qname("torch", "Tensor"),
                         _ => false,
                     };
 
-                    if is_tensor {
-                        // Tuple of tensors - extract all
-                        let shapes: Option<Vec<TensorShape>> =
-                            elems.iter().map(concrete_tensor_shape).collect();
+                    if is_shaped_array {
+                        // Tuple of shaped arrays - extract all
+                        let shapes: Option<Vec<ShapedArrayShape>> =
+                            elems.iter().map(shaped_array_shape).collect();
                         return shapes;
                     }
                 }
@@ -2293,7 +2293,7 @@ fn extract_dsl_val(actual_arg_type: &Type, expected_param_type: &DslType) -> Opt
         }
         DslType::Bool => Some(Val::Bool(extract::bool_arg(actual_arg_type)?)),
         DslType::Str => Some(Val::Str(extract::string_arg(actual_arg_type)?)),
-        DslType::Tensor => Some(Val::Shape(extract::concrete_tensor_shape(actual_arg_type)?)),
+        DslType::Tensor => Some(Val::Shape(extract::shaped_array_shape(actual_arg_type)?)),
         DslType::None => actual_arg_type.is_none().then_some(Val::None),
         DslType::List(inner) => match inner.as_ref() {
             DslType::Int => Some(Val::List(
@@ -2303,7 +2303,7 @@ fn extract_dsl_val(actual_arg_type: &Type, expected_param_type: &DslType) -> Opt
                     .collect(),
             )),
             DslType::Tensor => Some(Val::List(
-                extract::tensor_list(actual_arg_type)?
+                extract::shaped_array_list(actual_arg_type)?
                     .into_iter()
                     .map(Val::Shape)
                     .collect(),
@@ -2614,14 +2614,14 @@ fn eval_dsl_expr(
             let val = eval_dsl_expr(inner, env, fns, op_name)?;
             let shape = val.as_shape();
             match shape {
-                TensorShape::Concrete(dims) => {
+                ShapedArrayShape::Concrete(dims) => {
                     // Use dim_val to convert concrete Size(Literal(n)) to Val::Int(n)
                     // so comparisons against literal ints (e.g., `d != 1` in squeeze)
                     // work naturally.
                     let vals: Vec<Val> = dims.iter().map(|d| dim_val(d.clone())).collect();
                     Ok(Val::List(vals))
                 }
-                TensorShape::Unpacked(unpacked) => {
+                ShapedArrayShape::Unpacked(unpacked) => {
                     let (prefix, middle, suffix) = &**unpacked;
                     Ok(Val::Unpacked {
                         prefix: prefix.iter().map(|d| dim_val(d.clone())).collect(),
@@ -2642,7 +2642,7 @@ fn eval_dsl_expr(
                 } => {
                     let prefix_types = prefix.iter().map(|v| v.as_size()).collect();
                     let suffix_types = suffix.iter().map(|v| v.as_size()).collect();
-                    Ok(Val::Shape(TensorShape::unpacked(
+                    Ok(Val::Shape(ShapedArrayShape::unpacked(
                         prefix_types,
                         middle,
                         suffix_types,
@@ -2650,7 +2650,7 @@ fn eval_dsl_expr(
                 }
                 _ => {
                     let dims = val.as_size_list();
-                    Ok(Val::Shape(TensorShape::from_types(dims)))
+                    Ok(Val::Shape(ShapedArrayShape::from_types(dims)))
                 }
             }
         }
@@ -3233,15 +3233,15 @@ fn eval_dsl_body(
     }
 }
 
-/// Inject a computed `TensorShape` into a fixture `Type`, preserving the base class.
+/// Inject a computed `ShapedArrayShape` into a fixture `Type`, preserving the base class.
 ///
-/// Handles both `Type::Tensor(t)` and `Type::ClassType("torch.Tensor")` fixture types.
+/// Handles both `Type::ShapedArray(t)` and `Type::ClassType("torch.Tensor")` fixture types.
 /// Falls back to `ret_type` unchanged if it isn't a tensor type.
-fn inject_shape(shape: TensorShape, ret_type: &Type) -> Type {
+fn inject_shape(shape: ShapedArrayShape, ret_type: &Type) -> Type {
     match ret_type {
-        Type::Tensor(t) => TensorType::new(t.base_class.clone(), shape).to_type(),
+        Type::ShapedArray(t) => ShapedArrayType::new(t.base_class.clone(), shape).to_type(),
         Type::ClassType(cls) if cls.has_qname("torch", "Tensor") => {
-            TensorType::new(cls.clone(), shape).to_type()
+            ShapedArrayType::new(cls.clone(), shape).to_type()
         }
         _ => ret_type.clone(),
     }
@@ -3272,7 +3272,10 @@ fn val_to_scalar_type(val: &Val) -> Type {
 
 /// Inject a list of computed shapes into the fixture return type's tuple structure.
 /// Returns `None` if shapes is empty or the fixture type doesn't match.
-fn inject_shapes_into_tuple(shapes: Vec<TensorShape>, expected_return_type: &Type) -> Option<Type> {
+fn inject_shapes_into_tuple(
+    shapes: Vec<ShapedArrayShape>,
+    expected_return_type: &Type,
+) -> Option<Type> {
     if shapes.is_empty() {
         return None;
     }
@@ -3319,7 +3322,8 @@ fn val_to_type(
             // allows list[Tensor] for a declared Tensor return, so this path
             // is guarded by check_body's static validation.
             Val::List(items) => {
-                let shapes: Vec<TensorShape> = items.iter().map(|v| v.as_shape().clone()).collect();
+                let shapes: Vec<ShapedArrayShape> =
+                    items.iter().map(|v| v.as_shape().clone()).collect();
                 if shapes.len() == 1 {
                     return inject_shape(shapes.into_iter().next().unwrap(), expected_return_type);
                 }
@@ -3408,7 +3412,8 @@ fn val_to_type(
         DslType::List(inner) => match inner.as_ref() {
             DslType::Tensor => {
                 let items = val.as_list();
-                let shapes: Vec<TensorShape> = items.iter().map(|v| v.as_shape().clone()).collect();
+                let shapes: Vec<ShapedArrayShape> =
+                    items.iter().map(|v| v.as_shape().clone()).collect();
                 if is_unbounded {
                     // Unbounded: build Tuple::Unbounded with computed element shape
                     if let (Some(first), Type::Tuple(Tuple::Unbounded(elem))) =
@@ -3431,9 +3436,10 @@ fn val_to_type(
 
         DslType::Tuple(elems) => {
             let items = val.as_list();
-            let all_tensor = elems.iter().all(|e| matches!(e, DslType::Tensor));
-            if all_tensor {
-                let shapes: Vec<TensorShape> = items.iter().map(|v| v.as_shape().clone()).collect();
+            let all_shaped_array = elems.iter().all(|e| matches!(e, DslType::Tensor));
+            if all_shaped_array {
+                let shapes: Vec<ShapedArrayShape> =
+                    items.iter().map(|v| v.as_shape().clone()).collect();
                 inject_shapes_into_tuple(shapes, expected_return_type)
                     .unwrap_or_else(|| expected_return_type.clone())
             } else {
