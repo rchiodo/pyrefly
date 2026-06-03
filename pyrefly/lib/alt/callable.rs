@@ -983,7 +983,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 Param::Varargs(..) => {}
                 Param::Pos(name, ty, required) | Param::KwOnly(name, ty, required) => {
-                    kwparams.insert(name, (ty, required == &Required::Required));
+                    kwparams.insert(name, (ty, required));
                 }
                 Param::Kwargs(name, Type::Unpack(f)) if let Type::TypedDict(typed_dict) = &**f => {
                     self.typed_dict_fields(typed_dict)
@@ -991,7 +991,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         .for_each(|(name, field)| {
                             kwparams.insert(
                                 name_owner.push(name),
-                                (type_owner.push(field.ty), field.required),
+                                (
+                                    type_owner.push(field.ty),
+                                    if field.required {
+                                        &Required::Required
+                                    } else {
+                                        &Required::Optional(None)
+                                    },
+                                ),
                             );
                         });
                     if let ExtraItems::Extra(extra) = self.typed_dict_extra_items(typed_dict) {
@@ -1234,23 +1241,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut extra_posargs_matched = 0;
         for (name, (want, required)) in kwparams.iter() {
             if !seen_names.contains_key(name) {
-                if splat_kwargs.is_empty() && *required {
-                    if let Some(arg_range) = extra_posargs_iter.next() {
-                        error(
-                            call_errors,
-                            *arg_range,
-                            ErrorKind::UnexpectedPositionalArgument,
-                            format!("Expected argument `{name}` to be passed by name"),
-                        );
-                        extra_posargs_matched += 1;
-                    } else {
-                        error(
-                            call_errors,
-                            arguments_range,
-                            ErrorKind::MissingArgument,
-                            format!("Missing argument `{name}`"),
-                        );
+                match required {
+                    Required::Required => {
+                        if splat_kwargs.is_empty() {
+                            if let Some(arg_range) = extra_posargs_iter.next() {
+                                error(
+                                    call_errors,
+                                    *arg_range,
+                                    ErrorKind::UnexpectedPositionalArgument,
+                                    format!("Expected argument `{name}` to be passed by name"),
+                                );
+                                extra_posargs_matched += 1;
+                            } else {
+                                error(
+                                    call_errors,
+                                    arguments_range,
+                                    ErrorKind::MissingArgument,
+                                    format!("Missing argument `{name}`"),
+                                );
+                            }
+                        }
                     }
+                    Required::Optional(_) => {}
                 }
                 for (ty, range) in &splat_kwargs {
                     self.check_type_with_call_context(
