@@ -26,6 +26,7 @@ use ruff_python_ast::visitor::walk_stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
+use vec1::Vec1;
 
 use super::extract_shared::decorator_matches_name;
 use super::extract_shared::has_existing_from_import;
@@ -160,7 +161,7 @@ pub(crate) fn build_module_member_move_edits(
     context: &MoveModuleMemberContext,
     target_handle: &Handle,
     import_format: ImportFormat,
-) -> Option<Vec<(Module, TextRange, String)>> {
+) -> Option<Vec1<(Module, TextRange, String)>> {
     let (removal_edit, import_edit) = build_removal_and_import_edits(
         transaction,
         handle,
@@ -171,7 +172,7 @@ pub(crate) fn build_module_member_move_edits(
         import_format,
         context.removal_range,
     )?;
-    let mut edits = vec![removal_edit];
+    let mut edits = Vec1::new(removal_edit);
     if let Some(import_edit) = import_edit {
         edits.push(import_edit);
     }

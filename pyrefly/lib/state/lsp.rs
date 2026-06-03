@@ -93,6 +93,7 @@ mod dict_completions;
 mod pytest;
 mod quick_fixes;
 
+pub(crate) use self::quick_fixes::move_module::MoveModuleMemberContext;
 pub(crate) use self::quick_fixes::types::LocalRefactorCodeAction;
 
 #[derive(Debug)]
@@ -2999,6 +3000,30 @@ impl<'a> Transaction<'a> {
             self,
             handle,
             selection,
+            import_format,
+        )
+    }
+
+    pub(crate) fn module_member_move_context(
+        &self,
+        handle: &Handle,
+        selection: TextRange,
+    ) -> Option<MoveModuleMemberContext> {
+        quick_fixes::move_module::module_member_move_context(self, handle, selection)
+    }
+
+    pub(crate) fn module_member_move_edits(
+        &self,
+        handle: &Handle,
+        context: &MoveModuleMemberContext,
+        target_handle: &Handle,
+        import_format: ImportFormat,
+    ) -> Option<Vec1<(ModuleInfo, TextRange, String)>> {
+        quick_fixes::move_module::build_module_member_move_edits(
+            self,
+            handle,
+            context,
+            target_handle,
             import_format,
         )
     }
