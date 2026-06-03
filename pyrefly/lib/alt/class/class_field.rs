@@ -3573,11 +3573,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .map(|info| info.ty.clone())
                     .collect();
                 let intersect = self.intersects(&types);
-                // Before intersecting `types`, `intersects` attempts to simplify to a single
-                // element of `types` that is a common base type for all elements. If an
-                // intersection is produced (or `Never` if the types are disjoint), then there was
-                // no common base type, so the inheritance is inconsistent.
-                if matches!(intersect, Type::Intersect(_) | Type::Never(_)) {
+                if intersect.is_never() {
                     let mut builder = errors
                         .error_builder(
                             cls.range(),
