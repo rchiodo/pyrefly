@@ -4,7 +4,7 @@
 
 ```scrut {output_stream: stderr}
 $ $PYREFLY check $TMPDIR/does_not_exist --python-version 3.13.0
-No Python files matched pattern `*/does_not_exist` (glob)
+Path `*/does_not_exist` does not exist (glob)
 [1]
 ```
 

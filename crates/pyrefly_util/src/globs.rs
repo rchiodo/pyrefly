@@ -100,16 +100,20 @@ impl Glob {
         bytes.contains(&b'*') || bytes.contains(&b'?') || bytes.contains(&b'[')
     }
 
+    /// Returns true if this pattern contains no glob wildcards, i.e. the user
+    /// named a concrete path rather than a pattern. Says nothing about whether
+    /// the path exists on disk.
+    fn has_no_wildcards(&self) -> bool {
+        self.as_path().components().all(|comp| match comp {
+            Component::Normal(part) => !Self::contains_glob_char(part),
+            _ => true,
+        })
+    }
+
     /// Returns true if this pattern is "explicit" - i.e., it has no wildcards
     /// and directly specifies a file path that exists.
     fn is_explicit_file_pattern(&self) -> bool {
-        // Check if any component contains glob characters
-        let has_no_wildcards = self.as_path().components().all(|comp| match comp {
-            Component::Normal(part) => !Self::contains_glob_char(part),
-            _ => true,
-        });
-
-        has_no_wildcards && self.as_path().is_file()
+        self.has_no_wildcards() && self.as_path().is_file()
     }
 
     fn pattern_relative_to_root(root: &Path, pattern: &Pattern) -> Pattern {
@@ -560,7 +564,14 @@ impl Globs {
                 ));
             }
             if self.0.len() == 1 {
-                let pattern_str = self.0[0].as_str();
+                let pattern = &self.0[0];
+                let pattern_str = pattern.as_str();
+                // A lone concrete path (no wildcards) that resolved to nothing does
+                // not exist on disk -- a clearer error than "no files matched" for a
+                // path the user named directly.
+                if pattern.has_no_wildcards() && !pattern.as_path().exists() {
+                    return Err(anyhow::anyhow!("Path `{}` does not exist", pattern_str));
+                }
                 return Err(anyhow::anyhow!(
                     "No Python files matched pattern `{}`",
                     pattern_str
@@ -1875,26 +1886,22 @@ mod tests {
         assert!(files.contains(&root.join("regular.py")));
     }
 
-    /// Characterizes the current behavior for
-    /// https://github.com/facebook/pyrefly/issues/3647: a lone non-existent
-    /// concrete path reports the generic "No Python files matched pattern" error,
-    /// while a non-existent path alongside a real one is silently skipped. The
-    /// next diff improves the lone-path message to "does not exist".
+    /// A lone non-existent concrete path now reports a clear "does not exist"
+    /// error instead of the generic "no files matched". A non-existent path
+    /// alongside a real one is still silently skipped, so tools that pass a mix
+    /// of paths keep working. https://github.com/facebook/pyrefly/issues/3647
     #[test]
     fn test_explicit_nonexistent_path() {
         let tempdir = tempfile::tempdir().unwrap();
         let root = tempdir.path();
         TestPath::setup_test_directory(root, vec![TestPath::file("real.py")]);
 
-        // A lone non-existent concrete path errors, but with the generic message.
+        // A lone non-existent concrete path errors with a clear message.
         let err = Globs::new_with_root(root, vec!["does_not_exist.py".to_owned()])
             .unwrap()
             .filtered_files(&GlobFilter::empty(), None)
             .unwrap_err();
-        assert!(
-            err.to_string().contains("No Python files matched pattern"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("does not exist"), "got: {err}");
 
         // A non-existent path alongside a real one is silently skipped.
         let files = Globs::new_with_root(
