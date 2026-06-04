@@ -14,6 +14,7 @@ in crates/pyrefly_types/src/meta_shape_dsl.rs.
 import builtins
 from typing import Any, overload, Self, TYPE_CHECKING
 
+import shape_extensions
 from shape_extensions import uses_shape_dsl
 from torch._shapes import (
     aminmax_ir,
@@ -98,6 +99,7 @@ bool: Any
 # Tensor Class
 # ============================================================================
 
+@shape_extensions.shaped_array(shape="Shape")
 class Tensor[*Shape]:
     """
     PyTorch Tensor with shape type parameter.

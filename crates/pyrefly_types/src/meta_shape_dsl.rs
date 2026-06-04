@@ -447,7 +447,7 @@ enum DslTypeCon {
     Bool,
     SymInt,
     List,
-    Tensor,
+    ShapedArray,
 }
 
 /// Types in the DSL. Corresponds to `<type>` in the grammar,
@@ -458,7 +458,7 @@ enum DslType {
     SymInt,
     Bool,
     Str,
-    Tensor,
+    ShapedArray,
     None,
     /// `list[T]`
     List(Box<DslType>),
@@ -560,8 +560,8 @@ enum DslExpr {
     },
     /// `expr.shape` (extract tensor dimensions).
     Shape(Box<DslExpr>),
-    /// `Tensor(shape=expr)` (construct result tensor).
-    TensorNew(Box<DslExpr>),
+    /// `ShapedArray(shape=expr)` (construct result shaped array).
+    ShapedArrayNew(Box<DslExpr>),
     /// Ternary `body if test else orelse`.
     IfExpr {
         body: Box<DslExpr>,
@@ -651,7 +651,7 @@ impl fmt::Display for DslTypeCon {
             DslTypeCon::Bool => write!(f, "bool"),
             DslTypeCon::SymInt => write!(f, "symint"),
             DslTypeCon::List => write!(f, "list"),
-            DslTypeCon::Tensor => write!(f, "Tensor"),
+            DslTypeCon::ShapedArray => write!(f, "ShapedArray"),
         }
     }
 }
@@ -663,7 +663,7 @@ impl fmt::Display for DslType {
             DslType::SymInt => write!(f, "symint"),
             DslType::Bool => write!(f, "bool"),
             DslType::Str => write!(f, "str"),
-            DslType::Tensor => write!(f, "Tensor"),
+            DslType::ShapedArray => write!(f, "ShapedArray"),
             DslType::None => write!(f, "None"),
             DslType::List(inner) => write!(f, "list[{}]", inner),
             DslType::Union(types) => {
@@ -762,7 +762,7 @@ impl fmt::Display for DslExpr {
             DslExpr::IsInstance { expr, ty } => write!(f, "isinstance({}, {})", expr, ty),
             DslExpr::In { left, right } => write!(f, "{} in {}", left, right),
             DslExpr::Shape(expr) => write!(f, "{}.shape", expr),
-            DslExpr::TensorNew(expr) => write!(f, "Tensor(shape={})", expr),
+            DslExpr::ShapedArrayNew(expr) => write!(f, "ShapedArray(shape={})", expr),
             DslExpr::IfExpr { body, test, orelse } => {
                 write!(f, "{} if {} else {}", body, test, orelse)
             }
@@ -793,10 +793,10 @@ fn convert_type_constructor(expr: &Expr) -> Result<DslTypeCon, String> {
             "bool" => Ok(DslTypeCon::Bool),
             "symint" => Ok(DslTypeCon::SymInt),
             "list" => Ok(DslTypeCon::List),
-            "Tensor" => Ok(DslTypeCon::Tensor),
+            "ShapedArray" => Ok(DslTypeCon::ShapedArray),
             other => Err(format!(
                 "unknown type constructor '{}' in isinstance. \
-                 Expected one of: int, str, bool, symint, list, Tensor",
+                 Expected one of: int, str, bool, symint, list, ShapedArray",
                 other
             )),
         },
@@ -815,11 +815,11 @@ fn convert_type_annotation(expr: &Expr) -> Result<DslType, String> {
             "symint" => Ok(DslType::SymInt),
             "bool" => Ok(DslType::Bool),
             "str" => Ok(DslType::Str),
-            "Tensor" => Ok(DslType::Tensor),
+            "ShapedArray" => Ok(DslType::ShapedArray),
             "None" => Ok(DslType::None),
             other => Err(format!(
                 "unknown type '{}' in annotation. \
-                 Expected one of: int, symint, bool, str, Tensor, None",
+                 Expected one of: int, symint, bool, str, ShapedArray, None",
                 other
             )),
         },
@@ -1351,19 +1351,23 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, DslCompileE
                 })?,
             })
         }
-        "Tensor" => {
-            // Tensor(shape=expr) — keyword argument
+        "ShapedArray" => {
+            // ShapedArray(shape=expr) - keyword argument.
             if !call.arguments.args.is_empty() {
                 return Err(DslCompileError {
                     range,
-                    message: "Tensor() uses keyword arg shape=, not positional args".to_owned(),
+                    message: format!(
+                        "{}() uses keyword arg shape=, not positional args",
+                        func_name
+                    ),
                 });
             }
             if call.arguments.keywords.len() != 1 {
                 return Err(DslCompileError {
                     range,
                     message: format!(
-                        "Tensor() takes exactly one keyword arg, got {}",
+                        "{}() takes exactly one keyword arg, got {}",
+                        func_name,
                         call.arguments.keywords.len()
                     ),
                 });
@@ -1374,16 +1378,16 @@ fn convert_call(call: &ruff_python_ast::ExprCall) -> Result<DslExpr, DslCompileE
                 .as_ref()
                 .ok_or_else(|| DslCompileError {
                     range,
-                    message: "Tensor keyword must be named".to_owned(),
+                    message: format!("{} keyword must be named", func_name),
                 })?
                 .as_str();
             if kw_name != "shape" {
                 return Err(DslCompileError {
                     range,
-                    message: format!("Tensor() keyword must be 'shape', got '{}'", kw_name),
+                    message: format!("{}() keyword must be 'shape', got '{}'", func_name, kw_name),
                 });
             }
-            Ok(DslExpr::TensorNew(Box::new(convert_expr(&kw.value)?)))
+            Ok(DslExpr::ShapedArrayNew(Box::new(convert_expr(&kw.value)?)))
         }
 
         // Builtins validated at parse time
@@ -1584,7 +1588,7 @@ fn matches_constructor(ty: &DslType, con: DslTypeCon) -> bool {
             | (DslType::SymInt, DslTypeCon::SymInt)
             | (DslType::Bool, DslTypeCon::Bool)
             | (DslType::Str, DslTypeCon::Str)
-            | (DslType::Tensor, DslTypeCon::Tensor)
+            | (DslType::ShapedArray, DslTypeCon::ShapedArray)
             | (DslType::List(_), DslTypeCon::List)
     )
 }
@@ -1717,9 +1721,12 @@ fn return_type_compatible(inferred: &DslType, declared: &DslType) -> bool {
         (DslType::List(inferred_inner), DslType::List(declared_inner)) => {
             return_type_compatible(inferred_inner, declared_inner)
         }
-        // list[Tensor] → Tensor: existing dynamic multi-tensor return behaviour
-        // where some ops return [t1, t2] despite declaring `-> Tensor`.
-        (DslType::List(inner), DslType::Tensor) if matches!(inner.as_ref(), DslType::Tensor) => {
+        // list[ShapedArray] -> ShapedArray: existing dynamic multi-array return
+        // behaviour where some ops return [t1, t2] despite declaring a single
+        // shaped-array return.
+        (DslType::List(inner), DslType::ShapedArray)
+            if matches!(inner.as_ref(), DslType::ShapedArray) =>
+        {
             true
         }
         // List expressions are backed by Val::List, same as Tuple at runtime.
@@ -2175,9 +2182,9 @@ fn infer_expr(
             infer_expr(inner, env, sigs, errors);
             DslType::List(Box::new(dim_type()))
         }
-        DslExpr::TensorNew(inner) => {
+        DslExpr::ShapedArrayNew(inner) => {
             infer_expr(inner, env, sigs, errors);
-            DslType::Tensor
+            DslType::ShapedArray
         }
         DslExpr::IfExpr { body, test, orelse } => {
             let (then_env, else_env) = narrow(test, env, errors);
@@ -2293,7 +2300,7 @@ fn extract_dsl_val(actual_arg_type: &Type, expected_param_type: &DslType) -> Opt
         }
         DslType::Bool => Some(Val::Bool(extract::bool_arg(actual_arg_type)?)),
         DslType::Str => Some(Val::Str(extract::string_arg(actual_arg_type)?)),
-        DslType::Tensor => Some(Val::Shape(extract::shaped_array_shape(actual_arg_type)?)),
+        DslType::ShapedArray => Some(Val::Shape(extract::shaped_array_shape(actual_arg_type)?)),
         DslType::None => actual_arg_type.is_none().then_some(Val::None),
         DslType::List(inner) => match inner.as_ref() {
             DslType::Int => Some(Val::List(
@@ -2302,7 +2309,7 @@ fn extract_dsl_val(actual_arg_type: &Type, expected_param_type: &DslType) -> Opt
                     .map(|&i| Val::Int(i))
                     .collect(),
             )),
-            DslType::Tensor => Some(Val::List(
+            DslType::ShapedArray => Some(Val::List(
                 extract::shaped_array_list(actual_arg_type)?
                     .into_iter()
                     .map(Val::Shape)
@@ -2591,7 +2598,7 @@ fn eval_dsl_expr(
                 (DslTypeCon::SymInt, Val::Dim(_)) => true,
                 (DslTypeCon::List, Val::List(_)) => true,
                 (DslTypeCon::List, Val::Unpacked { .. }) => true,
-                (DslTypeCon::Tensor, Val::Shape(_)) => true,
+                (DslTypeCon::ShapedArray, Val::Shape(_)) => true,
                 _ => false,
             };
             Ok(Val::Bool(matches))
@@ -2632,7 +2639,7 @@ fn eval_dsl_expr(
             }
         }
 
-        DslExpr::TensorNew(shape_expr) => {
+        DslExpr::ShapedArrayNew(shape_expr) => {
             let val = eval_dsl_expr(shape_expr, env, fns, op_name)?;
             match val {
                 Val::Unpacked {
@@ -3314,13 +3321,13 @@ fn val_to_type(
     op_name: &str,
 ) -> Type {
     match actual_result_type {
-        DslType::Tensor => match val {
+        DslType::ShapedArray => match val {
             Val::Shape(s) => inject_shape(s, expected_return_type),
             // Some ops conditionally return a tuple of tensors despite
-            // declaring `-> Tensor` (e.g. min_max_median_ir returns
+            // declaring `-> ShapedArray` (e.g. min_max_median_ir returns
             // [Tensor, Tensor] when dim is given).  return_type_compatible
-            // allows list[Tensor] for a declared Tensor return, so this path
-            // is guarded by check_body's static validation.
+            // allows list[ShapedArray] for a declared ShapedArray return, so
+            // this path is guarded by check_body's static validation.
             Val::List(items) => {
                 let shapes: Vec<ShapedArrayShape> =
                     items.iter().map(|v| v.as_shape().clone()).collect();
@@ -3331,7 +3338,7 @@ fn val_to_type(
                     .unwrap_or_else(|| expected_return_type.clone())
             }
             _ => unreachable!(
-                "validated by check_body: Tensor return but got {:?} (op: {})",
+                "validated by check_body: ShapedArray return but got {:?} (op: {})",
                 val.variant_name(),
                 op_name,
             ),
@@ -3392,7 +3399,7 @@ fn val_to_type(
                     (DslType::Int, Val::Int(_))
                     | (DslType::SymInt, Val::Int(_))
                     | (DslType::SymInt, Val::Dim(_))
-                    | (DslType::Tensor, Val::Shape(_))
+                    | (DslType::ShapedArray, Val::Shape(_))
                     | (DslType::Bool, Val::Bool(_))
                     | (DslType::Str, Val::Str(_))
                     | (DslType::None, Val::None) => {
@@ -3410,7 +3417,7 @@ fn val_to_type(
         }
 
         DslType::List(inner) => match inner.as_ref() {
-            DslType::Tensor => {
+            DslType::ShapedArray => {
                 let items = val.as_list();
                 let shapes: Vec<ShapedArrayShape> =
                     items.iter().map(|v| v.as_shape().clone()).collect();
@@ -3436,7 +3443,7 @@ fn val_to_type(
 
         DslType::Tuple(elems) => {
             let items = val.as_list();
-            let all_shaped_array = elems.iter().all(|e| matches!(e, DslType::Tensor));
+            let all_shaped_array = elems.iter().all(|e| matches!(e, DslType::ShapedArray));
             if all_shaped_array {
                 let shapes: Vec<ShapedArrayShape> =
                     items.iter().map(|v| v.as_shape().clone()).collect();
@@ -3696,7 +3703,7 @@ fn collect_call_targets_expr(expr: &DslExpr, targets: &mut HashSet<String>) {
             collect_call_targets_expr(left, targets);
             collect_call_targets_expr(right, targets);
         }
-        DslExpr::Shape(expr) | DslExpr::TensorNew(expr) => {
+        DslExpr::Shape(expr) | DslExpr::ShapedArrayNew(expr) => {
             collect_call_targets_expr(expr, targets);
         }
         DslExpr::IfExpr { body, test, orelse } => {
@@ -3909,6 +3916,51 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn test_shaped_array_dsl_spelling_is_canonical() {
+        let fns = parse_dsl_functions(
+            r#"
+def new_spelling(x: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=x.shape)
+"#,
+        );
+
+        let f = fns.iter().find(|f| f.name() == "new_spelling").unwrap();
+        assert_eq!(f.inner.params[0].ty.to_string(), "ShapedArray");
+        assert_eq!(
+            f.inner.return_type.as_ref().unwrap().to_string(),
+            "ShapedArray"
+        );
+        let DslBody::Return(expr) = &f.inner.body else {
+            panic!("new_spelling should have a return body");
+        };
+        assert_eq!(expr.to_string(), "ShapedArray(shape=x.shape)");
+    }
+
+    #[test]
+    fn test_tensor_dsl_spelling_is_rejected() {
+        let (module, _, _) = Ast::parse(
+            r#"
+def legacy_spelling(x: Tensor) -> Tensor:
+    return Tensor(shape=x.shape)
+"#,
+            PySourceType::Stub,
+        );
+        let Stmt::FunctionDef(func) = &module.body[0] else {
+            panic!("expected a function");
+        };
+
+        let err = convert_shape_dsl_function(func).unwrap_err();
+        assert!(
+            err.message.contains("unknown type 'Tensor' in annotation")
+                || err
+                    .message
+                    .contains("unknown function or constructor 'Tensor'"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

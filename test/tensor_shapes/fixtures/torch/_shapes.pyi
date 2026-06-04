@@ -8,9 +8,9 @@ from shape_extensions.dsl import (
     parse_einsum_equation,
     prod,
     shape_dsl_function,
+    ShapedArray,
     sum,
     symint,
-    Tensor,
     Unknown,
 )
 
@@ -106,7 +106,7 @@ def conv_spatial_out(
     return (input_dim + 2 * padding - dilation * (kernel - 1) - 1) // stride + 1
 
 @shape_dsl_function
-def reshape_ir(self: Tensor, shape: list[int | symint]) -> Tensor:
+def reshape_ir(self: ShapedArray, shape: list[int | symint]) -> ShapedArray:
     minus_one_count = len([d for d in shape if d == -1])
     if minus_one_count > 1:
         raise Error("can only specify one unknown dimension as -1")
@@ -126,29 +126,29 @@ def reshape_ir(self: Tensor, shape: list[int | symint]) -> Tensor:
                 + " to be divisible by "
                 + str(known)
             )
-        return Tensor(shape=[total // known if d == -1 else d for d in shape])
-    return Tensor(shape=shape)
+        return ShapedArray(shape=[total // known if d == -1 else d for d in shape])
+    return ShapedArray(shape=shape)
 
 @shape_dsl_function
-def squeeze_ir(self: Tensor, dim: int | None = None) -> Tensor:
+def squeeze_ir(self: ShapedArray, dim: int | None = None) -> ShapedArray:
     if dim == None:
-        return Tensor(shape=[d for d in self.shape if d != 1])
+        return ShapedArray(shape=[d for d in self.shape if d != 1])
     idx = normalize_dim(len(self.shape), dim)
-    return Tensor(
+    return ShapedArray(
         shape=[d for i, d in enumerate(self.shape) if not (i == idx and d == 1)]
     )
 
 @shape_dsl_function
-def unsqueeze_ir(self: Tensor, dim: int) -> Tensor:
+def unsqueeze_ir(self: ShapedArray, dim: int) -> ShapedArray:
     d = normalize_dim(len(self.shape) + 1, dim)
-    return Tensor(shape=insert_dim(self.shape, d, 1))
+    return ShapedArray(shape=insert_dim(self.shape, d, 1))
 
 @shape_dsl_function
-def transpose_ir(self: Tensor, dim0: int, dim1: int) -> Tensor:
+def transpose_ir(self: ShapedArray, dim0: int, dim1: int) -> ShapedArray:
     rank = len(self.shape)
     d0 = normalize_dim(rank, dim0)
     d1 = normalize_dim(rank, dim1)
-    return Tensor(
+    return ShapedArray(
         shape=[
             self.shape[d1] if i == d0 else self.shape[d0] if i == d1 else d
             for i, d in enumerate(self.shape)
@@ -156,53 +156,55 @@ def transpose_ir(self: Tensor, dim0: int, dim1: int) -> Tensor:
     )
 
 @shape_dsl_function
-def permute_ir(self: Tensor, dims: list[int]) -> Tensor:
+def permute_ir(self: ShapedArray, dims: list[int]) -> ShapedArray:
     rank = len(self.shape)
     if len(dims) != rank:
         raise Error("permute: expected " + str(rank) + " dims, got " + str(len(dims)))
-    return Tensor(shape=[self.shape[normalize_dim(rank, d)] for d in dims])
+    return ShapedArray(shape=[self.shape[normalize_dim(rank, d)] for d in dims])
 
 @shape_dsl_function
-def flatten_ir(self: Tensor, start_dim: int = 0, end_dim: int = -1) -> Tensor:
+def flatten_ir(self: ShapedArray, start_dim: int = 0, end_dim: int = -1) -> ShapedArray:
     rank = len(self.shape)
     s = normalize_dim(rank, start_dim)
     e = normalize_dim(rank, end_dim)
-    return Tensor(
+    return ShapedArray(
         shape=self.shape[:s] + [prod(self.shape[s : e + 1])] + self.shape[e + 1 :]
     )
 
 @shape_dsl_function
-def expand_ir(self: Tensor, sizes: list[int | symint]) -> Tensor:
-    return Tensor(shape=[d if t == -1 else t for d, t in zip(self.shape, sizes)])
+def expand_ir(self: ShapedArray, sizes: list[int | symint]) -> ShapedArray:
+    return ShapedArray(shape=[d if t == -1 else t for d, t in zip(self.shape, sizes)])
 
 @shape_dsl_function
-def repeat_ir(self: Tensor, sizes: list[int | symint]) -> Tensor:
-    return Tensor(shape=[d * r for d, r in zip(self.shape, sizes)])
+def repeat_ir(self: ShapedArray, sizes: list[int | symint]) -> ShapedArray:
+    return ShapedArray(shape=[d * r for d, r in zip(self.shape, sizes)])
 
 @shape_dsl_function
-def unbind_ir(self: Tensor, dim: int = 0) -> list[Tensor]:
+def unbind_ir(self: ShapedArray, dim: int = 0) -> list[ShapedArray]:
     d = normalize_dim(len(self.shape), dim)
-    return [Tensor(shape=remove_dim(self.shape, d)), ...]
+    return [ShapedArray(shape=remove_dim(self.shape, d)), ...]
 
 @shape_dsl_function
 def movedim_ir(
-    self: Tensor, source: int | list[int], destination: int | list[int]
-) -> Tensor:
-    return Tensor(shape=move_dims(self.shape, source, destination, len(self.shape)))
+    self: ShapedArray, source: int | list[int], destination: int | list[int]
+) -> ShapedArray:
+    return ShapedArray(
+        shape=move_dims(self.shape, source, destination, len(self.shape))
+    )
 
 @shape_dsl_function
 def unfold_ir(
-    self: Tensor, dimension: int, size: int | symint, step: int = 1
-) -> Tensor:
+    self: ShapedArray, dimension: int, size: int | symint, step: int = 1
+) -> ShapedArray:
     d = normalize_dim(len(self.shape), dimension)
     new_dim = (self.shape[d] - size) // step + 1
-    return Tensor(shape=replace_dim(self.shape, d, new_dim) + [size])
+    return ShapedArray(shape=replace_dim(self.shape, d, new_dim) + [size])
 
 @shape_dsl_function
-def cat_ir(tensors: list[Tensor], dim: int = 0) -> Tensor:
+def cat_ir(tensors: list[ShapedArray], dim: int = 0) -> ShapedArray:
     first = tensors[0]
     d = normalize_dim(len(first.shape), dim)
-    return Tensor(
+    return ShapedArray(
         shape=[
             sum([t.shape[i] for t in tensors]) if i == d else dim_val
             for i, dim_val in enumerate(first.shape)
@@ -210,47 +212,47 @@ def cat_ir(tensors: list[Tensor], dim: int = 0) -> Tensor:
     )
 
 @shape_dsl_function
-def stack_ir(tensors: list[Tensor], dim: int = 0) -> Tensor:
+def stack_ir(tensors: list[ShapedArray], dim: int = 0) -> ShapedArray:
     first = tensors[0]
     d = normalize_dim(len(first.shape) + 1, dim)
-    return Tensor(shape=insert_dim(first.shape, d, len(tensors)))
+    return ShapedArray(shape=insert_dim(first.shape, d, len(tensors)))
 
 @shape_dsl_function
-def broadcast_to_ir(self: Tensor, shape: list[int | symint]) -> Tensor:
-    return Tensor(shape=shape)
+def broadcast_to_ir(self: ShapedArray, shape: list[int | symint]) -> ShapedArray:
+    return ShapedArray(shape=shape)
 
 @shape_dsl_function
-def tile_ir(self: Tensor, dims: list[int]) -> Tensor:
+def tile_ir(self: ShapedArray, dims: list[int]) -> ShapedArray:
     rank = len(self.shape)
     if len(dims) > rank:
         extra = len(dims) - rank
-        return Tensor(
+        return ShapedArray(
             shape=[r for r in dims[:extra]]
             + [d * r for d, r in zip(self.shape, dims[extra:])]
         )
-    return Tensor(shape=[d * r for d, r in zip(self.shape, dims)])
+    return ShapedArray(shape=[d * r for d, r in zip(self.shape, dims)])
 
 @shape_dsl_function
-def select_ir(self: Tensor, dim: int) -> Tensor:
+def select_ir(self: ShapedArray, dim: int) -> ShapedArray:
     d = normalize_dim(len(self.shape), dim)
-    return Tensor(shape=remove_dim(self.shape, d))
+    return ShapedArray(shape=remove_dim(self.shape, d))
 
 @shape_dsl_function
-def narrow_ir(self: Tensor, dim: int, length: int | symint) -> Tensor:
-    return Tensor(
+def narrow_ir(self: ShapedArray, dim: int, length: int | symint) -> ShapedArray:
+    return ShapedArray(
         shape=replace_dim(self.shape, normalize_dim(len(self.shape), dim), length)
     )
 
 @shape_dsl_function
 def split_ir(
-    self: Tensor,
+    self: ShapedArray,
     split_size_or_sections: int | symint | list[int | symint] | None = None,
     dim: int = 0,
-) -> list[Tensor]:
+) -> list[ShapedArray]:
     d = normalize_dim(len(self.shape), dim)
     if isinstance(split_size_or_sections, list):
         return [
-            Tensor(shape=replace_dim(self.shape, d, section))
+            ShapedArray(shape=replace_dim(self.shape, d, section))
             for section in split_size_or_sections
         ]
     if isinstance(split_size_or_sections, int):
@@ -258,7 +260,7 @@ def split_ir(
         if isinstance(dim_val, int):
             count = (dim_val + split_size_or_sections - 1) // split_size_or_sections
             return [
-                Tensor(
+                ShapedArray(
                     shape=replace_dim(
                         self.shape,
                         d,
@@ -269,25 +271,31 @@ def split_ir(
                 )
                 for i in range(count)
             ]
-        return [Tensor(shape=replace_dim(self.shape, d, split_size_or_sections)), ...]
+        return [
+            ShapedArray(shape=replace_dim(self.shape, d, split_size_or_sections)),
+            ...,
+        ]
     if split_size_or_sections != None:
         quotient = self.shape[d] // split_size_or_sections
         if isinstance(quotient, int):
             return [
-                Tensor(shape=replace_dim(self.shape, d, split_size_or_sections))
+                ShapedArray(shape=replace_dim(self.shape, d, split_size_or_sections))
                 for _ in range(quotient)
             ]
-        return [Tensor(shape=replace_dim(self.shape, d, split_size_or_sections)), ...]
+        return [
+            ShapedArray(shape=replace_dim(self.shape, d, split_size_or_sections)),
+            ...,
+        ]
     return Unknown
 
 @shape_dsl_function
-def chunk_ir(self: Tensor, chunks: int, dim: int = 0) -> list[Tensor]:
+def chunk_ir(self: ShapedArray, chunks: int, dim: int = 0) -> list[ShapedArray]:
     d = normalize_dim(len(self.shape), dim)
     dim_val = self.shape[d]
     if isinstance(dim_val, int):
         chunk_size = (dim_val + chunks - 1) // chunks
         return [
-            Tensor(
+            ShapedArray(
                 shape=replace_dim(
                     self.shape,
                     d,
@@ -299,13 +307,13 @@ def chunk_ir(self: Tensor, chunks: int, dim: int = 0) -> list[Tensor]:
             for i in range(chunks)
         ]
     return [
-        Tensor(shape=replace_dim(self.shape, d, dim_val // chunks))
+        ShapedArray(shape=replace_dim(self.shape, d, dim_val // chunks))
         for i in range(chunks)
     ]
 
 @shape_dsl_function
-def index_select_ir(self: Tensor, dim: int, index: Tensor) -> Tensor:
-    return Tensor(
+def index_select_ir(self: ShapedArray, dim: int, index: ShapedArray) -> ShapedArray:
+    return ShapedArray(
         shape=replace_dim(
             self.shape, normalize_dim(len(self.shape), dim), index.shape[0]
         )
@@ -313,13 +321,13 @@ def index_select_ir(self: Tensor, dim: int, index: Tensor) -> Tensor:
 
 @shape_dsl_function
 def reduce_ir(
-    self: Tensor, dim: int | list[int] | None = None, keepdim: bool = False
-) -> Tensor:
+    self: ShapedArray, dim: int | list[int] | None = None, keepdim: bool = False
+) -> ShapedArray:
     if dim == None:
-        return Tensor(shape=reduce_shape(self.shape, dim, keepdim))
+        return ShapedArray(shape=reduce_shape(self.shape, dim, keepdim))
     if isinstance(dim, list):
-        return Tensor(shape=reduce_shape(self.shape, dim, keepdim))
-    return Tensor(shape=reduce_single(self.shape, dim, keepdim))
+        return ShapedArray(shape=reduce_shape(self.shape, dim, keepdim))
+    return ShapedArray(shape=reduce_single(self.shape, dim, keepdim))
 
 @shape_dsl_function
 def reduce_single(
@@ -337,119 +345,125 @@ def reduce_single(
 
 @shape_dsl_function
 def min_max_median_ir(
-    self: Tensor, dim: int | None = None, keepdim: bool = False
-) -> Tensor:
+    self: ShapedArray, dim: int | None = None, keepdim: bool = False
+) -> ShapedArray:
     if dim == None:
-        return Tensor(shape=[])
+        return ShapedArray(shape=[])
     s = reduce_shape(self.shape, dim, keepdim)
-    return [Tensor(shape=s), Tensor(shape=s)]
+    return [ShapedArray(shape=s), ShapedArray(shape=s)]
 
 @shape_dsl_function
 def aminmax_ir(
-    self: Tensor, dim: int | list[int] | None = None, keepdim: bool = False
-) -> [Tensor, Tensor]:
+    self: ShapedArray, dim: int | list[int] | None = None, keepdim: bool = False
+) -> [ShapedArray, ShapedArray]:
     s = reduce_shape(self.shape, dim, keepdim)
-    return [Tensor(shape=s), Tensor(shape=s)]
+    return [ShapedArray(shape=s), ShapedArray(shape=s)]
 
 @shape_dsl_function
 def tuple_reduce_ir(
-    self: Tensor, dim: int = -1, keepdim: bool = False
-) -> [Tensor, Tensor]:
+    self: ShapedArray, dim: int = -1, keepdim: bool = False
+) -> [ShapedArray, ShapedArray]:
     s = reduce_shape(self.shape, dim, keepdim)
-    return [Tensor(shape=s), Tensor(shape=s)]
+    return [ShapedArray(shape=s), ShapedArray(shape=s)]
 
 @shape_dsl_function
-def topk_ir(self: Tensor, k: int | symint, dim: int = -1) -> [Tensor, Tensor]:
+def topk_ir(
+    self: ShapedArray, k: int | symint, dim: int = -1
+) -> [ShapedArray, ShapedArray]:
     s = replace_dim(self.shape, normalize_dim(len(self.shape), dim), k)
-    return [Tensor(shape=s), Tensor(shape=s)]
+    return [ShapedArray(shape=s), ShapedArray(shape=s)]
 
 @shape_dsl_function
 def repeat_interleave_ir(
-    self: Tensor, repeats: int | symint, dim: int | None = None
-) -> Tensor:
+    self: ShapedArray, repeats: int | symint, dim: int | None = None
+) -> ShapedArray:
     if dim == None:
-        return Tensor(shape=[prod(self.shape) * repeats])
+        return ShapedArray(shape=[prod(self.shape) * repeats])
     d = normalize_dim(len(self.shape), dim)
-    return Tensor(shape=replace_dim(self.shape, d, self.shape[d] * repeats))
+    return ShapedArray(shape=replace_dim(self.shape, d, self.shape[d] * repeats))
 
 @shape_dsl_function
-def cosine_similarity_ir(x1: Tensor, x2: Tensor, dim: int = 1) -> Tensor:
+def cosine_similarity_ir(x1: ShapedArray, x2: ShapedArray, dim: int = 1) -> ShapedArray:
     s = broadcast(x1.shape, x2.shape)
-    return Tensor(shape=reduce_single(s, normalize_dim(len(s), dim), False))
+    return ShapedArray(shape=reduce_single(s, normalize_dim(len(s), dim), False))
 
 @shape_dsl_function
-def randn_ir(size: list[int | symint]) -> Tensor:
-    return Tensor(shape=size)
+def randn_ir(size: list[int | symint]) -> ShapedArray:
+    return ShapedArray(shape=size)
 
 @shape_dsl_function
-def randint_ir(low: int, high: int, size: list[int | symint]) -> Tensor:
-    return Tensor(shape=size)
+def randint_ir(low: int, high: int, size: list[int | symint]) -> ShapedArray:
+    return ShapedArray(shape=size)
 
 @shape_dsl_function
-def linspace_ir(steps: int | symint) -> Tensor:
-    return Tensor(shape=[steps])
+def linspace_ir(steps: int | symint) -> ShapedArray:
+    return ShapedArray(shape=[steps])
 
 @shape_dsl_function
-def eye_ir(n: int | symint, m: int | symint | None = None) -> Tensor:
+def eye_ir(n: int | symint, m: int | symint | None = None) -> ShapedArray:
     if m == None:
-        return Tensor(shape=[n, n])
-    return Tensor(shape=[n, m])
+        return ShapedArray(shape=[n, n])
+    return ShapedArray(shape=[n, m])
 
 @shape_dsl_function
 def arange_ir(
     start: int | symint | None = None,
     end: int | symint | None = None,
     step: int | symint | None = None,
-) -> Tensor:
+) -> ShapedArray:
     if start != None and end != None and step != None:
-        return Tensor(shape=[(end - start) // step])
+        return ShapedArray(shape=[(end - start) // step])
     if start != None and end != None:
-        return Tensor(shape=[end - start])
+        return ShapedArray(shape=[end - start])
     if end != None:
-        return Tensor(shape=[end])
+        return ShapedArray(shape=[end])
     if start != None:
-        return Tensor(shape=[start])
+        return ShapedArray(shape=[start])
     return Unknown
 
 @shape_dsl_function
 def normal_ir(
-    mean: Tensor | None = None, std: Tensor | None = None, size: list[int] | None = None
-) -> Tensor:
+    mean: ShapedArray | None = None,
+    std: ShapedArray | None = None,
+    size: list[int] | None = None,
+) -> ShapedArray:
     if size != None:
-        return Tensor(shape=[s for s in size])
+        return ShapedArray(shape=[s for s in size])
     if mean != None:
-        return Tensor(shape=mean.shape)
+        return ShapedArray(shape=mean.shape)
     if std != None:
-        return Tensor(shape=std.shape)
+        return ShapedArray(shape=std.shape)
     return Unknown
 
 @shape_dsl_function
-def diag_embed_ir(self: Tensor, offset: int = 0) -> Tensor:
+def diag_embed_ir(self: ShapedArray, offset: int = 0) -> ShapedArray:
     new_dim = self.shape[-1] + (offset if offset >= 0 else -offset)
-    return Tensor(shape=self.shape[:-1] + [new_dim, new_dim])
+    return ShapedArray(shape=self.shape[:-1] + [new_dim, new_dim])
 
 @shape_dsl_function
-def tri_indices_ir(row: int | symint, col: int | symint, offset: int = 0) -> Tensor:
-    return Tensor(shape=[2, 0])
+def tri_indices_ir(
+    row: int | symint, col: int | symint, offset: int = 0
+) -> ShapedArray:
+    return ShapedArray(shape=[2, 0])
 
 @shape_dsl_function
-def matmul_ir(self: Tensor, other: Tensor) -> Tensor:
+def matmul_ir(self: ShapedArray, other: ShapedArray) -> ShapedArray:
     r1 = len(self.shape)
     r2 = len(other.shape)
     if r1 == 1 and r2 == 1:
-        return Tensor(shape=[])
+        return ShapedArray(shape=[])
     if r1 == 1 and r2 == 2:
-        return Tensor(shape=[other.shape[1]])
+        return ShapedArray(shape=[other.shape[1]])
     if r1 == 2 and r2 == 1:
-        return Tensor(shape=[self.shape[0]])
+        return ShapedArray(shape=[self.shape[0]])
     if r1 == 2 and r2 == 2:
-        return Tensor(shape=[self.shape[0], other.shape[1]])
+        return ShapedArray(shape=[self.shape[0], other.shape[1]])
     if r1 == 2 and r2 >= 3:
-        return Tensor(shape=other.shape[:-2] + [self.shape[0]] + [other.shape[-1]])
+        return ShapedArray(shape=other.shape[:-2] + [self.shape[0]] + [other.shape[-1]])
     if r1 >= 3 and r2 == 2:
-        return Tensor(shape=self.shape[:-2] + [self.shape[-2]] + [other.shape[1]])
+        return ShapedArray(shape=self.shape[:-2] + [self.shape[-2]] + [other.shape[1]])
     if r1 >= 3 and r2 >= 3:
-        return Tensor(
+        return ShapedArray(
             shape=broadcast(self.shape[:-2], other.shape[:-2])
             + [self.shape[-2]]
             + [other.shape[-1]]
@@ -457,15 +471,15 @@ def matmul_ir(self: Tensor, other: Tensor) -> Tensor:
     return Unknown
 
 @shape_dsl_function
-def mv_ir(self: Tensor, vec: Tensor) -> Tensor:
+def mv_ir(self: ShapedArray, vec: ShapedArray) -> ShapedArray:
     if len(self.shape) != 2:
         raise Error("mv expects 2D matrix, got " + str(len(self.shape)) + "D tensor")
     if len(vec.shape) != 1:
         raise Error("mv expects 1D vector, got " + str(len(vec.shape)) + "D tensor")
-    return Tensor(shape=[self.shape[0]])
+    return ShapedArray(shape=[self.shape[0]])
 
 @shape_dsl_function
-def outer_ir(self: Tensor, vec2: Tensor) -> Tensor:
+def outer_ir(self: ShapedArray, vec2: ShapedArray) -> ShapedArray:
     if len(self.shape) != 1 or len(vec2.shape) != 1:
         raise Error(
             "outer expects 1D tensors, got "
@@ -474,16 +488,16 @@ def outer_ir(self: Tensor, vec2: Tensor) -> Tensor:
             + str(len(vec2.shape))
             + "D"
         )
-    return Tensor(shape=[self.shape[0], vec2.shape[0]])
+    return ShapedArray(shape=[self.shape[0], vec2.shape[0]])
 
 @shape_dsl_function
-def tensordot_ir(self: Tensor, other: Tensor, dims: int) -> Tensor:
-    return Tensor(shape=self.shape[: len(self.shape) - dims] + other.shape[dims:])
+def tensordot_ir(self: ShapedArray, other: ShapedArray, dims: int) -> ShapedArray:
+    return ShapedArray(shape=self.shape[: len(self.shape) - dims] + other.shape[dims:])
 
 @shape_dsl_function
 def apply_einsum(
-    output_map: list[list[int]], check_pairs: list[list[int]], inputs: list[Tensor]
-) -> Tensor:
+    output_map: list[list[int]], check_pairs: list[list[int]], inputs: list[ShapedArray]
+) -> ShapedArray:
     bad_dims = [
         1
         for i0, d0, i1, d1 in check_pairs
@@ -493,68 +507,68 @@ def apply_einsum(
     ]
     if len(bad_dims) > 0:
         raise Error("einsum: inconsistent dimensions for repeated index")
-    return Tensor(shape=[inputs[inp].shape[dim] for inp, dim in output_map])
+    return ShapedArray(shape=[inputs[inp].shape[dim] for inp, dim in output_map])
 
 @shape_dsl_function
-def einsum_ir(spec: str, operands: list[Tensor] | None = None) -> Tensor:
+def einsum_ir(spec: str, operands: list[ShapedArray] | None = None) -> ShapedArray:
     if operands != None:
         output_map, check_pairs = parse_einsum_equation(spec)
         return apply_einsum(output_map, check_pairs, operands)
     return Unknown
 
 @shape_dsl_function
-def eigvals_ir(self: Tensor) -> Tensor:
+def eigvals_ir(self: ShapedArray) -> ShapedArray:
     if len(self.shape) < 2:
         raise Error(
             "eigvals requires at least 2D input, got "
             + str(len(self.shape))
             + "D tensor"
         )
-    return Tensor(shape=self.shape[:-2] + [self.shape[-2]])
+    return ShapedArray(shape=self.shape[:-2] + [self.shape[-2]])
 
 @shape_dsl_function
-def eig_ir(self: Tensor) -> [Tensor, Tensor]:
+def eig_ir(self: ShapedArray) -> [ShapedArray, ShapedArray]:
     if len(self.shape) < 2:
         raise Error(
             "eig requires at least 2D input, got " + str(len(self.shape)) + "D tensor"
         )
     batch = self.shape[:-2]
     return [
-        Tensor(shape=batch + [self.shape[-2]]),
-        Tensor(shape=batch + self.shape[-2:]),
+        ShapedArray(shape=batch + [self.shape[-2]]),
+        ShapedArray(shape=batch + self.shape[-2:]),
     ]
 
 @shape_dsl_function
-def slogdet_ir(self: Tensor) -> [Tensor, Tensor]:
+def slogdet_ir(self: ShapedArray) -> [ShapedArray, ShapedArray]:
     if len(self.shape) < 2:
         raise Error(
             "slogdet requires at least 2D input, got "
             + str(len(self.shape))
             + "D tensor"
         )
-    return [Tensor(shape=self.shape[:-2]), Tensor(shape=self.shape[:-2])]
+    return [ShapedArray(shape=self.shape[:-2]), ShapedArray(shape=self.shape[:-2])]
 
 @shape_dsl_function
-def solve_ir(self: Tensor, other: Tensor) -> Tensor:
-    return Tensor(shape=other.shape)
+def solve_ir(self: ShapedArray, other: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=other.shape)
 
 @shape_dsl_function
-def solve_reversed_ir(self: Tensor, other: Tensor) -> Tensor:
-    return Tensor(shape=self.shape)
+def solve_reversed_ir(self: ShapedArray, other: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=self.shape)
 
 @shape_dsl_function
 def conv_ir(
-    self: Tensor,
-    weight: Tensor,
+    self: ShapedArray,
+    weight: ShapedArray,
     stride: int | list[int] = 1,
     padding: int | list[int] = 0,
     dilation: int | list[int] = 1,
-) -> Tensor:
+) -> ShapedArray:
     spatial_dims = len(self.shape) - 2
     stride_list = broadcast_int(stride, spatial_dims)
     padding_list = broadcast_int(padding, spatial_dims)
     dilation_list = broadcast_int(dilation, spatial_dims)
-    return Tensor(
+    return ShapedArray(
         shape=[self.shape[0], weight.shape[0]]
         + [
             conv_spatial_out(s, k, st, p, dil)
@@ -570,19 +584,19 @@ def conv_ir(
 
 @shape_dsl_function
 def conv_transpose_ir(
-    self: Tensor,
-    weight: Tensor,
+    self: ShapedArray,
+    weight: ShapedArray,
     stride: int | list[int] = 1,
     padding: int | list[int] = 0,
     output_padding: int | list[int] = 0,
     dilation: int | list[int] = 1,
-) -> Tensor:
+) -> ShapedArray:
     spatial_dims = len(self.shape) - 2
     stride_list = broadcast_int(stride, spatial_dims)
     padding_list = broadcast_int(padding, spatial_dims)
     outpad_list = broadcast_int(output_padding, spatial_dims)
     dilation_list = broadcast_int(dilation, spatial_dims)
-    return Tensor(
+    return ShapedArray(
         shape=[self.shape[0], weight.shape[1]]
         + [
             (s - 1) * st - 2 * p + dil * (k - 1) + op + 1
@@ -599,13 +613,13 @@ def conv_transpose_ir(
 
 @shape_dsl_function
 def pool_ir(
-    self: Tensor,
+    self: ShapedArray,
     kernel_size: int | list[int],
     stride: int | list[int] | None = None,
     padding: int | list[int] = 0,
     dilation: int | list[int] = 1,
     return_indices: bool = False,
-) -> Tensor:
+) -> ShapedArray:
     spatial_dims = len(self.shape) - 2
     ks_list = broadcast_int(kernel_size, spatial_dims)
     stride_list = ks_list if stride == None else broadcast_int(stride, spatial_dims)
@@ -618,42 +632,42 @@ def pool_ir(
         )
     ]
     if return_indices:
-        return [Tensor(shape=out), Tensor(shape=out)]
-    return Tensor(shape=out)
+        return [ShapedArray(shape=out), ShapedArray(shape=out)]
+    return ShapedArray(shape=out)
 
 @shape_dsl_function
 def adaptive_pool_ir(
-    self: Tensor, output_size: int | symint | list[int | symint]
-) -> Tensor:
+    self: ShapedArray, output_size: int | symint | list[int | symint]
+) -> ShapedArray:
     out_sizes = broadcast_int(output_size, len(self.shape) - 2)
-    return Tensor(shape=[self.shape[0], self.shape[1]] + out_sizes)
+    return ShapedArray(shape=[self.shape[0], self.shape[1]] + out_sizes)
 
 @shape_dsl_function
 def interpolate_ir(
-    self: Tensor,
+    self: ShapedArray,
     size: int | symint | list[int | symint] | None = None,
     scale_factor: int | symint | None = None,
-) -> Tensor:
+) -> ShapedArray:
     if size != None:
-        return Tensor(
+        return ShapedArray(
             shape=[self.shape[0], self.shape[1]]
             + broadcast_int(size, len(self.shape) - 2)
         )
     if scale_factor != None:
-        return Tensor(
+        return ShapedArray(
             shape=[self.shape[0], self.shape[1]]
             + [d * scale_factor for d in self.shape[2:]]
         )
     raise Error("interpolate requires either 'size' or 'scale_factor' argument")
 
 @shape_dsl_function
-def loss_ir(self: Tensor, reduction: str = "mean") -> Tensor:
+def loss_ir(self: ShapedArray, reduction: str = "mean") -> ShapedArray:
     if reduction == "none":
-        return Tensor(shape=self.shape)
-    return Tensor(shape=[])
+        return ShapedArray(shape=self.shape)
+    return ShapedArray(shape=[])
 
 @shape_dsl_function
-def pad_ir(self: Tensor, pad: list[int]) -> Tensor:
+def pad_ir(self: ShapedArray, pad: list[int]) -> ShapedArray:
     rank = len(self.shape)
     num_pad_dims = len(pad) // 2
     offsets = [
@@ -662,38 +676,42 @@ def pad_ir(self: Tensor, pad: list[int]) -> Tensor:
         else 0
         for i in range(rank)
     ]
-    return Tensor(shape=[d + offsets[i] for i, d in enumerate(self.shape)])
+    return ShapedArray(shape=[d + offsets[i] for i, d in enumerate(self.shape)])
 
 @shape_dsl_function
-def rfft_ir(self: Tensor, n: int | symint | None = None, dim: int = -1) -> Tensor:
+def rfft_ir(
+    self: ShapedArray, n: int | symint | None = None, dim: int = -1
+) -> ShapedArray:
     d = normalize_dim(len(self.shape), dim)
     if n != None:
-        return Tensor(shape=replace_dim(self.shape, d, n // 2 + 1))
-    return Tensor(shape=replace_dim(self.shape, d, self.shape[d] // 2 + 1))
+        return ShapedArray(shape=replace_dim(self.shape, d, n // 2 + 1))
+    return ShapedArray(shape=replace_dim(self.shape, d, self.shape[d] // 2 + 1))
 
 @shape_dsl_function
-def irfft_ir(self: Tensor, n: int | symint | None = None, dim: int = -1) -> Tensor:
+def irfft_ir(
+    self: ShapedArray, n: int | symint | None = None, dim: int = -1
+) -> ShapedArray:
     d = normalize_dim(len(self.shape), dim)
     if n != None:
-        return Tensor(shape=replace_dim(self.shape, d, n))
-    return Tensor(shape=replace_dim(self.shape, d, 2 * (self.shape[d] - 1)))
+        return ShapedArray(shape=replace_dim(self.shape, d, n))
+    return ShapedArray(shape=replace_dim(self.shape, d, 2 * (self.shape[d] - 1)))
 
 @shape_dsl_function
-def size_ir(self: Tensor, dim: int | None = None) -> int | symint:
+def size_ir(self: ShapedArray, dim: int | None = None) -> int | symint:
     if dim != None:
         return self.shape[normalize_dim(len(self.shape), dim)]
     return [d for d in self.shape]
 
 @shape_dsl_function
-def numel_ir(self: Tensor) -> int | symint:
+def numel_ir(self: ShapedArray) -> int | symint:
     return prod(self.shape)
 
 @shape_dsl_function
-def dim_ir(self: Tensor) -> int:
+def dim_ir(self: ShapedArray) -> int:
     return len(self.shape)
 
 @shape_dsl_function
-def item_ir(self: Tensor) -> Tensor:
+def item_ir(self: ShapedArray) -> ShapedArray:
     if len(self.shape) != 0:
         raise Error(
             "item() only works on 0-dimensional tensors, got "
@@ -703,104 +721,106 @@ def item_ir(self: Tensor) -> Tensor:
     return Unknown
 
 @shape_dsl_function
-def tolist_ir(self: Tensor) -> Tensor:
+def tolist_ir(self: ShapedArray) -> ShapedArray:
     return Unknown
 
 @shape_dsl_function
-def multinomial_ir(self: Tensor, num_samples: int | symint) -> Tensor:
-    return Tensor(shape=self.shape[:-1] + [num_samples])
+def multinomial_ir(self: ShapedArray, num_samples: int | symint) -> ShapedArray:
+    return ShapedArray(shape=self.shape[:-1] + [num_samples])
 
 @shape_dsl_function
-def where_ir(condition: Tensor, x: Tensor, y: Tensor) -> Tensor:
-    return Tensor(shape=x.shape)
+def where_ir(condition: ShapedArray, x: ShapedArray, y: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=x.shape)
 
 @shape_dsl_function
-def take_along_dim_ir(self: Tensor, indices: Tensor) -> Tensor:
-    return Tensor(shape=indices.shape)
+def take_along_dim_ir(self: ShapedArray, indices: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=indices.shape)
 
 @shape_dsl_function
 def nn_flatten_forward_ir(
-    input: Tensor, start_dim: symint = 1, end_dim: symint = -1
-) -> Tensor:
+    input: ShapedArray, start_dim: symint = 1, end_dim: symint = -1
+) -> ShapedArray:
     return flatten_ir(input, start_dim, end_dim)
 
 @shape_dsl_function
 def nn_maxpool_forward_ir(
-    input: Tensor,
+    input: ShapedArray,
     kernel_size: symint = 1,
     stride: symint | None = None,
     padding: symint = 0,
     dilation: symint = 1,
-) -> Tensor:
+) -> ShapedArray:
     return pool_ir(input, kernel_size, stride, padding, dilation)
 
 @shape_dsl_function
 def nn_avgpool_forward_ir(
-    input: Tensor,
+    input: ShapedArray,
     kernel_size: symint = 1,
     stride: symint | None = None,
     padding: symint = 0,
-) -> Tensor:
+) -> ShapedArray:
     return pool_ir(input, kernel_size, stride, padding, 1)
 
 @shape_dsl_function
 def nn_upsample_forward_ir(
-    input: Tensor, size: symint | None = None, scale_factor: symint | None = None
-) -> Tensor:
+    input: ShapedArray, size: symint | None = None, scale_factor: symint | None = None
+) -> ShapedArray:
     return interpolate_ir(input, size, scale_factor)
 
 @shape_dsl_function
-def nn_pixel_shuffle_forward_ir(input: Tensor, upscale_factor: symint) -> Tensor:
+def nn_pixel_shuffle_forward_ir(
+    input: ShapedArray, upscale_factor: symint
+) -> ShapedArray:
     r = upscale_factor
-    return Tensor(
+    return ShapedArray(
         shape=[input.shape[0], input.shape[1] // (r * r)]
         + [d * r for d in input.shape[2:]]
     )
 
 @shape_dsl_function
-def nn_glu_forward_ir(input: Tensor, dim: symint = 1) -> Tensor:
+def nn_glu_forward_ir(input: ShapedArray, dim: symint = 1) -> ShapedArray:
     rank = len(input.shape)
     d = normalize_dim(rank, dim)
-    return Tensor(shape=replace_dim(input.shape, d, input.shape[d] // 2))
+    return ShapedArray(shape=replace_dim(input.shape, d, input.shape[d] // 2))
 
 @shape_dsl_function
 def nn_lstm_forward_ir(
-    input: Tensor,
+    input: ShapedArray,
     input_size: symint,
     hidden_size: symint,
     num_layers: symint = 1,
     bidirectional: bool = False,
-) -> [Tensor, Tensor, Tensor]:
+) -> [ShapedArray, ShapedArray, ShapedArray]:
     nd = 2 if bidirectional else 1
-    output = Tensor(shape=[input.shape[0], input.shape[1], hidden_size * nd])
-    h_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
-    c_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
+    output = ShapedArray(shape=[input.shape[0], input.shape[1], hidden_size * nd])
+    h_n = ShapedArray(shape=[num_layers * nd, input.shape[0], hidden_size])
+    c_n = ShapedArray(shape=[num_layers * nd, input.shape[0], hidden_size])
     return [output, h_n, c_n]
 
 @shape_dsl_function
 def nn_gru_forward_ir(
-    input: Tensor,
+    input: ShapedArray,
     input_size: symint,
     hidden_size: symint,
     num_layers: symint = 1,
     bidirectional: bool = False,
-) -> [Tensor, Tensor]:
+) -> [ShapedArray, ShapedArray]:
     nd = 2 if bidirectional else 1
-    output = Tensor(shape=[input.shape[0], input.shape[1], hidden_size * nd])
-    h_n = Tensor(shape=[num_layers * nd, input.shape[0], hidden_size])
+    output = ShapedArray(shape=[input.shape[0], input.shape[1], hidden_size * nd])
+    h_n = ShapedArray(shape=[num_layers * nd, input.shape[0], hidden_size])
     return [output, h_n]
 
 @shape_dsl_function
 def nn_lstmcell_forward_ir(
-    input: Tensor, input_size: symint, hidden_size: symint
-) -> [Tensor, Tensor]:
-    h = Tensor(shape=[input.shape[0], hidden_size])
-    c = Tensor(shape=[input.shape[0], hidden_size])
+    input: ShapedArray, input_size: symint, hidden_size: symint
+) -> [ShapedArray, ShapedArray]:
+    h = ShapedArray(shape=[input.shape[0], hidden_size])
+    c = ShapedArray(shape=[input.shape[0], hidden_size])
     return [h, c]
 
 @shape_dsl_function
-def nn_reflectionpad2d_forward_ir(input: Tensor, padding: symint) -> Tensor:
-    return Tensor(
+def nn_reflectionpad2d_forward_ir(input: ShapedArray, padding: symint) -> ShapedArray:
+    return ShapedArray(
         shape=[
             input.shape[0],
             input.shape[1],

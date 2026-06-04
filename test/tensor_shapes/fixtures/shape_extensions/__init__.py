@@ -61,6 +61,15 @@ class Dim[T]:
     pass
 
 
+def shaped_array(*, shape: str) -> typing.Callable[[type], type]:
+    """Decorator that marks a class as carrying a shape TypeVarTuple."""
+
+    def decorator(cls: type) -> type:
+        return cls
+
+    return decorator
+
+
 class TypeVar:
     """TypeVar with arithmetic support for tensor shape dimensions.
 

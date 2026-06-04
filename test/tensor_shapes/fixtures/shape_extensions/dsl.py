@@ -29,8 +29,8 @@ def shape_dsl_function(fn: typing.Callable) -> typing.Callable:
 # as builtins regardless of the Python-level definitions here.
 
 
-class Tensor:
-    """A tensor value in the DSL, constructed via Tensor(shape=[...])."""
+class ShapedArray:
+    """A shaped-array value in the DSL, constructed via ShapedArray(shape=[...])."""
 
     shape: list[int]
 

@@ -57,11 +57,11 @@ def uses_shape_dsl(ir_fn: Callable[..., Any], *, capture_init: list[str] | None 
         r#"
 from shape_extensions import uses_shape_dsl
 from shape_extensions import shaped_array
-from shape_extensions.dsl import Tensor, shape_dsl_function
+from shape_extensions.dsl import ShapedArray, shape_dsl_function
 
 @shape_dsl_function
-def add_leading_axis_ir(x: Tensor) -> Tensor:
-    return Tensor(shape=[1] + x.shape)
+def add_leading_axis_ir(x: ShapedArray) -> ShapedArray:
+    return ShapedArray(shape=[1] + x.shape)
 
 @shaped_array(shape="Shape")
 class ndarray[DType, *Shape]:
