@@ -13,7 +13,6 @@ use pyrefly_types::dimension::canonicalize;
 use pyrefly_types::lit_int::LitInt;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::quantified::Quantified;
-use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::shaped_array::broadcast_shapes;
 use pyrefly_types::type_var::Restriction;
@@ -84,7 +83,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         )
     }
 
-    /// Try to handle binary operations on symbolic integer types (Dim, SizeExpr, TypeVar Quantified).
+    /// Try to handle binary operations on symbolic integer types (Dim and SizeExpr).
     /// Returns Some(result_type) if the operation was handled, None otherwise.
     fn try_symint_binop(&self, op: Operator, lhs: &Type, rhs: &Type) -> Option<Type> {
         // Only handle if tensor shapes feature is enabled
@@ -100,20 +99,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return None;
         }
 
-        // Check if at least one operand is a symbolic dimension type or literal int
-        let is_dim_operand = |ty: &Type| match ty {
+        // Literal integers are allowed as the non-shape side of dimension arithmetic, but
+        // ordinary literal arithmetic should keep the normal integer operator behavior.
+        let is_shape_operand = |ty: &Type| match ty {
             Type::Dim(_) | Type::Size(_) => true,
-            Type::Literal(f) if matches!(f.value, Lit::Int(_)) => true,
-            Type::QuantifiedValue(q) => {
-                matches!(q.kind, QuantifiedKind::TypeVar)
-            }
             _ => false,
         };
-        if !is_dim_operand(lhs) && !is_dim_operand(rhs) {
+        if !is_shape_operand(lhs) && !is_shape_operand(rhs) {
             return None;
         }
 
-        // Extract the dimension type from Dim, Literal, or Quantified
+        // Extract the dimension type from Dim, Size, or an integer literal paired with one.
         let to_dim_type = |ty: &Type| -> Option<Type> {
             match ty {
                 Type::Dim(inner_ty) => {
@@ -124,12 +120,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // Convert literal to SizeExpr
                     n.as_i64()
                         .map(|val| self.heap.mk_size(SizeExpr::Literal(val)))
-                }
-                Type::QuantifiedValue(q)
-                    if matches!(q.kind, pyrefly_types::quantified::QuantifiedKind::TypeVar) =>
-                {
-                    // TypeVar Quantified can be used in dimension arithmetic
-                    Some(Type::Quantified(q.clone()))
                 }
                 Type::Size(_) => {
                     // SizeExpr is already a dimension type - pass through
@@ -152,20 +142,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             _ => unreachable!(),
         };
 
-        // If either operand is Dim, return Dim-wrapped result.
-        // If both operands are Literal[int], convert result back to Literal[int].
-        // Otherwise (e.g., Dim-bounded type parameters), return unwrapped dimension type.
+        // If either operand is Dim, return Dim-wrapped result. Otherwise
+        // (e.g., Dim-bounded type parameters), return the dimension expression.
         if matches!(lhs, Type::Dim(_)) || matches!(rhs, Type::Dim(_)) {
             Some(self.heap.mk_dim(result_ty))
-        } else if matches!(lhs, Type::Literal(f) if matches!(f.value, Lit::Int(_)))
-            && matches!(rhs, Type::Literal(f) if matches!(f.value, Lit::Int(_)))
-        {
-            // Both operands are Literal[int], so convert SizeExpr::Literal back to Literal[int]
-            if let Type::Size(SizeExpr::Literal(n)) = &result_ty {
-                Some(Lit::Int(LitInt::new(*n)).to_implicit_type())
-            } else {
-                Some(result_ty)
-            }
         } else {
             Some(result_ty)
         }

@@ -352,6 +352,34 @@ def dims[N](concrete: Dim[3], symbolic: Dim[N + 1]) -> None:
 );
 
 testcase!(
+    test_tensor_shapes_keeps_ordinary_literal_arithmetic_int,
+    shaped_array_env().enable_tensor_shapes(),
+    r#"
+from shape_extensions import Dim
+from typing import reveal_type
+
+def ordinary_literals() -> None:
+    reveal_type(1 + 2)  # E: revealed type: int
+    reveal_type(1 - 2)  # E: revealed type: int
+    reveal_type(2 * 3)  # E: revealed type: int
+    reveal_type(5 // 2)  # E: revealed type: int
+    total = 1
+    total += 2
+    reveal_type(total)  # E: revealed type: int
+
+def dim_literals[N](x: Dim[N]) -> None:
+    reveal_type(x + 1)  # E: revealed type: Dim
+    reveal_type(1 + x)  # E: revealed type: Dim
+
+def ordinary_typevar_value[T: int](x: T) -> None:
+    reveal_type(x + 1)  # E: revealed type: int
+
+def ordinary_unrestricted_typevar_value[T](x: T) -> None:
+    x + 1  # E: `+` is not supported between `T` and `Literal[1]`
+"#,
+);
+
+testcase!(
     test_decorated_torch_tensor_parses_shapes,
     shaped_array_env_with_shaped_torch(),
     r#"
