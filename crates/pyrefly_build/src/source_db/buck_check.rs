@@ -49,6 +49,15 @@ fn strip_stubs_suffix(path: &Path) -> PathBuf {
         .collect()
 }
 
+fn path_is_from_stubs_package(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|component| component.ends_with("-stubs"))
+    })
+}
+
 fn read_manifest_file_data(data: &[u8]) -> anyhow::Result<Vec<ManifestItem>> {
     let raw_items: Vec<Vec<String>> = serde_json::from_slice(data)?;
     let mut results = Vec::new();
@@ -100,14 +109,20 @@ fn read_manifest_files(manifest_paths: &[PathBuf]) -> anyhow::Result<Vec<Manifes
 }
 
 fn same_module_path_compare(left: &ModulePath, right: &ModulePath) -> Ordering {
-    // .pyi file always comes before .py file
     match (
         left.as_path().extension().and_then(OsStr::to_str),
         right.as_path().extension().and_then(OsStr::to_str),
     ) {
         (Some("pyi"), Some("py")) => Ordering::Less,
         (Some("py"), Some("pyi")) => Ordering::Greater,
-        _ => Ordering::Equal, // Preserve original ordering by default
+        _ => match (
+            path_is_from_stubs_package(left.as_path()),
+            path_is_from_stubs_package(right.as_path()),
+        ) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => Ordering::Equal,
+        },
     }
 }
 
@@ -363,6 +378,34 @@ mod tests {
         assert_eq!(
             source_db.lookup_for_test(ModuleName::from_str("qux")),
             LookupResult::NoSource
+        );
+    }
+
+    #[test]
+    fn test_load_prefers_stub_package_for_same_module() {
+        let runtime_path =
+            ModulePath::filesystem(PathBuf::from_str("/root/foo/__init__.pyi").unwrap());
+        let stub_path =
+            ModulePath::filesystem(PathBuf::from_str("/root/foo-stubs/__init__.pyi").unwrap());
+        let source_db = BuckCheckSourceDatabase::from_manifest_items(
+            vec![],
+            vec![
+                ManifestItem {
+                    module_name: ModuleName::from_str("foo"),
+                    module_path: runtime_path,
+                },
+                ManifestItem {
+                    module_name: ModuleName::from_str("foo"),
+                    module_path: stub_path.dupe(),
+                },
+            ],
+            vec![],
+            SysInfo::default(),
+            false,
+        );
+        assert_eq!(
+            source_db.lookup_for_test(ModuleName::from_str("foo")),
+            LookupResult::ExternalSource(stub_path)
         );
     }
 

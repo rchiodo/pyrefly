@@ -6,6 +6,7 @@
  */
 
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fmt;
@@ -37,6 +38,33 @@ use crate::source_db::Target;
 
 pub mod buck;
 pub mod custom;
+
+pub(crate) fn path_is_from_stubs_package(path: &Path) -> bool {
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_str()
+            .is_some_and(|component| component.ends_with("-stubs"))
+    })
+}
+
+fn same_module_path_compare(left: InternedPath, right: InternedPath) -> Ordering {
+    match (
+        left.as_path().extension().and_then(OsStr::to_str),
+        right.as_path().extension().and_then(OsStr::to_str),
+    ) {
+        (Some("pyi"), Some("py")) => Ordering::Less,
+        (Some("py"), Some("pyi")) => Ordering::Greater,
+        _ => match (
+            path_is_from_stubs_package(left.as_path()),
+            path_is_from_stubs_package(right.as_path()),
+        ) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => Ordering::Equal,
+        },
+    }
+}
 
 /// An enum representing something that has been included by the build system, and
 /// which the build system should query for when building the sourcedb.
@@ -281,6 +309,28 @@ pub(crate) struct PythonLibraryManifest {
 }
 
 impl PythonLibraryManifest {
+    fn strip_stubs_suffixes(&mut self) {
+        let old_srcs = std::mem::replace(&mut self.srcs, SmallMap::new());
+        for (module, paths) in old_srcs {
+            let normalized_module =
+                ModuleName::from_parts(module.components().into_iter().map(|component| {
+                    if let Some(stripped) = component.as_str().strip_suffix("-stubs") {
+                        stripped.to_owned()
+                    } else {
+                        component.to_string()
+                    }
+                }));
+            if let Some(existing) = self.srcs.get_mut(&normalized_module) {
+                existing.extend(paths);
+            } else {
+                self.srcs.insert(normalized_module, paths);
+            }
+        }
+        self.srcs
+            .values_mut()
+            .for_each(|paths| paths.sort_by(|left, right| same_module_path_compare(*left, *right)));
+    }
+
     fn replace_alias_deps(&mut self, aliases: &SmallMap<Target, Target>) {
         self.deps = self
             .deps
@@ -410,6 +460,7 @@ impl TargetManifestDatabase {
                 TargetManifest::Alias { .. } => continue,
                 TargetManifest::Library(lib) => {
                     lib.replace_alias_deps(&aliases);
+                    lib.strip_stubs_suffixes();
                     lib.rewrite_relative_to_root(&self.root);
                 }
             }
@@ -984,8 +1035,8 @@ mod tests {
                     (
                         "pyre.client.log.log",
                         &[
-                            "pyre/client/log/log.py",
                             "pyre/client/log/log.pyi",
+                            "pyre/client/log/log.py",
                         ]
                     ),
                     (
@@ -1024,8 +1075,8 @@ mod tests {
                     (
                         "log.log",
                         &[
-                            "pyre/client/log/log.py",
                             "pyre/client/log/log.pyi",
+                            "pyre/client/log/log.py",
                         ]
                     ),
                     (
@@ -1170,6 +1221,33 @@ mod tests {
         assert_eq!(
             TargetManifestDatabase::get_test_database().produce_map().0,
             expected
+        );
+    }
+
+    #[test]
+    fn test_produce_db_strips_stubs_suffix() {
+        let db = TargetManifestDatabase::new(
+            smallmap! {
+                Target::from_string("//torch:stubs".to_owned()) => TargetManifest::lib(
+                    &[("torch-stubs", &["torch-stubs/__init__.pyi"])],
+                    &[],
+                    "torch/BUCK",
+                    &[],
+                    None,
+                ),
+            },
+            PathBuf::from("/repo"),
+        );
+
+        let result = db.produce_map().0;
+        let manifest = result
+            .get(&Target::from_string("//torch:stubs".to_owned()))
+            .unwrap();
+        assert!(manifest.srcs.contains_key(&ModuleName::from_str("torch")));
+        assert!(
+            !manifest
+                .srcs
+                .contains_key(&ModuleName::from_str("torch-stubs"))
         );
     }
 
