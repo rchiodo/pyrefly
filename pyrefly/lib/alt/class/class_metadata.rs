@@ -354,8 +354,33 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let deprecation = decorators
             .iter()
             .find_map(|(decorator, _)| decorator.deprecation.clone());
-        let is_disjoint_base = decorators.iter().any(|(decorator, _)| {
-            decorator.ty.callee_kind() == Some(CalleeKind::Function(FunctionKind::DisjointBase))
+        // PEP 800: `@disjoint_base` is only valid on nominal classes. Marking
+        // an invalid TypedDict/Protocol target as disjoint would let narrowing
+        // incorrectly intersect it to Never.
+        let is_disjoint_base = decorators.iter().any(|(decorator, range)| {
+            if decorator.ty.callee_kind() != Some(CalleeKind::Function(FunctionKind::DisjointBase))
+            {
+                return false;
+            }
+            if is_typed_dict {
+                self.error(
+                    errors,
+                    *range,
+                    ErrorKind::InvalidDecorator,
+                    "`@disjoint_base` cannot be applied to a TypedDict".to_owned(),
+                );
+                false
+            } else if protocol_metadata.is_some() {
+                self.error(
+                    errors,
+                    *range,
+                    ErrorKind::InvalidDecorator,
+                    "`@disjoint_base` cannot be applied to a Protocol".to_owned(),
+                );
+                false
+            } else {
+                true
+            }
         });
 
         let total_ordering_metadata = decorators.iter().find_map(|(decorator, decorator_range)| {

@@ -4961,13 +4961,35 @@
     {
       "code": -2,
       "column": 1,
-      "concise_description": "`() -> None` is not assignable to upper bound `type[object]` of type variable `_TC`",
-      "description": "`() -> None` is not assignable to upper bound `type[object]` of type variable `_TC`",
+      "concise_description": "`@disjoint_base` cannot be applied to a function",
+      "description": "`@disjoint_base` cannot be applied to a function",
       "line": 113,
-      "name": "bad-specialization",
-      "severity": "error",
+      "name": "invalid-decorator",
+      "severity": "warn",
       "stop_column": 15,
       "stop_line": 113
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "`@disjoint_base` cannot be applied to a TypedDict",
+      "description": "`@disjoint_base` cannot be applied to a TypedDict",
+      "line": 118,
+      "name": "invalid-decorator",
+      "severity": "warn",
+      "stop_column": 15,
+      "stop_line": 118
+    },
+    {
+      "code": -2,
+      "column": 1,
+      "concise_description": "`@disjoint_base` cannot be applied to a Protocol",
+      "description": "`@disjoint_base` cannot be applied to a Protocol",
+      "line": 123,
+      "name": "invalid-decorator",
+      "severity": "warn",
+      "stop_column": 15,
+      "stop_line": 123
     }
   ],
   "directives_no_type_check.py": [

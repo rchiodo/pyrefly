@@ -99,6 +99,7 @@ pub enum SpecialDecorator<'a> {
     EnumNonmember,
     AbstractMethod,
     UsesShapeDsl,
+    DisjointBase,
 }
 
 impl UndecoratedFunction {

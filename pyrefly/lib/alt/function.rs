@@ -472,16 +472,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let decorators = Box::from_iter(decorators.iter().filter_map(|k| {
             let decorator = self.get_idx(*k);
             let range = self.bindings().idx_to_key(*k).range();
-            let keep = if let Some(special_decorator) = self.get_special_decorator(&decorator) {
-                if is_top_level_function {
-                    self.check_top_level_function_decorator(&special_decorator, range, errors);
+            let keep = match self.get_special_decorator(&decorator) {
+                // Filter `@disjoint_base` out before generic decorator application,
+                // otherwise it would produce a misleading bad-specialization error.
+                Some(SpecialDecorator::DisjointBase) => {
+                    self.error(
+                        errors,
+                        range,
+                        ErrorKind::InvalidDecorator,
+                        "`@disjoint_base` cannot be applied to a function".to_owned(),
+                    );
+                    false
                 }
-                !self.set_flag_from_special_decorator(&mut flags, &special_decorator)
-            } else {
-                if is_class_property_decorator_type(&decorator.ty) {
-                    found_class_property = true;
+                Some(special_decorator) => {
+                    if is_top_level_function {
+                        self.check_top_level_function_decorator(&special_decorator, range, errors);
+                    }
+                    !self.set_flag_from_special_decorator(&mut flags, &special_decorator)
                 }
-                true
+                None => {
+                    if is_class_property_decorator_type(&decorator.ty) {
+                        found_class_property = true;
+                    }
+                    true
+                }
             };
             if keep {
                 Some((decorator.ty.clone(), range))
@@ -864,6 +878,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Some(CalleeKind::Function(FunctionKind::AbstractMethod)) => {
                 Some(SpecialDecorator::AbstractMethod)
+            }
+            Some(CalleeKind::Function(FunctionKind::DisjointBase)) => {
+                Some(SpecialDecorator::DisjointBase)
             }
             _ => None,
         }

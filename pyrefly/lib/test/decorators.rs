@@ -5,6 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use pyrefly_python::sys_info::PythonVersion;
+
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -764,5 +766,76 @@ def test2(a: int, b: int) -> int:
 
 assert_type(test1(1, 2), int)
 assert_type(test2(1, 2), int)
+"#,
+);
+
+testcase!(
+    test_disjoint_base_decorator_misuse,
+    r#"
+from typing import NamedTuple, Protocol, TypedDict, assert_never
+from typing_extensions import disjoint_base
+
+@disjoint_base
+class Nominal:
+    pass
+
+@disjoint_base
+class Row(NamedTuple):
+    x: int
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a function
+def f() -> None:
+    pass
+
+class C:
+    @disjoint_base  # E: `@disjoint_base` cannot be applied to a function
+    def m(self) -> None:
+        pass
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a TypedDict
+class Movie(TypedDict):
+    name: str
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a Protocol
+class SupportsClose(Protocol):
+    def close(self) -> None:
+        ...
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a Protocol
+class BadProto(Protocol):
+    pass
+
+@disjoint_base
+class Other:
+    pass
+
+def keep_invalid_protocol_out_of_disjoint_base(x: BadProto) -> None:
+    if isinstance(x, Other):
+        # If `@disjoint_base` on a Protocol were honored, the intersection of
+        # the two disjoint bases would narrow `x` to `Never` and `assert_never`
+        # would be silently accepted. The error here proves the Protocol was
+        # NOT marked as a disjoint base.
+        assert_never(x)  # E: not assignable to parameter `arg` with type `Never`
+
+# A concrete (non-Protocol) class extending `BadProto` should not error, since
+# the rejected `@disjoint_base` on `BadProto` is not inherited.
+class ConcreteFromBadProto(BadProto):
+    pass
+"#,
+);
+
+testcase!(
+    test_disjoint_base_decorator_misuse_from_typing,
+    TestEnv::new_with_version(PythonVersion::new(3, 15, 0)),
+    r#"
+from typing import Protocol, disjoint_base
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a function
+def f() -> None:
+    pass
+
+@disjoint_base  # E: `@disjoint_base` cannot be applied to a Protocol
+class P(Protocol):
+    pass
 "#,
 );
