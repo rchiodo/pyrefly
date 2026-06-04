@@ -1871,27 +1871,41 @@ impl ReportArgs {
             .map(|f| &f.name)
             .chain(stub_variables.iter().map(|v| &v.name))
             .chain(stub_classes.iter().map(|c| &c.name))
-            .chain(stub_reexports.iter())
             .cloned()
             .collect();
-
         // Keep py-only names the stub neither defines nor omits from an explicit `__all__`.
         let keep = |name: &str| {
             !stub_names.contains(name)
                 && stub_filter.is_none_or(|(prefix, fqns)| Self::is_public_fqn(name, prefix, fqns))
         };
+        // A re-exported name owns its whole `Name.*` subtree: when the stub re-exports a class,
+        // the .py class AND its attributes must drop together.
+        let is_reexported = |name: &str| {
+            stub_reexports.iter().any(|reexport| {
+                name == reexport.as_str()
+                    || name
+                        .strip_prefix(reexport.as_str())
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
+        };
         for py_func in py_functions {
-            if keep(&py_func.name) && !stub_class_members.contains(&py_func.name) {
+            if keep(&py_func.name)
+                && !stub_class_members.contains(&py_func.name)
+                && !is_reexported(&py_func.name)
+            {
                 stub_functions.push(py_func);
             }
         }
         for py_var in py_variables {
-            if keep(&py_var.name) && !stub_class_members.contains(&py_var.name) {
+            if keep(&py_var.name)
+                && !stub_class_members.contains(&py_var.name)
+                && !is_reexported(&py_var.name)
+            {
                 stub_variables.push(py_var);
             }
         }
         for py_class in py_classes {
-            if keep(&py_class.name) {
+            if keep(&py_class.name) && !is_reexported(&py_class.name) {
                 stub_classes.push(py_class);
             }
         }
@@ -2662,6 +2676,14 @@ mod tests {
     fn test_report_stub_private_import() {
         let report = build_stub_module_report("stub_private_import.pyi", "stub_private_import.py");
         compare_snapshot("stub_private_import.expected.json", &report);
+    }
+
+    /// When a stub re-exports a class, the .py class is suppressed; its methods and attrs must
+    /// drop with it rather than dangling under a class that no longer appears in the report.
+    #[test]
+    fn test_report_stub_reexport_class() {
+        let report = build_stub_module_report("stub_reexport_class.pyi", "stub_reexport_class.py");
+        compare_snapshot("stub_reexport_class.expected.json", &report);
     }
 
     /// gh-3519: don't double-count methods whose stub coverage is inherited.
