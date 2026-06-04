@@ -325,6 +325,24 @@ def f(x: Tensor[2, 3], y: Tensor) -> None:
 );
 
 testcase!(
+    test_variadic_shape_context_preserves_starred_typevartuple,
+    shaped_array_env().enable_tensor_shapes(),
+    r#"
+from shape_extensions import shaped_array
+from typing import reveal_type
+
+@shaped_array(shape="Shape")
+class Tensor[*Shape]: ...
+
+class Foo[*Shape]:
+    x: Tensor[*Shape]
+
+def f[*Shape](x: Foo[*Shape]) -> None:
+    reveal_type(x)  # E: revealed type: Foo[*Shape]
+"#,
+);
+
+testcase!(
     test_jaxtyping_requires_registered_shaped_array,
     shaped_array_env_with_plain_torch_and_jaxtyping(),
     r#"
