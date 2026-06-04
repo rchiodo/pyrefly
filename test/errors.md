@@ -126,3 +126,54 @@ $ echo "x: str = 0" > $TMPDIR/test.py && \
  WARN */test.py:1:10-11: `Literal[0]` is not assignable to `str` [bad-assignment] (glob)
 [1]
 ```
+
+## `--output-format junit-xml` emits well-formed XML
+
+```scrut {output_stream: stdout}
+$ touch $TMPDIR/pyrefly.toml && \
+> echo "x: str = 0" > $TMPDIR/bad.py && \
+> $PYREFLY check --output-format junit-xml $TMPDIR/bad.py 2>/dev/null
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pyrefly" tests="1" failures="1" errors="0" time="0">
+    <testcase classname="*/bad.py" name="bad-assignment:L1" file="*/bad.py" line="1" time="0"> (glob)
+      <failure type="bad-assignment" message="`Literal[0]` is not assignable to `str`"><![CDATA[`Literal[0]` is not assignable to `str`]]></failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+[1]
+```
+
+## `--output-format junit-xml` omits warnings unless `--min-severity=warn`
+
+Severity filtering happens before formatting, so by default a warning-level
+finding produces an empty suite:
+
+```scrut {output_stream: stdout}
+$ touch $TMPDIR/pyrefly.toml && \
+> echo "x: str = 0" > $TMPDIR/warn.py && \
+> $PYREFLY check --warn=bad-assignment --output-format junit-xml $TMPDIR/warn.py 2>/dev/null
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pyrefly" tests="0" failures="0" errors="0" time="0">
+  </testsuite>
+</testsuites>
+```
+
+Lowering the threshold with `--min-severity=warn` includes it, rendered like any
+other failure with `type` set to the error kind:
+
+```scrut {output_stream: stdout}
+$ touch $TMPDIR/pyrefly.toml && \
+> echo "x: str = 0" > $TMPDIR/warn.py && \
+> $PYREFLY check --warn=bad-assignment --min-severity=warn --output-format junit-xml $TMPDIR/warn.py 2>/dev/null
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pyrefly" tests="1" failures="1" errors="0" time="0">
+    <testcase classname="*/warn.py" name="bad-assignment:L1" file="*/warn.py" line="1" time="0"> (glob)
+      <failure type="bad-assignment" message="`Literal[0]` is not assignable to `str`"><![CDATA[`Literal[0]` is not assignable to `str`]]></failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+[1]
+```
