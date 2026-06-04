@@ -1884,11 +1884,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         let mut default_ty = None;
         if let Some(default_expr) = &tp.default {
-            let default = self.expr_untype(
-                default_expr,
-                TypeFormContext::quantified_kind_default(tp.kind),
-                errors,
-            );
+            let is_dim_bound = |ty: &Type| {
+                matches!(ty, Type::Dim(_))
+                    || matches!(ty, Type::ClassType(cls) if cls.has_qname("shape_extensions", "Dim"))
+            };
+            let default = if self.solver().tensor_shapes
+                && matches!(&restriction, Restriction::Bound(bound) if is_dim_bound(bound))
+                && let Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. }) =
+                    default_expr
+                && let ruff_python_ast::Number::Int(i) = value
+                && let Some(n) = i.as_i64()
+            {
+                Type::Size(SizeExpr::Literal(n))
+            } else {
+                self.expr_untype(
+                    default_expr,
+                    TypeFormContext::quantified_kind_default(tp.kind),
+                    errors,
+                )
+            };
             default_ty = Some(self.validate_type_var_default(
                 &tp.name,
                 tp.kind,
@@ -6097,33 +6111,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     })
                     .collect();
                 Type::ParamSpecValue(ParamList::new(elts))
-            }
-            // Special case: integer literals in type argument or TypeVar default context with
-            // native tensor shapes. These can be used for Dim-bounded parameters
-            // (e.g., LinearLayer[6, 9]) or TypeVar defaults (e.g., class Conv2d[..., S = 1]).
-            // We convert them directly to Type::Size to distinguish from Literal[6].
-            Expr::NumberLiteral(ruff_python_ast::ExprNumberLiteral { value, .. })
-                if matches!(
-                    type_form_context,
-                    TypeFormContext::TypeArgument | TypeFormContext::TypeVarDefault
-                ) && self.solver().tensor_shapes =>
-            {
-                match value {
-                    ruff_python_ast::Number::Int(i) => {
-                        if let Some(n) = i.as_i64() {
-                            Type::Size(SizeExpr::Literal(n))
-                        } else {
-                            // Integer too large to fit in i64, fall back to error
-                            let inferred_ty = self.expr_infer(x, errors);
-                            self.untype(inferred_ty, x.range(), errors)
-                        }
-                    }
-                    _ => {
-                        // For non-integer numbers (float, complex), fall through to the generic path
-                        let inferred_ty = self.expr_infer(x, errors);
-                        self.untype(inferred_ty, x.range(), errors)
-                    }
-                }
             }
             _ => {
                 let inferred_ty = self.expr_infer(x, errors);

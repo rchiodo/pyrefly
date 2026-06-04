@@ -287,10 +287,16 @@ ERROR Returned type `Tensor[24]` is not assignable to declared return type `Tens
 
 ```scrut
 $ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_dim_in_non_tensor.py"
- INFO revealed type: MyContainer[5] [reveal-type]
+ERROR Expected a type form, got instance of `Literal[5]` [not-a-type]
+  --> *test_dim_in_non_tensor.py:21:24 (glob)
+   |
+21 | container: MyContainer[5] = MyContainer(42)
+   |                        ^
+   |
+ INFO revealed type: MyContainer[Unknown] [reveal-type]
   --> *test_dim_in_non_tensor.py:23:12 (glob)
    |
-23 | reveal_type(result)  # Should be: MyContainer[5]
+23 | reveal_type(result)  # Should be: MyContainer[Unknown]
    |            --------
    |
  INFO revealed type: int [reveal-type]
@@ -299,7 +305,7 @@ $ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_dim_in_non_tensor.py"
 33 | reveal_type(result2)  # Should be: int
    |            ---------
    |
-[0]
+[1]
 ```
 
 ## View/reshape validation errors (test_view_errors)

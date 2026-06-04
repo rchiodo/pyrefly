@@ -25,16 +25,16 @@ if TYPE_CHECKING:
 
 class DCGAN:
     # Number of channels in the training images. For color images this is 3
-    nc: Final = 3
+    nc: Final[Dim[3]] = 3
 
     # Size of z latent vector (i.e. size of generator input)
-    nz: Final = 100
+    nz: Final[Dim[100]] = 100
 
     # Size of feature maps in generator
-    ngf: Final = 64
+    ngf: Final[Dim[64]] = 64
 
     # Size of feature maps in discriminator
-    ndf: Final = 64
+    ndf: Final[Dim[64]] = 64
 
 
 # custom weights initialization called on netG and netD

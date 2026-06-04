@@ -477,7 +477,9 @@ class Identity(Module):
 # Convolution Modules
 # ==============================================================================
 
-class Conv1d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+class Conv1d[InC, OutC, K, S: _Dim[Any] = 1, P: _Dim[Any] = 0, D: _Dim[Any] = 1](
+    Module
+):
     """1D convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, D are bound from constructor arguments via _Dim[T].
@@ -504,7 +506,9 @@ class Conv1d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
         self, input: Tensor[B, InC, L]
     ) -> Tensor[B, OutC, (L + 2 * P - D * (K - 1) - 1) // S + 1]: ...
 
-class Conv2d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+class Conv2d[InC, OutC, K, S: _Dim[Any] = 1, P: _Dim[Any] = 0, D: _Dim[Any] = 1](
+    Module
+):
     """2D convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, D are bound from constructor arguments via _Dim[T].
@@ -544,7 +548,9 @@ class Conv2d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
         (W + 2 * P - D * (K - 1) - 1) // S + 1,
     ]: ...
 
-class Conv3d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
+class Conv3d[InC, OutC, K, S: _Dim[Any] = 1, P: _Dim[Any] = 0, D: _Dim[Any] = 1](
+    Module
+):
     """3D convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, D are bound from constructor arguments via _Dim[T].
@@ -577,7 +583,15 @@ class Conv3d[InC, OutC, K, S = 1, P = 0, D = 1](Module):
         (W + 2 * P - D * (K - 1) - 1) // S + 1,
     ]: ...
 
-class ConvTranspose1d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+class ConvTranspose1d[
+    InC,
+    OutC,
+    K,
+    S: _Dim[Any] = 1,
+    P: _Dim[Any] = 0,
+    OP: _Dim[Any] = 0,
+    D: _Dim[Any] = 1,
+](Module):
     """1D transposed convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].
@@ -605,7 +619,15 @@ class ConvTranspose1d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
         self, input: Tensor[B, InC, L]
     ) -> Tensor[B, OutC, (L - 1) * S - 2 * P + D * (K - 1) + OP + 1]: ...
 
-class ConvTranspose2d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+class ConvTranspose2d[
+    InC,
+    OutC,
+    K,
+    S: _Dim[Any] = 1,
+    P: _Dim[Any] = 0,
+    OP: _Dim[Any] = 0,
+    D: _Dim[Any] = 1,
+](Module):
     """2D transposed convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].
@@ -638,7 +660,15 @@ class ConvTranspose2d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
         (W - 1) * S - 2 * P + D * (K - 1) + OP + 1,
     ]: ...
 
-class ConvTranspose3d[InC, OutC, K, S = 1, P = 0, OP = 0, D = 1](Module):
+class ConvTranspose3d[
+    InC,
+    OutC,
+    K,
+    S: _Dim[Any] = 1,
+    P: _Dim[Any] = 0,
+    OP: _Dim[Any] = 0,
+    D: _Dim[Any] = 1,
+](Module):
     """3D transposed convolution. Tracks channel and spatial dimensions.
 
     Type parameters S, P, OP, D are bound from constructor arguments via _Dim[T].

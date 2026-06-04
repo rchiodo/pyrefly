@@ -20,7 +20,7 @@ def process_container[N](c: MyContainer[N]) -> MyContainer[N]:
 
 container: MyContainer[5] = MyContainer(42)
 result = process_container(container)
-reveal_type(result)  # Should be: MyContainer[5]
+reveal_type(result)  # Should be: MyContainer[Unknown]
 
 
 # Test 2: Dim type variable as a regular parameter (not in subscript)

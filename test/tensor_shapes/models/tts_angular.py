@@ -177,12 +177,12 @@ class SpeakerEncoder[InDim, ProjDim](nn.Module):
     def forward[B, T](self, x: Tensor[B, T, InDim]) -> Tensor[B, ProjDim]:
         if self.use_lstm_with_projection:
             # First layer: (B, T, InDim) → (B, T, ProjDim)
-            first: LSTMWithProjection[InDim, int, ProjDim] = self.network[0]
+            first: LSTMWithProjection[InDim, Any, ProjDim] = self.network[0]
             h = first(x)
             assert_type(h, Tensor[B, T, ProjDim])
             # Remaining layers: (B, T, ProjDim) → (B, T, ProjDim)
             for i in range(1, len(self.network)):
-                layer: LSTMWithProjection[ProjDim, int, ProjDim] = self.network[i]
+                layer: LSTMWithProjection[ProjDim, Any, ProjDim] = self.network[i]
                 h = layer(h)
             assert_type(h, Tensor[B, T, ProjDim])
             # Take last timestep and L2-normalize
@@ -282,7 +282,7 @@ class AngleProtoLoss(nn.Module):
 
 
 def compute_embedding[ProjDim](
-    encoder: SpeakerEncoder[int, ProjDim],
+    encoder: SpeakerEncoder[Any, ProjDim],
     utterance: Tensor,
     num_eval: int = 10,
     partial_n_frames: int = 160,
@@ -328,7 +328,7 @@ def compute_embedding[ProjDim](
 
 
 def batch_compute_embedding[ProjDim](
-    encoder: SpeakerEncoder[int, ProjDim],
+    encoder: SpeakerEncoder[Any, ProjDim],
     utterances: list[Tensor],
     num_eval: int = 10,
     partial_n_frames: int = 160,

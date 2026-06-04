@@ -2391,9 +2391,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Some(result) = class_getitem_result.or(metaclass_getitem_result) {
                         result
                     } else {
+                        let targs = self.parse_class_type_args(&cls, xs, errors);
                         self.heap.mk_type_of(self.specialize(
                             &cls,
-                            xs.map(|x| self.expr_untype(x, TypeFormContext::TypeArgument, errors)),
+                            targs,
                             range,
                             errors,
                         ))
@@ -3095,6 +3096,120 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
         Some(dims)
+    }
+
+    fn contains_quantified(ty: &Type, param: &Quantified) -> bool {
+        ty.any(|ty| {
+            matches!(ty, Type::Quantified(q) | Type::QuantifiedValue(q) if q.as_ref() == param)
+        })
+    }
+
+    fn is_dim_bound(ty: &Type) -> bool {
+        matches!(ty, Type::Dim(_))
+            || matches!(ty, Type::ClassType(cls) if cls.has_qname("shape_extensions", "Dim"))
+    }
+
+    fn type_mentions_param_as_dimension(
+        &self,
+        ty: &Type,
+        param: &Quantified,
+        depth: usize,
+    ) -> bool {
+        if depth > 8 {
+            return false;
+        }
+        match ty {
+            Type::Dim(inner) => Self::contains_quantified(inner, param),
+            Type::Size(_) => Self::contains_quantified(ty, param),
+            Type::ShapedArray(tensor) => match &tensor.shape {
+                ShapedArrayShape::Concrete(dims) => {
+                    dims.iter().any(|dim| Self::contains_quantified(dim, param))
+                }
+                ShapedArrayShape::Unpacked(unpacked) => {
+                    let (prefix, middle, suffix) = &**unpacked;
+                    prefix
+                        .iter()
+                        .chain(suffix)
+                        .any(|dim| Self::contains_quantified(dim, param))
+                        || Self::contains_quantified(middle, param)
+                }
+            },
+            Type::ClassType(cls) => cls.targs().iter_paired().any(|(nested_param, nested_arg)| {
+                Self::contains_quantified(nested_arg, param)
+                    && self.class_tparam_used_in_shape_context(
+                        cls.class_object(),
+                        nested_param,
+                        depth + 1,
+                    )
+            }),
+            _ => {
+                let mut found = false;
+                ty.recurse(&mut |ty| {
+                    found |= self.type_mentions_param_as_dimension(ty, param, depth + 1);
+                });
+                found
+            }
+        }
+    }
+
+    fn class_tparam_used_in_shape_context(
+        &self,
+        cls: &Class,
+        param: &Quantified,
+        depth: usize,
+    ) -> bool {
+        if matches!(param.restriction(), Restriction::Bound(bound) if Self::is_dim_bound(bound)) {
+            return true;
+        }
+        self.get_class_field_map(cls).values().any(|field| {
+            let (ty, _, _) = field.for_variance_inference();
+            self.type_mentions_param_as_dimension(ty, param, depth)
+        })
+    }
+
+    fn parse_class_type_args(
+        &self,
+        cls: &Class,
+        args: &[Expr],
+        errors: &ErrorCollector,
+    ) -> Vec<Type> {
+        if !self.solver().tensor_shapes {
+            return args.map(|arg| self.expr_untype(arg, TypeFormContext::TypeArgument, errors));
+        }
+        let tparams = self.get_class_tparams(cls);
+        let tparams_vec = tparams.as_vec();
+        let variadic_idx = tparams_vec
+            .iter()
+            .position(|param| param.is_type_var_tuple());
+        let param_for_arg = |idx: usize| {
+            if let Some(variadic_idx) = variadic_idx {
+                let suffix_len = tparams_vec.len() - variadic_idx - 1;
+                if idx < variadic_idx {
+                    tparams_vec.get(idx)
+                } else if idx + suffix_len < args.len() {
+                    tparams_vec.get(variadic_idx)
+                } else {
+                    tparams_vec.get(tparams_vec.len() - (args.len() - idx))
+                }
+            } else {
+                tparams_vec.get(idx)
+            }
+        };
+        args.iter()
+            .enumerate()
+            .map(|(idx, arg)| {
+                if let Some(param) = param_for_arg(idx)
+                    && (param.is_type_var() || param.is_type_var_tuple())
+                    && self.class_tparam_used_in_shape_context(cls, param, 0)
+                    && !matches!(arg, Expr::Starred(_))
+                {
+                    self.parse_dimension_expr(arg, errors)
+                        .unwrap_or_else(Type::any_error)
+                } else {
+                    self.expr_untype(arg, TypeFormContext::TypeArgument, errors)
+                }
+            })
+            .collect()
     }
 
     /// Check if a type is a valid TypeVarTuple (either directly or wrapped in Unpack).

@@ -18,7 +18,7 @@
 # - [x] MobileNetV2._forward_impl
 # - [x] MobileNetV2.forward
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -106,7 +106,7 @@ class InvertedResidual[Inp, Oup, ER, S](nn.Module):
         return out3
 
 
-class MobileNetV2[NC = 1000, LC = 1280](nn.Module):
+class MobileNetV2[NC: Dim[Any] = 1000, LC: Dim[Any] = 1280](nn.Module):
     """MobileNet V2 main class.
 
     Bridge dim LC (last_channel) connects the untracked feature extractor

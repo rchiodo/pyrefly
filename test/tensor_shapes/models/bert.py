@@ -14,7 +14,7 @@ Original: pytorch/benchmark/torchbenchmark/models/BERT_pytorch/bert_pytorch/mode
 
 import math
 from collections.abc import Callable
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -193,7 +193,9 @@ class MultiHeadedAttention[DModel, H](nn.Module):
 # ============================================================================
 
 
-class TokenEmbedding[VocabSize, EmbedSize = 512](nn.Embedding[VocabSize, EmbedSize]):
+class TokenEmbedding[VocabSize: Dim[Any], EmbedSize: Dim[Any] = 512](
+    nn.Embedding[VocabSize, EmbedSize]
+):
     def __init__(
         self, vocab_size: Dim[VocabSize], embed_size: Dim[EmbedSize] = 512
     ) -> None:
@@ -227,7 +229,7 @@ class SegmentEmbedding(nn.Embedding):
         super().__init__(3, embed_size, padding_idx=0)
 
 
-class BERTEmbedding[VocabSize, EmbedSize](nn.Module):
+class BERTEmbedding[VocabSize: Dim[Any], EmbedSize: Dim[Any]](nn.Module):
     """
     BERT Embedding which is consisted with under features
         1. TokenEmbedding : normal embedding matrix
@@ -321,7 +323,7 @@ class TransformerBlock[Hidden, H](nn.Module):
 # ============================================================================
 
 
-class BERT[VocabSize, Hidden = 768, H = 12](nn.Module):
+class BERT[VocabSize: Dim[Any], Hidden: Dim[Any] = 768, H: Dim[Any] = 12](nn.Module):
     """
     BERT model : Bidirectional Encoder Representations from Transformers.
     """
@@ -398,7 +400,7 @@ class NextSentencePrediction[Hidden](nn.Module):
         return self.softmax(self.linear(x[:, 0]))
 
 
-class MaskedLanguageModel[Hidden, VocabSize](nn.Module):
+class MaskedLanguageModel[Hidden: Dim[Any], VocabSize: Dim[Any]](nn.Module):
     """
     predicting origin token from masked input sequence
     n-class classification problem, n-class = vocab_size
@@ -413,7 +415,7 @@ class MaskedLanguageModel[Hidden, VocabSize](nn.Module):
         return self.softmax(self.linear(x))
 
 
-class BERTLM[VocabSize, Hidden, H](nn.Module):
+class BERTLM[VocabSize: Dim[Any], Hidden: Dim[Any], H: Dim[Any]](nn.Module):
     """
     BERT Language Model
     Next Sentence Prediction Model + Masked Language Model

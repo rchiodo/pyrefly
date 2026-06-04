@@ -34,7 +34,12 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class FinalMLPConfig[M1Out = 256, M2Out = 256, NH = 1, K = 16]:
+class FinalMLPConfig[
+    M1Out: Dim[Any] = 256,
+    M2Out: Dim[Any] = 256,
+    NH: Dim[Any] = 1,
+    K: Dim[Any] = 16,
+]:
     mlp1_hidden_units: list[int] = field(default_factory=lambda: [512, 256])
     mlp1_output_dim: Dim[M1Out] = 256  # type: ignore[bad-assignment]
     mlp1_activation: str = "ReLU"
@@ -149,7 +154,14 @@ class InteractionAggregation[XD, YD, OutD, NH](nn.Module):
         return out
 
 
-class FinalMLPLayer[F, D, K, M1Out, M2Out, NH](nn.Module):
+class FinalMLPLayer[
+    F,
+    D,
+    K: Dim[Any],
+    M1Out: Dim[Any],
+    M2Out: Dim[Any],
+    NH: Dim[Any],
+](nn.Module):
     """Single FinalMLP interaction layer: [B, F, D] -> [B, K, D].
 
     Runs two parallel MLPs on the flattened input, fuses via bilinear
@@ -216,7 +228,14 @@ class FinalMLPLayer[F, D, K, M1Out, M2Out, NH](nn.Module):
         return result
 
 
-class FinalMLPBackbone[F, D, M1Out, M2Out, NH, K](nn.Module):
+class FinalMLPBackbone[
+    F,
+    D,
+    M1Out: Dim[Any],
+    M2Out: Dim[Any],
+    NH: Dim[Any],
+    K: Dim[Any],
+](nn.Module):
     """Multi-layer FinalMLP backbone: stacks FinalMLPLayers for iterative interaction.
 
     Each layer runs dual-stream MLPs with bilinear fusion and projects output to

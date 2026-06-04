@@ -22,7 +22,6 @@ use pyrefly_types::callable::Params;
 use pyrefly_types::callable::PlaceholderBodyKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType;
-use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::literal::LitStyle;
 use pyrefly_types::meta_shape_dsl::ShapeDslFunction;
 use pyrefly_types::meta_shape_dsl::ShapeTransform;
@@ -1061,11 +1060,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ))
                     .with_annotation(annot_range, "declared type".to_owned())
                 };
-                // When the parameter type is Dim[S] where S is a TypeVar with a
-                // Size(Literal(n)) default, and the default expression is the same
-                // integer literal n, skip the type check. At definition time S is
-                // unresolved so `int <: Dim[S]` would fail spuriously. At call time
-                // S will be bound from the explicit argument or the PEP 696 default.
+                // Integer literal defaults are valid for `Dim[...]` parameters: at
+                // call time the dimension variable is bound from that default value.
                 let skip_check = matches!(
                     (&param_ty, default),
                     (
@@ -1074,13 +1070,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             value: ruff_python_ast::Number::Int(i),
                             ..
                         }))
-                    ) if matches!(
-                        inner.as_ref(),
-                        Type::Quantified(q) if matches!(
-                            &q.default,
-                            Some(Type::Size(SizeExpr::Literal(n))) if i.as_i64() == Some(*n)
-                        )
-                    )
+                    ) if i.as_i64().is_some() && matches!(inner.as_ref(), Type::Quantified(_))
                 );
                 let check: Option<(&Type, &dyn Fn() -> TypeCheckContext)> = if skip_check {
                     None

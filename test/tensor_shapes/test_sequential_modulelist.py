@@ -10,7 +10,7 @@ Note: These containers may have limitations because they're type-erased
 (they hold generic Module objects, not specifically typed ones)
 """
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -111,7 +111,7 @@ def test_manual_sequential():
     assert_type(y, Tensor[16, 10])
 
 
-class TypedSequential[N, M, K](nn.Module):
+class TypedSequential[N: Dim[Any], M: Dim[Any], K: Dim[Any]](nn.Module):
     """Sequential that takes layer types instead of dimension literals"""
 
     layer1: LinearLayer[N, M]

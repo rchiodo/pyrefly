@@ -21,6 +21,7 @@ fn shaped_array_env() -> TestEnv {
 from typing import Any
 
 shaped_array: Any
+class Dim[T]: ...
 "#,
     );
     env
@@ -302,10 +303,51 @@ testcase!(
 from typing import reveal_type
 from torch import Tensor
 
-def f(x: Tensor[2, 3], y: Tensor) -> None:
+def f(x: Tensor[2, 3], y: Tensor) -> None:  # E: Expected a type form, got instance of `Literal[2]`  # E: Expected a type form, got instance of `Literal[3]`
     reveal_type(x)  # E: revealed type: Tensor
     reveal_type(x[0])  # E: revealed type: Tensor
     reveal_type(y)  # E: revealed type: Tensor
+"#,
+);
+
+testcase!(
+    test_tensor_shapes_keeps_integer_type_arguments_ordinary,
+    shaped_array_env().enable_tensor_shapes(),
+    r#"
+from shape_extensions import Dim, shaped_array
+from typing import TypeVar, reveal_type
+
+T = TypeVar("T")
+DefaultT = TypeVar("DefaultT", default=3)  # E: Expected a type form, got instance of `Literal[3]`
+
+class Box[T]: ...
+class DefaultBox[T = 3]: ...  # E: Expected a type form, got instance of `Literal[3]`
+
+@shaped_array(shape="Shape")
+class Array[DType, *Shape, Device]: ...
+
+@shaped_array(shape="Shape")
+class SuffixArray[*Shape, DType]: ...
+
+class Cpu: ...
+class Gpu: ...
+
+type Image = Array[int, 2, 3, Cpu]
+
+def ordinary_type_arguments(x: Box[3]) -> None:  # E: Expected a type form, got instance of `Literal[3]`
+    pass
+
+def shaped_array_segments(
+    good: Array[int, 2, 3, Cpu],
+    bad_prefix: Array[3, 2, 3, Cpu],  # E: Expected a type form, got instance of `Literal[3]`
+    bad_suffix: SuffixArray[2, 3, 3],  # E: Expected a type form, got instance of `Literal[3]`
+    alias: Image,
+) -> None:
+    reveal_type(good)  # E: revealed type: Array[2, 3]
+    reveal_type(alias)  # E: revealed type: Array[2, 3]
+
+def dims[N](concrete: Dim[3], symbolic: Dim[N + 1]) -> None:
+    pass
 "#,
 );
 

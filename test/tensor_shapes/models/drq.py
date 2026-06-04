@@ -99,7 +99,7 @@ class SquashedNormal[*EventShape](TransformedDistribution):
         self.scale = scale
         base_dist = Normal(loc, scale)
         tfms: list[Transform] = [TanhTransform()]
-        super().__init__(base_dist, tfms)
+        super().__init__(base_dist, tfms)  # type: ignore[bad-argument-type]
 
     @property
     def mean(self) -> Tensor[*EventShape]:

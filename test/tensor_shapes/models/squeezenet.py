@@ -17,7 +17,7 @@ off-by-one in intermediate spatial dims does not affect the output; the
 gap is in the typing of `features`.
 """
 
-from typing import assert_type, TYPE_CHECKING
+from typing import Any, assert_type, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -68,7 +68,7 @@ class Fire[InC, SQ, E1, E3](nn.Module):
         return result
 
 
-class SqueezeNet[NC = 1000](nn.Module):
+class SqueezeNet[NC: Dim[Any] = 1000](nn.Module):
     """SqueezeNet 1.0 architecture.
 
     Input:  Tensor[B, 3, H, W]

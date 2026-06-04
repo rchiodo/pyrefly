@@ -111,6 +111,10 @@ fn accepts_all_class_objects(ty: &Type) -> bool {
     }
 }
 
+fn is_dim_class_type(cls: &ClassType) -> bool {
+    cls.has_qname("shape_extensions", "Dim")
+}
+
 /// Check if a param list has both `*args: Any` and `**kwargs: Any`
 fn has_any_args_and_kwargs(args: &[Param]) -> bool {
     let has_vararg_any = args
@@ -2236,6 +2240,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             // This relies on top-level rules for Size <: Size, Size <: Quantified, Quantified <: Size,
             // Size <: Var, Var <: Size, etc.
             (Type::Dim(l_inner), Type::Dim(u_inner)) => self.is_subset_eq(l_inner, u_inner),
+            // Size expressions and symbolic shape parameters are the valid arguments to Dim.
+            (Type::Size(_), Type::Dim(dim_inner)) | (Type::Quantified(_), Type::Dim(dim_inner)) => {
+                self.is_subset_eq(got, dim_inner)
+            }
+            (Type::QuantifiedValue(q), Type::Dim(dim_inner)) => {
+                self.is_subset_eq(&Type::Quantified(q.clone()), dim_inner)
+            }
             // Literal[n] <: Dim[X] - convert literal to Size and check Size(n) <: X
             (Type::Literal(lit), Type::Dim(dim_inner)) if let Lit::Int(n) = &lit.value => {
                 let size_type = Type::Size(SizeExpr::Literal(n.as_i64().unwrap_or(0)));
@@ -2251,6 +2262,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::ClassType(cls), want @ Type::Dim(_)) if cls.is_builtin("int") => {
                 self.is_subset_eq_impl(&self.solver.heap.mk_dim(Type::any_implicit()), want)
             }
+            (Type::Size(_) | Type::Quantified(_), Type::ClassType(cls))
+                if is_dim_class_type(cls) =>
+            {
+                Ok(())
+            }
+            (Type::QuantifiedValue(_), Type::ClassType(cls)) if is_dim_class_type(cls) => Ok(()),
             // ========== End Dim Subtyping Rules ==========
             (Type::Literal(l_lit), Type::Literal(u_lit)) => {
                 ok_or(l_lit.value == u_lit.value, SubsetError::Other)
