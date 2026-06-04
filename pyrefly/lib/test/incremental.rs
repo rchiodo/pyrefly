@@ -144,7 +144,7 @@ impl Incremental {
         let loaded = Self::USER_FILES.map(|x| self.handle(x));
         let errors = self.state.transaction().get_errors(&loaded);
         let project_root = PathBuf::new();
-        let _ = print_errors(project_root.as_path(), &errors.collect_display_errors());
+        print_errors(project_root.as_path(), &errors.collect_display_errors());
 
         let mut changed = Vec::new();
         for (x, (count, _)) in subscriber.finish() {

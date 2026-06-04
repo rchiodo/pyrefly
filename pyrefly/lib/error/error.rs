@@ -356,15 +356,21 @@ impl Error {
 }
 
 #[cfg(test)]
-pub fn print_errors(project_root: &Path, errors: &[Error]) -> io::Result<()> {
-    let stdout = anstream::stdout();
-    let color_choice = stdout.current_choice();
-    let mut renderer = ErrorRenderer::new(stdout.lock(), color_choice);
-    for err in errors {
-        renderer.write(err, project_root, true)?;
-        renderer.flush()?;
+pub fn print_errors(project_root: &Path, errors: &[Error]) {
+    let mut buf = Vec::new();
+    {
+        let mut renderer = ErrorRenderer::plain(&mut buf);
+        for err in errors {
+            renderer.write(err, project_root, true).unwrap();
+        }
+        renderer.flush().unwrap();
     }
-    Ok(())
+    // Use eprintln! so Rust's test runner captures the output and shows it
+    // on test failure. Direct writes to stdout (e.g. via ErrorRenderer +
+    // stdout.lock()) bypass test capture and are invisible in test output.
+    if !buf.is_empty() {
+        eprint!("{}", String::from_utf8_lossy(&buf));
+    }
 }
 
 fn count_error_kinds(errors: &[Error]) -> Vec<(ErrorKind, usize)> {
