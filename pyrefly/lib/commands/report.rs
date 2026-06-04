@@ -66,6 +66,7 @@ use crate::commands::config_finder::ConfigConfigurerWrapper;
 use crate::commands::files::FilesArgs;
 use crate::commands::util::CommandExitStatus;
 use crate::export::exports::ExportLocation;
+use crate::export::exports::Exports;
 use crate::module::finder::DirEntryCache;
 use crate::module::finder::find_import_filtered;
 use crate::state::require::Require;
@@ -1823,11 +1824,16 @@ impl ReportArgs {
         members
     }
 
-    /// FQNs the stub re-exports from other modules, so an untyped same-named `.py` def isn't
-    /// merged in over the authoritative re-export.
+    /// FQNs the stub re-exports from other modules
+    ///
+    /// In a `.pyi` an import is only a re-export when its name is listed in `__all__` or written
+    /// as a `from x import Y as Y` alias. A plain `from x import Y` is a private implementation detail,
+    /// and does not obscure a same-named definition in the `.py`.
     fn collect_reexport_fqns(
         module: &Module,
         exports: &SmallMap<Name, ExportLocation>,
+        exports_data: &Exports,
+        dunder_all: &SmallSet<Name>,
     ) -> SmallSet<String> {
         let module_prefix = if module.name() != ModuleName::unknown() {
             format!("{}.", module.name())
@@ -1836,7 +1842,10 @@ impl ReportArgs {
         };
         exports
             .iter()
-            .filter(|&(_, loc)| matches!(loc, ExportLocation::OtherModule(..)))
+            .filter(|&(name, loc)| {
+                matches!(loc, ExportLocation::OtherModule(..))
+                    && (dunder_all.contains(name) || exports_data.is_explicit_reexport(name))
+            })
             .map(|(name, _)| format!("{module_prefix}{name}"))
             .collect()
     }
@@ -2206,7 +2215,12 @@ impl ReportArgs {
                         &tco_classes,
                     );
                     let stub_filter = Self::stub_merge_filter(transaction, handle);
-                    let stub_reexports = Self::collect_reexport_fqns(&module, &exports);
+                    let stub_reexports = Self::collect_reexport_fqns(
+                        &module,
+                        &exports,
+                        &transaction.get_exports_data(handle),
+                        &dunder_all,
+                    );
                     Self::merge_uncovered_py_symbols(
                         &mut functions,
                         &mut variables,
@@ -2534,7 +2548,12 @@ mod tests {
             &tco_classes,
         );
         let stub_filter = ReportArgs::stub_merge_filter(&pyi_txn, &pyi_handle);
-        let stub_reexports = ReportArgs::collect_reexport_fqns(&module, &exports);
+        let stub_reexports = ReportArgs::collect_reexport_fqns(
+            &module,
+            &exports,
+            &pyi_txn.get_exports_data(&pyi_handle),
+            &dunder_all,
+        );
         ReportArgs::merge_uncovered_py_symbols(
             &mut functions,
             &mut variables,
@@ -2635,6 +2654,14 @@ mod tests {
         let report =
             build_stub_module_report("stub_reexport_import.pyi", "stub_reexport_import.py");
         compare_snapshot("stub_reexport_import.expected.json", &report);
+    }
+
+    /// gh-3641: a plain `from x import Y` in a stub (not in `__all__`, not an `as` alias) is a
+    /// private import, so a same-named public `.py` def must still appear in the report.
+    #[test]
+    fn test_report_stub_private_import() {
+        let report = build_stub_module_report("stub_private_import.pyi", "stub_private_import.py");
+        compare_snapshot("stub_private_import.expected.json", &report);
     }
 
     /// gh-3519: don't double-count methods whose stub coverage is inherited.
