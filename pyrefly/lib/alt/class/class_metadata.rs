@@ -366,7 +366,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.error(
                     errors,
                     *range,
-                    ErrorKind::InvalidDecorator,
+                    ErrorKind::BadClassDefinition,
                     "`@disjoint_base` cannot be applied to a TypedDict".to_owned(),
                 );
                 false
@@ -374,7 +374,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.error(
                     errors,
                     *range,
-                    ErrorKind::InvalidDecorator,
+                    ErrorKind::BadClassDefinition,
                     "`@disjoint_base` cannot be applied to a Protocol".to_owned(),
                 );
                 false
@@ -685,7 +685,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         self.error(
                             errors,
                             *range,
-                            ErrorKind::InvalidArgument,
+                            ErrorKind::BadClassDefinition,
                             "@runtime_checkable can only be applied to Protocol classes".to_owned(),
                         );
                     }
@@ -1133,7 +1133,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.error(
                     errors,
                     cls.range(),
-                    ErrorKind::InvalidDecorator,
+                    ErrorKind::BadClassDefinition,
                     format!(
                         "`@dataclass` cannot be applied to Protocol `{}`",
                         cls.name()

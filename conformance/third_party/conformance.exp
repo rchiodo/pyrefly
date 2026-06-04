@@ -4964,8 +4964,8 @@
       "concise_description": "`@disjoint_base` cannot be applied to a function",
       "description": "`@disjoint_base` cannot be applied to a function",
       "line": 113,
-      "name": "invalid-decorator",
-      "severity": "warn",
+      "name": "bad-function-definition",
+      "severity": "error",
       "stop_column": 15,
       "stop_line": 113
     },
@@ -4975,8 +4975,8 @@
       "concise_description": "`@disjoint_base` cannot be applied to a TypedDict",
       "description": "`@disjoint_base` cannot be applied to a TypedDict",
       "line": 118,
-      "name": "invalid-decorator",
-      "severity": "warn",
+      "name": "bad-class-definition",
+      "severity": "error",
       "stop_column": 15,
       "stop_line": 118
     },
@@ -4986,8 +4986,8 @@
       "concise_description": "`@disjoint_base` cannot be applied to a Protocol",
       "description": "`@disjoint_base` cannot be applied to a Protocol",
       "line": 123,
-      "name": "invalid-decorator",
-      "severity": "warn",
+      "name": "bad-class-definition",
+      "severity": "error",
       "stop_column": 15,
       "stop_line": 123
     }

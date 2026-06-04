@@ -479,7 +479,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.error(
                         errors,
                         range,
-                        ErrorKind::InvalidDecorator,
+                        ErrorKind::BadFunctionDefinition,
                         "`@disjoint_base` cannot be applied to a function".to_owned(),
                     );
                     false

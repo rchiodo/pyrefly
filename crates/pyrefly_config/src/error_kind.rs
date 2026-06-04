@@ -202,8 +202,13 @@ pub enum ErrorKind {
     InvalidAnnotation,
     /// Passing an argument that is invalid for reasons besides type.
     InvalidArgument,
-    /// Error caused by incorrect usage of a decorator.
-    /// e.g. using @final on a top-level function
+    /// A method-only decorator was applied to a top-level function.
+    /// e.g. using `@final` or `@override` on a top-level function.
+    /// Defaults to `warn` because such usage is harmless at runtime and is
+    /// sometimes intentional. Decorator misuse that violates a typing spec
+    /// (e.g. `@dataclass` on a `Protocol`, `@disjoint_base` on a function)
+    /// is reported under `BadClassDefinition` or `BadFunctionDefinition`
+    /// instead, both of which default to `error`.
     InvalidDecorator,
     /// An error caused by incorrect inheritance in a class or type definition.
     /// e.g. a metaclass that is not a subclass of `type`.
