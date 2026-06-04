@@ -177,7 +177,7 @@ mod extract {
     use crate::types::Type;
 
     /// Extract a ShapedArrayShape from a Type.
-    /// Returns None for non-tensors and shapeless tensors.
+    /// Returns None for non-shaped-arrays and shapeless arrays.
     /// Allows both Concrete and Unpacked shapes through so DSL ops that
     /// support variadic shapes (e.g., slicing) can operate on them.
     pub fn shaped_array_shape(ty: &Type) -> Option<ShapedArrayShape> {
@@ -195,20 +195,14 @@ mod extract {
                     }
                 }
             },
-            Type::ClassType(cls) if cls.has_qname("torch", "Tensor") => {
-                // Extract shape from ClassType targs
-                let targs = cls.targs();
-                if targs.is_empty() {
-                    return None;
+            Type::Union(union) => {
+                let mut shapes = union.members.iter().map(shaped_array_shape);
+                let first = shapes.next()??;
+                if shapes.all(|shape| shape.as_ref() == Some(&first)) {
+                    Some(first)
+                } else {
+                    None
                 }
-                // First targ should be the shape tuple
-                if let Type::Tuple(Tuple::Concrete(elems)) = &targs.as_slice()[0] {
-                    let dims: Vec<Type> = elems.iter().filter_map(dimension).collect();
-                    if dims.len() == elems.len() && !dims.is_empty() {
-                        return Some(ShapedArrayShape::from_types(dims));
-                    }
-                }
-                None
             }
             _ => None,
         }
@@ -298,37 +292,25 @@ mod extract {
         }
     }
 
-    /// Extract list or tuple of tensor shapes.
-    /// Handles both list[Tensor[...]] and tuple[Tensor[...], ...].
+    /// Extract list or tuple of shaped-array shapes.
+    /// Handles tuple[Array[...], ...].
     /// Returns None for list types (can't determine element count) or unbounded tuples.
     pub fn shaped_array_list(ty: &Type) -> Option<Vec<ShapedArrayShape>> {
         use crate::tuple::Tuple;
 
         match ty {
-            // list[Tensor[...]] - can't determine element count, return None
+            // list[Array[...]] - can't determine element count, return None
             Type::ClassType(class_type) if class_type.has_qname("builtins", "list") => {
                 // Lists don't preserve element count in the type system
                 // Fall back to fixture for now
                 None
             }
-            // tuple[Tensor[...], ...] - unbounded, can't determine count
+            // tuple[Array[...], ...] - unbounded, can't determine count
             Type::Tuple(Tuple::Unbounded(_)) => None,
-            // tuple[Tensor[...], Tensor[...], ...] - concrete, extract all
+            // tuple[Array[...], Array[...], ...] - concrete, extract all
             Type::Tuple(Tuple::Concrete(elems)) => {
-                // Check if first element is a shaped array.
-                if let Some(first) = elems.first() {
-                    let is_shaped_array = match first {
-                        Type::ShapedArray(_) => true,
-                        Type::ClassType(ct) => ct.has_qname("torch", "Tensor"),
-                        _ => false,
-                    };
-
-                    if is_shaped_array {
-                        // Tuple of shaped arrays - extract all
-                        let shapes: Option<Vec<ShapedArrayShape>> =
-                            elems.iter().map(shaped_array_shape).collect();
-                        return shapes;
-                    }
+                if matches!(elems.first(), Some(Type::ShapedArray(_))) {
+                    return elems.iter().map(shaped_array_shape).collect();
                 }
                 None
             }
@@ -3241,15 +3223,10 @@ fn eval_dsl_body(
 }
 
 /// Inject a computed `ShapedArrayShape` into a fixture `Type`, preserving the base class.
-///
-/// Handles both `Type::ShapedArray(t)` and `Type::ClassType("torch.Tensor")` fixture types.
-/// Falls back to `ret_type` unchanged if it isn't a tensor type.
+/// Falls back to `ret_type` unchanged if it isn't a shaped-array type.
 fn inject_shape(shape: ShapedArrayShape, ret_type: &Type) -> Type {
     match ret_type {
         Type::ShapedArray(t) => ShapedArrayType::new(t.base_class.clone(), shape).to_type(),
-        Type::ClassType(cls) if cls.has_qname("torch", "Tensor") => {
-            ShapedArrayType::new(cls.clone(), shape).to_type()
-        }
         _ => ret_type.clone(),
     }
 }
@@ -3897,11 +3874,28 @@ pub fn convert_shape_dsl_function(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
     use pyrefly_python::ast::Ast;
+    use pyrefly_python::module::Module;
+    use pyrefly_python::module_name::ModuleName;
+    use pyrefly_python::module_path::ModulePath;
+    use pyrefly_python::nesting_context::NestingContext;
+    use ruff_python_ast::Identifier;
     use ruff_python_ast::PySourceType;
     use ruff_python_ast::Stmt;
+    use ruff_python_ast::name::Name;
+    use ruff_text_size::TextRange;
+    use ruff_text_size::TextSize;
 
     use super::*;
+    use crate::class::Class;
+    use crate::class::ClassDefIndex;
+    use crate::class::ClassType;
+    use crate::tuple::Tuple;
+    use crate::types::TArgs;
+    use crate::types::Union;
 
     fn parse_dsl_functions(source: &str) -> Vec<ShapeDslFunction> {
         let (module, _, _) = Ast::parse(source, PySourceType::Stub);
@@ -3916,6 +3910,86 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    fn fake_class(name: &str, module: &str) -> Class {
+        let module = Module::new(
+            ModuleName::from_str(module),
+            ModulePath::filesystem(PathBuf::from(module)),
+            Arc::new("1234567890".to_owned()),
+        );
+        Class::new(
+            ClassDefIndex(0),
+            Identifier::new(Name::new(name), TextRange::empty(TextSize::new(0))),
+            NestingContext::toplevel(),
+            module,
+            None,
+        )
+    }
+
+    #[test]
+    fn test_shape_dsl_extract_ignores_ordinary_torch_class_type() {
+        let torch_tensor = Type::ClassType(ClassType::new(
+            fake_class("Tensor", "torch"),
+            TArgs::default(),
+        ));
+        let shape = ShapedArrayShape::new(vec![SizeExpr::Literal(2)]);
+
+        assert!(extract::shaped_array_shape(&torch_tensor).is_none());
+        assert!(
+            extract::shaped_array_list(&Type::Tuple(Tuple::Concrete(vec![torch_tensor.clone()])))
+                .is_none()
+        );
+        assert_eq!(inject_shape(shape, &torch_tensor), torch_tensor);
+    }
+
+    #[test]
+    fn test_shape_dsl_extracts_registered_shaped_array_tuple() {
+        let array = ClassType::new(fake_class("Array", "arrays"), TArgs::default());
+        let first_shape = ShapedArrayShape::new(vec![SizeExpr::Literal(2)]);
+        let second_shape = ShapedArrayShape::new(vec![SizeExpr::Literal(3)]);
+        let first = ShapedArrayType::new(array.clone(), first_shape.clone()).to_type();
+        let second = ShapedArrayType::new(array.clone(), second_shape.clone()).to_type();
+
+        assert_eq!(
+            extract::shaped_array_shape(&first),
+            Some(first_shape.clone())
+        );
+        assert_eq!(
+            extract::shaped_array_list(&Type::Tuple(Tuple::Concrete(vec![first, second]))),
+            Some(vec![first_shape, second_shape.clone()])
+        );
+        assert_eq!(
+            inject_shape(
+                second_shape.clone(),
+                &ShapedArrayType::shapeless(array.clone()).to_type()
+            ),
+            ShapedArrayType::new(array, second_shape).to_type()
+        );
+    }
+
+    #[test]
+    fn test_shape_dsl_extracts_same_shape_union() {
+        let array = ClassType::new(fake_class("Array", "arrays"), TArgs::default());
+        let shape = ShapedArrayShape::new(vec![SizeExpr::Literal(2)]);
+        let other_shape = ShapedArrayShape::new(vec![SizeExpr::Literal(3)]);
+        let union = Type::Union(Box::new(Union {
+            members: vec![
+                ShapedArrayType::new(array.clone(), shape.clone()).to_type(),
+                ShapedArrayType::new(array.clone(), shape.clone()).to_type(),
+            ],
+            display_name: None,
+        }));
+        let mismatched_union = Type::Union(Box::new(Union {
+            members: vec![
+                ShapedArrayType::new(array.clone(), shape.clone()).to_type(),
+                ShapedArrayType::new(array, other_shape).to_type(),
+            ],
+            display_name: None,
+        }));
+
+        assert_eq!(extract::shaped_array_shape(&union), Some(shape));
+        assert!(extract::shaped_array_shape(&mismatched_union).is_none());
     }
 
     #[test]

@@ -26,16 +26,54 @@ shaped_array: Any
     env
 }
 
-fn shaped_array_env_with_torch() -> TestEnv {
+fn shaped_array_env_with_plain_torch() -> TestEnv {
     let mut env = shaped_array_env();
     env.add_with_path(
         "torch",
         "torch.pyi",
         r#"
+class Tensor[*Shape]:
+    def __getitem__(self, idx: int) -> Tensor[*Shape]: ...
+"#,
+    );
+    env
+}
+
+fn shaped_array_env_with_shaped_torch() -> TestEnv {
+    let mut env = shaped_array_env();
+    env.add_with_path(
+        "torch",
+        "torch.pyi",
+        r#"
+from shape_extensions import shaped_array
+
+@shaped_array(shape="Shape")
 class Tensor[*Shape]: ...
 "#,
     );
     env
+}
+
+fn add_jaxtyping(env: &mut TestEnv) {
+    env.add_with_path(
+        "jaxtyping",
+        "jaxtyping.pyi",
+        r#"
+class Float[*Shape]: ...
+"#,
+    );
+}
+
+fn shaped_array_env_with_plain_torch_and_jaxtyping() -> TestEnv {
+    let mut env = shaped_array_env_with_plain_torch();
+    add_jaxtyping(&mut env);
+    env.enable_tensor_shapes()
+}
+
+fn shaped_array_env_with_shaped_torch_and_jaxtyping() -> TestEnv {
+    let mut env = shaped_array_env_with_shaped_torch();
+    add_jaxtyping(&mut env);
+    env.enable_tensor_shapes()
 }
 
 fn shaped_array_env_with_numpy() -> TestEnv {
@@ -251,12 +289,29 @@ def values() -> None:
     value = Array()
     reveal_type(value)  # E: revealed type: Array[Unknown, *tuple[Unknown, ...]]
     reveal_type(value[0])  # E: revealed type: Array
+
+def index_preserves_dtype(concrete: Array[int, 2, 3]) -> Array[int, 3]:
+    return concrete[0]
 "#,
 );
 
 testcase!(
-    test_torch_tensor_fallback_still_parses_shapes,
-    shaped_array_env_with_torch(),
+    test_undecorated_torch_tensor_stays_ordinary,
+    shaped_array_env_with_plain_torch().enable_tensor_shapes(),
+    r#"
+from typing import reveal_type
+from torch import Tensor
+
+def f(x: Tensor[2, 3], y: Tensor) -> None:
+    reveal_type(x)  # E: revealed type: Tensor
+    reveal_type(x[0])  # E: revealed type: Tensor
+    reveal_type(y)  # E: revealed type: Tensor
+"#,
+);
+
+testcase!(
+    test_decorated_torch_tensor_parses_shapes,
+    shaped_array_env_with_shaped_torch(),
     r#"
 from typing import reveal_type
 from torch import Tensor
@@ -266,6 +321,31 @@ def f(x: Tensor[2, 3], y: Tensor) -> None:
     reveal_type(y)  # E: revealed type: Tensor
     reveal_type(x[0])  # E: revealed type: Tensor[3]
     reveal_type(y[0])  # E: revealed type: Tensor
+"#,
+);
+
+testcase!(
+    test_jaxtyping_requires_registered_shaped_array,
+    shaped_array_env_with_plain_torch_and_jaxtyping(),
+    r#"
+from jaxtyping import Float
+from torch import Tensor
+
+def f(x: Float[Tensor, "batch channels"]) -> None:  # E: First argument to jaxtyping annotation must be a registered shaped-array class, got `Tensor[*tuple[Unknown, ...]]`
+    pass
+"#,
+);
+
+testcase!(
+    test_jaxtyping_accepts_decorated_torch_tensor,
+    shaped_array_env_with_shaped_torch_and_jaxtyping(),
+    r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)  # E: revealed type: Shaped[Tensor, "batch channels"]
 "#,
 );
 

@@ -524,17 +524,6 @@ impl<'a> TypeDisplayContext<'a> {
             {
                 output.write_qname(class_type.qname())
             }
-            // Display Tensor[*tuple[Unknown, ...]] as just "Tensor"
-            Type::ClassType(class_type)
-                if class_type.has_qname("torch", "Tensor")
-                    && class_type.targs().as_slice().len() == 1
-                    && matches!(
-                        &class_type.targs().as_slice()[0],
-                        Type::Tuple(Tuple::Unbounded(t)) if matches!(**t, Type::Any(_))
-                    ) =>
-            {
-                output.write_qname(class_type.qname())
-            }
             Type::ClassType(class_type) => {
                 output.write_qname(class_type.qname())?;
                 output.write_targs(class_type.targs())

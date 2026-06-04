@@ -5659,12 +5659,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 // Canonicalize bare shaped-array types to Type::ShapedArray(shapeless)
                 // for consistency. Subscripted arrays are already converted to
-                // Type::ShapedArray in parse_shaped_array_type, so only the bare case
-                // reaches here. Keep the torch name fallback until the fixture is
-                // explicitly registered with `@shaped_array`.
+                // Type::ShapedArray during annotation parsing, so only the bare case reaches here.
                 if let Type::ClassType(cls) = t.as_ref()
-                    && (cls.has_qname("torch", "Tensor")
-                        || self.shaped_array_shape_for_class_type(cls).is_some())
+                    && self.shaped_array_shape_for_class_type(cls).is_some()
                 {
                     return Some(ShapedArrayType::shapeless(cls.clone()).to_type());
                 }

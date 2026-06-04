@@ -839,13 +839,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         // Extract the receiver type from the already-resolved BoundMethod
         // rather than re-inferring the base expression.
-        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::ShapedArray(_))
-                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
-        } else {
-            false
-        };
-        if is_tensor {
+        if matches!(callee_ty, Type::BoundMethod(bm) if Self::is_pytorch_tensor_type(&bm.obj)) {
             errors
                 .error_builder(
                     x.range(),
@@ -881,13 +875,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if !x.arguments.is_empty() {
             return;
         }
-        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::ShapedArray(_))
-                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
-        } else {
-            false
-        };
-        if is_tensor {
+        if matches!(callee_ty, Type::BoundMethod(bm) if Self::is_pytorch_tensor_type(&bm.obj)) {
             errors
                 .error_builder(
                     x.range(),
@@ -921,9 +909,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 continue;
             };
             let arg_ty = self.expr_infer(arg, errors);
-            let is_tensor = matches!(&arg_ty, Type::ShapedArray(_))
-                || matches!(&arg_ty, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"));
-            if is_tensor {
+            if Self::is_pytorch_tensor_type(&arg_ty) {
                 errors
                     .error_builder(
                         arg.range(),
@@ -961,13 +947,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if x.arguments.is_empty() {
             return;
         }
-        let is_tensor = if let Type::BoundMethod(bm) = callee_ty {
-            matches!(&bm.obj, Type::ShapedArray(_))
-                || matches!(&bm.obj, Type::ClassType(ct) if ct.has_qname("torch", "Tensor"))
-        } else {
-            false
-        };
-        if !is_tensor {
+        if !matches!(callee_ty, Type::BoundMethod(bm) if Self::is_pytorch_tensor_type(&bm.obj)) {
             return;
         }
         let Expr::Call(base_call) = &*attr_expr.value else {
@@ -2319,9 +2299,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ),
                     }
                 }
-                // Shaped-array type parsing: Tensor[2, 3] and registered array classes.
+                // Shaped-array type parsing for registered array classes.
                 Type::ClassDef(ref cls) if self.is_shaped_array_class(cls) => {
-                    Type::type_of(self.parse_shaped_array_type(cls, xs, range, errors))
+                    Type::type_of(self.parse_registered_shaped_array_type(cls, xs, range, errors))
                 }
                 // Jaxtyping annotation parsing: Float[Tensor, "batch channels"] syntax
                 Type::ClassDef(ref cls)
@@ -2908,30 +2888,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    /// Check if a class is a tensor class (torch.Tensor)
-    fn is_tensor_class(&self, cls: &Class) -> bool {
-        cls.has_toplevel_qname("torch", "Tensor")
+    fn is_pytorch_tensor_type(ty: &Type) -> bool {
+        match ty {
+            Type::ClassType(cls) => cls.has_qname("torch", "Tensor"),
+            Type::ShapedArray(shaped_array) => shaped_array.base_class.has_qname("torch", "Tensor"),
+            _ => false,
+        }
     }
 
     /// Check if a class should use shaped-array type parsing.
     fn is_shaped_array_class(&self, cls: &Class) -> bool {
-        self.is_tensor_class(cls) || self.shaped_array_shape_for_class(cls).is_some()
+        self.shaped_array_shape_for_class(cls).is_some()
     }
 
-    fn shaped_array_classtype_to_shaped_array_type(&self, cls: &ClassType) -> ShapedArrayType {
-        if self.is_tensor_class(cls.class_object()) {
-            let targs = cls.targs().as_slice();
-            let is_shapeless = match targs {
-                [] => true,
-                [Type::Tuple(Tuple::Unbounded(f))] => f.is_any(),
-                _ => false,
-            };
-            if is_shapeless {
-                return ShapedArrayType::shapeless(cls.clone());
-            }
-            return ShapedArrayType::new(cls.clone(), ShapedArrayShape::from_types(targs.to_vec()));
-        }
-
+    pub(crate) fn shaped_array_classtype_to_shaped_array_type(
+        &self,
+        cls: &ClassType,
+    ) -> ShapedArrayType {
         let shape_param = self
             .shaped_array_shape_for_class_type(cls)
             .expect("registered shaped-array class should have shape metadata");
@@ -3203,22 +3176,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some((ShapedArrayShape::from_types(dims.clone()), dims))
     }
 
-    /// Parse torch's legacy `Tensor[...]` syntax, preserving its existing base-class behavior.
-    fn parse_tensor_type(&self, cls: &Class, shape_args: &[Expr], errors: &ErrorCollector) -> Type {
-        let Some((shaped_array_shape, _)) = self.parse_shaped_array_shape_args(shape_args, errors)
-        else {
-            return Type::any_error();
-        };
-
-        // Create the base class type (with default type arguments if needed)
-        let base_class = self.promote_nontypeddict_silently_to_classtype(cls);
-
-        // Create the shaped-array type.
-        let shaped_array_type = ShapedArrayType::new(base_class, shaped_array_shape);
-
-        shaped_array_type.to_type()
-    }
-
     /// Parse a registered shaped-array annotation.
     ///
     /// The shape segment is determined by the class's registered `TypeVarTuple`
@@ -3263,22 +3220,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         ShapedArrayType::new(base_class, shaped_array_shape).to_type()
     }
-
-    /// Parse Tensor[2, 3] or registered Array[DType, 2, 3] into a ShapedArrayType.
-    fn parse_shaped_array_type(
-        &self,
-        cls: &Class,
-        args: &[Expr],
-        range: TextRange,
-        errors: &ErrorCollector,
-    ) -> Type {
-        if self.is_tensor_class(cls) {
-            self.parse_tensor_type(cls, args, errors)
-        } else {
-            self.parse_registered_shaped_array_type(cls, args, range, errors)
-        }
-    }
-
     /// Parse Dim[3], Dim[N], Dim[N+1] into Type::Dim(...)
     fn parse_symint_type(&self, args: &[Expr], range: TextRange, errors: &ErrorCollector) -> Type {
         // Dim takes exactly one argument

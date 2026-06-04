@@ -8,6 +8,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter;
+use std::sync::Arc;
 
 use itertools::EitherOrBoth;
 use itertools::Itertools;
@@ -62,6 +63,7 @@ use crate::types::type_alias::TypeAliasData;
 use crate::types::type_var::Restriction;
 use crate::types::type_var::Variance;
 use crate::types::types::Forallable;
+use crate::types::types::TArgs;
 use crate::types::types::Type;
 
 /// Extract a `TypeAliasData` reference from a `Type` that wraps one,
@@ -2518,16 +2520,35 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         got: &ShapedArrayType,
         want: &ShapedArrayType,
     ) -> Result<(), SubsetError> {
-        // Check base class compatibility
-        self.is_subset_eq(
-            &got.base_class.clone().to_type(),
-            &want.base_class.clone().to_type(),
-        )?;
+        // Check base class compatibility, but ignore the shape TypeVarTuple:
+        // the shape is tracked and checked separately in `ShapedArrayType::shape`.
+        let got_base = Self::shape_erased_base_class(got);
+        let want_base = Self::shape_erased_base_class(want);
+        self.is_subset_eq(&got_base.to_type(), &want_base.to_type())?;
 
         // Check shape compatibility
         self.bind_tensor_dimensions(&got.shape, &want.shape)?;
 
         Ok(())
+    }
+
+    fn shape_erased_base_class(shaped_array: &ShapedArrayType) -> ClassType {
+        let base_class = &shaped_array.base_class;
+        let targs = base_class
+            .targs()
+            .iter_paired()
+            .map(|(param, arg)| {
+                if param.kind() == QuantifiedKind::TypeVarTuple {
+                    Type::any_tuple()
+                } else {
+                    arg.clone()
+                }
+            })
+            .collect();
+        ClassType::new(
+            base_class.class_object().clone(),
+            TArgs::new(Arc::new(base_class.tparams().clone()), targs),
+        )
     }
 
     /// Check tensor dimensions for compatibility and create Var bindings.

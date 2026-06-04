@@ -343,6 +343,19 @@ impl CallArgPreEval<'_> {
         matches!(self, Self::Star(..))
     }
 
+    fn inferred_type<Ans: LookupAnswer>(
+        &self,
+        solver: &AnswersSolver<Ans>,
+        arg_errors: &ErrorCollector,
+    ) -> Type {
+        match self {
+            Self::Type(ty, _) => (*ty).clone(),
+            Self::Expr(expr, _) => solver.expr_infer(expr, arg_errors),
+            Self::Star(ty, _) => ty.clone(),
+            Self::Fixed(tys, idx) => tys[*idx].clone(),
+        }
+    }
+
     /// Check the argument against a parameter hint and return the inferred argument type.
     fn post_check<Ans: LookupAnswer>(
         &mut self,
@@ -616,11 +629,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // If Some, records parameter-name → argument-type bindings (for meta-shape inference).
         bound_args: &mut Option<HashMap<String, Type>>,
     ) -> HashMap<TextRange, Type> {
-        fn record(bound: &mut Option<HashMap<String, Type>>, name: &Name, ty: Type) {
+        let record = |bound: &mut Option<HashMap<String, Type>>, name: &Name, ty: Type| {
             if let Some(map) = bound.as_mut() {
-                map.insert(name.to_string(), ty);
+                map.insert(name.to_string(), self.canonicalize_shape_dsl_type(ty));
             }
-        }
+        };
         let mut expected_types: HashMap<TextRange, Type> = HashMap::new();
         // We want to work mostly with references, but some things are taken from elsewhere,
         // so have some owners to capture them.
@@ -748,6 +761,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             seen_names.insert(name, ty);
                         }
                         expected_types.insert(arg.range(), ty.clone());
+                        let unhinted_arg_ty = bound_args
+                            .as_ref()
+                            .map(|_| arg_pre.inferred_type(self, arg_errors));
                         let arg_ty = arg_pre.post_check(
                             self,
                             callable_name,
@@ -761,7 +777,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             call_context,
                         );
                         if let Some(name) = name
-                            && let Some(ty) = arg_ty
+                            && let Some(ty) = unhinted_arg_ty.or(arg_ty)
                         {
                             record(bound_args, name, ty);
                         }
@@ -784,6 +800,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         kind: PosParamKind::Variadic,
                     }) => {
                         expected_types.insert(arg.range(), ty.clone());
+                        let unhinted_arg_ty = bound_args
+                            .as_ref()
+                            .map(|_| arg_pre.inferred_type(self, arg_errors));
                         let arg_ty = arg_pre.post_check(
                             self,
                             callable_name,
@@ -800,7 +819,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             if let Some(name) = name {
                                 variadic_name = Some(name);
                             }
-                            if let Some(ty) = arg_ty {
+                            if let Some(ty) = unhinted_arg_ty.or(arg_ty) {
                                 variadic_collected.push(ty);
                             }
                         }
@@ -1176,6 +1195,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Some(expected) = hint {
                         expected_types.insert(kw.range, expected.clone());
                     }
+                    let unhinted_arg_ty = bound_args
+                        .as_ref()
+                        .map(|_| kw.value.infer(self, arg_errors));
                     let tcc: &dyn Fn() -> TypeCheckContext = &|| {
                         TypeCheckContext::of_kind(if has_matching_param {
                             TypeCheckKind::CallArgument(Some(id.id.clone()), callable_name.cloned())
@@ -1212,7 +1234,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             (*x).clone()
                         }
                     };
-                    record(bound_args, &id.id, arg_ty);
+                    record(bound_args, &id.id, unhinted_arg_ty.unwrap_or(arg_ty));
                 }
             }
         }
@@ -1660,9 +1682,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // The self param may not be recorded by callable_infer_params if it's
             // positional-only without a name.
             if let Some(ref obj) = self_obj {
-                bound
-                    .entry("self".to_owned())
-                    .or_insert_with(|| obj.clone());
+                let obj = self.canonicalize_shape_dsl_type(obj.clone());
+                bound.entry("self".to_owned()).or_insert(obj);
             }
             // Auto-inject module field values for DSL params not in bound_args.
             // When a DSL function expects params like `start_dim` that aren't method
@@ -1773,6 +1794,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
+        let ret_type = self.canonicalize_shape_dsl_type(ret_type);
         match meta_shape_func.evaluate(bound_args, &ret_type) {
             Some(Ok(ty)) => ty,
             Some(Err(shape_error)) => {
@@ -1787,5 +1809,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             None => ret_type,
         }
+    }
+
+    fn canonicalize_shape_dsl_type(&self, ty: Type) -> Type {
+        ty.transform(&mut |ty| {
+            if let Type::ClassType(cls) = ty
+                && self.shaped_array_shape_for_class_type(cls).is_some()
+            {
+                *ty = self
+                    .shaped_array_classtype_to_shaped_array_type(cls)
+                    .to_type();
+            }
+        })
     }
 }

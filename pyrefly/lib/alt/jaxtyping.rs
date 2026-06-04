@@ -117,10 +117,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
         }
 
-        // Resolve xs[0] as the base array type (e.g., torch.Tensor).
-        // With tensor_shapes enabled and shared fixtures, bare `Tensor` in a type
-        // argument position resolves to Type::ShapedArray(shapeless). We extract the
-        // base_class from it and apply the jaxtyping shape string instead.
+        // Resolve xs[0] as a registered shaped-array class. Bare class names
+        // canonicalize to Type::ShapedArray(shapeless) only when their stubs
+        // carry `@shape_extensions.shaped_array` metadata.
         let base_type = self.expr_untype(&xs[0], TypeFormContext::TypeArgument, errors);
         let base_class = match &base_type {
             Type::ShapedArray(shaped_array_type) if shaped_array_type.is_shapeless() => {
@@ -132,7 +131,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     xs[0].range(),
                     ErrorKind::InvalidAnnotation,
                     format!(
-                        "First argument to jaxtyping annotation must be a tensor class, got `{}`",
+                        "First argument to jaxtyping annotation must be a registered shaped-array class, got `{}`",
                         self.for_display(base_type)
                     ),
                 );
