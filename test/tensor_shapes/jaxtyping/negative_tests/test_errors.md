@@ -5,7 +5,7 @@ These tests verify that the type checker correctly catches jaxtyping annotation 
 ## Mixed native and jaxtyping tensor syntax (test_mixed_syntax)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_mixed_syntax.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_mixed_syntax.py"
 ERROR Cannot mix native tensor syntax (Tensor[N, M]) and jaxtyping syntax (Float[Tensor, "N M"]) in the same function [invalid-annotation]
   --> *test_mixed_syntax.py:15:5 (glob)
    |
@@ -27,7 +27,7 @@ ERROR Returned type `Shaped[Tensor, "batch 3"]` is not assignable to declared re
 ## Matmul return type mismatch (test_matmul_mismatch)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_matmul_mismatch.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_matmul_mismatch.py"
 ERROR Returned type `Tensor[batch, 3, 5]` is not assignable to declared return type `Shaped[Tensor, "batch 3 99"]` [bad-return]
   --> *test_matmul_mismatch.py:22:12 (glob)
    |
@@ -44,7 +44,7 @@ ERROR Returned type `Tensor[batch, 3, 5]` is not assignable to declared return t
 ## Multiple variadic specifiers (test_multiple_variadics)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_multiple_variadics.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_multiple_variadics.py"
 ERROR Tensor shape can have at most one variadic dimension [invalid-annotation]
   --> *test_multiple_variadics.py:16:23 (glob)
    |
@@ -57,7 +57,7 @@ ERROR Tensor shape can have at most one variadic dimension [invalid-annotation]
 ## Direct shape mismatch on return (test_shape_mismatch)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_shape_mismatch.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_shape_mismatch.py"
 ERROR Returned type `Shaped[Tensor, "batch 3"]` is not assignable to declared return type `Shaped[Tensor, "batch 4"]` [bad-return]
   --> *test_shape_mismatch.py:14:12 (glob)
    |
@@ -74,7 +74,7 @@ ERROR Returned type `Shaped[Tensor, "batch 3"]` is not assignable to declared re
 ## Rank mismatch on return (test_rank_mismatch)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_rank_mismatch.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_rank_mismatch.py"
 ERROR Returned type `Shaped[Tensor, "batch 3"]` is not assignable to declared return type `Shaped[Tensor, "batch 3 4"]` [bad-return]
   --> *test_rank_mismatch.py:14:12 (glob)
    |
@@ -91,7 +91,7 @@ ERROR Returned type `Shaped[Tensor, "batch 3"]` is not assignable to declared re
 ## Malformed jaxtyping annotations (test_bad_annotation)
 
 ```scrut
-$ $PYREFLY check "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_bad_annotation.py"
+$ $PYREFLY check --config /dev/null --python-version 3.12 --tensor-shapes true --search-path "$JAXTYPING_TEST_ROOT/jaxtyping/fixtures" --search-path "$TENSOR_SHAPES_ROOT" "$JAXTYPING_TEST_ROOT/jaxtyping/negative_tests/test_bad_annotation.py"
 ERROR jaxtyping annotations require exactly 2 arguments (array type and shape string), got 1 [invalid-annotation]
   --> *test_bad_annotation.py:12:21 (glob)
    |

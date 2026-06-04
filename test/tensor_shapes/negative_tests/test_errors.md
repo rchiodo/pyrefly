@@ -5,7 +5,7 @@ These tests verify that the type checker correctly catches shape mismatches and 
 ## Generic tensor substitution with wrong shape (test_compare_generic_tensor)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_compare_generic_tensor.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_compare_generic_tensor.py"
  INFO revealed type: int [reveal-type]
   --> *test_compare_generic_tensor.py:20:12 (glob)
    |
@@ -33,7 +33,7 @@ ERROR `Tensor[2, 3]` is not assignable to `Tensor[100, 3]` [bad-assignment]
 ## Symbolic dimension binding with wrong expected type (test_check_symbolic_binding)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_check_symbolic_binding.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_check_symbolic_binding.py"
  INFO revealed type: Tensor[2, 3] [reveal-type]
   --> *test_check_symbolic_binding.py:26:16 (glob)
    |
@@ -145,7 +145,7 @@ ERROR Returned type `Tensor[(N * M)]` is not assignable to declared return type 
 ## Literal shape mismatch (test_literal_shape_check)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_literal_shape_check.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_literal_shape_check.py"
  INFO revealed type: Tensor[2, 3] [reveal-type]
   --> *test_literal_shape_check.py:19:16 (glob)
    |
@@ -172,7 +172,7 @@ ERROR Returned type `Tensor[2, 3]` is not assignable to declared return type `Te
 ## TypeVar substitution with multiple mismatches (test_typevar_substitution_bug)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_typevar_substitution_bug.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_typevar_substitution_bug.py"
  INFO revealed type: Tensor[2, 3] [reveal-type]
   --> *test_typevar_substitution_bug.py:25:16 (glob)
    |
@@ -212,7 +212,7 @@ ERROR `Tensor[2, 3]` is not assignable to `Tensor[100, 3]` [bad-assignment]
 ## Flatten with wrong expected shape (test_concat_flatten_types)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_concat_flatten_types.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_concat_flatten_types.py"
  INFO revealed type: Tensor[N, 3] [reveal-type]
   --> *test_concat_flatten_types.py:18:16 (glob)
    |
@@ -286,7 +286,7 @@ ERROR Returned type `Tensor[24]` is not assignable to declared return type `Tens
 ## Dim type variable in non-Tensor context (test_dim_in_non_tensor)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_dim_in_non_tensor.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_dim_in_non_tensor.py"
 ERROR Expected a type form, got instance of `Literal[5]` [not-a-type]
   --> *test_dim_in_non_tensor.py:21:24 (glob)
    |
@@ -311,7 +311,7 @@ ERROR Expected a type form, got instance of `Literal[5]` [not-a-type]
 ## View/reshape validation errors (test_view_errors)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_view_errors.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_view_errors.py"
 ERROR can only specify one unknown dimension as -1 [invalid-argument]
   --> *test_view_errors.py:19:15 (glob)
    |
@@ -342,7 +342,7 @@ ERROR reshape dimensions cannot contain 0 [invalid-argument]
 ## Item validation on non-scalar tensors (test_item_error)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_item_error.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_item_error.py"
 ERROR item() only works on 0-dimensional tensors, got 1D tensor [invalid-argument]
   --> *test_item_error.py:20:11 (glob)
    |
@@ -361,7 +361,7 @@ ERROR item() only works on 0-dimensional tensors, got 2D tensor [invalid-argumen
 ## Dim type variable unification (test_symint_unification)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_symint_unification.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_symint_unification.py"
  INFO revealed type: Dim[(A * B)] [reveal-type]
   --> *test_symint_unification.py:23:16 (glob)
    |
@@ -399,7 +399,7 @@ ERROR Argument `Dim[((A * B) // 2)]` is not assignable to parameter `x` with typ
 ## Dim with bare type annotation (test_symint_any)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_symint_any.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_symint_any.py"
  INFO revealed type: Dim [reveal-type]
   --> *test_symint_any.py:18:12 (glob)
    |
@@ -436,7 +436,7 @@ $ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_symint_any.py"
 ## Tensor subtyping errors (test_tensor_subtyping)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_subtyping.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_subtyping.py"
 ERROR Returned type `Tensor[2, 3]` is not assignable to declared return type `Tensor[4, 3]` [bad-return]
   --> *test_tensor_subtyping.py:33:12 (glob)
    |
@@ -532,7 +532,7 @@ ERROR Returned type `Tensor[2, 3]` is not assignable to declared return type `Te
 ## Tensor indexing errors (test_tensor_indexing)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_indexing.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_indexing.py"
 ERROR Returned type `Tensor[20]` is not assignable to declared return type `Tensor[10, 20]` [bad-return]
    --> *test_tensor_indexing.py:317:12 (glob)
     |
@@ -559,7 +559,7 @@ ERROR Returned type `Tensor[5, 20]` is not assignable to declared return type `T
 ## Tensor arithmetic errors (test_tensor_arithmetic)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_arithmetic.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_arithmetic.py"
 ERROR Returned type `Tensor[2, 3]` is not assignable to declared return type `Tensor[4, 5]` [bad-return]
    --> *test_tensor_arithmetic.py:145:12 (glob)
     |
@@ -623,7 +623,7 @@ ERROR Returned type `Tensor[*tuple[Unknown, ...], 3]` is not assignable to decla
 ## Generic function substitution with expressions (test_tensor_generic_exprs)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_generic_exprs.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_generic_exprs.py"
 ERROR Returned type `Tensor[5]` is not assignable to declared return type `Tensor[6]` [bad-return]
    --> *test_tensor_generic_exprs.py:122:12 (glob)
     |
@@ -660,7 +660,7 @@ ERROR Returned type `Tensor[8, 5]` is not assignable to declared return type `Te
 ## Shape expression equivalence (test_tensor_expr_equiv)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_expr_equiv.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_expr_equiv.py"
 ERROR Returned type `Tensor[(N + M)]` is not assignable to declared return type `Tensor[(N * M)]` [bad-return]
   --> *test_tensor_expr_equiv.py:85:12 (glob)
    |
@@ -697,7 +697,7 @@ ERROR Returned type `Tensor[5, 4]` is not assignable to declared return type `Te
 ## Variadic shape patterns (test_tensor_variadic)
 
 ```scrut
-$ $PYREFLY check "$TENSOR_TEST_ROOT/negative_tests/test_tensor_variadic.py"
+$ $PYREFLY check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$TENSOR_SHAPES_ROOT" "$TENSOR_TEST_ROOT/negative_tests/test_tensor_variadic.py"
 ERROR Returned type `Tensor[10, 20]` is not assignable to declared return type `Tensor[10, 30]` [bad-return]
   --> *test_tensor_variadic.py:97:12 (glob)
    |
