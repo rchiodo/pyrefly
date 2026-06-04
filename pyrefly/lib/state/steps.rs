@@ -72,28 +72,29 @@ pub struct Context<'a, Lookup> {
 }
 
 /// AST and lexer tokens produced by the same parser invocation.
+/// Tokens are only retained when the require level is `Everything`
+/// (i.e. open files in the LSP), since they are only needed for
+/// semantic token highlighting.
 #[derive(Debug, Dupe, Clone)]
 pub struct ParsedModule {
     module: Arc<ModModule>,
-    tokens: Arc<Tokens>,
+    tokens: Option<Arc<Tokens>>,
 }
 
 impl ParsedModule {
+    pub fn new(module: ModModule, tokens: Option<Tokens>) -> Self {
+        Self {
+            module: Arc::new(module),
+            tokens: tokens.map(Arc::new),
+        }
+    }
+
     pub fn module(&self) -> Arc<ModModule> {
         self.module.dupe()
     }
 
-    pub fn tokens(&self) -> Arc<Tokens> {
+    pub fn tokens(&self) -> Option<Arc<Tokens>> {
         self.tokens.dupe()
-    }
-}
-
-impl From<(ModModule, Tokens)> for ParsedModule {
-    fn from(value: (ModModule, Tokens)) -> Self {
-        Self {
-            module: Arc::new(value.0),
-            tokens: Arc::new(value.1),
-        }
     }
 }
 
@@ -456,15 +457,14 @@ impl Step {
 
     #[inline(never)]
     fn step_ast<Lookup>(ctx: &Context<Lookup>, load: Arc<Load>) -> Arc<ParsedModule> {
-        Arc::new(
-            module_parse(
-                load.module_info.contents(),
-                ctx.sys_info.version(),
-                load.module_info.source_type(),
-                &load.errors,
-            )
-            .into(),
-        )
+        let (module, tokens) = module_parse(
+            load.module_info.contents(),
+            ctx.sys_info.version(),
+            load.module_info.source_type(),
+            &load.errors,
+            ctx.require.keep_ast(),
+        );
+        Arc::new(ParsedModule::new(module, tokens))
     }
 
     #[inline(never)]

@@ -19,7 +19,8 @@ pub fn module_parse(
     version: PythonVersion,
     source_type: PySourceType,
     errors: &ErrorCollector,
-) -> (ModModule, Tokens) {
+    keep_tokens: bool,
+) -> (ModModule, Option<Tokens>) {
     let (parsed, parse_errors, unsupported_syntax_errors) =
         Ast::parse_with_version(contents, version, source_type);
     for err in parse_errors {
@@ -37,7 +38,11 @@ pub fn module_parse(
             .emit();
     }
 
-    let tokens = parsed.tokens().clone();
+    let tokens = if keep_tokens {
+        Some(parsed.tokens().clone())
+    } else {
+        None
+    };
 
     (parsed.into_syntax(), tokens)
 }

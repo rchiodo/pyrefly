@@ -32,8 +32,7 @@ impl Transaction<'_> {
         let disabled_ranges = disabled_ranges_for_module(ast.as_ref(), *handle.sys_info());
         let mut builder = SemanticTokenBuilder::new(limit_range, disabled_ranges);
 
-        if include_syntax_tokens {
-            let tokens = parsed.tokens();
+        if include_syntax_tokens && let Some(tokens) = parsed.tokens() {
             builder.process_syntax_tokens(&tokens);
         }
 
