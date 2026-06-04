@@ -131,6 +131,7 @@ use crate::state::module::ModuleStateReader;
 use crate::state::require::Require;
 use crate::state::require::RequireLevels;
 use crate::state::steps::Context;
+use crate::state::steps::ParsedModule;
 use crate::state::steps::PysaContext;
 use crate::state::steps::Step;
 use crate::state::steps::StepsMut;
@@ -859,6 +860,10 @@ impl<'a> Transaction<'a> {
 
     pub fn get_ast(&self, handle: &Handle) -> Option<Arc<ruff_python_ast::ModModule>> {
         self.with_module_inner(handle, |x| x.get_ast())
+    }
+
+    pub(crate) fn get_parsed_module(&self, handle: &Handle) -> Option<Arc<ParsedModule>> {
+        self.with_module_inner(handle, |x| x.get_parsed_module())
     }
 
     pub fn get_config(&self, handle: &Handle) -> Option<ArcId<ConfigFile>> {

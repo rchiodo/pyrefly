@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -20,6 +21,7 @@ use pyrefly_python::module_path::ModulePath;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::ModModule;
+use ruff_python_ast::token::Tokens;
 
 use crate::alt::answers::Answers;
 use crate::alt::answers::LookupAnswer;
@@ -69,13 +71,47 @@ pub struct Context<'a, Lookup> {
     pub timing: Option<&'a TransactionTimingCounters>,
 }
 
+/// AST and lexer tokens produced by the same parser invocation.
+#[derive(Debug, Dupe, Clone)]
+pub struct ParsedModule {
+    module: Arc<ModModule>,
+    tokens: Arc<Tokens>,
+}
+
+impl ParsedModule {
+    pub fn module(&self) -> Arc<ModModule> {
+        self.module.dupe()
+    }
+
+    pub fn tokens(&self) -> Arc<Tokens> {
+        self.tokens.dupe()
+    }
+}
+
+impl From<(ModModule, Tokens)> for ParsedModule {
+    fn from(value: (ModModule, Tokens)) -> Self {
+        Self {
+            module: Arc::new(value.0),
+            tokens: Arc::new(value.1),
+        }
+    }
+}
+
+impl Deref for ParsedModule {
+    type Target = ModModule;
+
+    fn deref(&self) -> &Self::Target {
+        self.module.as_ref()
+    }
+}
+
 #[derive(Debug, Default, Dupe, Clone)]
 pub struct Steps {
     /// The last step that was computed.
     /// None means no steps have been computed yet.
     pub last_step: Option<Step>,
     pub load: Option<Arc<Load>>,
-    pub ast: Option<Arc<ModModule>>,
+    pub ast: Option<Arc<ParsedModule>>,
     pub exports: Option<Arc<Exports>>,
     pub answers: Option<Arc<(Bindings, Arc<Answers>)>>,
     pub solutions: Option<Arc<Solutions>>,
@@ -203,6 +239,20 @@ macro_rules! compute_step {
         let res = paste! { Step::[<step_ $output>] }($ctx, $($input,)*);
         $steps.$output.store(Some(res));
     }};
+    // The `ast` field stores a `ParsedModule`; downstream steps need the
+    // inner `Arc<ModModule>`, so these arms extract it via `.module()`.
+    (@exec $steps:ident, $ctx:ident, $output:ident, [$($acc:ident)*] ast ? $(, $($rest:tt)*)?) => {{
+        let ast = $steps.ast.load_full().map(|parsed| parsed.module());
+        compute_step!(@exec $steps, $ctx, $output, [$($acc)* ast] $($($rest)*)?);
+    }};
+    (@exec $steps:ident, $ctx:ident, $output:ident, [$($acc:ident)*] ast $(, $($rest:tt)*)?) => {{
+        let ast = $steps
+            .ast
+            .load_full()
+            .expect("parsed module must exist after the AST step")
+            .module();
+        compute_step!(@exec $steps, $ctx, $output, [$($acc)* ast] $($($rest)*)?);
+    }};
     // Optional input (name?): load as Option (no unwrap).
     (@exec $steps:ident, $ctx:ident, $output:ident, [$($acc:ident)*] $input:ident ? $(, $($rest:tt)*)?) => {{
         let $input = $steps.$input.load_full();
@@ -228,7 +278,7 @@ macro_rules! compute_step {
 pub struct StepsMut {
     pub current_step: AtomicStep,
     pub load: ArcSwapOption<Load>,
-    pub ast: ArcSwapOption<ModModule>,
+    pub ast: ArcSwapOption<ParsedModule>,
     pub exports: ArcSwapOption<Exports>,
     pub answers: ArcSwapOption<(Bindings, Arc<Answers>)>,
     pub solutions: ArcSwapOption<Solutions>,
@@ -405,13 +455,16 @@ impl Step {
     }
 
     #[inline(never)]
-    fn step_ast<Lookup>(ctx: &Context<Lookup>, load: Arc<Load>) -> Arc<ModModule> {
-        Arc::new(module_parse(
-            load.module_info.contents(),
-            ctx.sys_info.version(),
-            load.module_info.source_type(),
-            &load.errors,
-        ))
+    fn step_ast<Lookup>(ctx: &Context<Lookup>, load: Arc<Load>) -> Arc<ParsedModule> {
+        Arc::new(
+            module_parse(
+                load.module_info.contents(),
+                ctx.sys_info.version(),
+                load.module_info.source_type(),
+                &load.errors,
+            )
+            .into(),
+        )
     }
 
     #[inline(never)]
