@@ -1874,4 +1874,36 @@ mod tests {
         assert!(!files.contains(&root.join("another_script")));
         assert!(files.contains(&root.join("regular.py")));
     }
+
+    /// Characterizes the current behavior for
+    /// https://github.com/facebook/pyrefly/issues/3647: a lone non-existent
+    /// concrete path reports the generic "No Python files matched pattern" error,
+    /// while a non-existent path alongside a real one is silently skipped. The
+    /// next diff improves the lone-path message to "does not exist".
+    #[test]
+    fn test_explicit_nonexistent_path() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        TestPath::setup_test_directory(root, vec![TestPath::file("real.py")]);
+
+        // A lone non-existent concrete path errors, but with the generic message.
+        let err = Globs::new_with_root(root, vec!["does_not_exist.py".to_owned()])
+            .unwrap()
+            .filtered_files(&GlobFilter::empty(), None)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("No Python files matched pattern"),
+            "got: {err}"
+        );
+
+        // A non-existent path alongside a real one is silently skipped.
+        let files = Globs::new_with_root(
+            root,
+            vec!["real.py".to_owned(), "does_not_exist.py".to_owned()],
+        )
+        .unwrap()
+        .filtered_files(&GlobFilter::empty(), None)
+        .unwrap();
+        assert_eq!(files, vec![root.join("real.py")]);
+    }
 }
