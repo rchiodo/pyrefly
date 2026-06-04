@@ -97,7 +97,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .any(|name| cls.has_toplevel_qname("jaxtyping", name))
     }
 
-    /// Parse a jaxtyping annotation like `Float[Tensor, "batch channels"]` into a ShapedArrayType.
+    /// Parse a jaxtyping annotation like `Float[Tensor, "batch channels"]`.
+    ///
+    /// If the array argument is not a registered shaped-array class, jaxtyping
+    /// keeps its ordinary static behavior and reduces to the array type.
     pub fn parse_jaxtyping_annotation(
         &self,
         xs: &[Expr],
@@ -125,17 +128,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Type::ShapedArray(shaped_array_type) if shaped_array_type.is_shapeless() => {
                 shaped_array_type.base_class.clone()
             }
-            _ => {
-                return self.error(
-                    errors,
-                    xs[0].range(),
-                    ErrorKind::InvalidAnnotation,
-                    format!(
-                        "First argument to jaxtyping annotation must be a registered shaped-array class, got `{}`",
-                        self.for_display(base_type)
-                    ),
-                );
-            }
+            _ => return base_type,
         };
 
         // Extract shape string from xs[1]

@@ -413,14 +413,19 @@ def f[*Shape](x: Foo[*Shape]) -> None:
 );
 
 testcase!(
-    test_jaxtyping_requires_registered_shaped_array,
+    test_jaxtyping_without_shape_stubs_reduces_to_array_type,
     shaped_array_env_with_plain_torch_and_jaxtyping(),
     r#"
 from jaxtyping import Float
 from torch import Tensor
+from typing import reveal_type
 
-def f(x: Float[Tensor, "batch channels"]) -> None:  # E: First argument to jaxtyping annotation must be a registered shaped-array class, got `Tensor[*tuple[Unknown, ...]]`
-    pass
+def f(
+    x: Float[Tensor, "batch channels"],
+    y: Float[Tensor, 123],
+) -> None:
+    reveal_type(x)  # E: revealed type: Tensor
+    reveal_type(y)  # E: revealed type: Tensor
 "#,
 );
 
@@ -434,6 +439,9 @@ from typing import reveal_type
 
 def f(x: Float[Tensor, "batch channels"]) -> None:
     reveal_type(x)  # E: revealed type: Shaped[Tensor, "batch channels"]
+
+def bad_shape(x: Float[Tensor, 123]) -> None:  # E: Second argument to jaxtyping annotation must be a string literal
+    pass
 "#,
 );
 
