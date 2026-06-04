@@ -29,7 +29,7 @@ Complete these gates before writing any code.
 ## Gate 0: Understand the system
 
 Read `shape_tracking_capabilities.md` (this skill dir). It explains the
-three shape-tracking mechanisms (fixture stubs, DSL functions, special
+three shape-tracking mechanisms (shape-aware stubs, DSL functions, special
 handlers) and how to check each one. You need this context to make the
 Gate 1 audit meaningful — knowing whether an op exists in a stub is not
 the same as knowing whether its shapes are tracked.
@@ -41,33 +41,42 @@ before you have empirically probed this model's shapes.
 ## Gate 1: Audit ops
 
 List every `nn.Module` subclass and `torch`/`F.` function called in the
-model. Check each against the fixture stubs (`.pyi` files in
-`test/tensor_shapes/fixtures/torch/`) and the DSL registry
-(`tensor_ops_registry.rs` — search for the qualified name). Add any missing
-stubs or DSL functions BEFORE starting the port. This step should take
-minutes — you are scanning two known locations.
+model. Check each against the shape-aware torch stubs (`.pyi` files in
+`tensor-shapes/torch-stubs/`) and any shape DSL declarations in those stubs.
+The stubs attach DSL shape functions with `@uses_shape_dsl(ir_fn)`, and the
+IR functions live in `tensor-shapes/torch-stubs/_shapes.pyi` and are imported
+from stub files as `torch._shapes` because `torch-stubs` provides the `torch`
+package for type checking. Add any missing stubs or DSL functions BEFORE
+starting the port. This step should take minutes — you are scanning the stub
+file for the op and, only when a decorator points there, the corresponding IR
+function.
 
-**Do NOT use code search agents or web search for this step.** The two
-locations above are exhaustive. For each op in your list, check whether it
-appears in the stubs/registry — a targeted grep or scan, not a full read
-of every file. You need to confirm presence and spot missing attributes
+**Do NOT delegate this audit to code search agents or use web search for this
+step.** The `tensor-shapes/torch-stubs/` package and its `_shapes.pyi` DSL
+file are exhaustive for torch shape support. For each op in your list, check
+whether it appears in the relevant stub file and whether it has a precise
+generic signature, `Self`/`Tensor[*S]` return, or `@uses_shape_dsl(...)`
+decorator that refines a bare declared return. Use targeted file reads or
+repo-approved search scoped to known files/directories, not broad recursive
+shell search. You need to confirm presence and spot missing attributes
 (e.g., `bias` on `Conv2d`), not memorize every signature.
 
 **Paste your audit table** in your response before proceeding to Gate 2:
 
 ```
 ## Gate 1: Ops audit
-| Op | Stub location | DSL fn (or "not registered") | Status |
+| Op | Stub location | Shape DSL decorator / IR fn (or "no decorator") | Status |
 |----|---------------|------------------------------|--------|
-| nn.Conv2d | nn/__init__.pyi:491 — generic [InC,OutC,K,S,P,D] | not registered (stub generic) | ✓ tracked |
-| F.adaptive_avg_pool2d | functional.pyi:315 — bare return | adaptive_avg_pool2d_ir | ✓ tracked (DSL) |
+| nn.Conv2d | tensor-shapes/torch-stubs/nn/__init__.pyi — generic [InC,OutC,K,S,P,D] | no decorator (stub generic) | ✓ tracked |
+| F.adaptive_avg_pool2d | tensor-shapes/torch-stubs/nn/functional.pyi — bare declared return | `@uses_shape_dsl(adaptive_pool_ir)`, defined in `_shapes.pyi` | ✓ tracked (DSL) |
 | ...
 ```
 
-Filling the "DSL fn" column requires searching `tensor_ops_registry.rs`
-for the qualified name (e.g., `"torch.nn.functional.adaptive_avg_pool2d"`).
-Write "not registered" only after confirming the name is absent — do not
-leave this column blank or write "check registry".
+Filling the "Shape DSL decorator / IR fn" column requires checking whether
+the stub declaration has a `@uses_shape_dsl(...)` decorator. If it does,
+confirm the named IR function exists in `tensor-shapes/torch-stubs/_shapes.pyi`.
+Write "no decorator" only after confirming the stub declaration has no
+decorator — do not leave this column blank or write "check DSL".
 
 If any op is missing or returns bare, fix stubs/DSL BEFORE proceeding.
 
@@ -86,7 +95,7 @@ this exact format:
 
 **Every class, function, and method in the original file must appear, and
 every item must be ported.** Do not skip or exclude anything. If a class
-depends on a library without fixture stubs, add the missing stubs or DSL
+depends on a library without shape-aware stubs, add the missing stubs or DSL
 in Gate 1 rather than omitting the class. If adding full stubs is
 impractical (e.g., the library is large and only one op is needed), add
 a minimal stub for the specific ops used.
@@ -110,7 +119,7 @@ Write the file with imports, the inventory comment, and utility functions
 (no tensor shapes). Then start Step 1 for the FIRST module only.
 
 Read `porting_principles.md` (this skill dir) for the mindset: why we port,
-priority order, and fixture philosophy.
+priority order, and stub philosophy.
 
 # Module loop
 
@@ -377,13 +386,15 @@ before falling back to typed interface:
 □ **Inlined expressions?** `f(g(x))` sometimes loses shapes that
   `y = g(x); f(y)` preserves. Break into separate assignments.
 
-□ **Missing stub or DSL registration?** Check the fixture stubs and
-  `tensor_ops_registry.rs`. Fix if missing — stubs are your code.
+□ **Missing stub or DSL declaration?** Check `tensor-shapes/torch-stubs/`
+  and any `@uses_shape_dsl(...)` IR function in
+  `tensor-shapes/torch-stubs/_shapes.pyi`. Fix if missing — stubs are your
+  code.
 
-□ **About to claim an op is untracked?** Check the DSL registry,
-  fixture stubs, and special handlers first. The system tracks reshape,
-  flatten, permute, transpose, cat, stack, matmul, arange, zeros,
-  outer, interpolate, einsum, and many more.
+□ **About to claim an op is untracked?** Check the shape-aware stubs, their
+  `@uses_shape_dsl(...)` decorators and IR functions, and special handlers
+  first. The system tracks reshape, flatten, permute, transpose, cat, stack,
+  matmul, arange, zeros, outer, interpolate, einsum, and many more.
 
 After EACH restructuring, re-run `reveal_type` and update your records.
 
@@ -397,7 +408,7 @@ want typed interface, paste this filled-out receipt in your response:
 - list→tuple: [not applicable — reason]
 - Branch join: [not applicable — reason]
 - Inlined expressions: [split / not applicable — reason]
-- Missing stub/DSL: [checked stubs + registry — reason]
+- Missing stub/DSL: [checked stubs + `@uses_shape_dsl` IR — reason]
 - Dim | None reclassification: [reclassified param X / not applicable — reason]
 - Bridge dim: [promoted X to class Dim / not applicable — reason]
 - Config parameterization: [parameterized Config[...] / not applicable — reason]
@@ -531,11 +542,31 @@ Everything above produced a DRAFT. This phase reviews it.
 Run:
 
 ```bash
-.claude/skills/port-model/verify_port.sh test/tensor_shapes/models/<model>.py
+.claude/skills/port-model/verify_port.sh tensor-shapes/examples/torch/<model>.py
 ```
 
 **Paste the FULL output** in your response. Do not summarize or
 paraphrase — the raw output is the artifact.
+
+## Run the actual Pyrefly check
+
+`verify_port.sh` is a heuristic quality gate; it does not type check the port.
+You must also run Pyrefly with tensor shapes enabled and the shape-aware stubs
+on the search path:
+
+```bash
+buck build fbcode//pyrefly/tensor-shapes:torch-stubs-search-path
+buck run fbcode//pyrefly:pyrefly -- check --config /dev/null --python-version 3.13 --tensor-shapes true --search-path "$(buck targets --show-output fbcode//pyrefly/tensor-shapes:torch-stubs-search-path | awk '{print $2}')" tensor-shapes/examples/torch/<model>.py
+```
+
+If you are updating the shared example corpus, also run the Buck test target:
+
+```bash
+buck test fbcode//pyrefly/tensor-shapes/examples/torch:torch_examples_test
+```
+
+Paste the Pyrefly output. The result must be `0 errors`; `reveal_type` info is
+acceptable only while probing and must not remain in the finished port.
 
 ## Investigate each warning
 
@@ -628,6 +659,7 @@ smoke tests: ___ — all use `assert_type` on typed output (not `.shape ==`): ye
 Verification phase:
 - verify_port.sh warnings: ___
   Fixed: ___. Accepted: ___ (each justified above).
+- Pyrefly check: 0 errors: yes/no
 - Style guide comparison rows: ___
   Improvements attempted: ___. Improvements that worked: ___.
 - verify_port.sh re-run (if changes made): 0 actionable: yes/no
@@ -641,6 +673,13 @@ accept subscript syntax (e.g., `Tensor[B, C, H, W]`) at runtime without
 crashing. It also provides `TypeVar` with arithmetic support (`N + 1`, `N // 2`
 return `self` instead of `TypeError`) and `Dim` for binding runtime ints to
 type-level symbols.
+
+For tensor shape tests and examples, `shape_extensions` lives next to the
+shape-aware torch stubs under `tensor-shapes/`. In Buck, the runtime package is
+`fbcode//pyrefly/tensor-shapes:shape_extensions`, the importable stub package is
+`fbcode//pyrefly/tensor-shapes:torch-stubs`, and the filegroup to pass as a
+Pyrefly `--search-path` is
+`fbcode//pyrefly/tensor-shapes:torch-stubs-search-path`.
 
 **Type-checking only (recommended for ports):** guard imports so annotations
 are invisible at runtime:

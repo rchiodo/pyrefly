@@ -2,7 +2,7 @@
 
 A practical guide to adding tensor shape annotations to PyTorch models using
 pyrefly's type system. Patterns and methodology drawn from
-[ported open-source models](test/tensor_shapes/models/).
+[ported open-source models](tensor-shapes/examples/torch/).
 
 ---
 
@@ -35,7 +35,7 @@ Tensor shape checking requires two things in your `pyrefly.toml`:
 tensor-shapes = true
 
 search_path = [
-    "fixtures",
+    "tensor-shapes",
 ]
 ```
 
@@ -43,16 +43,17 @@ search_path = [
 subscript syntax (`Tensor[B, C, H, W]`), algebraic dimension arithmetic, and
 shape-aware dispatch for operations like `conv2d`, `view`, and `cat`.
 
-**`search_path`** points to a directory of *fixture stubs* — `.pyi` files that
-provide shape-generic type signatures for PyTorch modules and functions. The
-real `torch` library's type stubs don't carry shape information, so the
-fixtures replace them with shape-aware versions (e.g., `nn.Conv2d.__init__`
-that captures kernel size, stride, and padding as type-level values, and a
-`forward` that computes the output spatial dimensions).
+**`search_path`** points to the `tensor-shapes` directory, which contains the
+shape-aware `torch-stubs` package plus the `shape_extensions` runtime package.
+The real `torch` library's type stubs don't carry shape information, so
+`torch-stubs` replaces them for type checking (e.g., `nn.Conv2d.__init__` that
+captures kernel size, stride, and padding as type-level values, and a `forward`
+that computes the output spatial dimensions).
 
-The fixtures also provide the `shape_extensions` package, which exports `Dim` — the
-bridge between runtime integer values and type-level symbols. The package also
-includes some utilities to support runtime evaluation of types with shapes.
+The `shape_extensions` package exports `Dim` — the bridge between runtime
+integer values and type-level symbols. The package also includes utilities to
+support runtime evaluation of types with shapes and decorators such as
+`@uses_shape_dsl(...)` and `@shaped_array(...)`.
 
 ### Concrete shape annotations
 
@@ -75,11 +76,10 @@ h = F.relu(self.fc1(x))
 assert_type(h, Tensor[B, 512])  # checked by pyrefly, zero runtime cost
 ```
 
-In practice, you won't need `assert_type` for every intermediate — pyrefly
-shows inferred shapes as inlay type hints in your editor. The hints appear
-automatically, so you can verify shapes visually without writing any
-assertions. Use `assert_type` only at key checkpoints where you want a
-permanent regression guard.
+In exploratory work, editor inlay hints are useful for seeing inferred shapes.
+For a finished port, every local variable in every `forward` method should have
+an `assert_type` checkpoint so the port remains a regression test rather than a
+visual inspection.
 
 ---
 
@@ -182,9 +182,10 @@ The type system tracks shapes through nearly all standard PyTorch operations:
   `.size()`, tuple slicing, star unpacking
 
 **If an op appears to lose shapes, it is almost certainly a bug or a missing
-stub — not a fundamental limitation.** Check the DSL registry
-(`tensor_ops_registry.rs`) and fixture stubs before concluding anything is
-untracked.
+stub — not a fundamental limitation.** Check the shape-aware stubs in
+`tensor-shapes/torch-stubs/`, any `@uses_shape_dsl(...)` decorator and IR
+function in `tensor-shapes/torch-stubs/_shapes.pyi`, and special handlers
+before concluding anything is untracked.
 
 ### When shapes are lost, trace upstream
 
@@ -430,7 +431,7 @@ and parameters. The type checker tracks these automatically:
 - **Linear**: `nn.Linear(in, out)` maps last dim from `in` to `out`.
 - **Reshape/view**: `x.view(B, C, -1)` infers the `-1` dim from total element
   count. Multiple `-1`s are rejected.
-- **Concatenation**: `torch.cat([a, b], dim=1)` produces a sum dim (`C1 + C2`).
+- **Concatenation**: `torch.cat((a, b), dim=1)` produces a sum dim (`C1 + C2`).
 - **Slicing**: `x[:, 3:7]` computes `stop - start = 4`. Negative indices and
   symbolic bounds are supported.
 - **PixelShuffle**: `nn.PixelShuffle(r)` maps `(B, C*r², H, W)` to
@@ -774,7 +775,7 @@ x = x + self.mlp(self.ln_2(x))    # same shape: Tensor[B, T, D]
 
 ```python
 sa = torch.cat((state, action), dim=1)  # Tensor[B, S + A]
-skip_cat = torch.cat([x2, x1_up], dim=1)  # Tensor[B, C1 + C2, H, W]
+skip_cat = torch.cat((x2, x1_up), dim=1)  # Tensor[B, C1 + C2, H, W]
 ```
 
 ### `@overload` for type narrowing
@@ -988,21 +989,21 @@ when none of the above fixes apply — not the first move.
 
 | Pattern | Models | Key concept |
 |---------|--------|-------------|
-| Linear Pipeline | [learning_to_paint](test/tensor_shapes/models/learning_to_paint.py), [soft_actor_critic](test/tensor_shapes/models/soft_actor_critic.py), [deeprecommender](test/tensor_shapes/models/deeprecommender.py) | Sequential layers, `assert_type` checkpoints |
-| Homogeneous Stacking | [nanogpt](test/tensor_shapes/models/nanogpt.py), [gptfast](test/tensor_shapes/models/gptfast.py), [speech_transformer](test/tensor_shapes/models/speech_transformer.py), [llama](test/tensor_shapes/models/llama.py) | `ModuleList` iteration, shape-preserving loops |
-| Encoder-Decoder Skip | [unet](test/tensor_shapes/models/unet.py), [super_slomo](test/tensor_shapes/models/super_slomo.py), [demucs](test/tensor_shapes/models/demucs.py), [stargan](test/tensor_shapes/models/stargan.py) | Recursive `encode`-`decode`, generic spatial dim `S` |
-| Recursive Exponential | [dcgan](test/tensor_shapes/models/dcgan.py), [resnet](test/tensor_shapes/models/resnet.py), [densenet](test/tensor_shapes/models/densenet.py) | `@overload` base/recursive, `2**I` expressions |
-| Config Classes | [nanogpt](test/tensor_shapes/models/nanogpt.py), [gptfast](test/tensor_shapes/models/gptfast.py), [dcgan](test/tensor_shapes/models/dcgan.py), [llama](test/tensor_shapes/models/llama.py) | `@dataclass` type params, `Final` constants |
-| ShapePreservingActivation | [resnet](test/tensor_shapes/models/resnet.py) | Union of activation types as callable |
-| Multi-Head Attention | [llama](test/tensor_shapes/models/llama.py), [sam](test/tensor_shapes/models/sam.py) | Reshape+transpose multi-head, `D // NHead`, RoPE |
-| KV Cache | [llama](test/tensor_shapes/models/llama.py) | Optional `start_pos`, typed cache, branch-per-path |
-| Windowed Attention | [sam](test/tensor_shapes/models/sam.py) | Window partition/unpartition with `Dim[WS]`, generic `H, W` on attention |
-| Typed Distributions | [drq](test/tensor_shapes/models/drq.py) | `Distribution[*EventShape]`, `SquashedNormal` |
-| Variadic Batch | [tacotron2](test/tensor_shapes/models/tacotron2.py) | `forward[*Bs]` for any-batch-shape support |
-| Typed Dynamic Interface | [finalmlp](test/tensor_shapes/models/finalmlp.py) | Typed forward on dynamic-internal modules, `Module.forward` → `Any` |
-| Config Dim Extraction | [finalmlp](test/tensor_shapes/models/finalmlp.py) | Explicit `Dim` fields for values from `list[int]` access |
-| Typed Element Lists | [finalmlp](test/tensor_shapes/models/finalmlp.py) | `list[Tensor[B]]` + annotated stack result for `Linear` matching |
-| First-Iteration Split | [finalmlp](test/tensor_shapes/models/finalmlp.py) | Separate shape-changing first iteration from shape-preserving rest |
-| Autoregressive Loop | [tacotron2](test/tensor_shapes/models/tacotron2.py) | `list[Tensor[B, 80]]` + `torch.stack`, typed elements |
-| Dims-First Params | [sam](test/tensor_shapes/models/sam.py) | Bind bare `Dim[X]` before derived `Tensor[..., X*Y, ...]` |
-| Conv Chain Formulas | [sam](test/tensor_shapes/models/sam.py), [background_matting](test/tensor_shapes/models/background_matting.py), [stargan](test/tensor_shapes/models/stargan.py) | `4*ES → 2*ES → ES`, `(S-16)//16+1` through Conv2d/ConvTranspose2d |
+| Linear Pipeline | [learning_to_paint](tensor-shapes/examples/torch/learning_to_paint.py), [soft_actor_critic](tensor-shapes/examples/torch/soft_actor_critic.py), [deeprecommender](tensor-shapes/examples/torch/deeprecommender.py) | Sequential layers, `assert_type` checkpoints |
+| Homogeneous Stacking | [nanogpt](tensor-shapes/examples/torch/nanogpt.py), [gptfast](tensor-shapes/examples/torch/gptfast.py), [speech_transformer](tensor-shapes/examples/torch/speech_transformer.py), [llama](tensor-shapes/examples/torch/llama.py) | `ModuleList` iteration, shape-preserving loops |
+| Encoder-Decoder Skip | [unet](tensor-shapes/examples/torch/unet.py), [super_slomo](tensor-shapes/examples/torch/super_slomo.py), [demucs](tensor-shapes/examples/torch/demucs.py), [stargan](tensor-shapes/examples/torch/stargan.py) | Recursive `encode`-`decode`, generic spatial dim `S` |
+| Recursive Exponential | [dcgan](tensor-shapes/examples/torch/dcgan.py), [resnet](tensor-shapes/examples/torch/resnet.py), [densenet](tensor-shapes/examples/torch/densenet.py) | `@overload` base/recursive, `2**I` expressions |
+| Config Classes | [nanogpt](tensor-shapes/examples/torch/nanogpt.py), [gptfast](tensor-shapes/examples/torch/gptfast.py), [dcgan](tensor-shapes/examples/torch/dcgan.py), [llama](tensor-shapes/examples/torch/llama.py) | `@dataclass` type params, `Final` constants |
+| ShapePreservingActivation | [resnet](tensor-shapes/examples/torch/resnet.py) | Union of activation types as callable |
+| Multi-Head Attention | [llama](tensor-shapes/examples/torch/llama.py), [sam](tensor-shapes/examples/torch/sam.py) | Reshape+transpose multi-head, `D // NHead`, RoPE |
+| KV Cache | [llama](tensor-shapes/examples/torch/llama.py) | Optional `start_pos`, typed cache, branch-per-path |
+| Windowed Attention | [sam](tensor-shapes/examples/torch/sam.py) | Window partition/unpartition with `Dim[WS]`, generic `H, W` on attention |
+| Typed Distributions | [drq](tensor-shapes/examples/torch/drq.py) | `Distribution[*EventShape]`, `SquashedNormal` |
+| Variadic Batch | [tacotron2](tensor-shapes/examples/torch/tacotron2.py) | `forward[*Bs]` for any-batch-shape support |
+| Typed Dynamic Interface | [finalmlp](tensor-shapes/examples/torch/finalmlp.py) | Typed forward on dynamic-internal modules, `Module.forward` → `Any` |
+| Config Dim Extraction | [finalmlp](tensor-shapes/examples/torch/finalmlp.py) | Explicit `Dim` fields for values from `list[int]` access |
+| Typed Element Lists | [finalmlp](tensor-shapes/examples/torch/finalmlp.py) | `list[Tensor[B]]` + annotated stack result for `Linear` matching |
+| First-Iteration Split | [finalmlp](tensor-shapes/examples/torch/finalmlp.py) | Separate shape-changing first iteration from shape-preserving rest |
+| Autoregressive Loop | [tacotron2](tensor-shapes/examples/torch/tacotron2.py) | `list[Tensor[B, 80]]` + `torch.stack`, typed elements |
+| Dims-First Params | [sam](tensor-shapes/examples/torch/sam.py) | Bind bare `Dim[X]` before derived `Tensor[..., X*Y, ...]` |
+| Conv Chain Formulas | [sam](tensor-shapes/examples/torch/sam.py), [background_matting](tensor-shapes/examples/torch/background_matting.py), [stargan](tensor-shapes/examples/torch/stargan.py) | `4*ES → 2*ES → ES`, `(S-16)//16+1` through Conv2d/ConvTranspose2d |

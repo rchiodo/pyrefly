@@ -26,8 +26,9 @@ to be demonstrated.
 where a shaped `Tensor[...]` is expected (annotation fallback). The ONLY
 proof that shapes are inferred is `assert_type` inside forward methods.
 
-## Fixture philosophy
+## Stub philosophy
 
-Fixtures serve all code for all time. They should capture the truth about each
-op, not just what the current models need. When you fix a stub, make the fix
-general — don't special-case it for your model.
+Shape-aware stubs serve all code for all time. They should capture the truth
+about each op, not just what the current models need. When you fix a stub or
+shape DSL function, make the fix general — don't special-case it for your
+model.

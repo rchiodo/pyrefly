@@ -20,9 +20,9 @@ use expressions (`D // NHead`, not a separate `HeadDim` param).
 
 ## The three shape-tracking mechanisms
 
-### 1. Fixture stubs
+### 1. Shape-aware stubs
 
-**Location:** `test/tensor_shapes/fixtures/torch/` and subdirectories (`nn/`,
+**Location:** `tensor-shapes/torch-stubs/` and subdirectories (`nn/`,
 `distributions/`, `optim/`, `quantization/`).
 
 `.pyi` files with type signatures for PyTorch classes and functions. Common
@@ -35,35 +35,43 @@ patterns:
 
 **How to check if an op is supported:** Open the `.pyi` file and search for the
 class or function. If the return type is bare `Tensor`, shapes aren't tracked —
-consider adding type params. If it uses `Self`, `[*S]`, or generics, it's
-tracked.
+unless the declaration has `@uses_shape_dsl(...)`. If it uses `Self`, `[*S]`,
+generics, or a `@uses_shape_dsl(...)` decorator, it's tracked.
 
 **How to fix:** Change the stub's return type. Use `Self` for identity ops,
-`Tensor[*S]` for shape-preserving ops, or generic params for transforms. Stubs
-are YOUR code — fix them rather than using `type: ignore`.
+`Tensor[*S]` for shape-preserving ops, generic params for transforms, or
+`@uses_shape_dsl(...)` for shape functions that need argument-dependent
+computation. Stubs are YOUR code — fix them rather than using `type: ignore`.
 
 ### 2. DSL functions
 
-**Location:** `crates/pyrefly_types/src/tensor_ops_registry.rs`
+**Location:** declarations use `@uses_shape_dsl(ir_fn)` in
+`tensor-shapes/torch-stubs/**/*.pyi`; IR functions live in
+`tensor-shapes/torch-stubs/_shapes.pyi` and are imported from stubs as
+`torch._shapes` because `torch-stubs` provides the `torch` package for type
+checking.
 
 Python-like shape functions interpreted at type-check time. Two parts:
 
-- **Registration** (top of file): maps qualified names (e.g., `"torch.cat"`,
-  `"torch.Tensor.reshape"`) to DSL function names (e.g., `"cat_ir"`,
-  `"reshape_ir"`). For nn.Modules, `register_init_forward` captures constructor
-  args and connects them to a forward DSL function.
+- **Declaration** (in the relevant stub file): imports an IR function and
+  attaches it to a function or method with `@uses_shape_dsl(ir_fn)`. For
+  `nn.Module` classes, the decorator can capture constructor arguments with
+  `capture_init=[...]` and connect them to `forward`.
 
-- **DSL definitions** (bottom of file): Python-like functions that compute
+- **DSL definitions** (`_shapes.pyi`): Python-like functions that compute
   output shapes from input shapes and arguments. For example, `reshape_ir`
   handles `-1` inference, `cat_ir` sums along the concat dim.
 
-**How to check if an op is supported:** Search the file for the op name (e.g.,
-grep for `"torch.cat"` or `"interpolate"`). If it's registered, it's tracked.
+**How to check if an op is supported:** Open the relevant stub declaration and
+look for `@uses_shape_dsl(...)`. If it has a decorator, confirm the named IR
+function exists in `_shapes.pyi`.
 
-**How to add support:** Write a DSL function that computes the output shape,
-then register it. DSL functions are Python-like — look at existing ones for
-patterns. The DSL supports conditionals (`x if cond else y`), list
-comprehensions, and calls to helper functions like `normalize_dim`.
+**How to add support:** Write a DSL function in `_shapes.pyi` that computes
+the output shape, decorate it with `@shape_dsl_function`, then attach it from
+the stub declaration with `@uses_shape_dsl(...)`. DSL functions are
+Python-like — look at existing ones for patterns. The DSL supports conditionals
+(`x if cond else y`), list comprehensions, and calls to helper functions like
+`normalize_dim`.
 
 ### 3. Special handlers
 
@@ -92,8 +100,11 @@ not the problem. Trace back:
    Fix: compute output in each branch independently, or use Optional narrowing.
 5. **Inlined expressions?** `f(g(x))` sometimes loses shapes that
    `y = g(x); f(y)` preserves. Fix: break into separate assignments.
-6. **Stub returning bare?** Check the `.pyi` file — fix it.
-7. **DSL missing?** Check `tensor_ops_registry.rs` — add it.
+6. **Stub returning bare?** Check whether it has `@uses_shape_dsl(...)`. If
+   not, fix the `.pyi` signature or add DSL support.
+7. **DSL missing?** Add the IR function in `tensor-shapes/torch-stubs/_shapes.pyi`,
+   decorate it with `@shape_dsl_function`, and attach it with
+   `@uses_shape_dsl(...)`.
 
 ## What IS genuinely shapeless
 
