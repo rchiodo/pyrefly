@@ -562,7 +562,7 @@ class A: ...
 class B(A): ...
 x: list[A]
 y: list[B]
-x = y = [B()]  # E: Wrong type for assignment, expected `list[A]` and got `list[B]`
+x = y = [B()]  # E: `list[B]` is not assignable to `list[A]`
     "#,
 );
 

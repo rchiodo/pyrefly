@@ -3983,19 +3983,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(ann_idx) = ann {
             let annot = self.get_idx(ann_idx);
             self.check_final_reassignment(&annot, range, errors);
-            if let Some(annot_ty) = annot.ty(self.heap, self.stdlib)
-                && !self.is_subset_eq(ty, &annot_ty)
-            {
-                self.error(
-                    errors,
-                    range,
-                    ErrorKind::BadAssignment,
-                    format!(
-                        "Wrong type for assignment, expected `{}` and got `{}`",
-                        &annot_ty, ty
-                    ),
-                );
-                return annot_ty;
+            if let Some(annot_ty) = annot.ty(self.heap, self.stdlib) {
+                let tcc: &dyn Fn() -> TypeCheckContext = &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::AnnAssign)
+                        .with_annotation(self.annotation_range(ann_idx), "declared type".to_owned())
+                };
+                if !self.check_type(ty, &annot_ty, range, errors, tcc) {
+                    // Type check failed, fall back to the annotation type
+                    return annot_ty;
+                }
             }
         }
         if let Some(receiver) = receiver {
