@@ -1215,6 +1215,10 @@ impl<'a> CalleesWithLocation<'a> {
                 .iter()
                 .flat_map(Self::class_info_from_bound_obj)
                 .collect_vec(),
+            Type::Intersect(intersection) => {
+                let (_members, fallback) = &**intersection;
+                Self::class_info_from_bound_obj(fallback)
+            }
             _ => panic!("unexpected type: {ty:?}"),
         }
     }
@@ -1340,6 +1344,10 @@ impl<'a> CalleesWithLocation<'a> {
                 ),
             },
             Type::Union(u) => self.init_or_new_from_union(&u.members, callee_range),
+            Type::Intersect(intersection) => {
+                let (_members, fallback) = &**intersection;
+                self.init_or_new_from_type(fallback, callee_range)
+            }
             Type::Any(_) => vec![],
             x => {
                 panic!(
@@ -1378,6 +1386,10 @@ impl<'a> CalleesWithLocation<'a> {
                     // return sorted by target
                     .sorted_by(|a, b| a.target.cmp(&b.target))
                     .collect_vec()
+            }
+            Type::Intersect(intersection) => {
+                let (_members, fallback) = &**intersection;
+                self.callee_from_type(fallback, call_target, callee_range, call_arguments)
             }
             Type::BoundMethod(m) => Self::class_info_from_bound_obj(&m.obj)
                 .into_iter()
