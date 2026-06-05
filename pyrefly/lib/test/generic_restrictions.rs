@@ -1481,3 +1481,26 @@ def f[T](x: A[T] = A()) -> T: ...
 reveal_type(f())  # E: revealed type: @_
     "#,
 );
+
+testcase!(
+    bug = "False negative",
+    test_union_of_constraints_does_not_match_constrained_typevar,
+    r#"
+def f[T: (int, str)](x: T) -> T:
+    return x
+def g(x: int | str):
+    f(x)  # this should error!
+    "#,
+);
+
+testcase!(
+    bug = "False positive",
+    test_constrained_identity_function_preserves_typevar,
+    r#"
+from typing import reveal_type
+def f[T: (bool, int)](x: T) -> T:
+    return x
+def g[T: bool](x: T) -> T:
+    return f(x)  # E: `bool` is not assignable to declared return type `T`
+    "#,
+);
