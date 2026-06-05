@@ -452,6 +452,20 @@ pub trait TspInterface: Send + Sync + 'static {
         character: u32,
     ) -> Option<pyrefly_types::types::Type>;
 
+    /// Return the contextually expected type at the given position.
+    ///
+    /// The expected type is what the surrounding context demands of the
+    /// expression at the cursor: a call argument's parameter type, an
+    /// annotated assignment / return / attribute target's declared type, etc.
+    /// When no such context applies, falls back to the computed type at the
+    /// position (so the result is never `None` where a computed type exists).
+    fn get_expected_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type>;
+
     /// Resolve the source range of a function name from its `FuncDefIndex`.
     ///
     /// Uses the binding table to look up `KeyUndecoratedFunctionRange` for
@@ -6345,6 +6359,31 @@ impl TspInterface for Server {
         // intact on the wire, which TSP clients need to re-resolve the
         // signature (parameters, overloads) from source.
         transaction.get_type_at_preserving_declaration(&handle, position)
+    }
+
+    fn get_expected_type_at_position(
+        &self,
+        uri: &str,
+        line: u32,
+        character: u32,
+    ) -> Option<pyrefly_types::types::Type> {
+        let url = Url::parse(uri)
+            .ok()
+            .or_else(|| Url::from_file_path(uri).ok())?;
+        let path = self.path_for_uri_or_notebook_cell(&url)?;
+        let notebook_cell = self.maybe_get_code_cell_index(&url);
+
+        let handle = make_open_handle(&self.state, &path);
+        let transaction = self.state.transaction();
+        let module_info = transaction.get_module_info(&handle)?;
+        let position =
+            module_info.from_lsp_position(lsp_types::Position { line, character }, notebook_cell);
+        // Prefer the contextually expected type; fall back to the computed type
+        // (preserving declarations, as `get_type_at_position` does) so the
+        // result is meaningful even outside an expected-type context.
+        transaction
+            .get_expected_type_at(&handle, position)
+            .or_else(|| transaction.get_type_at_preserving_declaration(&handle, position))
     }
 
     fn resolve_func_def_range(

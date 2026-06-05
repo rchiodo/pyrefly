@@ -71,6 +71,27 @@ fn get_computed_type_ok(
     result
 }
 
+/// Helper to send a getExpectedType request and return a successful (non-null) result.
+fn get_expected_type_ok(
+    tsp: &mut TspInteraction,
+    file_uri: &str,
+    line: u32,
+    character: u32,
+    snapshot: i32,
+) -> serde_json::Value {
+    tsp.server
+        .get_expected_type(file_uri, line, character, snapshot);
+    let resp = tsp.client.receive_response_skip_notifications();
+    assert!(
+        resp.error.is_none(),
+        "Expected success, got error: {:?}",
+        resp.error
+    );
+    let result = resp.result.expect("Expected result");
+    assert!(!result.is_null(), "Expected non-null type result");
+    result
+}
+
 // =======================================================================
 // getDeclaredType
 // =======================================================================
@@ -1071,6 +1092,201 @@ greet(\"world\")
         Some(file_uri.as_str()),
         "Expected declaration URI to match the source file"
     );
+
+    tsp.shutdown();
+}
+
+// =======================================================================
+// getExpectedType
+// =======================================================================
+
+#[test]
+fn test_get_expected_type_on_rhs_returns_lhs_annotation_union() {
+    // For `x: int | str = 42`, the expected type at the RHS position is
+    // the union `int | str` declared on the LHS, NOT the inferred type
+    // (Literal[42]) of the RHS expression.
+    //                          1111111
+    //                0123456789012345678
+    let source = "x: int | str = 42\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Position 15 is the `4` in `42`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 15, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    // Sanity check: getComputedType at the same position narrows to the
+    // RHS literal type (Class), confirming the two methods disagree here.
+    let computed = get_computed_type_ok(&mut tsp, &file_uri, 0, 15, snapshot);
+    assert_kind(&computed, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_on_rhs_string_literal_annotation() {
+    // For `e: Literal["a", "b"] = "a"`, the expected type at the RHS
+    // string literal should be the annotated `Literal["a", "b"]` (a
+    // Union of literal classes), not just `Literal["a"]`.
+    //                                     1111111111222222
+    //                           01234567890123456789012345
+    let source = "from typing import Literal\ne: Literal[\"a\", \"b\"] = \"a\"\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 1, position 24 lands inside the RHS string literal `"a"`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 1, 24, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_falls_back_outside_annotated_rhs() {
+    // No annotated assignment surrounds the cursor → expected type
+    // falls back to the type at the cursor (`Literal[42]` → Class).
+    let (mut tsp, file_uri, snapshot) = setup_project("x = 42\n");
+
+    // Position 4 is the `4` in `42`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 4, snapshot);
+    assert_kind(&expected, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_on_lhs_returns_declared_type() {
+    // When the cursor is on the LHS target of an annotated assignment,
+    // the value range does not contain it, so the expected type is just
+    // the declared type at that position (which is the annotation).
+    let (mut tsp, file_uri, snapshot) = setup_project("x: int | str = 42\n");
+
+    // Position 0 is the `x` target.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 0, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_call_positional_argument() {
+    // For `foo(4)` where `foo(a: int | str)`, the expected type at the
+    // argument `4` is the union `int | str`, not the inferred Literal[4].
+    //                                                       111111111
+    //                                            0123456789012345678
+    let source = "def foo(a: int | str) -> None: ...\nfoo(4)\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 1, position 4 lands on the `4` argument.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 1, 4, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    // Sanity check: getComputedType at the same position narrows to Literal[4].
+    let computed = get_computed_type_ok(&mut tsp, &file_uri, 1, 4, snapshot);
+    assert_kind(&computed, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_call_keyword_argument() {
+    // For `foo(a=4)` where `foo(a: int | str)`, the expected type at `4`
+    // should be the union `int | str` (matched by parameter name).
+    let source = "def foo(a: int | str) -> None: ...\nfoo(a=4)\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 1, position 6 lands on the `4` value of the kwarg.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 1, 6, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_return_statement_value() {
+    // For `def f() -> int | str: return 4`, the expected type of the
+    // return value `4` is the function's declared return annotation
+    // `int | str`, not the inferred Literal[4].
+    let source = "def f() -> int | str:\n    return 4\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 1 is `    return 4`. Position 11 is the `4`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 1, 11, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_default_parameter_value() {
+    // For `def f(x: int | str = 4): ...`, the expected type of the
+    // default value `4` is the parameter's annotation `int | str`.
+    //              1111111111222
+    //    01234567890123456789012
+    let source = "def f(x: int | str = 4) -> None: ...\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Position 21 is the `4` default value.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 21, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_yield_returns_element_type() {
+    // For `def g() -> Iterator[int | str]: yield 4`, the contextually
+    // expected type of the yielded value `4` is the iterator's element
+    // type `int | str` (a Union), which the solver records at the yield.
+    let source = "\
+from typing import Iterator
+def g() -> Iterator[int | str]:
+    yield 4
+";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Line 2 is `    yield 4`. Position 10 is the `4`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 2, 10, snapshot);
+    assert_kind(&expected, TypeKind::Union);
+
+    tsp.shutdown();
+}
+
+// ---- Container element / dict value contexts -------------------------
+//
+// These cases would ideally also return the contextual element/value type
+// from the surrounding annotation (e.g. for `xs: list[int | str] = [4]`,
+// the expected type at `4` should be `int | str`). We currently fall back
+// to the outer assignment's declared type in these cases. The tests below
+// pin the current behavior so a future improvement will deliberately fail
+// them and force an update.
+
+#[test]
+fn test_get_expected_type_list_element_falls_back_to_container_type() {
+    // `xs: list[int | str] = [4]` — ideally the expected type at `4`
+    // would be `int | str`, but we currently return the container type
+    // `list[int | str]` (a Class) because the AnnAssign branch fires.
+    let source = "xs: list[int | str] = [4]\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Position 23 is the `4` inside `[4]`.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 23, snapshot);
+    // TODO: should be TypeKind::Union (the element type). For now we
+    // verify the response is a well-formed class type (the container).
+    assert_kind(&expected, TypeKind::Class);
+
+    tsp.shutdown();
+}
+
+#[test]
+fn test_get_expected_type_dict_value_falls_back_to_container_type() {
+    // `d: dict[str, int | str] = {"k": 4}` — ideally the expected type
+    // at `4` would be `int | str`, but we currently return `dict[...]`.
+    let source = "d: dict[str, int | str] = {\"k\": 4}\n";
+    let (mut tsp, file_uri, snapshot) = setup_project(source);
+
+    // Position 32 is the `4` value in the dict literal.
+    let expected = get_expected_type_ok(&mut tsp, &file_uri, 0, 32, snapshot);
+    // TODO: should be TypeKind::Union for the value type.
+    assert_kind(&expected, TypeKind::Class);
 
     tsp.shutdown();
 }
