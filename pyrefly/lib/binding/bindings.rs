@@ -153,7 +153,7 @@ impl NameLookupResult {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InitializedInFlow {
     Yes,
     Conditionally,
@@ -1847,37 +1847,40 @@ impl<'a> BindingsBuilder<'a> {
             let mut default = None;
             let mut bound = None;
             let mut constraints = None;
+            let mut usage = Usage::StaticTypeInformation {
+                is_annotation: false,
+            };
             let kind = match x {
                 TypeParam::TypeVar(tv) => {
                     if let Some(bound_expr) = &mut tv.bound {
                         if let Expr::Tuple(tuple) = &mut **bound_expr {
                             let mut constraint_exprs = Vec::new();
                             for constraint in &mut tuple.elts {
-                                self.ensure_type(constraint, &mut None);
+                                self.ensure_type_with_usage(constraint, &mut None, &mut usage);
                                 constraint_exprs.push(constraint.clone());
                             }
                             constraints = Some((constraint_exprs, bound_expr.range()))
                         } else {
-                            self.ensure_type(bound_expr, &mut None);
+                            self.ensure_type_with_usage(bound_expr, &mut None, &mut usage);
                             bound = Some((**bound_expr).clone());
                         }
                     }
                     if let Some(default_expr) = &mut tv.default {
-                        self.ensure_type(default_expr, &mut None);
+                        self.ensure_type_with_usage(default_expr, &mut None, &mut usage);
                         default = Some((**default_expr).clone());
                     }
                     QuantifiedKind::TypeVar
                 }
                 TypeParam::ParamSpec(x) => {
                     if let Some(default_expr) = &mut x.default {
-                        self.ensure_type(default_expr, &mut None);
+                        self.ensure_type_with_usage(default_expr, &mut None, &mut usage);
                         default = Some((**default_expr).clone());
                     }
                     QuantifiedKind::ParamSpec
                 }
                 TypeParam::TypeVarTuple(x) => {
                     if let Some(default_expr) = &mut x.default {
-                        self.ensure_type(default_expr, &mut None);
+                        self.ensure_type_with_usage(default_expr, &mut None, &mut usage);
                         default = Some((**default_expr).clone());
                     }
                     QuantifiedKind::TypeVarTuple
@@ -2033,30 +2036,33 @@ struct PossibleTParam {
     id: LegacyTParamId,
     idx: Idx<Key>,
     tparam_idx: Idx<KeyLegacyTypeParam>,
+    initialized: InitializedInFlow,
 }
 
 enum TParamLookupResult {
     MaybeTParam(PossibleTParam),
-    NotTParam(Idx<Key>),
+    NotTParam {
+        idx: Idx<Key>,
+        initialized: InitializedInFlow,
+    },
     NotFound,
 }
 
 impl TParamLookupResult {
-    fn idx(&self) -> Option<Idx<Key>> {
-        match self {
-            Self::MaybeTParam(possible_tparam) => Some(possible_tparam.idx),
-            Self::NotTParam(idx) => Some(*idx),
-            Self::NotFound => None,
-        }
-    }
-
     fn as_name_lookup_result(&self) -> NameLookupResult {
-        self.idx()
-            .map_or(NameLookupResult::NotFound, |idx| NameLookupResult::Found {
-                idx,
-                initialized: InitializedInFlow::Yes,
+        match self {
+            Self::MaybeTParam(possible_tparam) => NameLookupResult::Found {
+                idx: possible_tparam.idx,
+                initialized: possible_tparam.initialized.clone(),
                 is_module_scope: false,
-            })
+            },
+            Self::NotTParam { idx, initialized } => NameLookupResult::Found {
+                idx: *idx,
+                initialized: initialized.clone(),
+                is_module_scope: false,
+            },
+            Self::NotFound => NameLookupResult::NotFound,
+        }
     }
 }
 
@@ -2159,15 +2165,23 @@ impl<'a> BindingsBuilder<'a> {
         let mut usage = Usage::StaticTypeInformation {
             is_annotation: false,
         };
-        self.lookup_name(Hashed::new(&name.id), &mut usage)
-            .found()
-            .map_or(TParamLookupResult::NotFound, |original_idx| {
+        match self.lookup_name(Hashed::new(&name.id), &mut usage) {
+            NameLookupResult::Found {
+                idx: original_idx,
+                initialized,
+                ..
+            } => {
                 self.mark_does_not_pin_if_first_use(original_idx);
                 match self.lookup_legacy_tparam_from_idx(id, original_idx, has_scoped_type_params) {
                     Some(possible_tparam) => TParamLookupResult::MaybeTParam(possible_tparam),
-                    None => TParamLookupResult::NotTParam(original_idx),
+                    None => TParamLookupResult::NotTParam {
+                        idx: original_idx,
+                        initialized,
+                    },
                 }
-            })
+            }
+            NameLookupResult::NotFound => TParamLookupResult::NotFound,
+        }
     }
 
     pub fn get_original_binding(
@@ -2227,6 +2241,7 @@ impl<'a> BindingsBuilder<'a> {
             id,
             idx,
             tparam_idx,
+            initialized: InitializedInFlow::Yes,
         })
     }
 

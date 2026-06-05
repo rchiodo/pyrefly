@@ -1503,6 +1503,17 @@
   "annotations_forward_refs.py": [
     {
       "code": -2,
+      "column": 12,
+      "concise_description": "`ClassA` is uninitialized",
+      "description": "`ClassA` is uninitialized",
+      "line": 23,
+      "name": "unbound-name",
+      "severity": "error",
+      "stop_column": 18,
+      "stop_line": 23
+    },
+    {
+      "code": -2,
       "column": 7,
       "concise_description": "`|` union syntax does not work with string literals",
       "description": "`|` union syntax does not work with string literals\n  Hint: put the quotes around the entire union type",
@@ -6827,17 +6838,6 @@
       "description": "Expected a type form, got instance of `tuple[type[bytes], type[str]]`",
       "line": 71,
       "name": "not-a-type",
-      "severity": "error",
-      "stop_column": 19,
-      "stop_line": 71
-    },
-    {
-      "code": -2,
-      "column": 17,
-      "concise_description": "`t1` is not a valid type alias: Tuple literal cannot be used in annotations",
-      "description": "`t1` is not a valid type alias: Tuple literal cannot be used in annotations",
-      "line": 71,
-      "name": "invalid-annotation",
       "severity": "error",
       "stop_column": 19,
       "stop_line": 71
