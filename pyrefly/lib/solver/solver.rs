@@ -1954,33 +1954,13 @@ impl Solver {
             let all_pruned_cause = decision.all_pruned_cause.as_ref().unwrap_or_else(|| {
                 unreachable!("all-pruned witness diagnostics require solved-type cause")
             });
-            let primary_constraint =
-                all_pruned_cause
-                    .solved_constraints
-                    .first()
-                    .unwrap_or_else(|| {
-                        unreachable!(
-                            "all-pruned witness diagnostics require at least one solved var"
-                        )
-                    });
-            err.push(TypeVarSpecializationError {
-                name: primary_constraint.quantified_name.clone(),
-                got: Type::never(),
-                want: primary_constraint.solved_ty.clone(),
-                error_kind: ErrorKind::IncompatibleOverloadResidual,
-                message_override: Some(format!(
-                    "Overload type was not compatible with solved type variables: {}",
-                    all_pruned_cause
-                        .solved_constraints
-                        .iter()
-                        .map(|constraint| format!(
-                            "{} = {}",
-                            constraint.quantified_name,
-                            constraint.solved_ty.clone().deterministic_printing()
-                        ))
-                        .join(", "),
-                )),
-                error: SubsetError::Other,
+            err.push(TypeVarSpecializationError::IncompatibleOverloadResidual {
+                solved_constraints: all_pruned_cause.solved_constraints.map(|constraint| {
+                    (
+                        constraint.quantified_name.clone(),
+                        constraint.solved_ty.clone(),
+                    )
+                }),
             });
         }
 
@@ -2057,24 +2037,15 @@ impl Solver {
                                     "all-pruned witness diagnostics require solved-type cause"
                                 )
                             });
-                        err.push(TypeVarSpecializationError {
-                            name: q.name().clone(),
-                            got: Type::never(),
-                            want: q.as_gradual_type(),
-                            error_kind: ErrorKind::IncompatibleOverloadResidual,
-                            message_override: Some(format!(
-                                "Overload type was not compatible with solved type variables: {}",
-                                all_pruned_cause
-                                    .solved_constraints
-                                    .iter()
-                                    .map(|constraint| format!(
-                                        "{} = {}",
-                                        constraint.quantified_name,
-                                        constraint.solved_ty.clone().deterministic_printing()
-                                    ))
-                                    .join(", "),
-                            )),
-                            error: SubsetError::Other,
+                        err.push(TypeVarSpecializationError::IncompatibleOverloadResidual {
+                            solved_constraints: all_pruned_cause.solved_constraints.map(
+                                |constraint| {
+                                    (
+                                        constraint.quantified_name.clone(),
+                                        constraint.solved_ty.clone(),
+                                    )
+                                },
+                            ),
                         });
                     }
                 }
@@ -2484,30 +2455,44 @@ impl Solver {
 }
 
 #[derive(Debug, Clone)]
-pub struct TypeVarSpecializationError {
-    pub name: Name,
-    pub got: Type,
-    pub want: Type,
-    pub error_kind: ErrorKind,
-    pub message_override: Option<String>,
-    #[allow(dead_code)]
-    pub error: SubsetError,
+pub enum TypeVarSpecializationError {
+    BadBoundSpecialization {
+        name: Name,
+        got: Type,
+        want: Type,
+    },
+    IncompatibleOverloadResidual {
+        solved_constraints: Vec<(Name, Type)>,
+    },
 }
 
 impl TypeVarSpecializationError {
     pub fn error_kind(&self) -> ErrorKind {
-        self.error_kind
+        match self {
+            Self::BadBoundSpecialization { .. } => ErrorKind::BadSpecialization,
+            Self::IncompatibleOverloadResidual { .. } => ErrorKind::IncompatibleOverloadResidual,
+        }
     }
 
     pub fn to_error_msg<Ans: LookupAnswer>(self, ans: &AnswersSolver<Ans>) -> String {
-        if let Some(message_override) = self.message_override {
-            return message_override;
+        match self {
+            Self::BadBoundSpecialization { name, got, want } => {
+                TypeCheckKind::TypeVarSpecialization(name).format_error(
+                    &ans.for_display(got),
+                    &ans.for_display(want),
+                    ans.module().name(),
+                )
+            }
+            Self::IncompatibleOverloadResidual { solved_constraints } => {
+                format!(
+                    "Overload type was not compatible with solved type variables: {}",
+                    solved_constraints
+                        .into_iter()
+                        .map(|(name, ty)| format!("{} = {}", name, ans.for_display(ty)))
+                        .join(", ")
+                )
+            }
         }
-        TypeCheckKind::TypeVarSpecialization(self.name).format_error(
-            &ans.for_display(self.got),
-            &ans.for_display(self.want),
-            ans.module().name(),
-        )
     }
 }
 
@@ -3253,19 +3238,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 (constraint.clone(), None)
             } else if let Some(constraint) = self.find_matching_constraint(t1, constraints) {
                 (constraint.clone(), None)
-            } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
+            } else if self.is_subset_eq(&t1_p, &bound).is_err() {
                 // No individual constraint matched, but the type may still
                 // be assignable to the constraint union (e.g. an abstract
                 // `AnyStr` satisfies `str | bytes`). Fall back to bound
                 // checking, mirroring the non-constraint code path.
                 if self.is_subset_eq(t1, &bound).is_err() {
-                    let specialization_error = TypeVarSpecializationError {
+                    let specialization_error = TypeVarSpecializationError::BadBoundSpecialization {
                         name: q.name().clone(),
                         got: t1_p.clone(),
                         want: bound,
-                        error_kind: ErrorKind::BadSpecialization,
-                        message_override: None,
-                        error: err_p,
                     };
                     (t1_p.clone(), Some(specialization_error))
                 } else {
@@ -3274,18 +3256,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             } else {
                 (t1_p.clone(), None)
             }
-        } else if let Err(err_p) = self.is_subset_eq(&t1_p, &bound) {
+        } else if self.is_subset_eq(&t1_p, &bound).is_err() {
             // If the promoted type fails, try again with the original type, in case the bound itself is literal.
             // This could be more optimized, but errors are rare, so this code path should not be hot.
             if self.is_subset_eq(t1, &bound).is_err() {
                 // If the original type is also an error, use the promoted type.
-                let specialization_error = TypeVarSpecializationError {
+                let specialization_error = TypeVarSpecializationError::BadBoundSpecialization {
                     name: q.name().clone(),
                     got: t1_p.clone(),
                     want: bound,
-                    error_kind: ErrorKind::BadSpecialization,
-                    message_override: None,
-                    error: err_p,
                 };
                 (t1_p.clone(), Some(specialization_error))
             } else {
@@ -3523,36 +3502,30 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                     .variables
                                     .lock()
                                     .update(*v1, Variable::Answer(constraint));
-                            } else if let Err(e) = self.is_subset_eq(t2, &bound) {
+                            } else if self.is_subset_eq(t2, &bound).is_err() {
                                 // No individual constraint matched, but the type may still
                                 // be assignable to the constraint union (e.g. an abstract
                                 // `AnyStr` satisfies `str | bytes`). Only error if it fails
                                 // the union bound check too.
                                 self.solver.instantiation_errors.write().insert(
                                     *v1,
-                                    TypeVarSpecializationError {
+                                    TypeVarSpecializationError::BadBoundSpecialization {
                                         name,
                                         got: t2.clone(),
                                         want: bound,
-                                        error_kind: ErrorKind::BadSpecialization,
-                                        message_override: None,
-                                        error: e,
                                     },
                                 );
                             }
                         } else {
                             variables.update(*v1, Variable::Answer(t2.clone()));
                             drop(variables);
-                            if let Err(e) = self.is_subset_eq(t2, &bound) {
+                            if self.is_subset_eq(t2, &bound).is_err() {
                                 self.solver.instantiation_errors.write().insert(
                                     *v1,
-                                    TypeVarSpecializationError {
+                                    TypeVarSpecializationError::BadBoundSpecialization {
                                         name,
                                         got: t2.clone(),
                                         want: bound,
-                                        error_kind: ErrorKind::BadSpecialization,
-                                        message_override: None,
-                                        error: e,
                                     },
                                 );
                             }
