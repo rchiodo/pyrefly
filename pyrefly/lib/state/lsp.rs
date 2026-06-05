@@ -74,6 +74,7 @@ use crate::export::exports::Export;
 use crate::export::exports::ExportLocation;
 use crate::lsp::module_helpers::collect_symbol_def_paths;
 use crate::lsp::wasm::completion::CompletionOptions;
+use crate::lsp::wasm::signature_help::CallInfo;
 use crate::state::ide::IntermediateDefinition;
 use crate::state::ide::common_alias_target_module;
 use crate::state::ide::import_regular_import_edit;
@@ -1244,6 +1245,53 @@ impl<'a> Transaction<'a> {
         position: TextSize,
     ) -> Option<Type> {
         self.get_result_type_at_impl(handle, position, true)
+    }
+
+    /// The type that the context at `position` expects a value to have.
+    ///
+    /// Two complementary sources, behind one API:
+    ///
+    /// 1. **Call arguments** — derived live from the enclosing call's signature
+    ///    (`get_callables_from_call`). This works even when the argument hasn't
+    ///    been written yet (the empty slot in `foo(|)`), which completion relies
+    ///    on, and it selects the resolved (or first) overload. The solver records
+    ///    no trace for these, so they must be computed at query time.
+    /// 2. **Everything else** — the solver-recorded expected type at
+    ///    `check_and_return_type` sites (annotated assignments, returns,
+    ///    attribute/subscript targets, TypedDict values, yields).
+    ///
+    /// Returns `None` where neither applies.
+    pub fn get_expected_type_at(&self, handle: &Handle, position: TextSize) -> Option<Type> {
+        // Call-argument position: predict the active parameter's type from the
+        // call signature. Works for not-yet-typed arguments and selects an overload.
+        if let Some(CallInfo {
+            callables,
+            chosen_overload_index,
+            active_argument,
+            ..
+        }) = self.get_callables_from_call(handle, position)
+            && let Some(callable) = callables.get(chosen_overload_index.unwrap_or(0)).cloned()
+            && let Some(params) = Self::normalize_singleton_function_type_into_params(callable)
+            && let Some(arg_index) = Self::active_parameter_index(&params, &active_argument)
+            && let Some(param) = params.get(arg_index)
+        {
+            return Some(param.as_type().clone());
+        }
+
+        let module = self.get_ast(handle)?;
+        let covering_nodes = Ast::locate_node(&module, position);
+        // Walk from innermost to outermost to find a node with a recorded expected
+        // type. The solver records these at check sites during type checking.
+        for node in covering_nodes {
+            if let Some(expr) = node.as_expr_ref() {
+                let answers = self.get_answers(handle)?;
+                let expected = answers.get_expected_type_trace(expr.range());
+                if expected.is_some() {
+                    return expected;
+                }
+            }
+        }
+        None
     }
 
     /// If `ty` represents a callable instance (e.g., a class with `__call__`), return the

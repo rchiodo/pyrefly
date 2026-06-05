@@ -1617,6 +1617,13 @@ impl ThreadState {
         }
     }
 
+    /// Append an expected type trace to the active sink. No-op if no sink is installed.
+    pub(crate) fn record_expected_type_trace(&self, loc: TextRange, ty: Arc<Type>) {
+        if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
+            sink.expected_types.insert(loc, ty);
+        }
+    }
+
     /// Append a resolved callee trace to the active sink.
     pub(crate) fn record_resolved_trace(&self, loc: TextRange, callee: OverloadedCallee) {
         if let Some(sink) = self.trace_sink.borrow_mut().as_mut() {
@@ -1886,6 +1893,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Access the thread-local state for trace recording.
     pub(crate) fn trace_state(&self) -> &ThreadState {
         self.thread_state
+    }
+
+    /// Record an expected type trace.
+    pub(crate) fn record_expected_type_trace(&self, loc: TextRange, ty: &Type) {
+        self.trace_state()
+            .record_expected_type_trace(loc, Arc::new(ty.clone()));
     }
 
     /// Store a partial answer for inline first-use pinning.
@@ -3074,6 +3087,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         tcc: &dyn Fn() -> TypeCheckContext,
     ) -> bool {
+        // Record expected type for LSP query
+        self.record_expected_type_trace(loc, want);
+
         let subset_result = match tcc().kind {
             TypeCheckKind::CallArgument(..)
             | TypeCheckKind::CallVarArgs(..)
