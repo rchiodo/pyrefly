@@ -220,6 +220,10 @@ pub struct Descriptor {
     /// descriptors (which have an actual object on the class) from annotation-only
     /// descriptors (which rely on metaclass or other runtime machinery).
     initialization: ClassFieldInitialization,
+    /// Whether the defining `def` was decorated with `@override`. Descriptors created by
+    /// decorators (e.g. `@classproperty`) become a `ClassType`, which can't carry the
+    /// function metadata flag, so we record it here from the undecorated function.
+    is_override: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1024,7 +1028,7 @@ impl ClassField {
     fn is_override(&self) -> bool {
         match &self.0 {
             ClassFieldInner::Property { ty, .. } => ty.is_override(),
-            ClassFieldInner::Descriptor { ty, .. } => ty.is_override(),
+            ClassFieldInner::Descriptor { descriptor, .. } => descriptor.is_override,
             ClassFieldInner::Method { ty, .. } => ty.is_override(),
             ClassFieldInner::NestedClass { .. } => false,
             ClassFieldInner::ClassAttribute { ty, .. } => ty.is_override(),
@@ -1360,6 +1364,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // which requires us having a place to store synthesized dummy values until we've refactored more.
         let value_storage = Owner::new();
 
+        // For descriptors created by a decorated `def` (e.g. `@classproperty`), the `@override`
+        // decorator's flag lives in the undecorated function metadata but is lost once the
+        // decorator turns the function into a `ClassType`. Recover it here so the override
+        // consistency check can see it.
+        let mut descriptor_is_override = false;
+
         let (
             initialization,
             is_function_without_return_annotation,
@@ -1581,6 +1591,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let binding = Binding::Forward(*definition);
                 let value_ty =
                     Arc::unwrap_or_clone(self.solve_binding(&binding, range, errors)).into_ty();
+                if let Binding::Function(decorated_idx, _, _) = self.bindings().get(*definition) {
+                    descriptor_is_override = self
+                        .get_decorated_function(*decorated_idx)
+                        .undecorated
+                        .metadata
+                        .flags
+                        .is_override;
+                }
                 (
                     initialization,
                     !has_return_annotation,
@@ -1728,6 +1746,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             getter,
                             setter,
                             initialization: initialization.clone(),
+                            is_override: descriptor_is_override,
                         })
                     }
                 }
