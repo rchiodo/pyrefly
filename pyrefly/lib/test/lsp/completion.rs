@@ -1638,10 +1638,9 @@ Completion Results:
     );
 }
 
-// Literal-value completion currently only fires for call arguments. The three
-// tests below document the gap in expected-type contexts (annotated assignment,
-// return, attribute target): today they offer no literal completions. A
-// follow-up wires `get_expected_type_at` in and populates these results.
+// Literal-value completion fires in expected-type contexts (annotated
+// assignment, return, attribute target), sourcing the expected type from
+// `get_expected_type_at` when the cursor is not a call argument.
 #[test]
 fn completion_literal_annotated_assignment() {
     let code = r#"
@@ -1657,6 +1656,8 @@ x: Literal['foo', 'bar'] = '
 3 | x: Literal['foo', 'bar'] = '
                                 ^
 Completion Results:
+- (Value) 'bar': Literal['bar'] inserting `bar`
+- (Value) 'foo': Literal['foo'] inserting `foo`
 "#
         .trim(),
         report.trim(),
@@ -1679,6 +1680,8 @@ def f() -> Literal['foo', 'bar']:
 4 |     return '
                 ^
 Completion Results:
+- (Value) 'bar': Literal['bar'] inserting `bar`
+- (Value) 'foo': Literal['foo'] inserting `foo`
 "#
         .trim(),
         report.trim(),
@@ -1703,6 +1706,8 @@ c.x = '
 6 | c.x = '
            ^
 Completion Results:
+- (Value) 'bar': Literal['bar'] inserting `bar`
+- (Value) 'foo': Literal['foo'] inserting `foo`
 "#
         .trim(),
         report.trim(),

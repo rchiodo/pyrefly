@@ -250,47 +250,6 @@ impl Transaction<'_> {
         }
     }
 
-    /// Like `add_literal_completions_from_type`, but deduplicates using a shared `seen` set.
-    /// This is used when collecting literal completions across multiple overloads.
-    fn add_literal_completions_from_type_dedup(
-        param_type: &Type,
-        completions: &mut Vec<RankedCompletion>,
-        in_string_literal: bool,
-        seen: &mut SmallSet<(String, Option<String>)>,
-    ) {
-        match param_type {
-            Type::Literal(lit) => {
-                let label = lit.value.to_string_escaped(true);
-                let detail = format!("{param_type}");
-                if seen.insert((label.clone(), Some(detail.clone()))) {
-                    let insert_text = if in_string_literal && let Lit::Str(s) = &lit.value {
-                        s.to_string()
-                    } else {
-                        label.clone()
-                    };
-                    completions.push(RankedCompletion::new(CompletionItem {
-                        label,
-                        kind: Some(CompletionItemKind::VALUE),
-                        detail: Some(detail),
-                        insert_text: Some(insert_text),
-                        ..Default::default()
-                    }));
-                }
-            }
-            Type::Union(u) => {
-                for member in &u.members {
-                    Self::add_literal_completions_from_type_dedup(
-                        member,
-                        completions,
-                        in_string_literal,
-                        seen,
-                    );
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Adds completions for magic methods (dunder methods like `__init__`, `__str__`, etc.).
     fn add_magic_method_completions(
         identifier: &Identifier,
@@ -478,20 +437,6 @@ impl Transaction<'_> {
         }
     }
 
-    fn expected_call_argument_type(&self, handle: &Handle, position: TextSize) -> Option<Type> {
-        let CallInfo {
-            callables,
-            chosen_overload_index,
-            active_argument,
-            ..
-        } = self.get_callables_from_call(handle, position)?;
-        let callable = callables.get(chosen_overload_index.unwrap_or(0))?.clone();
-        let params = Self::normalize_singleton_function_type_into_params(callable)?;
-        let arg_index = Self::active_parameter_index(&params, &active_argument)?;
-        let param = params.get(arg_index)?;
-        Some(param.as_type().clone())
-    }
-
     fn is_incompatible_with_expected_type(
         &self,
         handle: &Handle,
@@ -594,7 +539,13 @@ impl Transaction<'_> {
         has_added_any
     }
 
-    /// Adds literal completions for function call arguments based on parameter types.
+    /// Adds literal completions from the expected type at `position`.
+    ///
+    /// `get_expected_type_at` supplies the contextually expected type for both
+    /// call arguments (the active parameter's type) and the solver-recorded
+    /// contexts (annotated assignments, returns, attribute/subscript targets,
+    /// TypedDict values, yields), so a single source covers every
+    /// literal-completion site.
     fn add_literal_completions(
         &self,
         handle: &Handle,
@@ -602,30 +553,8 @@ impl Transaction<'_> {
         completions: &mut Vec<RankedCompletion>,
         in_string_literal: bool,
     ) {
-        if let Some(CallInfo {
-            callables,
-            active_argument,
-            provided_arg_ranges,
-            ..
-        }) = self.get_callables_from_call(handle, position)
-        {
-            let callables =
-                self.filter_compatible_overloads(handle, callables, &provided_arg_ranges);
-            let mut seen = SmallSet::new();
-            for callable in callables {
-                if let Some(params) =
-                    Self::normalize_singleton_function_type_into_params(callable.clone())
-                    && let Some(arg_index) = Self::active_parameter_index(&params, &active_argument)
-                    && let Some(param) = params.get(arg_index)
-                {
-                    Self::add_literal_completions_from_type_dedup(
-                        param.as_type(),
-                        completions,
-                        in_string_literal,
-                        &mut seen,
-                    );
-                }
-            }
+        if let Some(expected) = self.get_expected_type_at(handle, position) {
+            Self::add_literal_completions_from_type(&expected, completions, in_string_literal);
         }
     }
 
@@ -1113,7 +1042,7 @@ impl Transaction<'_> {
                 identifier: _,
                 context: IdentifierContext::Attribute { base_range, .. },
             }) => {
-                let expected_type = self.expected_call_argument_type(handle, position);
+                let expected_type = self.get_expected_type_at(handle, position);
                 allow_function_call_parens = true;
                 if let Some(answers) = self.get_answers(handle)
                     && let Some(base_type) = answers.get_type_trace(base_range)
@@ -1135,7 +1064,7 @@ impl Transaction<'_> {
                     context,
                     IdentifierContext::Expr(ExprContext::Load | ExprContext::Invalid)
                 ) {
-                    self.expected_call_argument_type(handle, position)
+                    self.get_expected_type_at(handle, position)
                 } else {
                     None
                 };
@@ -1227,7 +1156,7 @@ impl Transaction<'_> {
                     ) {
                         // Skip global completions — we handled the import case.
                     } else {
-                        let expected_type = self.expected_call_argument_type(handle, position);
+                        let expected_type = self.get_expected_type_at(handle, position);
                         if nodes.is_empty() {
                             Self::add_keyword_completions(handle, &mut result);
                             self.add_local_variable_completions(
