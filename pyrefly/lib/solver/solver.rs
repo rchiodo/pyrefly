@@ -3280,23 +3280,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 (constraint.clone(), None)
             } else if let Some(constraint) = self.find_matching_constraint(t1, constraints) {
                 (constraint.clone(), None)
-            } else if self.is_subset_eq(&t1_p, &bound).is_err() {
-                // No individual constraint matched, but the type may still
-                // be assignable to the constraint union (e.g. an abstract
-                // `AnyStr` satisfies `str | bytes`). Fall back to bound
-                // checking, mirroring the non-constraint code path.
-                if self.is_subset_eq(t1, &bound).is_err() {
-                    let specialization_error = TypeVarSpecializationError::BadBoundSpecialization {
+            } else {
+                // `Any` falls through to here because it does not match a specific constraint.
+                let specialization_error = (!t1_p.is_any()).then(|| {
+                    TypeVarSpecializationError::BadConstraintSpecialization {
                         name: q.name().clone(),
                         got: t1_p.clone(),
-                        want: bound,
-                    };
-                    (t1_p.clone(), Some(specialization_error))
-                } else {
-                    (t1.clone(), None)
-                }
-            } else {
-                (t1_p.clone(), None)
+                        want: constraints.clone(),
+                    }
+                });
+                (t1_p.clone(), specialization_error)
             }
         } else if self.is_subset_eq(&t1_p, &bound).is_err() {
             // If the promoted type fails, try again with the original type, in case the bound itself is literal.
@@ -3556,17 +3549,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                                     .variables
                                     .lock()
                                     .update(*v1, Variable::Answer(constraint));
-                            } else if self.is_subset_eq(t2, &bound).is_err() {
-                                // No individual constraint matched, but the type may still
-                                // be assignable to the constraint union (e.g. an abstract
-                                // `AnyStr` satisfies `str | bytes`). Only error if it fails
-                                // the union bound check too.
+                            } else if !t2.is_any() {
                                 self.solver.instantiation_errors.write().insert(
                                     *v1,
-                                    TypeVarSpecializationError::BadBoundSpecialization {
+                                    TypeVarSpecializationError::BadConstraintSpecialization {
                                         name,
                                         got: t2.clone(),
-                                        want: bound,
+                                        want: constraints,
                                     },
                                 );
                             }

@@ -112,7 +112,7 @@ def test[T: (B, C)](x: T) -> None:
     c: C = x  # E: `T` is not assignable to `C`
     d: B | C = x  # OK
 
-test(A())  # E: `A` is not assignable to upper bound `B | C` of type variable `T`
+test(A())  # E: `A` is not assignable to any of constraints `B`, `C` of type variable `T`
 test(B())
 test(C())
 test(D())
@@ -592,7 +592,7 @@ class X: ...
 def f[T: (int, str)](x: T) -> T: ...
 
 # X is not assignable to int or str, so this should error.
-f(X())  # E: `X` is not assignable to upper bound `int | str` of type variable `T`
+f(X())  # E: `X` is not assignable to any of constraints `int`, `str` of type variable `T`
     "#,
 );
 
@@ -1483,13 +1483,12 @@ reveal_type(f())  # E: revealed type: @_
 );
 
 testcase!(
-    bug = "False negative",
     test_union_of_constraints_does_not_match_constrained_typevar,
     r#"
 def f[T: (int, str)](x: T) -> T:
     return x
 def g(x: int | str):
-    f(x)  # this should error!
+    f(x)  # E: `int | str` is not assignable to any of constraints `int`, `str` of type variable `T`
     "#,
 );
 
