@@ -2461,6 +2461,11 @@ pub enum TypeVarSpecializationError {
         got: Type,
         want: Type,
     },
+    BadConstraintSpecialization {
+        name: Name,
+        got: Type,
+        want: Vec<Type>,
+    },
     IncompatibleOverloadResidual {
         solved_constraints: Vec<(Name, Type)>,
     },
@@ -2469,7 +2474,9 @@ pub enum TypeVarSpecializationError {
 impl TypeVarSpecializationError {
     pub fn error_kind(&self) -> ErrorKind {
         match self {
-            Self::BadBoundSpecialization { .. } => ErrorKind::BadSpecialization,
+            Self::BadBoundSpecialization { .. } | Self::BadConstraintSpecialization { .. } => {
+                ErrorKind::BadSpecialization
+            }
             Self::IncompatibleOverloadResidual { .. } => ErrorKind::IncompatibleOverloadResidual,
         }
     }
@@ -2481,6 +2488,15 @@ impl TypeVarSpecializationError {
                     &ans.for_display(got),
                     &ans.for_display(want),
                     ans.module().name(),
+                )
+            }
+            Self::BadConstraintSpecialization { name, got, want } => {
+                format!(
+                    "`{}` is not assignable to any of constraints {} of type variable `{name}`",
+                    ans.for_display(got),
+                    want.into_iter()
+                        .map(|want| format!("`{}`", ans.for_display(want)))
+                        .join(", ")
                 )
             }
             Self::IncompatibleOverloadResidual { solved_constraints } => {
