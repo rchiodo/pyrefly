@@ -1494,13 +1494,14 @@ def g(x: int | str):
 );
 
 testcase!(
-    bug = "False positive",
     test_constrained_identity_function_preserves_typevar,
     r#"
 from typing import reveal_type
 def f[T: (bool, int)](x: T) -> T:
     return x
 def g[T: bool](x: T) -> T:
-    return f(x)  # E: `bool` is not assignable to declared return type `T`
+    return f(x)
+def h[S: str](x: S) -> S:
+    return f(x)  # E: `S` is not assignable to any of constraints `bool`, `int` of type variable `T`
     "#,
 );

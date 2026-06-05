@@ -3193,6 +3193,23 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         }
     }
 
+    fn quantified_satisfies_constraints(&mut self, q: &Quantified, constraints: &[Type]) -> bool {
+        match q.restriction() {
+            Restriction::Bound(b) => constraints.iter().any(|c| self.is_subset_eq(b, c).is_ok()),
+            Restriction::Constraints(cs) => cs.iter().all(|c1| {
+                constraints
+                    .iter()
+                    .any(|c2| self.is_subset_eq(c1, c2).is_ok())
+            }),
+            Restriction::Unrestricted => {
+                // Check if the implicit bound `object` is assignable to any of the constraints
+                constraints.iter().any(|c| {
+                    c.is_any() || matches!(c, Type::ClassType(cls) if cls.is_builtin("object"))
+                })
+            }
+        }
+    }
+
     /// For a constrained TypeVar, find the narrowest constraint that `ty` is assignable to.
     ///
     /// Per the typing spec, a constrained TypeVar (`T = TypeVar("T", int, str)`) must resolve
@@ -3248,9 +3265,18 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         };
         let bound = q.upper_bound(self.type_order.stdlib(), &self.solver.heap);
         // For constrained TypeVars, promote to the matching constraint type.
-        if let Restriction::Constraints(ref constraints) = q.restriction {
+        if let Restriction::Constraints(constraints) = &q.restriction {
+            if let Type::Quantified(q_t1) = t1 {
+                let err = (!self.quantified_satisfies_constraints(q_t1, constraints)).then(|| {
+                    TypeVarSpecializationError::BadConstraintSpecialization {
+                        name: q.name.clone(),
+                        got: t1.clone(),
+                        want: constraints.clone(),
+                    }
+                });
+                (t1.clone(), err)
             // Try promoted type first, then fall back to original (for literal bounds).
-            if let Some(constraint) = self.find_matching_constraint(&t1_p, constraints) {
+            } else if let Some(constraint) = self.find_matching_constraint(&t1_p, constraints) {
                 (constraint.clone(), None)
             } else if let Some(constraint) = self.find_matching_constraint(t1, constraints) {
                 (constraint.clone(), None)
@@ -3508,10 +3534,22 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
                         // For constrained TypeVars, promote to the matching constraint type
                         // rather than pinning to the raw argument type.
-                        if let Restriction::Constraints(ref constraints) = restriction {
+                        if let Restriction::Constraints(constraints) = restriction {
                             variables.update(*v1, Variable::Answer(t2.clone()));
                             drop(variables);
-                            if let Some(constraint) = self.find_matching_constraint(t2, constraints)
+                            if let Type::Quantified(q_t2) = t2 {
+                                if !self.quantified_satisfies_constraints(q_t2, &constraints) {
+                                    self.solver.instantiation_errors.write().insert(
+                                        *v1,
+                                        TypeVarSpecializationError::BadConstraintSpecialization {
+                                            name,
+                                            got: t2.clone(),
+                                            want: constraints,
+                                        },
+                                    );
+                                }
+                            } else if let Some(constraint) =
+                                self.find_matching_constraint(t2, &constraints)
                             {
                                 let constraint = constraint.clone();
                                 self.solver
