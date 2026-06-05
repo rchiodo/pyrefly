@@ -1638,6 +1638,77 @@ Completion Results:
     );
 }
 
+// Literal-value completion currently only fires for call arguments. The three
+// tests below document the gap in expected-type contexts (annotated assignment,
+// return, attribute target): today they offer no literal completions. A
+// follow-up wires `get_expected_type_at` in and populates these results.
+#[test]
+fn completion_literal_annotated_assignment() {
+    let code = r#"
+from typing import Literal
+x: Literal['foo', 'bar'] = '
+#                           ^
+"#;
+    let report =
+        get_batched_lsp_operations_report_allow_error(&[("main", code)], get_default_test_report());
+    assert_eq!(
+        r#"
+# main.py
+3 | x: Literal['foo', 'bar'] = '
+                                ^
+Completion Results:
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn completion_literal_return() {
+    let code = r#"
+from typing import Literal
+def f() -> Literal['foo', 'bar']:
+    return '
+#           ^
+"#;
+    let report =
+        get_batched_lsp_operations_report_allow_error(&[("main", code)], get_default_test_report());
+    assert_eq!(
+        r#"
+# main.py
+4 |     return '
+                ^
+Completion Results:
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
+#[test]
+fn completion_literal_attribute_assignment() {
+    let code = r#"
+from typing import Literal
+class C:
+    x: Literal['foo', 'bar']
+c = C()
+c.x = '
+#      ^
+"#;
+    let report =
+        get_batched_lsp_operations_report_allow_error(&[("main", code)], get_default_test_report());
+    assert_eq!(
+        r#"
+# main.py
+6 | c.x = '
+           ^
+Completion Results:
+"#
+        .trim(),
+        report.trim(),
+    );
+}
+
 // todo(kylei): completion on known dict values
 // Pyright completes "a", "b"
 #[test]
