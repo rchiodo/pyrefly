@@ -270,7 +270,7 @@ Expected Type: None
 
 6 | y[0] = "hello"
            ^
-Expected Type: None
+Expected Type: `Iterable[int]`
 "#
         .trim(),
         report.trim(),
@@ -379,7 +379,7 @@ Expected Type: None
 
 4 | 1 + 1
       ^
-Expected Type: None
+Expected Type: `int`
 
 6 | def f():
          ^

@@ -3122,6 +3122,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         tcc: &dyn Fn() -> TypeCheckContext,
         call_context: &CallContext,
     ) -> bool {
+        // Record expected type for LSP query
+        self.record_expected_type_trace(loc, want);
+
         match self
             .solver()
             .is_subset_eq(got, want, self.type_order(), Some(call_context))
