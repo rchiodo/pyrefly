@@ -58,7 +58,7 @@
     "Line 69: Expected 1 errors",
     "Line 73: Expected 1 errors",
     "Line 77: Expected 1 errors",
-    "Line 60: Unexpected errors ['Named tuples do not support multiple inheritance']"
+    "Line 81: Expected 1 errors"
   ],
   "directives_no_type_check.py": [],
   "directives_reveal_type.py": [],

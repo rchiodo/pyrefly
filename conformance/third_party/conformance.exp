@@ -4939,28 +4939,6 @@
     {
       "code": -2,
       "column": 7,
-      "concise_description": "Named tuples do not support multiple inheritance",
-      "description": "Named tuples do not support multiple inheritance",
-      "line": 60,
-      "name": "invalid-inheritance",
-      "severity": "error",
-      "stop_column": 18,
-      "stop_line": 60
-    },
-    {
-      "code": -2,
-      "column": 7,
-      "concise_description": "Named tuples do not support multiple inheritance",
-      "description": "Named tuples do not support multiple inheritance",
-      "line": 81,
-      "name": "invalid-inheritance",
-      "severity": "error",
-      "stop_column": 17,
-      "stop_line": 81
-    },
-    {
-      "code": -2,
-      "column": 7,
       "concise_description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
       "description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
       "line": 105,

@@ -298,7 +298,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         let named_tuple_metadata =
             self.named_tuple_metadata(cls, bases, &bases_with_metadata, errors);
-        if named_tuple_metadata.is_some()
+        // Only `class X(NamedTuple, ...)` is rejected at runtime. Subclassing
+        // a concrete NamedTuple alongside other bases is allowed.
+        let directly_defines_named_tuple = bases
+            .iter()
+            .any(|base| matches!(base, BaseClass::NamedTuple(..)));
+        if directly_defines_named_tuple
             && bases_with_metadata.len() > 1
             && !cls.module().path().is_interface()
         {
