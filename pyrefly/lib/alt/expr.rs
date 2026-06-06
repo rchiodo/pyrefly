@@ -2341,58 +2341,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         )
                     }
                 }
-                Type::ClassDef(cls) => {
-                    let metadata = self.get_metadata_for_class(&cls);
-                    let class_ty = Type::ClassDef(cls.dupe());
-                    let allow_dunder_lookup = self.get_class_tparams(&cls).is_empty()
-                        && !metadata.has_base_any()
-                        && !metadata.is_new_type();
-                    let class_getitem_result = if allow_dunder_lookup {
-                        let class_ty = self.heap.mk_class_def(cls.dupe());
-                        // TODO(stroxler): Add a new API, similar to `type_of_attr_get` but returning a
-                        // LookupResult or an Optional type, that we could use here to avoid the double lookup.
-                        if self.has_attr(&class_ty, &dunder::CLASS_GETITEM) {
-                            Some(self.call_method_or_error(
-                                &class_ty,
-                                &dunder::CLASS_GETITEM,
-                                range,
-                                &[CallArg::expr(slice)],
-                                &[],
-                                errors,
-                                Some(&|| ErrorContext::Index(self.for_display(class_ty.clone()))),
-                            ))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-                    let metaclass_getitem_result =
-                        if class_getitem_result.is_none() && allow_dunder_lookup {
-                            self.call_magic_dunder_method(
-                                &class_ty,
-                                &dunder::GETITEM,
-                                range,
-                                &[CallArg::expr(slice)],
-                                &[],
-                                errors,
-                                Some(&|| ErrorContext::Index(self.for_display(class_ty.clone()))),
-                            )
-                        } else {
-                            None
-                        };
-                    if let Some(result) = class_getitem_result.or(metaclass_getitem_result) {
-                        result
-                    } else {
-                        let targs = self.parse_class_type_args(&cls, xs, errors);
-                        self.heap.mk_type_of(self.specialize(
-                            &cls,
-                            targs,
-                            range,
-                            errors,
-                        ))
-                    }
-                }
+                Type::ClassDef(cls) => self.class_subscript_infer(&cls, slice, xs, range, errors),
                 Type::Type(f) if matches!(&*f, Type::Quantified(q) if q.is_type_var()) => {
                     // Repeated match because pattern guards cannot move out of bindings.
                     let Type::Quantified(quantified) = *f else { unreachable!("guarded by matches! above") };
@@ -3162,6 +3111,61 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let (ty, _, _) = field.for_variance_inference();
             self.type_mentions_param_as_dimension(ty, param, depth)
         })
+    }
+
+    fn class_subscript_infer(
+        &self,
+        cls: &Class,
+        slice: &Expr,
+        xs: &[Expr],
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Type {
+        let metadata = self.get_metadata_for_class(cls);
+        let class_ty = Type::ClassDef(cls.dupe());
+        let allow_dunder_lookup = self.get_class_tparams(cls).is_empty()
+            && !metadata.has_base_any()
+            && !metadata.is_new_type();
+        let class_getitem_result = if allow_dunder_lookup {
+            let class_ty = self.heap.mk_class_def(cls.dupe());
+            // TODO(stroxler): Add a new API, similar to `type_of_attr_get` but returning a
+            // LookupResult or an Optional type, that we could use here to avoid the double lookup.
+            if self.has_attr(&class_ty, &dunder::CLASS_GETITEM) {
+                Some(self.call_method_or_error(
+                    &class_ty,
+                    &dunder::CLASS_GETITEM,
+                    range,
+                    &[CallArg::expr(slice)],
+                    &[],
+                    errors,
+                    Some(&|| ErrorContext::Index(self.for_display(class_ty.clone()))),
+                ))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let metaclass_getitem_result = if class_getitem_result.is_none() && allow_dunder_lookup {
+            self.call_magic_dunder_method(
+                &class_ty,
+                &dunder::GETITEM,
+                range,
+                &[CallArg::expr(slice)],
+                &[],
+                errors,
+                Some(&|| ErrorContext::Index(self.for_display(class_ty.clone()))),
+            )
+        } else {
+            None
+        };
+        if let Some(result) = class_getitem_result.or(metaclass_getitem_result) {
+            result
+        } else {
+            let targs = self.parse_class_type_args(cls, xs, errors);
+            self.heap
+                .mk_type_of(self.specialize(cls, targs, range, errors))
+        }
     }
 
     fn parse_class_type_args(
