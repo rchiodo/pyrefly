@@ -10,6 +10,7 @@ use pyrefly_types::quantified::QuantifiedKind;
 
 use crate::test::class_keywords::get_class_metadata;
 use crate::test::util::TestEnv;
+use crate::test::util::testcase_for_macro;
 use crate::testcase;
 
 fn shaped_array_env() -> TestEnv {
@@ -89,6 +90,20 @@ from typing import (
 )
 "#,
     );
+}
+
+fn plain_torch_and_jaxtyping_env() -> TestEnv {
+    let mut env = TestEnv::new();
+    env.add_with_path(
+        "torch",
+        "torch.pyi",
+        r#"
+class Tensor[*Shape]:
+    def __getitem__(self, idx: int) -> Tensor[*Shape]: ...
+"#,
+    );
+    add_jaxtyping(&mut env);
+    env
 }
 
 fn shaped_array_env_with_plain_torch_and_jaxtyping() -> TestEnv {
@@ -445,7 +460,7 @@ def f[*Shape](x: Foo[*Shape]) -> None:
 );
 
 testcase!(
-    test_jaxtyping_without_shape_stubs_reduces_to_array_type,
+    test_jaxtyping_without_shape_stubs_uses_ordinary_type_args,
     shaped_array_env_with_plain_torch_and_jaxtyping(),
     r#"
 from jaxtyping import Float
@@ -462,6 +477,43 @@ def f(
     reveal_type(z)  # E: revealed type: Tensor
 "#,
 );
+
+#[test]
+fn test_tensor_shapes_semantically_inert_without_shape_extensions() -> anyhow::Result<()> {
+    let contents = r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import Annotated, Literal, TypeVar, reveal_type
+
+T = TypeVar("T")
+
+class Box[T]: ...
+
+def annotations(
+    x: Tensor[Literal[2], Literal[3]],
+    y: Float[Tensor, "batch channels"],
+    z: Float[123, "batch"],  # E: Number literal cannot be used in annotations
+    named: Float[Tensor, "batch"],
+    box: Box[3],  # E: Expected a type form, got instance of `Literal[3]`
+    annotated: Annotated[int, "metadata"],
+) -> None:
+    reveal_type(x)  # E: revealed type: Tensor[Literal[2], Literal[3]]
+    reveal_type(x[0])  # E: revealed type: Tensor[Literal[2], Literal[3]]
+    reveal_type(annotated)  # E: revealed type: int
+
+def arithmetic(value: T) -> None:
+    value + 1  # E: `+` is not supported between `T` and `Literal[1]`
+"#;
+
+    testcase_for_macro(plain_torch_and_jaxtyping_env(), contents, file!(), line!())?;
+    testcase_for_macro(
+        plain_torch_and_jaxtyping_env().enable_tensor_shapes(),
+        contents,
+        file!(),
+        line!(),
+    )?;
+    Ok(())
+}
 
 testcase!(
     test_jaxtyping_accepts_decorated_torch_tensor,
