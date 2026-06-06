@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use dupe::Dupe;
 use num_traits::ToPrimitive;
 use pyrefly_config::error_kind::ErrorKind;
 use pyrefly_graph::index::Idx;
@@ -128,28 +129,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Return the most specific disjoint base for a type per PEP 800.
-    /// Walks the MRO to find the first ancestor marked `@disjoint_base`.
-    /// TODO: handle multiple incompatible disjoint bases
+    ///
+    /// Uses the cache on `ClassMro`, but checks the class itself first so
+    /// locally decorated classes still work when their MRO is cyclic.
+    /// Falls back to `object` for anything not explicitly disjoint.
     pub fn disjoint_base(&self, t: &Type) -> Class {
         match t {
             Type::ClassType(cls) => {
                 let class = cls.class_object();
-                // Check the class itself first.
                 if self.get_metadata_for_class(class).is_disjoint_base() {
-                    return class.clone();
+                    return class.dupe();
                 }
-                // Walk the MRO to find the most specific disjoint base ancestor.
-                let mro = self.get_mro_for_class(class);
-                for ancestor in mro.ancestors_no_object() {
-                    if self
-                        .get_metadata_for_class(ancestor.class_object())
-                        .is_disjoint_base()
-                    {
-                        return ancestor.class_object().clone();
-                    }
-                }
-                // Fall back to object (which is never disjoint with anything).
-                self.stdlib.object().class_object().clone()
+                self.get_mro_for_class(class)
+                    .nearest_disjoint_base()
+                    .map(|class| class.dupe())
+                    .unwrap_or_else(|| self.stdlib.object().class_object().dupe())
             }
             Type::Tuple(_) => self.stdlib.tuple_object().clone(),
             _ => self.stdlib.object().class_object().clone(),

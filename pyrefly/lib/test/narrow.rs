@@ -2835,6 +2835,26 @@ def f(a: A):
 );
 
 testcase!(
+    test_disjoint_bases_custom_propagation,
+    r#"
+from typing import assert_never
+from typing_extensions import disjoint_base
+
+@disjoint_base
+class Left: ...
+
+class LeftChild(Left): ...
+
+@disjoint_base
+class Right: ...
+
+def f(x: LeftChild) -> None:
+    if isinstance(x, Right):
+        assert_never(x)
+"#,
+);
+
+testcase!(
     test_literals_are_disjoint,
     r#"
 from typing import Literal, LiteralString, assert_never
