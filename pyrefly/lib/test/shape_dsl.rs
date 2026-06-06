@@ -118,12 +118,6 @@ fn shaped_array_env_with_shaped_torch_and_jaxtyping() -> TestEnv {
     env.enable_tensor_shapes()
 }
 
-fn shaped_array_env_with_shaped_torch_and_jaxtyping_disabled() -> TestEnv {
-    let mut env = shaped_array_env_with_shaped_torch();
-    add_jaxtyping(&mut env);
-    env
-}
-
 fn shaped_array_env_with_numpy() -> TestEnv {
     let path = std::env::var("SHAPE_DSL_TEST_PATH").expect("SHAPE_DSL_TEST_PATH must be set");
     let mut env = TestEnv::new_with_site_package_paths(&[&path]);
@@ -584,15 +578,19 @@ alias: type[jaxtyping.Shaped[Tensor, "batch"]] = Float[Tensor, "batch"]  # E: `A
 );
 
 testcase!(
-    test_jaxtyping_disabled_keeps_vanilla_annotated_metadata,
-    shaped_array_env_with_shaped_torch_and_jaxtyping_disabled(),
+    test_shape_extensions_resolvability_enables_jaxtyping_shapes,
+    {
+        let mut env = shaped_array_env_with_shaped_torch();
+        add_jaxtyping(&mut env);
+        env
+    },
     r#"
 from jaxtyping import Float
 from torch import Tensor
 from typing import reveal_type
 
-def f(x: Float[Tensor, 123]) -> None:
-    reveal_type(x)  # E: revealed type: Tensor
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)  # E: revealed type: Shaped[Tensor, "batch channels"]
 "#,
 );
 

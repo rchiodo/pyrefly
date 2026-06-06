@@ -22,6 +22,7 @@ use pyrefly_python::sys_info::PythonPlatform;
 use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
+use pyrefly_util::events::CategorizedEvents;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::thread_pool::TEST_THREAD_COUNT;
@@ -29,6 +30,7 @@ use tempfile::TempDir;
 
 use crate::commands::config_finder::default_config_finder;
 use crate::config::config::ConfigFile;
+use crate::config::config::ConfigSource;
 use crate::config::finder::ConfigFinder;
 use crate::error::error::print_errors;
 use crate::module::finder::DirEntryCache;
@@ -174,6 +176,398 @@ fn test_multiple_path() {
     print_errors(project_root.as_path(), &loads.collect_display_errors());
     loads.check_against_expectations().unwrap();
     assert_eq!(loads.collect_errors().ordinary.len(), 3);
+}
+
+#[test]
+fn test_tensor_shapes_availability_uses_origin_sensitive_resolution() {
+    let tdir = TempDir::new().unwrap();
+    let root = tdir.path();
+    let pkg = root.join("pkg");
+    let plain = root.join("plain");
+    fs::create_dir_all(pkg.join("shape_extensions")).unwrap();
+    fs::create_dir_all(&plain).unwrap();
+    fs::write(root.join(ConfigFile::PYREFLY_FILE_NAME), "").unwrap();
+    fs::write(
+        pkg.join("shape_extensions").join("__init__.pyi"),
+        r#"
+from typing import Any
+
+shaped_array: Any
+"#,
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("torch.pyi"),
+        r#"
+from shape_extensions import shaped_array
+
+@shaped_array(shape="Shape")
+class Tensor[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    fs::write(
+        pkg.join("jaxtyping.pyi"),
+        r#"
+class Float[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    fs::write(
+        plain.join("torch.pyi"),
+        r#"
+class Tensor[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    fs::write(
+        plain.join("jaxtyping.pyi"),
+        r#"
+class Float[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    let shaped_main_path = pkg.join("main.py");
+    fs::write(
+        &shaped_main_path,
+        r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)  # E: revealed type: Shaped[Tensor, "batch channels"]
+"#,
+    )
+    .unwrap();
+    let plain_main_path = plain.join("main.py");
+    fs::write(
+        &plain_main_path,
+        r#"
+from jaxtyping import Float
+from torch import Tensor
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    pass
+"#,
+    )
+    .unwrap();
+
+    let mut config = ConfigFile {
+        source: ConfigSource::File(root.join(ConfigFile::PYREFLY_FILE_NAME)),
+        enable_fallback_search_path: true,
+        ..Default::default()
+    };
+    config.python_environment.set_empty_to_default();
+    config.interpreters.skip_interpreter_query = true;
+    config.configure();
+    let config = ArcId::new(config);
+    let sys_info = config.get_sys_info();
+    let state = State::new(ConfigFinder::new_constant(config.dupe()), TEST_THREAD_COUNT);
+    let shaped_handle = Handle::new(
+        ModuleName::from_str("pkg.main"),
+        ModulePath::filesystem(shaped_main_path),
+        sys_info.dupe(),
+    );
+    let plain_handle = Handle::new(
+        ModuleName::from_str("plain.main"),
+        ModulePath::filesystem(plain_main_path),
+        sys_info,
+    );
+
+    let mut transaction = state.new_transaction(Require::Everything, None);
+    assert!(transaction.tensor_shapes_available(&config, &shaped_handle, None));
+    assert!(!transaction.tensor_shapes_available(&config, &plain_handle, None));
+
+    transaction.run(&[shaped_handle.dupe()], Require::Everything, None);
+    let errors = transaction.get_errors([&shaped_handle]);
+    print_errors(PathBuf::new().as_path(), &errors.collect_display_errors());
+    errors.check_against_expectations().unwrap();
+}
+
+/// Regression test: the per-module `tensor_shapes` bit is derived from whether
+/// `shape_extensions` is resolvable, but the module never imports it directly.
+/// When `shape_extensions` is created on disk (a find invalidation), a module that
+/// does not import it must still rebuild and pick up the now-true bit. This exercises
+/// the find-only `tensor_shapes` dependency in the `dirty.find()` clean-check.
+#[test]
+fn test_tensor_shapes_find_invalidation_rebuilds_module() {
+    let tdir = TempDir::new().unwrap();
+    let root = tdir.path();
+    fs::write(root.join(ConfigFile::PYREFLY_FILE_NAME), "").unwrap();
+    // `torch` and `jaxtyping` are present from the start, but `shape_extensions` is not,
+    // so shapes are initially unavailable for `main`. `torch` references `shaped_array`
+    // from `shape_extensions` so the shaped form is only derivable once it resolves.
+    fs::write(
+        root.join("torch.pyi"),
+        r#"
+from shape_extensions import shaped_array
+
+@shaped_array(shape="Shape")
+class Tensor[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("jaxtyping.pyi"),
+        r#"
+class Float[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    let main_path = root.join("main.py");
+    fs::write(
+        &main_path,
+        r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)
+"#,
+    )
+    .unwrap();
+
+    let mut config = ConfigFile {
+        source: ConfigSource::File(root.join(ConfigFile::PYREFLY_FILE_NAME)),
+        enable_fallback_search_path: true,
+        ..Default::default()
+    };
+    config.python_environment.set_empty_to_default();
+    config.interpreters.skip_interpreter_query = true;
+    config.configure();
+    let config = ArcId::new(config);
+    let sys_info = config.get_sys_info();
+    let state = State::new(ConfigFinder::new_constant(config.dupe()), TEST_THREAD_COUNT);
+    let handle = Handle::new(
+        ModuleName::from_str("main"),
+        ModulePath::filesystem(main_path),
+        sys_info,
+    );
+
+    // Before `shape_extensions` exists, shapes are unavailable and the revealed type is
+    // the unshaped jaxtyping `Float` form, not the shaped form. We commit this transaction
+    // so the stored `tensor_shapes = Some(false)` bit persists into the main state — this
+    // is what makes the next transaction exercise the incremental `dirty.find()` re-check.
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    assert!(
+        !transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let before = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        before.contains("revealed type: Float[") && !before.contains("Shaped["),
+        "expected unshaped Float type before shape_extensions exists, got: {before}"
+    );
+    state.commit_transaction(transaction, None);
+
+    // Create `shape_extensions` on disk: this is a find invalidation that the production
+    // code triggers via `invalidate_events` on file creation.
+    let shape_ext_path = root.join("shape_extensions.pyi");
+    fs::write(
+        &shape_ext_path,
+        r#"
+from typing import Any
+
+shaped_array: Any
+"#,
+    )
+    .unwrap();
+
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    transaction.as_mut().invalidate_events(&CategorizedEvents {
+        created: vec![shape_ext_path.clone()],
+        ..Default::default()
+    });
+
+    // Now shapes are available, and `main` — which never imports `shape_extensions` —
+    // must rebuild and re-derive the shaped type. This only happens if the `dirty.find()`
+    // re-check noticed the stored `tensor_shapes` bit flipped from false to true.
+    assert!(
+        transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let after = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        after.contains(r#"revealed type: Shaped[Tensor, "batch channels"]"#)
+            && !after.contains("revealed type: Float["),
+        "expected Shaped type (and no stale unshaped Float) after shape_extensions created, got: {after}"
+    );
+
+    // Commit the rebuilt transaction, then remove `shape_extensions` again. This proves the
+    // `Some(true)` bit written *during the dirty.find() rebuild* (not an initial run) survives
+    // `take_and_freeze`/`clone_for_mutation`: the next transaction's dirty.find must see the
+    // committed `Some(true)`, notice it flipped back to false, and revert `main` to unshaped.
+    state.commit_transaction(transaction, None);
+    fs::remove_file(&shape_ext_path).unwrap();
+
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    transaction.as_mut().invalidate_events(&CategorizedEvents {
+        removed: vec![shape_ext_path],
+        ..Default::default()
+    });
+    assert!(
+        !transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let reverted = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        reverted.contains("revealed type: Float[") && !reverted.contains("Shaped["),
+        "expected revert to unshaped Float after removing shape_extensions, got: {reverted}"
+    );
+}
+
+/// Reverse of `test_tensor_shapes_find_invalidation_rebuilds_module`: when
+/// `shape_extensions` is removed from disk (a find invalidation), a module that
+/// never imported it directly must still rebuild and drop the now-false bit,
+/// reverting to the unshaped form. Guards against only handling the create case.
+#[test]
+fn test_tensor_shapes_find_invalidation_drops_shapes_on_removal() {
+    let tdir = TempDir::new().unwrap();
+    let root = tdir.path();
+    fs::write(root.join(ConfigFile::PYREFLY_FILE_NAME), "").unwrap();
+    // `shape_extensions` is present from the start, so shapes are initially available.
+    let shape_ext_path = root.join("shape_extensions.pyi");
+    fs::write(
+        &shape_ext_path,
+        r#"
+from typing import Any
+
+shaped_array: Any
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("torch.pyi"),
+        r#"
+from shape_extensions import shaped_array
+
+@shaped_array(shape="Shape")
+class Tensor[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("jaxtyping.pyi"),
+        r#"
+class Float[*Shape]: ...
+"#,
+    )
+    .unwrap();
+    let main_path = root.join("main.py");
+    fs::write(
+        &main_path,
+        r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)
+"#,
+    )
+    .unwrap();
+
+    let mut config = ConfigFile {
+        source: ConfigSource::File(root.join(ConfigFile::PYREFLY_FILE_NAME)),
+        enable_fallback_search_path: true,
+        ..Default::default()
+    };
+    config.python_environment.set_empty_to_default();
+    config.interpreters.skip_interpreter_query = true;
+    config.configure();
+    let config = ArcId::new(config);
+    let sys_info = config.get_sys_info();
+    let state = State::new(ConfigFinder::new_constant(config.dupe()), TEST_THREAD_COUNT);
+    let handle = Handle::new(
+        ModuleName::from_str("main"),
+        ModulePath::filesystem(main_path),
+        sys_info,
+    );
+
+    // While `shape_extensions` exists, shapes are available and the revealed type is the
+    // shaped form. We commit so the stored `tensor_shapes = Some(true)` bit persists into
+    // the main state, setting up the incremental `dirty.find()` re-check on removal.
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    assert!(
+        transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let before = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        before.contains(r#"revealed type: Shaped[Tensor, "batch channels"]"#),
+        "expected Shaped type while shape_extensions exists, got: {before}"
+    );
+    state.commit_transaction(transaction, None);
+
+    // Remove `shape_extensions` from disk: a find invalidation triggered in production via
+    // `invalidate_events` on file removal.
+    fs::remove_file(&shape_ext_path).unwrap();
+
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    transaction.as_mut().invalidate_events(&CategorizedEvents {
+        removed: vec![shape_ext_path],
+        ..Default::default()
+    });
+
+    // Now shapes are unavailable, and `main` — which never imports `shape_extensions` —
+    // must rebuild and revert to the unshaped type. This only happens if the `dirty.find()`
+    // re-check noticed the stored `tensor_shapes` bit flipped from true to false.
+    assert!(
+        !transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let after = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        after.contains("revealed type: Float[") && !after.contains("Shaped["),
+        "expected unshaped Float type after shape_extensions removed, got: {after}"
+    );
 }
 
 #[test]
