@@ -4939,6 +4939,50 @@
     {
       "code": -2,
       "column": 7,
+      "concise_description": "Class `LeftAndRight` inherits from incompatible disjoint bases `Left`, `Right`",
+      "description": "Class `LeftAndRight` inherits from incompatible disjoint bases `Left`, `Right`",
+      "line": 69,
+      "name": "invalid-inheritance",
+      "severity": "error",
+      "stop_column": 19,
+      "stop_line": 69
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Class `LeftChildAndRight` inherits from incompatible disjoint bases `LeftChild`, `Right`",
+      "description": "Class `LeftChildAndRight` inherits from incompatible disjoint bases `LeftChild`, `Right`",
+      "line": 73,
+      "name": "invalid-inheritance",
+      "severity": "error",
+      "stop_column": 24,
+      "stop_line": 73
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Class `LeftAndRightViaChild` inherits from incompatible disjoint bases `Left`, `Right`",
+      "description": "Class `LeftAndRightViaChild` inherits from incompatible disjoint bases `Left`, `Right`",
+      "line": 77,
+      "name": "invalid-inheritance",
+      "severity": "error",
+      "stop_column": 27,
+      "stop_line": 77
+    },
+    {
+      "code": -2,
+      "column": 7,
+      "concise_description": "Class `LeftRecord` inherits from incompatible disjoint bases `Left`, `Record`",
+      "description": "Class `LeftRecord` inherits from incompatible disjoint bases `Left`, `Record`",
+      "line": 81,
+      "name": "invalid-inheritance",
+      "severity": "error",
+      "stop_column": 17,
+      "stop_line": 81
+    },
+    {
+      "code": -2,
+      "column": 7,
       "concise_description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
       "description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
       "line": 105,

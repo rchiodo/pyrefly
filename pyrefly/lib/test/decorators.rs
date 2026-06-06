@@ -839,3 +839,56 @@ class P(Protocol):
     pass
 "#,
 );
+
+testcase!(
+    test_disjoint_base_incompatible_inheritance,
+    r#"
+from typing import NamedTuple
+from typing_extensions import disjoint_base
+
+@disjoint_base
+class Left: ...
+
+@disjoint_base
+class Right: ...
+
+@disjoint_base
+class Third: ...
+
+@disjoint_base
+class LeftChild(Left): ...
+
+@disjoint_base
+class Record(NamedTuple):
+    value: int
+
+class Plain: ...
+
+class LeftOnly(Left, Plain): ...
+class MostSpecific(LeftChild, Left): ...
+
+class LeftA(Left): ...
+class LeftB(Left): ...
+class SameRepresentative(LeftA, LeftB): ...
+
+class LeftAndObject(Left, object): ...
+class LeftAndInt(Left, int): ...  # E: incompatible disjoint bases
+
+class Bad(Left, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
+class BadThree(Left, Right, Third): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`, `Third`
+class BadViaChild(LeftChild, Right): ...  # E: incompatible disjoint bases
+class BadViaLeftOnly(LeftOnly, Right): ...  # E: incompatible disjoint bases
+# `Bad` cached `Left` (its first direct base), so re-conflicts with `Right`
+# but not with `Left`.
+class BadViaInvalidIntermediate(Bad, Right): ...  # E: incompatible disjoint bases
+class BadViaInvalidIntermediateCompatible(Bad, Left): ...
+
+class LeftRecord(Left, Record): ...  # E: incompatible disjoint bases
+
+@disjoint_base
+class DecoratedBad(Left, Right): ...  # E: incompatible disjoint bases
+
+# `Right` is already in `DecoratedBad`'s MRO, so no new conflict.
+class CascadingFromDecoratedBad(DecoratedBad, Right): ...
+"#,
+);

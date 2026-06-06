@@ -74,6 +74,7 @@ use crate::types::callable::FunctionKind;
 use crate::types::class::Class;
 use crate::types::class::ClassKind;
 use crate::types::class::ClassType;
+use crate::types::display::ClassDisplayContext;
 use crate::types::keywords::DataclassFieldKeywords;
 use crate::types::keywords::DataclassKeywords;
 use crate::types::keywords::DataclassTransformMetadata;
@@ -1646,11 +1647,74 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 (base, mro)
             })
             .collect();
-        // TODO(disjoint-bases): Phase 3 will compute the cache here via
-        // `check_incompatible_disjoint_bases_and_choose_nearest` and emit
-        // any incompatible-disjoint-bases diagnostic.
-        let nearest_disjoint_base = None;
+        // Safe to read: class metadata never reads its own MRO.
+        let metadata = self.get_metadata_for_class(cls);
+        let nearest_disjoint_base = self.check_incompatible_disjoint_bases_and_choose_nearest(
+            cls,
+            &metadata,
+            &bases_with_mros,
+            errors,
+        );
         ClassMro::new(cls, nearest_disjoint_base, bases_with_mros, errors)
+    }
+
+    /// For each direct base, look up its nearest `@disjoint_base` ancestor.
+    /// Drop any that are subclasses of another; if more than one is left,
+    /// emit `incompatible disjoint bases`. Return the chosen ancestor to
+    /// cache on `cls`'s MRO, preferring a local `@disjoint_base` on `cls`
+    /// itself (but the local decorator does NOT silence the diagnostic).
+    ///
+    /// Cyclic direct bases contribute nothing here; the cycle diagnostic
+    /// already covers them. Other direct bases are still checked, so a
+    /// class like `(CyclicBase, Left, Right)` still flags `Left` vs `Right`.
+    fn check_incompatible_disjoint_bases_and_choose_nearest(
+        &self,
+        cls: &Class,
+        metadata: &ClassMetadata,
+        bases_with_mros: &[(&ClassType, Arc<ClassMro>)],
+        errors: &ErrorCollector,
+    ) -> Option<Class> {
+        let mut survivors: Vec<Class> = Vec::new();
+        for (_, mro) in bases_with_mros {
+            let Some(candidate) = mro.nearest_disjoint_base() else {
+                continue;
+            };
+            // A more-specific (or equal) base already survives, drop this one.
+            if survivors
+                .iter()
+                .any(|survivor| self.has_superclass(survivor, candidate))
+            {
+                continue;
+            }
+            // Otherwise drop any less-specific survivors and keep `candidate`.
+            survivors.retain(|survivor| !self.has_superclass(candidate, survivor));
+            survivors.push(candidate.dupe());
+        }
+
+        if survivors.len() > 1 {
+            let ctx_classes: Vec<&Class> = std::iter::once(cls).chain(survivors.iter()).collect();
+            let ctx = ClassDisplayContext::new(&ctx_classes);
+            let listed = survivors
+                .iter()
+                .map(|s| format!("`{}`", ctx.display(s)))
+                .join(", ");
+            self.error(
+                errors,
+                cls.range(),
+                ErrorKind::InvalidInheritance,
+                format!(
+                    "Class `{}` inherits from incompatible disjoint bases {}",
+                    ctx.display(cls),
+                    listed,
+                ),
+            );
+        }
+
+        // Skip `object` so narrowing's fallback to `object` stays meaningful.
+        if !cls.is_builtin("object") && metadata.is_disjoint_base() {
+            return Some(cls.dupe());
+        }
+        survivors.into_iter().next()
     }
 
     pub fn calculate_abstract_members(&self, cls: &Class) -> AbstractClassMembers {
