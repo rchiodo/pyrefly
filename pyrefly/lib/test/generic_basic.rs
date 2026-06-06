@@ -818,3 +818,26 @@ def f[T](x: T, y: T) -> T: ...
 assert_type(f([""], [0]), list[int] | list[str])
     "#,
 );
+
+testcase!(
+    test_typevar_bound_type_of_class_attr_access,
+    r#"
+from typing import TypeVar, assert_type
+
+class C:
+    name: str = "base"
+
+T = TypeVar("T", bound=type[C])
+def test(cls: T) -> str:
+    return cls.name
+
+class C2:
+    def __init__(self) -> None:
+        self.name: str = "base"
+
+T2 = TypeVar("T2", bound=type[C2])
+def test2(cls: T2) -> str:
+    # this should error because `name` is instance-only
+    return cls.name  # E:
+    "#,
+);
