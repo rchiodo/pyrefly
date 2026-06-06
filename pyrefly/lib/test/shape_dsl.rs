@@ -60,7 +60,33 @@ fn add_jaxtyping(env: &mut TestEnv) {
         "jaxtyping",
         "jaxtyping.pyi",
         r#"
-class Float[*Shape]: ...
+from typing import (
+    Annotated as BFloat16,
+    Annotated as Bool,
+    Annotated as Complex,
+    Annotated as Complex128,
+    Annotated as Complex64,
+    Annotated as Float,
+    Annotated as Float16,
+    Annotated as Float32,
+    Annotated as Float64,
+    Annotated as Inexact,
+    Annotated as Int,
+    Annotated as Int16,
+    Annotated as Int32,
+    Annotated as Int64,
+    Annotated as Int8,
+    Annotated as Integer,
+    Annotated as Key,
+    Annotated as Num,
+    Annotated as Real,
+    Annotated as Shaped,
+    Annotated as UInt,
+    Annotated as UInt16,
+    Annotated as UInt32,
+    Annotated as UInt64,
+    Annotated as UInt8,
+)
 "#,
     );
 }
@@ -75,6 +101,12 @@ fn shaped_array_env_with_shaped_torch_and_jaxtyping() -> TestEnv {
     let mut env = shaped_array_env_with_shaped_torch();
     add_jaxtyping(&mut env);
     env.enable_tensor_shapes()
+}
+
+fn shaped_array_env_with_shaped_torch_and_jaxtyping_disabled() -> TestEnv {
+    let mut env = shaped_array_env_with_shaped_torch();
+    add_jaxtyping(&mut env);
+    env
 }
 
 fn shaped_array_env_with_numpy() -> TestEnv {
@@ -423,9 +455,11 @@ from typing import reveal_type
 def f(
     x: Float[Tensor, "batch channels"],
     y: Float[Tensor, 123],
+    z: Float[Tensor, "shape metadata", 123],
 ) -> None:
     reveal_type(x)  # E: revealed type: Tensor
     reveal_type(y)  # E: revealed type: Tensor
+    reveal_type(z)  # E: revealed type: Tensor
 "#,
 );
 
@@ -434,14 +468,79 @@ testcase!(
     shaped_array_env_with_shaped_torch_and_jaxtyping(),
     r#"
 from jaxtyping import Float
+from jaxtyping import Float as F
+from jaxtyping import Integer, Key, Real
+import jaxtyping
+import jaxtyping as jt
 from torch import Tensor
-from typing import reveal_type
+from typing import assert_type, reveal_type
 
-def f(x: Float[Tensor, "batch channels"]) -> None:
+def f(
+    x: Float[Tensor, "batch channels"],
+    y: jaxtyping.Float[Tensor, "batch channels"],
+    z: F[Tensor, "batch channels"],
+    w: jt.Float[Tensor, "batch channels"],
+    integer: Integer[Tensor, "batch channels"],
+    key: Key[Tensor, "batch channels"],
+    real: Real[Tensor, "batch channels"],
+) -> None:
     reveal_type(x)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(y)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(z)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(w)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(integer)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(key)  # E: revealed type: Shaped[Tensor, "batch channels"]
+    reveal_type(real)  # E: revealed type: Shaped[Tensor, "batch channels"]
+
+def check_expected_type(x: Float[Tensor, "3 4"]) -> None:
+    assert_type(x, jaxtyping.Shaped[Tensor, "3 4"])
+
+def check_nontrivial_shape_syntax(
+    variadic: Float[Tensor, "*batch h w"],
+    arithmetic: Float[Tensor, "dim dim+1"],
+) -> None:
+    assert_type(variadic, jaxtyping.Shaped[Tensor, "*batch h w"])
+    assert_type(arithmetic, jaxtyping.Shaped[Tensor, "dim dim+1"])
 
 def bad_shape(x: Float[Tensor, 123]) -> None:  # E: Second argument to jaxtyping annotation must be a string literal
     pass
+"#,
+);
+
+testcase!(
+    test_non_jaxtyping_annotated_alias_keeps_vanilla_metadata,
+    shaped_array_env_with_shaped_torch().enable_tensor_shapes(),
+    r#"
+from torch import Tensor
+from typing import Annotated as Float, reveal_type
+
+def f(x: Float[Tensor, 123]) -> None:
+    reveal_type(x)  # E: revealed type: Tensor
+"#,
+);
+
+testcase!(
+    test_jaxtyping_value_expression_keeps_vanilla_annotated_behavior,
+    shaped_array_env_with_shaped_torch_and_jaxtyping(),
+    r#"
+from jaxtyping import Float
+import jaxtyping
+from torch import Tensor
+
+alias: type[jaxtyping.Shaped[Tensor, "batch"]] = Float[Tensor, "batch"]  # E: `Annotated[Tensor]` is not assignable to `type[Shaped[Tensor, "batch"]]`
+"#,
+);
+
+testcase!(
+    test_jaxtyping_disabled_keeps_vanilla_annotated_metadata,
+    shaped_array_env_with_shaped_torch_and_jaxtyping_disabled(),
+    r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, 123]) -> None:
+    reveal_type(x)  # E: revealed type: Tensor
 "#,
 );
 

@@ -675,6 +675,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             Expr::Subscript(x)
+                if let Some(ty) =
+                    self.parse_jaxtyping_type_form(&x.value, &x.slice, x.range(), errors) =>
+            {
+                Annotation::new_type(ty)
+            }
+            Expr::Subscript(x)
                 if let unpacked_slice = Ast::unpack_slice(&x.slice)
                     && !unpacked_slice.is_empty()
                     && let Some(qualifier) =
@@ -6092,6 +6098,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let result = match x {
+            Expr::Subscript(x)
+                if let Some(ty) =
+                    self.parse_jaxtyping_type_form(&x.value, &x.slice, x.range(), errors) =>
+            {
+                ty
+            }
             Expr::List(x)
                 if matches!(
                     type_form_context,

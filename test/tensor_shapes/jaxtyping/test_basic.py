@@ -18,6 +18,21 @@ def test_concrete_dims():
     assert_type(x, Shaped[Tensor, "3 4"])
 
 
+def test_concrete_dims_parameter(x: Float[Tensor, "3 4"]) -> None:
+    """Jaxtyping wrappers also parse when used as assert_type expected types."""
+    assert_type(x, Shaped[Tensor, "3 4"])
+
+
+def test_float_variadic_parameter(x: Float[Tensor, "*batch h w"]) -> None:
+    """Float also supports nontrivial jaxtyping shape syntax."""
+    assert_type(x, Shaped[Tensor, "*batch h w"])
+
+
+def test_float_arithmetic_parameter(x: Float[Tensor, "dim dim+1"]) -> None:
+    """Float also supports jaxtyping dimension arithmetic."""
+    assert_type(x, Shaped[Tensor, "dim dim+1"])
+
+
 def test_named_dims(
     x: Shaped[Tensor, "batch channels"],
 ) -> Shaped[Tensor, "batch channels"]:

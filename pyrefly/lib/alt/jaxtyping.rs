@@ -8,9 +8,10 @@
 //! Jaxtyping annotation support.
 //!
 //! This module handles parsing and processing of jaxtyping-style tensor
-//! annotations like `Float[Tensor, "batch channels"]`. The jaxtyping library
-//! uses dtype wrapper classes (Float, Int, Shaped, etc.) subscripted with a
-//! tensor class and a shape string.
+//! annotations like `Float[Tensor, "batch channels"]`. Static jaxtyping stubs
+//! expose dtype wrappers (Float, Int, Shaped, etc.) as `Annotated` aliases.
+//! Pyrefly uses those wrappers only as markers for jaxtyping shape syntax; it
+//! does not model dtype refinements.
 //!
 //! ## Shape string syntax
 //!
@@ -43,6 +44,10 @@
 use std::sync::Arc;
 
 use dupe::Dupe;
+use pyrefly_graph::index::Idx;
+use pyrefly_python::ast::Ast;
+use pyrefly_python::short_identifier::ShortIdentifier;
+use pyrefly_types::class::ClassType;
 use pyrefly_types::dimension::SizeExpr;
 use pyrefly_types::quantified::QuantifiedKind;
 use pyrefly_types::shaped_array::ShapedArrayShape;
@@ -55,55 +60,218 @@ use ruff_python_ast::ExprStringLiteral;
 use ruff_python_ast::name::Name;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::Hashed;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::solve::TypeFormContext;
+use crate::binding::binding::Binding;
+use crate::binding::binding::BindingLegacyTypeParam;
+use crate::binding::binding::ImportBinding;
+use crate::binding::binding::Key;
+use crate::binding::binding::KeyLegacyTypeParam;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
-use crate::types::class::Class;
 use crate::types::types::AnyStyle;
 use crate::types::types::Type;
 
+const JAXTYPING_WRAPPERS: &[&str] = &[
+    "Float",
+    "Float16",
+    "Float32",
+    "Float64",
+    "BFloat16",
+    "Int",
+    "Int8",
+    "Int16",
+    "Int32",
+    "Int64",
+    "Integer",
+    "Key",
+    "UInt",
+    "UInt8",
+    "UInt16",
+    "UInt32",
+    "UInt64",
+    "Bool",
+    "Num",
+    "Real",
+    "Shaped",
+    "Complex",
+    "Complex64",
+    "Complex128",
+    "Inexact",
+];
+
 impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
-    /// Check if a class is a jaxtyping dtype wrapper (Float, Int, Shaped, etc.)
-    pub fn is_jaxtyping_wrapper(&self, cls: &Class) -> bool {
-        const WRAPPERS: &[&str] = &[
-            "Float",
-            "Float16",
-            "Float32",
-            "Float64",
-            "BFloat16",
-            "Int",
-            "Int8",
-            "Int16",
-            "Int32",
-            "Int64",
-            "UInt",
-            "UInt8",
-            "UInt16",
-            "UInt32",
-            "UInt64",
-            "Bool",
-            "Num",
-            "Shaped",
-            "Complex",
-            "Complex64",
-            "Complex128",
-            "Inexact",
-        ];
-        WRAPPERS
-            .iter()
-            .any(|name| cls.has_toplevel_qname("jaxtyping", name))
+    /// Check if an expression resolves to one of jaxtyping's public dtype wrappers.
+    pub fn is_jaxtyping_wrapper_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Name(name) => self.name_is_jaxtyping_wrapper(name),
+            Expr::Attribute(attr) => {
+                if !JAXTYPING_WRAPPERS
+                    .iter()
+                    .any(|wrapper| attr.attr.id.as_str() == *wrapper)
+                {
+                    return false;
+                }
+                self.is_jaxtyping_module_expr(&attr.value)
+            }
+            _ => false,
+        }
+    }
+
+    fn binding_for_name(&self, name: &ruff_python_ast::ExprName) -> Option<&Binding> {
+        let key = Key::BoundName(ShortIdentifier::expr_name(name));
+        let idx = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key))?;
+        Some(self.bindings().get(idx))
+    }
+
+    fn binding_following_forwards(&self, mut idx: Idx<Key>) -> &Binding {
+        for _ in 0..16 {
+            match self.bindings().get(idx) {
+                Binding::Forward(inner)
+                | Binding::PromoteForward(inner)
+                | Binding::ForwardToFirstUse(inner) => idx = *inner,
+                binding => return binding,
+            }
+        }
+        unreachable!("exceeded forward-binding depth limit while resolving jaxtyping wrapper")
+    }
+
+    fn binding_for_name_following_forwards(
+        &self,
+        name: &ruff_python_ast::ExprName,
+    ) -> Option<&Binding> {
+        let key = Key::BoundName(ShortIdentifier::expr_name(name));
+        let idx = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key))?;
+        Some(self.binding_following_forwards(idx))
+    }
+
+    fn import_is_jaxtyping_wrapper(import: &ImportBinding) -> bool {
+        import.module.as_str() == "jaxtyping"
+            && JAXTYPING_WRAPPERS
+                .iter()
+                .any(|wrapper| import.name.as_str() == *wrapper)
+    }
+
+    fn name_is_jaxtyping_wrapper(&self, name: &ruff_python_ast::ExprName) -> bool {
+        self.binding_for_name(name)
+            .is_some_and(|binding| self.binding_is_jaxtyping_wrapper_origin(binding))
+            || self
+                .binding_for_name_following_forwards(name)
+                .is_some_and(|binding| self.binding_is_jaxtyping_wrapper_origin(binding))
+    }
+
+    fn is_jaxtyping_module_expr(&self, expr: &Expr) -> bool {
+        if let Expr::Name(name) = expr
+            && (self
+                .binding_for_name(name)
+                .is_some_and(|binding| self.binding_is_jaxtyping_module(binding))
+                || self
+                    .binding_for_name_following_forwards(name)
+                    .is_some_and(|binding| self.binding_is_jaxtyping_module(binding)))
+        {
+            return true;
+        }
+        let silent_errors = self.error_swallower();
+        matches!(
+            self.expr_infer(expr, &silent_errors),
+            Type::Module(module)
+                if module.parts().len() == 1
+                    && module.parts()[0].as_str() == "jaxtyping"
+        )
+    }
+
+    fn binding_is_jaxtyping_module(&self, binding: &Binding) -> bool {
+        match binding {
+            Binding::Module(module) => module.0.as_str() == "jaxtyping",
+            Binding::Import(import) => {
+                import.module.as_str() == "jaxtyping" && import.name.as_str() == "jaxtyping"
+            }
+            Binding::PossibleLegacyTParam(key, _) => self.legacy_tparam_is_jaxtyping_module(*key),
+            _ => false,
+        }
+    }
+
+    fn binding_is_jaxtyping_wrapper_origin(&self, binding: &Binding) -> bool {
+        match binding {
+            Binding::Import(import) => Self::import_is_jaxtyping_wrapper(import),
+            Binding::Forward(idx)
+            | Binding::PromoteForward(idx)
+            | Binding::ForwardToFirstUse(idx) => {
+                self.binding_is_jaxtyping_wrapper_origin(self.binding_following_forwards(*idx))
+            }
+            Binding::PossibleLegacyTParam(key, _) => {
+                self.legacy_tparam_is_jaxtyping_wrapper_origin(*key)
+            }
+            _ => false,
+        }
+    }
+
+    fn legacy_tparam_is_jaxtyping_wrapper_origin(&self, key: Idx<KeyLegacyTypeParam>) -> bool {
+        match self.bindings().get(key) {
+            BindingLegacyTypeParam::ParamKeyed(idx) => {
+                self.binding_is_jaxtyping_wrapper_origin(self.binding_following_forwards(*idx))
+            }
+            BindingLegacyTypeParam::ModuleKeyed(idx, attrs)
+                if attrs.len() == 1
+                    && JAXTYPING_WRAPPERS
+                        .iter()
+                        .any(|wrapper| attrs.last().as_str() == *wrapper) =>
+            {
+                self.binding_is_jaxtyping_module(self.binding_following_forwards(*idx))
+            }
+            BindingLegacyTypeParam::ModuleKeyed(_, _) => false,
+        }
+    }
+
+    fn legacy_tparam_is_jaxtyping_module(&self, key: Idx<KeyLegacyTypeParam>) -> bool {
+        match self.bindings().get(key) {
+            BindingLegacyTypeParam::ParamKeyed(idx) => {
+                self.binding_is_jaxtyping_module(self.binding_following_forwards(*idx))
+            }
+            BindingLegacyTypeParam::ModuleKeyed(_, _) => false,
+        }
+    }
+
+    /// Parse an origin-aware jaxtyping type form such as `Float[Tensor, "batch"]`.
+    ///
+    /// This hook is intentionally for annotation/type-form parsing only. In value
+    /// expressions, jaxtyping aliases should keep their ordinary `Annotated[...]`
+    /// runtime behavior. Returning `Some` is the commit point: normal
+    /// `Annotated` parsing will not run, and this hook may emit diagnostics for
+    /// malformed jaxtyping shape syntax.
+    pub fn parse_jaxtyping_type_form(
+        &self,
+        value: &Expr,
+        slice: &Expr,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Option<Type> {
+        let xs = Ast::unpack_slice(slice);
+        if xs.is_empty() || !self.solver().tensor_shapes || !self.is_jaxtyping_wrapper_expr(value) {
+            return None;
+        }
+        let base_class = self.jaxtyping_shaped_array_base(&xs[0])?;
+        Some(self.parse_jaxtyping_annotation(xs, base_class, range, errors))
+    }
+
+    fn jaxtyping_shaped_array_base(&self, base_expr: &Expr) -> Option<ClassType> {
+        let silent_errors = self.error_swallower();
+        match self.expr_untype(base_expr, TypeFormContext::TypeArgument, &silent_errors) {
+            Type::ShapedArray(shaped_array_type) if shaped_array_type.is_shapeless() => {
+                Some(shaped_array_type.base_class.clone())
+            }
+            _ => None,
+        }
     }
 
     /// Parse a jaxtyping annotation like `Float[Tensor, "batch channels"]`.
-    ///
-    /// If the array argument is not a registered shaped-array class, jaxtyping
-    /// keeps its ordinary static behavior and reduces to the array type.
-    pub fn parse_jaxtyping_annotation(
+    fn parse_jaxtyping_annotation(
         &self,
         xs: &[Expr],
+        base_class: ClassType,
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
@@ -119,17 +287,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ),
             );
         }
-
-        // Resolve xs[0] as a registered shaped-array class. Bare class names
-        // canonicalize to Type::ShapedArray(shapeless) only when their stubs
-        // carry `@shape_extensions.shaped_array` metadata.
-        let base_type = self.expr_untype(&xs[0], TypeFormContext::TypeArgument, errors);
-        let base_class = match &base_type {
-            Type::ShapedArray(shaped_array_type) if shaped_array_type.is_shapeless() => {
-                shaped_array_type.base_class.clone()
-            }
-            _ => return base_type,
-        };
 
         // Extract shape string from xs[1]
         let shape_str = match &xs[1] {
@@ -296,7 +453,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         Some(self.heap.mk_size(size_expr))
     }
 
-    /// Collect implicit jaxtyping TypeVars from a callable's signature and    /// extend `tparams` with them. Also detects and reports mixing of native
+    /// Collect implicit jaxtyping TypeVars from a callable's signature and
+    /// extend `tparams` with them. Also detects and reports mixing of native
     /// and jaxtyping tensor annotation syntax in the same function.
     ///
     /// Returns the (potentially extended) `TParams` to use for the function's

@@ -104,12 +104,6 @@ ERROR jaxtyping annotations require exactly 2 arguments (array type and shape st
 17 | def too_many_args(x: Shaped[Tensor, "3", "extra"]) -> None:  # noqa: F821
    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-ERROR Could not find name `extra` [unknown-name]
-  --> *test_bad_annotation.py:17:43 (glob)
-   |
-17 | def too_many_args(x: Shaped[Tensor, "3", "extra"]) -> None:  # noqa: F821
-   |                                           ^^^^^
-   |
 ERROR Second argument to jaxtyping annotation must be a string literal [invalid-annotation]
   --> *test_bad_annotation.py:22:45 (glob)
    |
