@@ -1861,11 +1861,7 @@ impl<'a> Transaction<'a> {
         config.tensor_shapes(handle.path().as_path())
             || self
                 .get_cached_loader(config)
-                .find_import(
-                    ModuleName::from_str("shape_extensions"),
-                    Some(handle.path()),
-                    timing,
-                )
+                .find_import_for_tensor_shapes(Some(handle.path()), timing)
                 .finding()
                 // This is Pyrefly resolvability, not runtime importability: a
                 // found module with a nonfatal import error is enough to mark

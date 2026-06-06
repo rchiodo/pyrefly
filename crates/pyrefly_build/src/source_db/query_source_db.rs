@@ -328,6 +328,10 @@ impl SourceDatabase for QuerySourceDatabase {
         vec![]
     }
 
+    fn may_contain_module(&self, module: ModuleName) -> bool {
+        self.inner.read().known_modules.contains(&module)
+    }
+
     fn lookup(
         &self,
         module: ModuleName,
@@ -578,6 +582,14 @@ mod tests {
             QuerySourceDatabase::from_target_manifest_db(raw_db, &root, &files),
             root,
         )
+    }
+
+    #[test]
+    fn test_may_contain_module_uses_known_modules() {
+        let (db, _) = get_db();
+
+        assert!(db.may_contain_module(ModuleName::from_str("pyre.client.log.log")));
+        assert!(!db.may_contain_module(ModuleName::from_str("shape_extensions")));
     }
 
     #[test]

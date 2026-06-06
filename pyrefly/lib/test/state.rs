@@ -8,6 +8,7 @@
 //! Tests of the `State` object.
 
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::sleep;
@@ -15,17 +16,24 @@ use std::time::Duration;
 
 use dupe::Dupe;
 use pyrefly_build::handle::Handle;
+use pyrefly_build::source_db::SourceDatabase;
+use pyrefly_build::source_db::Target;
 use pyrefly_build::source_db::map_db::MapDatabase;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use pyrefly_python::module_path::ModuleStyle;
 use pyrefly_python::sys_info::PythonPlatform;
 use pyrefly_python::sys_info::PythonVersion;
 use pyrefly_python::sys_info::SysInfo;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::events::CategorizedEvents;
+use pyrefly_util::interned_path::InternedPath;
 use pyrefly_util::lock::Mutex;
 use pyrefly_util::prelude::SliceExt;
+use pyrefly_util::telemetry::TelemetrySourceDbRebuildInstanceStats;
 use pyrefly_util::thread_pool::TEST_THREAD_COUNT;
+use pyrefly_util::watch_pattern::WatchPattern;
+use starlark_map::small_set::SmallSet;
 use tempfile::TempDir;
 
 use crate::commands::config_finder::default_config_finder;
@@ -40,6 +48,97 @@ use crate::state::require::Require;
 use crate::state::require::RequireLevels;
 use crate::state::state::State;
 use crate::test::util::TestEnv;
+
+#[derive(Debug)]
+struct MutableShapeExtensionsSourceDb {
+    sys_info: SysInfo,
+    contains_shape_extensions: Arc<Mutex<bool>>,
+}
+
+impl MutableShapeExtensionsSourceDb {
+    fn new(sys_info: SysInfo, contains_shape_extensions: Arc<Mutex<bool>>) -> Self {
+        Self {
+            sys_info,
+            contains_shape_extensions,
+        }
+    }
+
+    fn module_path(module: ModuleName) -> Option<ModulePath> {
+        Some(ModulePath::memory(PathBuf::from(match module.as_str() {
+            "main" => "main.py",
+            "torch" => "torch.pyi",
+            "jaxtyping" => "jaxtyping.pyi",
+            "shape_extensions" => "shape_extensions.pyi",
+            _ => return None,
+        })))
+    }
+}
+
+impl SourceDatabase for MutableShapeExtensionsSourceDb {
+    fn modules_to_check(&self) -> Vec<Handle> {
+        vec![Handle::new(
+            ModuleName::from_str("main"),
+            ModulePath::memory(PathBuf::from("main.py")),
+            self.sys_info.dupe(),
+        )]
+    }
+
+    fn may_contain_module(&self, module: ModuleName) -> bool {
+        match module.as_str() {
+            "shape_extensions" => *self.contains_shape_extensions.lock(),
+            "main" | "torch" | "jaxtyping" => true,
+            _ => false,
+        }
+    }
+
+    fn lookup(
+        &self,
+        module: ModuleName,
+        _: Option<&Path>,
+        _: Option<ModuleStyle>,
+    ) -> Option<ModulePath> {
+        if module.as_str() == "shape_extensions" && !*self.contains_shape_extensions.lock() {
+            None
+        } else {
+            Self::module_path(module)
+        }
+    }
+
+    fn handle_from_module_path(&self, module_path: &ModulePath) -> Option<Handle> {
+        let module = match module_path.as_path().to_str()? {
+            "main.py" => ModuleName::from_str("main"),
+            "torch.pyi" => ModuleName::from_str("torch"),
+            "jaxtyping.pyi" => ModuleName::from_str("jaxtyping"),
+            "shape_extensions.pyi" => ModuleName::from_str("shape_extensions"),
+            _ => return None,
+        };
+        Some(Handle::new(
+            module,
+            module_path.dupe(),
+            self.sys_info.dupe(),
+        ))
+    }
+
+    fn query_source_db(
+        &self,
+        _: SmallSet<InternedPath>,
+        _: bool,
+    ) -> (anyhow::Result<bool>, TelemetrySourceDbRebuildInstanceStats) {
+        (Ok(true), TelemetrySourceDbRebuildInstanceStats::default())
+    }
+
+    fn get_paths_to_watch(&self) -> SmallSet<WatchPattern> {
+        SmallSet::new()
+    }
+
+    fn get_target(&self, _: Option<&Path>) -> Option<Target> {
+        None
+    }
+
+    fn get_generated_files(&self) -> SmallSet<InternedPath> {
+        SmallSet::new()
+    }
+}
 
 #[test]
 fn test_multiple_config() {
@@ -260,6 +359,18 @@ def f(x: Float[Tensor, "batch channels"]) -> None:
     };
     config.python_environment.set_empty_to_default();
     config.interpreters.skip_interpreter_query = true;
+    let mut sourcedb = MapDatabase::new(config.get_sys_info());
+    // The source DB can prove `shape_extensions` is absent, but directory-relative
+    // fallback still makes the filesystem lookup depend on the importing origin.
+    sourcedb.insert(
+        ModuleName::from_str("pkg.main"),
+        ModulePath::filesystem(shaped_main_path.clone()),
+    );
+    sourcedb.insert(
+        ModuleName::from_str("plain.main"),
+        ModulePath::filesystem(plain_main_path.clone()),
+    );
+    config.source_db = Some(ArcId::new(Box::new(sourcedb)));
     config.configure();
     let config = ArcId::new(config);
     let sys_info = config.get_sys_info();
@@ -442,6 +553,124 @@ shaped_array: Any
     assert!(
         reverted.contains("revealed type: Float[") && !reverted.contains("Shaped["),
         "expected revert to unshaped Float after removing shape_extensions, got: {reverted}"
+    );
+}
+
+/// Regression test for source-db rebuild invalidation: when the source DB changes
+/// from proving `shape_extensions` absent to resolving it, the stored find-only
+/// `tensor_shapes` bit must be rechecked and affected modules must rebuild.
+#[test]
+fn test_tensor_shapes_source_db_rebuild_rechecks_marker_availability() {
+    let shape_extensions_available = Arc::new(Mutex::new(false));
+    let mut config = ConfigFile::default();
+    config.python_environment.set_empty_to_default();
+    let sys_info = config.get_sys_info();
+    config.source_db = Some(ArcId::new(Box::new(MutableShapeExtensionsSourceDb::new(
+        sys_info.dupe(),
+        shape_extensions_available.dupe(),
+    ))));
+    config.configure();
+    let config = ArcId::new(config);
+    let state = State::new(ConfigFinder::new_constant(config.dupe()), TEST_THREAD_COUNT);
+    let handle = Handle::new(
+        ModuleName::from_str("main"),
+        ModulePath::memory(PathBuf::from("main.py")),
+        sys_info,
+    );
+    let memory = vec![
+        (
+            PathBuf::from("main.py"),
+            Some(Arc::new(FileContents::from_source(
+                r#"
+from jaxtyping import Float
+from torch import Tensor
+from typing import reveal_type
+
+def f(x: Float[Tensor, "batch channels"]) -> None:
+    reveal_type(x)
+"#
+                .to_owned(),
+            ))),
+        ),
+        (
+            PathBuf::from("torch.pyi"),
+            Some(Arc::new(FileContents::from_source(
+                r#"
+from shape_extensions import shaped_array
+
+@shaped_array(shape="Shape")
+class Tensor[*Shape]: ...
+"#
+                .to_owned(),
+            ))),
+        ),
+        (
+            PathBuf::from("jaxtyping.pyi"),
+            Some(Arc::new(FileContents::from_source(
+                r#"
+class Float[*Shape]: ...
+"#
+                .to_owned(),
+            ))),
+        ),
+        (
+            PathBuf::from("shape_extensions.pyi"),
+            Some(Arc::new(FileContents::from_source(
+                r#"
+from typing import Any
+
+shaped_array: Any
+"#
+                .to_owned(),
+            ))),
+        ),
+    ];
+
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    transaction.as_mut().set_memory(memory);
+    assert!(
+        !transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let before = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        before.contains("revealed type: Float[") && !before.contains("Shaped["),
+        "expected unshaped Float type before source DB resolves shape_extensions, got: {before}"
+    );
+    state.commit_transaction(transaction, None);
+
+    *shape_extensions_available.lock() = true;
+    let mut transaction = state.new_committable_transaction(Require::Everything, None);
+    transaction
+        .as_mut()
+        .invalidate_find_for_configs(SmallSet::from_iter([config.dupe()]));
+    assert!(
+        transaction
+            .as_mut()
+            .tensor_shapes_available(&config, &handle, None)
+    );
+    transaction
+        .as_mut()
+        .run(&[handle.dupe()], Require::Everything, None);
+    let after = transaction
+        .as_mut()
+        .get_errors([&handle])
+        .collect_display_errors()
+        .map(|e| e.msg())
+        .join("\n");
+    assert!(
+        after.contains(r#"revealed type: Shaped[Tensor, "batch channels"]"#)
+            && !after.contains("revealed type: Float["),
+        "expected Shaped type after source DB resolves shape_extensions, got: {after}"
     );
 }
 

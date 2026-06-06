@@ -177,6 +177,12 @@ impl SourceDatabase for BuckCheckSourceDatabase {
         }
     }
 
+    fn may_contain_module(&self, module: ModuleName) -> bool {
+        self.sources.contains_key(&module)
+            || self.dependencies.contains_key(&module)
+            || self.implicit_init.contains_key(&module)
+    }
+
     fn lookup(
         &self,
         module: ModuleName,
@@ -379,6 +385,10 @@ mod tests {
             source_db.lookup_for_test(ModuleName::from_str("qux")),
             LookupResult::NoSource
         );
+        assert!(source_db.may_contain_module(ModuleName::from_str("foo")));
+        assert!(source_db.may_contain_module(ModuleName::from_str("bar")));
+        assert!(source_db.may_contain_module(ModuleName::from_str("baz")));
+        assert!(!source_db.may_contain_module(ModuleName::from_str("qux")));
     }
 
     #[test]
