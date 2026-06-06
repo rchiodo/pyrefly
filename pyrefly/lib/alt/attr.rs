@@ -2117,6 +2117,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn quantified_bound_class(&self, base: AttributeBase1) -> Option<ClassType> {
         match base {
             AttributeBase1::ClassInstance(cls) => Some(cls),
+            AttributeBase1::TypedDict(typed_dict) => Some(
+                self.stdlib.dict(
+                    self.stdlib.str().clone().to_type(),
+                    self.get_typed_dict_value_type_as_builtins_dict(&TypedDict::TypedDict(
+                        typed_dict,
+                    ))
+                    .unwrap_or_else(|| self.stdlib.object().clone().to_type()),
+                ),
+            ),
             // Handle `type[Any]`, which happens for TypeVars w/ `bound=type`
             AttributeBase1::TypeAny(_) => Some(self.stdlib.builtins_type().clone()),
             _ => None,

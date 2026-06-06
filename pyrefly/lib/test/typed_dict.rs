@@ -2631,3 +2631,20 @@ class DeviceIndex2(Generic[T2]):
         return device[ADDRESS]
 "#,
 );
+
+testcase!(
+    test_constrained_type_var_typed_dict_method_call,
+    r#"
+from typing import Generic, TypedDict, TypeVar, assert_type
+
+class DeviceInfo(TypedDict):
+    name: str
+    address: str
+
+T = TypeVar("T", bound=DeviceInfo)
+
+def test(x: T) -> object:
+    # type vars bounded by typed dict get treated as dict[str, T]
+    return x.get("name")
+    "#,
+);
