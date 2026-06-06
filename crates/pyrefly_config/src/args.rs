@@ -213,8 +213,7 @@ pub struct ConfigOverrideArgs {
     /// Enable PyTorch efficiency lints that detect common GPU performance anti-patterns.
     #[arg(long)]
     pytorch_efficiency_lints: Option<bool>,
-    /// (Experimental) Enable tensor shape type inference.
-    /// Supports both native (Tensor[N, M]) and jaxtyping (Float[Tensor, "batch channels"]) syntax.
+    /// Deprecated no-op. Tensor shape support is derived from whether `shape_extensions` is resolvable.
     #[arg(long)]
     tensor_shapes: Option<bool>,
     /// Whether to strictly check callable subtyping for signatures with `*args: Any, **kwargs: Any`.
@@ -437,9 +436,6 @@ impl ConfigOverrideArgs {
         if let Some(x) = &self.pytorch_efficiency_lints {
             config.root.pytorch_efficiency_lints = Some(*x);
         }
-        if let Some(x) = &self.tensor_shapes {
-            config.root.tensor_shapes = Some(*x);
-        }
         if let Some(x) = &self.strict_callable_subtyping {
             config.root.strict_callable_subtyping = Some(*x);
         }
@@ -466,7 +462,12 @@ impl ConfigOverrideArgs {
             let sub_config_errors = sub_config.settings.errors.get_or_insert_default();
             apply_error_settings(sub_config_errors);
         }
-        let errors = config.configure();
+        let mut errors = config.configure();
+        if self.tensor_shapes.is_some() {
+            errors.push(ConfigError::warn(anyhow::anyhow!(
+                "`--tensor-shapes` is deprecated and has no effect. Tensor shape support is enabled when `shape_extensions` is resolvable."
+            )));
+        }
         (ArcId::new(config), errors)
     }
 

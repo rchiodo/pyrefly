@@ -968,14 +968,6 @@ impl ConfigFile {
                  self.root.infer_with_first_use.unwrap())
     }
 
-    pub fn tensor_shapes(&self, path: &Path) -> bool {
-        self.get_from_sub_configs(ConfigBase::get_tensor_shapes, path)
-            .unwrap_or_else(||
-                 // we can use unwrap here, because the value in the root config must
-                 // be set in `ConfigFile::configure()`.
-                 self.root.tensor_shapes.unwrap())
-    }
-
     pub fn strict_callable_subtyping(&self, path: &Path) -> bool {
         self.get_from_sub_configs(ConfigBase::get_strict_callable_subtyping, path)
             .unwrap_or_else(||
@@ -1301,7 +1293,6 @@ impl ConfigFile {
             apply_preset_default!(strict_callable_subtyping);
             apply_preset_default!(spec_compliant_overloads);
             apply_preset_default!(ignore_errors_in_generated_code);
-            apply_preset_default!(tensor_shapes);
             apply_preset_default!(permissive_ignores);
         }
 
@@ -1353,10 +1344,6 @@ impl ConfigFile {
 
         if self.root.infer_with_first_use.is_none() {
             self.root.infer_with_first_use = Some(true);
-        }
-
-        if self.root.tensor_shapes.is_none() {
-            self.root.tensor_shapes = Some(false);
         }
 
         if self.root.strict_callable_subtyping.is_none() {
@@ -1746,7 +1733,6 @@ mod tests {
                     infer_with_first_use: None,
                     pytorch_efficiency_lints: None,
                     strict_callable_subtyping: None,
-                    tensor_shapes: None,
                     replace_imports_with_any: Some(vec![ModuleWildcard::new("fibonacci").unwrap()]),
                     ignore_missing_imports: Some(vec![ModuleWildcard::new("sprout").unwrap()]),
                     untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnType),
@@ -1772,7 +1758,6 @@ mod tests {
                         infer_with_first_use: Some(false),
                         pytorch_efficiency_lints: None,
                         strict_callable_subtyping: Some(false),
-                        tensor_shapes: None,
                         replace_imports_with_any: Some(Vec::new()),
                         ignore_missing_imports: Some(Vec::new()),
                         untyped_def_behavior: Some(UntypedDefBehavior::CheckAndInferReturnAny),
@@ -2204,7 +2189,6 @@ output-format = "omit-errors"
                 infer_with_first_use: Some(true),
                 pytorch_efficiency_lints: None,
                 strict_callable_subtyping: Some(false),
-                tensor_shapes: None,
                 extras: Default::default(),
                 permissive_ignores: Some(false),
                 enabled_ignores: None,
@@ -2980,7 +2964,6 @@ output-format = "omit-errors"
                 infer_with_first_use: Some(true),
                 pytorch_efficiency_lints: None,
                 strict_callable_subtyping: Some(false),
-                tensor_shapes: None,
                 extras: Default::default(),
                 permissive_ignores: Some(false),
                 enabled_ignores: None,
@@ -3020,7 +3003,6 @@ output-format = "omit-errors"
                 infer_with_first_use: Some(true),
                 pytorch_efficiency_lints: None,
                 strict_callable_subtyping: Some(false),
-                tensor_shapes: None,
                 extras: Default::default(),
                 permissive_ignores: Some(false),
                 enabled_ignores: None,

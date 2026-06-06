@@ -40,10 +40,6 @@ fn env_with_lint() -> TestEnv {
     env().enable_pytorch_efficiency_lint_error()
 }
 
-fn tensor_shapes_env_with_lint() -> TestEnv {
-    env_with_lint().enable_tensor_shapes()
-}
-
 fn add_shape_extensions(e: &mut TestEnv) {
     e.add(
         "shape_extensions",
@@ -118,8 +114,8 @@ def f(x: torch.Tensor) -> None:
 );
 
 testcase!(
-    test_ordinary_torch_tensor_lints_with_tensor_shapes_enabled,
-    tensor_shapes_env_with_lint(),
+    test_ordinary_torch_tensor_lints,
+    env_with_lint(),
     r#"
 import torch
 

@@ -109,13 +109,13 @@ class Tensor[*Shape]:
 fn shaped_array_env_with_plain_torch_and_jaxtyping() -> TestEnv {
     let mut env = shaped_array_env_with_plain_torch();
     add_jaxtyping(&mut env);
-    env.enable_tensor_shapes()
+    env
 }
 
 fn shaped_array_env_with_shaped_torch_and_jaxtyping() -> TestEnv {
     let mut env = shaped_array_env_with_shaped_torch();
     add_jaxtyping(&mut env);
-    env.enable_tensor_shapes()
+    env
 }
 
 fn shaped_array_env_with_numpy() -> TestEnv {
@@ -339,7 +339,7 @@ def index_preserves_dtype(concrete: Array[int, 2, 3]) -> Array[int, 3]:
 
 testcase!(
     test_undecorated_torch_tensor_stays_ordinary,
-    shaped_array_env_with_plain_torch().enable_tensor_shapes(),
+    shaped_array_env_with_plain_torch(),
     r#"
 from typing import reveal_type
 from torch import Tensor
@@ -353,7 +353,7 @@ def f(x: Tensor[2, 3], y: Tensor) -> None:  # E: Expected a type form, got insta
 
 testcase!(
     test_tensor_shapes_keeps_integer_type_arguments_ordinary,
-    shaped_array_env().enable_tensor_shapes(),
+    shaped_array_env(),
     r#"
 from shape_extensions import Dim, shaped_array
 from typing import TypeVar, reveal_type
@@ -394,7 +394,7 @@ def dims[N](concrete: Dim[3], symbolic: Dim[N + 1]) -> None:
 
 testcase!(
     test_tensor_shapes_keeps_ordinary_literal_arithmetic_int,
-    shaped_array_env().enable_tensor_shapes(),
+    shaped_array_env(),
     r#"
 from shape_extensions import Dim
 from typing import reveal_type
@@ -437,7 +437,7 @@ def f(x: Tensor[2, 3], y: Tensor) -> None:
 
 testcase!(
     test_variadic_shape_context_preserves_starred_typevartuple,
-    shaped_array_env().enable_tensor_shapes(),
+    shaped_array_env(),
     r#"
 from shape_extensions import shaped_array
 from typing import reveal_type
@@ -500,12 +500,6 @@ def arithmetic(value: T) -> None:
 "#;
 
     testcase_for_macro(plain_torch_and_jaxtyping_env(), contents, file!(), line!())?;
-    testcase_for_macro(
-        plain_torch_and_jaxtyping_env().enable_tensor_shapes(),
-        contents,
-        file!(),
-        line!(),
-    )?;
     Ok(())
 }
 
@@ -555,7 +549,7 @@ def bad_shape(x: Float[Tensor, 123]) -> None:  # E: Second argument to jaxtyping
 
 testcase!(
     test_non_jaxtyping_annotated_alias_keeps_vanilla_metadata,
-    shaped_array_env_with_shaped_torch().enable_tensor_shapes(),
+    shaped_array_env_with_shaped_torch(),
     r#"
 from torch import Tensor
 from typing import Annotated as Float, reveal_type

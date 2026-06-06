@@ -105,7 +105,6 @@ pub struct TestEnv {
     check_unannotated_defs: bool,
     infer_return_types: InferReturnTypes,
     infer_with_first_use: bool,
-    tensor_shapes: bool,
     site_package_path: Vec<PathBuf>,
     implicitly_defined_attribute_error: bool,
     explicit_any_error: bool,
@@ -140,7 +139,6 @@ impl TestEnv {
             check_unannotated_defs: true,
             infer_return_types: InferReturnTypes::Checked,
             infer_with_first_use: true,
-            tensor_shapes: false,
             site_package_path: Vec::new(),
             implicitly_defined_attribute_error: false,
             explicit_any_error: false,
@@ -304,11 +302,6 @@ impl TestEnv {
         self
     }
 
-    pub fn enable_tensor_shapes(mut self) -> Self {
-        self.tensor_shapes = true;
-        self
-    }
-
     pub fn enable_incompatible_comparison_error(mut self) -> Self {
         self.incompatible_comparison_error = true;
         self
@@ -418,7 +411,6 @@ impl TestEnv {
         config.root.check_unannotated_defs = Some(self.check_unannotated_defs);
         config.root.infer_return_types = Some(self.infer_return_types);
         config.root.infer_with_first_use = Some(self.infer_with_first_use);
-        config.root.tensor_shapes = Some(self.tensor_shapes);
         config.root.strict_callable_subtyping = Some(self.strict_callable_subtyping);
         config.root.spec_compliant_overloads = Some(self.spec_compliant_overloads);
         if config.root.errors.is_none() {

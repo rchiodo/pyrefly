@@ -1858,15 +1858,13 @@ impl<'a> Transaction<'a> {
         handle: &Handle,
         timing: Option<&TransactionTimingCounters>,
     ) -> bool {
-        config.tensor_shapes(handle.path().as_path())
-            || self
-                .get_cached_loader(config)
-                .find_import_for_tensor_shapes(Some(handle.path()), timing)
-                .finding()
-                // This is Pyrefly resolvability, not runtime importability: a
-                // found module with a nonfatal import error is enough to mark
-                // shape support as reachable for type-checking.
-                .is_some()
+        self.get_cached_loader(config)
+            .find_import_for_tensor_shapes(Some(handle.path()), timing)
+            .finding()
+            // This is Pyrefly resolvability, not runtime importability: a
+            // found module with a nonfatal import error is enough to mark
+            // shape support as reachable for type-checking.
+            .is_some()
     }
 
     pub fn get_stdlib(&self, handle: &Handle) -> Arc<Stdlib> {
