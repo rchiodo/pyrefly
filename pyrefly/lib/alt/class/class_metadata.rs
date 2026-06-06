@@ -1639,14 +1639,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     pub fn calculate_class_mro(&self, cls: &Class, errors: &ErrorCollector) -> ClassMro {
         let bases = self.get_base_types_for_class(cls);
-        let bases_with_mros = bases
+        let bases_with_mros: Vec<_> = bases
             .iter()
             .map(|base| {
                 let mro = self.get_mro_for_class(base.class_object());
                 (base, mro)
             })
             .collect();
-        ClassMro::new(cls, bases_with_mros, errors)
+        // TODO(disjoint-bases): Phase 3 will compute the cache here via
+        // `check_incompatible_disjoint_bases_and_choose_nearest` and emit
+        // any incompatible-disjoint-bases diagnostic.
+        let nearest_disjoint_base = None;
+        ClassMro::new(cls, nearest_disjoint_base, bases_with_mros, errors)
     }
 
     pub fn calculate_abstract_members(&self, cls: &Class) -> AbstractClassMembers {

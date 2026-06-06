@@ -608,17 +608,23 @@ pub struct TotalOrderingMetadata {
 /// linearizable using C3 linearization), it is possible it appears with
 /// different type arguments. The type arguments computed here will always be
 /// those coming from the instance that was selected during linearization.
+///
+/// We also cache the nearest `@disjoint_base` ancestor (skipping `object`)
+/// so subclasses and narrowing don't re-walk the MRO to find it.
 #[derive(Clone, Debug, VisitMut, TypeEq, PartialEq, Eq)]
 pub enum ClassMro {
-    Resolved(Vec<ClassType>),
+    Resolved {
+        ancestors: Vec<ClassType>,
+        nearest_disjoint_base: Option<Class>,
+    },
     Cyclic,
 }
 
 impl Display for ClassMro {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            ClassMro::Resolved(xs) => {
-                write!(f, "[{}]", commas_iter(|| xs.iter()))
+            ClassMro::Resolved { ancestors, .. } => {
+                write!(f, "[{}]", commas_iter(|| ancestors.iter()))
             }
             ClassMro::Cyclic => write!(f, "Cyclic"),
         }
@@ -637,10 +643,14 @@ impl ClassMro {
     /// about the algorithm and a worked-through example here:
     /// https://en.wikipedia.org/wiki/C3_linearization
     ///
+    /// `nearest_disjoint_base` is computed by the caller and dropped when
+    /// the MRO is cyclic.
+    ///
     /// TODO: We currently omit some classes that are in the runtime MRO:
     /// `Generic`, `Protocol`, and `object`.
     pub fn new(
         cls: &Class,
+        nearest_disjoint_base: Option<Class>,
         bases_with_mro: Vec<(&ClassType, Arc<ClassMro>)>,
         errors: &ErrorCollector,
     ) -> Self {
@@ -648,7 +658,10 @@ impl ClassMro {
             Linearization::Cyclic => Self::Cyclic,
             Linearization::Resolved(ancestor_chains) => {
                 let ancestors = Linearization::merge(cls, ancestor_chains, errors);
-                Self::Resolved(ancestors)
+                Self::Resolved {
+                    ancestors,
+                    nearest_disjoint_base,
+                }
             }
         }
     }
@@ -657,7 +670,7 @@ impl ClassMro {
     /// some use cases (for example checking if the type is an enum) do not care about `object`.
     pub fn ancestors_no_object(&self) -> &[ClassType] {
         match self {
-            ClassMro::Resolved(ancestors) => ancestors,
+            ClassMro::Resolved { ancestors, .. } => ancestors,
             ClassMro::Cyclic => &[],
         }
     }
@@ -666,6 +679,19 @@ impl ClassMro {
         self.ancestors_no_object()
             .iter()
             .chain(iter::once(stdlib.object()))
+    }
+
+    /// The nearest `@disjoint_base` ancestor in this class's MRO, if any.
+    /// Returns `None` for cyclic MROs; callers that care about the class
+    /// itself should check `ClassMetadata::is_disjoint_base()` first.
+    pub fn nearest_disjoint_base(&self) -> Option<&Class> {
+        match self {
+            ClassMro::Resolved {
+                nearest_disjoint_base,
+                ..
+            } => nearest_disjoint_base.as_ref(),
+            ClassMro::Cyclic => None,
+        }
     }
 
     pub fn recursive() -> Self {
@@ -726,7 +752,7 @@ impl Linearization {
         let mut seen_ancestors: SmallMap<Class, ClassType> = SmallMap::new();
         for (base, mro) in bases_with_mro {
             match &*mro {
-                ClassMro::Resolved(ancestors) => {
+                ClassMro::Resolved { ancestors, .. } => {
                     let ancestors_through_base = ancestors
                         .iter()
                         .map(|ancestor| ancestor.substitute_with(&base.substitution()))

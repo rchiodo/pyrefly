@@ -1695,56 +1695,54 @@ impl ReportArgs {
                 }
             }
             // Check inherited methods
-            if let ClassMro::Resolved(ancestors) = &*mro {
-                for ancestor_class_type in ancestors {
-                    let ancestor_class = ancestor_class_type.class_object();
-                    let ancestor_name = {
-                        let ancestor_module = ancestor_class.module();
-                        let ancestor_module_prefix =
-                            if ancestor_module.name() != ModuleName::unknown() {
-                                format!("{}.", ancestor_module.name())
-                            } else {
-                                String::new()
-                            };
-                        let ancestor_parent_path = ancestor_module
-                            .display(ancestor_class.qname().parent())
-                            .to_string();
-                        if ancestor_parent_path.is_empty() {
-                            format!("{}{}", ancestor_module_prefix, ancestor_class.name())
-                        } else {
-                            format!(
-                                "{}{}.{}",
-                                ancestor_module_prefix,
-                                ancestor_parent_path,
-                                ancestor_class.name()
-                            )
-                        }
+            for ancestor_class_type in mro.ancestors_no_object() {
+                let ancestor_class = ancestor_class_type.class_object();
+                let ancestor_name = {
+                    let ancestor_module = ancestor_class.module();
+                    let ancestor_module_prefix = if ancestor_module.name() != ModuleName::unknown()
+                    {
+                        format!("{}.", ancestor_module.name())
+                    } else {
+                        String::new()
                     };
-                    // Skip methods inherited from builtins
-                    if ancestor_class.module_name().as_str() == "builtins" {
+                    let ancestor_parent_path = ancestor_module
+                        .display(ancestor_class.qname().parent())
+                        .to_string();
+                    if ancestor_parent_path.is_empty() {
+                        format!("{}{}", ancestor_module_prefix, ancestor_class.name())
+                    } else {
+                        format!(
+                            "{}{}.{}",
+                            ancestor_module_prefix,
+                            ancestor_parent_path,
+                            ancestor_class.name()
+                        )
+                    }
+                };
+                // Skip methods inherited from builtins
+                if ancestor_class.module_name().as_str() == "builtins" {
+                    continue;
+                }
+                let Some(ancestor_class_fields) =
+                    transaction.get_class_fields(handle, ancestor_class)
+                else {
+                    continue;
+                };
+                for field_name in ancestor_class_fields.names() {
+                    let field_name_str = field_name.to_string();
+                    // Skip if we already have this attribute listed (it has been overridden
+                    // by the current class or another class in the MRO)
+                    if incomplete_attributes
+                        .iter()
+                        .any(|a| a.name == field_name_str)
+                    {
                         continue;
                     }
-                    let Some(ancestor_class_fields) =
-                        transaction.get_class_fields(handle, ancestor_class)
-                    else {
-                        continue;
-                    };
-                    for field_name in ancestor_class_fields.names() {
-                        let field_name_str = field_name.to_string();
-                        // Skip if we already have this attribute listed (it has been overridden
-                        // by the current class or another class in the MRO)
-                        if incomplete_attributes
-                            .iter()
-                            .any(|a| a.name == field_name_str)
-                        {
-                            continue;
-                        }
-                        if !ancestor_class_fields.is_field_annotated(field_name) {
-                            incomplete_attributes.push(IncompleteAttribute {
-                                name: field_name_str,
-                                declared_in: ancestor_name.clone(),
-                            });
-                        }
+                    if !ancestor_class_fields.is_field_annotated(field_name) {
+                        incomplete_attributes.push(IncompleteAttribute {
+                            name: field_name_str,
+                            declared_in: ancestor_name.clone(),
+                        });
                     }
                 }
             }
@@ -1806,11 +1804,8 @@ impl ReportArgs {
             let mro = answers
                 .get_idx(bindings.key_to_idx(&KeyClassMro(cls.index())))
                 .unwrap_or_else(|| Arc::new(ClassMro::Cyclic));
-            let mro: &[_] = match mro.as_ref() {
-                ClassMro::Resolved(a) => a,
-                ClassMro::Cyclic => &[],
-            };
-            for obj in std::iter::once(&cls).chain(mro.iter().map(ClassType::class_object)) {
+            let ancestors = mro.ancestors_no_object();
+            for obj in std::iter::once(&cls).chain(ancestors.iter().map(ClassType::class_object)) {
                 if obj.module_name().as_str() == "builtins" {
                     continue;
                 }

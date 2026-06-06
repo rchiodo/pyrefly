@@ -6045,17 +6045,11 @@ impl Server {
                     true
                 } else {
                     let mro = solutions.get(&KeyClassMro(class_def_index));
-                    matches!(
-                        mro.as_ref(),
-                        ClassMro::Resolved(ancestors)
-                            if ancestors
-                                .iter()
-                                .any(|ancestor| {
-                                    let ancestor_class = ancestor.class_object();
-                                    ancestor_class.index() == target.def_index
-                                        && ancestor_class.module_path() == &target.module_path
-                                })
-                    )
+                    mro.ancestors_no_object().iter().any(|ancestor| {
+                        let ancestor_class = ancestor.class_object();
+                        ancestor_class.index() == target.def_index
+                            && ancestor_class.module_path() == &target.module_path
+                    })
                 };
                 if !is_subtype {
                     continue;
@@ -6166,7 +6160,8 @@ impl Server {
                 let mro = solutions.get(&KeyClassMro(target.def_index));
                 let stdlib = transaction.as_ref().get_stdlib(handle);
                 let mut items = Vec::new();
-                if let ClassMro::Resolved(ancestors) = mro.as_ref() {
+                // Skip the implicit trailing `object` for cyclic MROs.
+                if let ClassMro::Resolved { ancestors, .. } = mro.as_ref() {
                     for ancestor in ancestors {
                         if let Some(item) = type_hierarchy_item_from_class_type(ancestor) {
                             items.push(item);
