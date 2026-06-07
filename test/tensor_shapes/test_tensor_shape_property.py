@@ -9,7 +9,7 @@ The .shape property on a shaped Tensor should return a tuple type
 where each element is Literal[n] for the corresponding dimension.
 """
 
-from typing import assert_type, Literal, TYPE_CHECKING
+from typing import Literal, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from shape_extensions import Dim
