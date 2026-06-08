@@ -1853,6 +1853,106 @@ assert_type(c.value, int)
 "#,
 );
 
+// Test two special import alias calls in the same file.
+fn env_special_import_two_aliases() -> TestEnv {
+    let mut t = TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned()]);
+    t.add_with_path(
+        "service.types.thrift",
+        "service/types.thrift",
+        r#"
+class MyConfig:
+    value: int
+"#,
+    );
+    t.add_with_path(
+        "service.other.thrift",
+        "service/other.thrift",
+        r#"
+class OtherConfig:
+    name: str
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_special_import_two_aliases,
+    env_special_import_two_aliases(),
+    r#"
+from typing import assert_type
+import_thrift("service/types.thrift", "types_mod")
+import_thrift("service/other.thrift", "other_mod")
+c = types_mod.MyConfig()
+assert_type(c.value, int)
+o = other_mod.OtherConfig()
+assert_type(o.name, str)
+"#,
+);
+
+// Test importing from a module that uses a special import with alias.
+fn env_special_import_alias_module() -> TestEnv {
+    let mut t =
+        TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned(), "cinc".to_owned()]);
+    t.add_with_path(
+        "service.types.thrift",
+        "service/types.thrift",
+        r#"
+class MyConfig:
+    value: int
+"#,
+    );
+    // This .cinc module uses import_thrift with an alias and re-exports the type.
+    t.add_with_path(
+        "helper.cinc",
+        "helper.cinc",
+        r#"import_thrift("service/types.thrift", "types_mod")
+
+def get_config() -> types_mod.MyConfig:
+    return types_mod.MyConfig()
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_special_import_alias_module,
+    env_special_import_alias_module(),
+    r#"
+from typing import assert_type
+from helper.cinc import get_config
+c = get_config()
+assert_type(c.value, int)
+"#,
+);
+
+// Test special import alias referenced inside a function body with
+// an unresolvable module.
+fn env_special_import_alias_in_function() -> TestEnv {
+    let mut t =
+        TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned(), "cinc".to_owned()]);
+    // .cinc module with import_thrift alias used inside a function body.
+    // The target module doesn't exist, so the alias is typed as Any.
+    t.add_with_path(
+        "helper.cinc",
+        "helper.cinc",
+        r#"import_thrift("nonexistent/types.thrift", "deletion_types")
+
+def get_plan():
+    return deletion_types.DeletionPlan()
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_special_import_alias_in_function,
+    env_special_import_alias_in_function(),
+    r#"
+from helper.cinc import get_plan
+x = get_plan()
+"#,
+);
+
 // Test import_thrift for unresolvable module (no error, names typed as Any).
 testcase!(
     test_import_thrift_unresolvable,

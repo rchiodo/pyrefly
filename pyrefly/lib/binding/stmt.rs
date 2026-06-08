@@ -175,7 +175,11 @@ impl<'a> BindingsBuilder<'a> {
     /// Handle a special import function call by synthesizing equivalent import bindings.
     /// `import_thrift("path/to/file.thrift", "*")` becomes `from path.to.file.thrift import *`,
     /// `import_thrift("path/to/file.thrift", "alias")` becomes `import path.to.file.thrift as alias`.
-    fn handle_special_import_call(&mut self, range: TextRange, args: &[Expr]) {
+    ///
+    /// `func_name_range` is the range of the function name (e.g. `import_thrift`) in the source.
+    /// For the alias case, we use this range to create `Key::Definition` that matches the
+    /// definitions phase, which also uses the function name range.
+    fn handle_special_import_call(&mut self, func_name_range: TextRange, args: &[Expr]) {
         // Extract the module path from the first string argument.
         let module_path = match &args[0] {
             Expr::StringLiteral(lit) => lit.value.to_str(),
@@ -199,7 +203,7 @@ impl<'a> BindingsBuilder<'a> {
                 && let Some(wildcards) = self.lookup.get_wildcard(m)
             {
                 for name in wildcards.iter_hashed() {
-                    let key = Key::Import(Box::new((name.into_key().clone(), range)));
+                    let key = Key::Import(Box::new((name.into_key().clone(), func_name_range)));
                     let val = if self.lookup.export_exists(m, &name) {
                         Binding::Import(Box::new(ImportBinding {
                             module: m,
@@ -215,7 +219,7 @@ impl<'a> BindingsBuilder<'a> {
                     self.scopes.register_import_with_star(&Identifier {
                         node_index: AtomicNodeIndex::default(),
                         id: name.into_key().clone(),
-                        range,
+                        range: func_name_range,
                     });
                     self.bind_name(
                         name.key(),
@@ -236,13 +240,16 @@ impl<'a> BindingsBuilder<'a> {
                 // Module not found — bind as Any to suppress downstream errors.
                 Binding::Any(AnyStyle::Implicit)
             };
-            let key = self.insert_binding(Key::Import(Box::new((alias_name.clone(), range))), val);
-            self.scopes.register_import(&Identifier {
+            let alias_ident = Identifier {
                 node_index: AtomicNodeIndex::default(),
                 id: alias_name.clone(),
-                range,
-            });
-            self.bind_name(&alias_name, key, FlowStyle::Other);
+                range: func_name_range,
+            };
+            self.scopes.register_import(&alias_ident);
+            // Must use bind_definition (not Key::Import) to create Key::Definition,
+            // matching the definitions phase (export/definitions.rs) which uses
+            // DefinitionStyle::Import → StaticStyle::SingleDef → Key::Definition.
+            self.bind_definition(&alias_ident, val, FlowStyle::Other);
         }
     }
 
@@ -1508,8 +1515,15 @@ impl<'a> BindingsBuilder<'a> {
                 let Expr::Call(call) = *stmt_expr.value else {
                     unreachable!("guarded by matches! above")
                 };
+                let Expr::Name(name) = &*call.func else {
+                    unreachable!("guarded by matches! above")
+                };
                 self.insert_binding(Key::StmtExpr(expr_range), Binding::None);
-                self.handle_special_import_call(expr_range, &call.arguments.args);
+                // Pass name.range (the range of `import_thrift`), not expr_range
+                // (the range of the full call expression). The definitions phase
+                // uses the function name range for DefinitionStyle::Import, so
+                // the binding phase must use the same range to produce matching keys.
+                self.handle_special_import_call(name.range, &call.arguments.args);
             }
             Stmt::Expr(stmt_expr)
                 if matches!(&*stmt_expr.value,
