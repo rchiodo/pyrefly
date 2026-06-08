@@ -1346,13 +1346,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// inhabitable (e.g. `C(x=C(x=None))`), so we can't assume all generic
     /// containers require their type parameter.
     /// Returns `true` if a cyclic self-reference was found.
-    fn check_type_alias_for_cyclic_reference(
-        &self,
-        name: &Name,
-        ta: &TypeAlias,
-        range: TextRange,
-        errors: &ErrorCollector,
-    ) -> bool {
+    fn type_alias_has_cyclic_reference(&self, name: &Name, ta: &TypeAlias) -> bool {
         // Unwrap the type[body] wrapper. We operate on the inner body because
         // map_over_union wraps inner union members in type[...] when traversing
         // inside Type::Type, which would prevent matching UntypedAlias nodes.
@@ -1422,17 +1416,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ => false,
             }
         }
-
-        if has_direct_self_ref || contains_only_self_ref(body, &is_self_ref) {
-            self.error(
-                errors,
-                range,
-                ErrorKind::InvalidTypeAlias,
-                format!("Found cyclic self-reference in `{name}`"),
-            );
-            return true;
-        }
-        false
+        has_direct_self_ref || contains_only_self_ref(body, &is_self_ref)
     }
 
     /// `typealiastype_tparams` refers specifically to the elements of the tuple literal passed to the `TypeAliasType` constructor
@@ -1468,8 +1452,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // If a cycle is found, replace the body with an error type to prevent
         // infinite recursion when downstream operations (e.g. attribute lookup,
         // subset checks) try to resolve the alias.
-        if self.check_type_alias_for_cyclic_reference(name, &ta, range, errors) {
-            return self.heap.mk_any_error();
+        if self.type_alias_has_cyclic_reference(name, &ta) {
+            return self.error(
+                errors,
+                range,
+                ErrorKind::InvalidTypeAlias,
+                format!("Found cyclic self-reference in `{name}`"),
+            );
         }
 
         // Step 3: Extract type parameters from the (now expanded) body.
