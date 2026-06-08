@@ -118,6 +118,7 @@ fn compute_errors(
     config.root.permissive_ignores = Some(true);
     config.root.check_unannotated_defs = Some(false);
     config.root.infer_return_types = Some(InferReturnTypes::Annotated);
+    config.root.ignore_errors_in_generated_code = Some(true);
     if report_pysa.is_some() {
         config.root.check_unannotated_defs = Some(true);
         config.root.infer_return_types = Some(InferReturnTypes::Checked);
