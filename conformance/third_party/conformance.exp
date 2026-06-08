@@ -4983,8 +4983,8 @@
     {
       "code": -2,
       "column": 7,
-      "concise_description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
-      "description": "Class `IncompatibleSlots` has multiple base classes with non-empty `__slots__` (`SlotBase1`, `SlotBase2`), which causes a TypeError at runtime",
+      "concise_description": "Class `IncompatibleSlots` inherits from incompatible disjoint bases `SlotBase1`, `SlotBase2`",
+      "description": "Class `IncompatibleSlots` inherits from incompatible disjoint bases `SlotBase1`, `SlotBase2`",
       "line": 105,
       "name": "invalid-inheritance",
       "severity": "error",

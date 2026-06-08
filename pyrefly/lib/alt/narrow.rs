@@ -130,8 +130,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Return the most specific disjoint base for a type per PEP 800.
     ///
-    /// Uses the cache on `ClassMro`, but checks the class itself first so
-    /// locally decorated classes still work when their MRO is cyclic.
+    /// Uses the cache on `ClassMro`, but checks the class itself first so a
+    /// locally disjoint class still works when its MRO is cyclic or nonlinear.
     /// Falls back to `object` for anything not explicitly disjoint.
     pub fn disjoint_base(&self, t: &Type) -> Class {
         match t {

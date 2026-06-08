@@ -609,8 +609,8 @@ pub struct TotalOrderingMetadata {
 /// different type arguments. The type arguments computed here will always be
 /// those coming from the instance that was selected during linearization.
 ///
-/// We also cache the nearest `@disjoint_base` ancestor (skipping `object`)
-/// so subclasses and narrowing don't re-walk the MRO to find it.
+/// We also cache the nearest disjoint base (skipping `object`) so subclasses
+/// and narrowing don't re-walk the MRO to find it.
 #[derive(Clone, Debug, VisitMut, TypeEq, PartialEq, Eq)]
 pub enum ClassMro {
     Resolved {
@@ -681,9 +681,9 @@ impl ClassMro {
             .chain(iter::once(stdlib.object()))
     }
 
-    /// The nearest `@disjoint_base` ancestor in this class's MRO, if any.
-    /// Returns `None` for cyclic MROs; callers that care about the class
-    /// itself should check `ClassMetadata::is_disjoint_base()` first.
+    /// The nearest disjoint base for this class, if any. Returns `None` for
+    /// cyclic MROs; callers that care about the class itself should check
+    /// `ClassMetadata::is_disjoint_base()` first.
     pub fn nearest_disjoint_base(&self) -> Option<&Class> {
         match self {
             ClassMro::Resolved {

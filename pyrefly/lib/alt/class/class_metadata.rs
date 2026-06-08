@@ -360,10 +360,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let deprecation = decorators
             .iter()
             .find_map(|(decorator, _)| decorator.deprecation.clone());
+
+        let slots_info = self.extract_slots_info(cls);
+        let has_nonempty_explicit_slots = slots_info
+            .as_ref()
+            .is_some_and(|slots| !slots.names.is_empty());
         // PEP 800: `@disjoint_base` is only valid on nominal classes. Marking
         // an invalid TypedDict/Protocol target as disjoint would let narrowing
         // incorrectly intersect it to Never.
-        let is_disjoint_base = decorators.iter().any(|(decorator, range)| {
+        let has_valid_disjoint_base_decorator = decorators.iter().any(|(decorator, range)| {
             if decorator.ty.callee_kind() != Some(CalleeKind::Function(FunctionKind::DisjointBase))
             {
                 return false;
@@ -388,6 +393,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 true
             }
         });
+        // PEP 800: non-empty `__slots__` also makes a nominal class disjoint.
+        let is_disjoint_base = has_valid_disjoint_base_decorator
+            || (!is_typed_dict && protocol_metadata.is_none() && has_nonempty_explicit_slots);
 
         let total_ordering_metadata = decorators.iter().find_map(|(decorator, decorator_range)| {
             decorator.ty.callee_kind().and_then(|kind| {
@@ -453,35 +461,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         let extends_abc = self.extends_abc(&bases_with_metadata, metaclass);
 
-        // Check for __slots__ layout conflict: if two or more base classes
-        // define non-empty __slots__, CPython raises TypeError at runtime
-        // ("multiple bases have instance lay-out conflict").
-        {
-            let bases_with_nonempty_slots: Vec<&Class> = bases_with_metadata
-                .iter()
-                .filter(|(_, metadata)| {
-                    metadata.slots_info().is_some_and(|si| !si.names.is_empty())
-                })
-                .map(|(base, _)| base)
-                .collect();
-            if bases_with_nonempty_slots.len() > 1 {
-                let names: Vec<String> = bases_with_nonempty_slots
-                    .iter()
-                    .map(|b| format!("`{}`", b.name()))
-                    .collect();
-                self.error(
-                    errors,
-                    cls.range(),
-                    ErrorKind::InvalidInheritance,
-                    format!(
-                        "Class `{}` has multiple base classes with non-empty `__slots__` ({}), which causes a TypeError at runtime",
-                        cls.name(),
-                        names.join(", "),
-                    ),
-                );
-            }
-        }
-
         // Compute final base class list.
         let bases = if is_typed_dict && bases_with_metadata.is_empty() {
             // This is a "fallback" class that contains attributes that are available on all TypedDict subclasses.
@@ -510,11 +489,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .as_ref()
             .map(|m| m.pydantic_model_kind.clone());
 
-        // Extract __slots__ info from the binding. This must happen here (in
-        // the class's own module) because ClassDefIndex is per-file, so looking
-        // up a cross-module class's __slots__ in the wrong module's bindings
-        // could match a completely different class.
-        let slots_info = self.extract_slots_info(cls);
         let shaped_array_shape = self.shaped_array_shape(cls, shaped_array_metadata, errors);
 
         ClassMetadata::new(
@@ -1658,11 +1632,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         ClassMro::new(cls, nearest_disjoint_base, bases_with_mros, errors)
     }
 
-    /// For each direct base, look up its nearest `@disjoint_base` ancestor.
-    /// Drop any that are subclasses of another; if more than one is left,
-    /// emit `incompatible disjoint bases`. Return the chosen ancestor to
-    /// cache on `cls`'s MRO, preferring a local `@disjoint_base` on `cls`
-    /// itself (but the local decorator does NOT silence the diagnostic).
+    /// For each direct base, look up its nearest disjoint base. Drop any that
+    /// are subclasses of another; if more than one is left, emit
+    /// `incompatible disjoint bases`. Return the chosen representative to
+    /// cache on `cls`'s MRO, preferring `cls` itself when locally disjoint.
+    /// Local disjointness does NOT silence the diagnostic.
     ///
     /// Cyclic direct bases contribute nothing here; the cycle diagnostic
     /// already covers them. Other direct bases are still checked, so a
