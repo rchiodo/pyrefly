@@ -1775,3 +1775,109 @@ class Child(foo.Base):
         return self._update()
     "#,
 );
+
+// --- Special import function tests (import_thrift, import_python) ---
+
+/// Create a test environment with a `.thrift` module for import_thrift tests.
+fn env_import_thrift() -> TestEnv {
+    let mut t =
+        TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned(), "cinc".to_owned()]);
+    t.add_with_path(
+        "service.types.thrift",
+        "service/types.thrift",
+        r#"
+class MyConfig:
+    value: int
+"#,
+    );
+    t
+}
+
+// Test import_thrift with wildcard import.
+testcase!(
+    test_import_thrift_wildcard,
+    env_import_thrift(),
+    r#"
+from typing import assert_type
+import_thrift("service/types.thrift", "*")
+c = MyConfig()
+assert_type(c.value, int)
+"#,
+);
+
+// Test import_thrift with alias.
+testcase!(
+    test_import_thrift_alias,
+    env_import_thrift(),
+    r#"
+from typing import assert_type
+import_thrift("service/types.thrift", "thrift_mod")
+c = thrift_mod.MyConfig()
+assert_type(c.value, int)
+"#,
+);
+
+// Test import_thrift with no second argument (defaults to wildcard).
+testcase!(
+    test_import_thrift_default_wildcard,
+    env_import_thrift(),
+    r#"
+from typing import assert_type
+import_thrift("service/types.thrift")
+c = MyConfig()
+assert_type(c.value, int)
+"#,
+);
+
+// Test import_python with wildcard import.
+testcase!(
+    test_import_python_wildcard,
+    env_import_thrift(),
+    r#"
+from typing import assert_type
+import_python("service/types.thrift", "*")
+c = MyConfig()
+assert_type(c.value, int)
+"#,
+);
+
+// Test import_thrift with dot separators.
+testcase!(
+    test_import_thrift_dot_separator,
+    env_import_thrift(),
+    r#"
+from typing import assert_type
+import_thrift("service.types.thrift", "*")
+c = MyConfig()
+assert_type(c.value, int)
+"#,
+);
+
+// Test import_thrift for unresolvable module (no error, names typed as Any).
+testcase!(
+    test_import_thrift_unresolvable,
+    env_import_thrift(),
+    r#"
+import_thrift("nonexistent/module.thrift", "mod")
+"#,
+);
+
+// --- __files__ directory import tests ---
+
+// Test that `import foo.__files__ as alias` binds alias without errors.
+testcase!(
+    test_import_files_directory,
+    r#"
+import myproject.schemas.__files__ as schema_files
+x = schema_files
+"#,
+);
+
+// Test that `import foo.__recursefiles__ as alias` also works.
+testcase!(
+    test_import_recursefiles_directory,
+    r#"
+import some.dir.__recursefiles__ as all_files
+x = all_files
+"#,
+);

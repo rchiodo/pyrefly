@@ -37,6 +37,7 @@ use starlark_map::small_map::Entry;
 use starlark_map::small_map::SmallMap;
 use starlark_map::small_set::SmallSet;
 
+use crate::binding::stmt::is_special_import_function;
 use crate::export::deprecation::parse_deprecation;
 use crate::export::special::SpecialExport;
 use crate::types::globals::ImplicitGlobal;
@@ -740,6 +741,38 @@ impl DefinitionsBuilder {
             }
             Stmt::Expr(StmtExpr { value, .. }) => {
                 self.named_in_expr(value);
+                // Handle special import function calls:
+                //   import_thrift("path", "*") → from path import *
+                //   import_thrift("path", "alias") → import path as alias
+                if let Expr::Call(ExprCall {
+                    func, arguments, ..
+                }) = &**value
+                    && let Expr::Name(func_name) = &**func
+                    && is_special_import_function(&func_name.id)
+                    && arguments.keywords.is_empty()
+                    && !arguments.args.is_empty()
+                    && let Expr::StringLiteral(path_lit) = &arguments.args[0]
+                {
+                    let module_name_str = path_lit.value.to_str().replace('/', ".");
+                    let m = ModuleName::from_string(module_name_str);
+
+                    let alias = arguments.args.get(1).and_then(|arg| match arg {
+                        Expr::StringLiteral(lit) => Some(lit.value.to_str()),
+                        _ => None,
+                    });
+                    let is_wildcard = alias.is_none() || alias == Some("*");
+
+                    if is_wildcard {
+                        self.inner.import_all.insert(m, func_name.range);
+                    } else {
+                        let alias_str = alias.expect("alias is Some when not wildcard");
+                        self.add_name(
+                            &Name::new(alias_str),
+                            func_name.range,
+                            DefinitionStyle::Import(m),
+                        );
+                    }
+                }
                 if let Expr::Call(
                     ExprCall {
                         func, arguments, ..

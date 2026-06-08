@@ -60,9 +60,32 @@ use crate::binding::scope::Scope;
 use crate::config::error_kind::ErrorKind;
 use crate::export::definitions::MutableCaptureKind;
 use crate::export::special::SpecialExport;
+use crate::state::loader::FindingOrError;
 use crate::types::alias::resolve_typeshed_alias;
 use crate::types::special_form::SpecialForm;
 use crate::types::types::AnyStyle;
+
+/// Special import function names. These are runtime functions that dynamically import
+/// thrift types or other Python modules. We recognize them so we can synthesize
+/// equivalent import bindings for type checking.
+pub(crate) const SPECIAL_IMPORT_FUNCTIONS: &[&str] = &[
+    "import_thrift",
+    "importThrift",
+    "import_python",
+    "importPython",
+];
+
+/// Returns true if the given name is a special import function.
+pub(crate) fn is_special_import_function(name: &str) -> bool {
+    SPECIAL_IMPORT_FUNCTIONS.contains(&name)
+}
+
+/// Returns true if the module name represents a directory import
+/// (`__files__` or `__recursefiles__`).
+fn is_directory_import(module_name: ModuleName) -> bool {
+    let s = module_name.as_str();
+    s.ends_with(".__files__") || s.ends_with(".__recursefiles__")
+}
 
 /// Checks if an iterable expression is guaranteed to be non-empty and thus
 /// the for-loop body will definitely execute at least once.
@@ -146,6 +169,80 @@ impl<'a> BindingsBuilder<'a> {
         );
         if let Some(false) = static_test {
             self.scopes.mark_flow_termination(true);
+        }
+    }
+
+    /// Handle a special import function call by synthesizing equivalent import bindings.
+    /// `import_thrift("path/to/file.thrift", "*")` becomes `from path.to.file.thrift import *`,
+    /// `import_thrift("path/to/file.thrift", "alias")` becomes `import path.to.file.thrift as alias`.
+    fn handle_special_import_call(&mut self, range: TextRange, args: &[Expr]) {
+        // Extract the module path from the first string argument.
+        let module_path = match &args[0] {
+            Expr::StringLiteral(lit) => lit.value.to_str(),
+            _ => return,
+        };
+
+        // Convert path separators to dots to form a module name.
+        let module_name_str = module_path.replace('/', ".");
+        let m = ModuleName::from_string(module_name_str);
+
+        // Determine import style: "*" or absent → wildcard, otherwise aliased.
+        let alias = args.get(1).and_then(|arg| match arg {
+            Expr::StringLiteral(lit) => Some(lit.value.to_str()),
+            _ => None,
+        });
+        let is_wildcard = alias.is_none() || alias == Some("*");
+
+        if is_wildcard {
+            // Equivalent to `from <module> import *`.
+            if matches!(self.lookup.module_exists(m), FindingOrError::Finding(_))
+                && let Some(wildcards) = self.lookup.get_wildcard(m)
+            {
+                for name in wildcards.iter_hashed() {
+                    let key = Key::Import(Box::new((name.into_key().clone(), range)));
+                    let val = if self.lookup.export_exists(m, &name) {
+                        Binding::Import(Box::new(ImportBinding {
+                            module: m,
+                            name: name.into_key().clone(),
+                            original_name_range: None,
+                            check_deprecated: None,
+                            fallback: None,
+                        }))
+                    } else {
+                        Binding::Any(AnyStyle::Error)
+                    };
+                    let key = self.insert_binding(key, val);
+                    self.scopes.register_import_with_star(&Identifier {
+                        node_index: AtomicNodeIndex::default(),
+                        id: name.into_key().clone(),
+                        range,
+                    });
+                    self.bind_name(
+                        name.key(),
+                        key,
+                        FlowStyle::Import(m, name.into_key().clone()),
+                    );
+                }
+            }
+            // If the module doesn't exist, silently ignore — the thrift/python module
+            // may not be available to the type checker.
+        } else {
+            // Has alias: equivalent to `import <module> as <alias>`.
+            let alias_str = alias.expect("alias is Some when not wildcard");
+            let alias_name = Name::new(alias_str);
+            let val = if matches!(self.lookup.module_exists(m), FindingOrError::Finding(_)) {
+                Binding::Module(Box::new((m, m.components().into_boxed_slice(), None, None)))
+            } else {
+                // Module not found — bind as Any to suppress downstream errors.
+                Binding::Any(AnyStyle::Implicit)
+            };
+            let key = self.insert_binding(Key::Import(Box::new((alias_name.clone(), range))), val);
+            self.scopes.register_import(&Identifier {
+                node_index: AtomicNodeIndex::default(),
+                id: alias_name.clone(),
+                range,
+            });
+            self.bind_name(&alias_name, key, FlowStyle::Other);
         }
     }
 
@@ -1307,6 +1404,21 @@ impl<'a> BindingsBuilder<'a> {
             Stmt::Import(x) => {
                 for x in x.names {
                     let m = ModuleName::from_name(&x.name.id);
+                    // Handle __files__/__recursefiles__ directory imports.
+                    // These import all files from a directory into a namespace object.
+                    // We bind the alias as Any since we can't resolve individual files.
+                    if is_directory_import(m) {
+                        if let Some(asname) = x.asname {
+                            self.scopes.register_import(&asname);
+                            let key = self.insert_binding(
+                                Key::Import(Box::new((asname.id.clone(), asname.range))),
+                                Binding::Any(AnyStyle::Implicit),
+                            );
+                            self.bind_name(&asname.id, key, FlowStyle::Other);
+                        }
+                        continue;
+                    }
+
                     match x.asname {
                         Some(asname) => {
                             // `import X as X` is an explicit re-export per Python typing spec.
@@ -1379,6 +1491,25 @@ impl<'a> BindingsBuilder<'a> {
                 for name in x.names {
                     self.declare_mutable_capture(&name, MutableCaptureKind::Nonlocal);
                 }
+            }
+            // Handle special import function calls. These are statement-level calls like:
+            //   import_thrift("path/to/file.thrift", "*")  → from path.to.file.thrift import *
+            //   import_thrift("path/to/file.thrift", "mod") → import path.to.file.thrift as mod
+            //   import_python("path/to/module.cinc", "*")  → from path.to.module.cinc import *
+            Stmt::Expr(stmt_expr)
+                if matches!(&*stmt_expr.value,
+                    Expr::Call(ExprCall { func, arguments: Arguments { args, keywords, .. }, .. })
+                    if matches!(&**func, Expr::Name(name) if is_special_import_function(&name.id))
+                    && keywords.is_empty()
+                    && !args.is_empty()
+                ) =>
+            {
+                let expr_range = stmt_expr.range;
+                let Expr::Call(call) = *stmt_expr.value else {
+                    unreachable!("guarded by matches! above")
+                };
+                self.insert_binding(Key::StmtExpr(expr_range), Binding::None);
+                self.handle_special_import_call(expr_range, &call.arguments.args);
             }
             Stmt::Expr(stmt_expr)
                 if matches!(&*stmt_expr.value,
