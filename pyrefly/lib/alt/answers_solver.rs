@@ -107,16 +107,9 @@ impl<'a> TypeCheckOptions<'a> {
         }
     }
 
-    pub fn with_call_context(
-        errors: &'a ErrorCollector,
-        context: &'a dyn Fn() -> TypeCheckContext,
-        call_context: &'a CallContext,
-    ) -> Self {
-        Self {
-            errors,
-            context,
-            call_context: Some(call_context),
-        }
+    pub fn with_call_context(mut self, call_context: &'a CallContext) -> Self {
+        self.call_context = Some(call_context);
+        self
     }
 }
 

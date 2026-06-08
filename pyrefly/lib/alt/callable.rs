@@ -387,7 +387,7 @@ impl CallArgPreEval<'_> {
                     ty,
                     hint,
                     range,
-                    TypeCheckOptions::with_call_context(call_errors, tcc, call_context),
+                    TypeCheckOptions::new(call_errors, tcc).with_call_context(call_context),
                 );
                 Some((*ty).clone())
             }
@@ -428,7 +428,7 @@ impl CallArgPreEval<'_> {
                     ty,
                     hint,
                     range,
-                    TypeCheckOptions::with_call_context(call_errors, tcc, call_context),
+                    TypeCheckOptions::new(call_errors, tcc).with_call_context(call_context),
                 );
                 Some(ty.clone())
             }
@@ -438,7 +438,7 @@ impl CallArgPreEval<'_> {
                     &arg_ty,
                     hint,
                     range,
-                    TypeCheckOptions::with_call_context(call_errors, tcc, call_context),
+                    TypeCheckOptions::new(call_errors, tcc).with_call_context(call_context),
                 );
                 *i += 1;
                 Some(arg_ty)
@@ -1105,17 +1105,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     &field.ty,
                                     want,
                                     kw.range,
-                                    TypeCheckOptions::with_call_context(
-                                        call_errors,
-                                        &|| {
-                                            TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
-                                                Some(name.clone()),
-                                                callable_name.cloned(),
-                                            ))
-                                            .with_context(context.map(|ctx| ctx()))
-                                        },
-                                        call_context,
-                                    ),
+                                    TypeCheckOptions::new(call_errors, &|| {
+                                        TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
+                                            Some(name.clone()),
+                                            callable_name.cloned(),
+                                        ))
+                                        .with_context(context.map(|ctx| ctx()))
+                                    })
+                                    .with_call_context(call_context),
                                 );
                             }
                         }
@@ -1131,20 +1128,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                             &value,
                                             want,
                                             kw.range,
-                                            TypeCheckOptions::with_call_context(
-                                                call_errors,
-                                                &|| {
-                                                    TypeCheckContext::of_kind(
-                                                        TypeCheckKind::CallKwArgs(
-                                                            None,
-                                                            name.cloned(),
-                                                            callable_name.cloned(),
-                                                        ),
-                                                    )
-                                                    .with_context(context.map(|ctx| ctx()))
-                                                },
-                                                call_context,
-                                            ),
+                                            TypeCheckOptions::new(call_errors, &|| {
+                                                TypeCheckContext::of_kind(
+                                                    TypeCheckKind::CallKwArgs(
+                                                        None,
+                                                        name.cloned(),
+                                                        callable_name.cloned(),
+                                                    ),
+                                                )
+                                                .with_context(context.map(|ctx| ctx()))
+                                            })
+                                            .with_call_context(call_context),
                                         );
                                     };
                                     splat_kwargs.push((value, kw.range));
@@ -1242,11 +1236,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     x,
                                     hint,
                                     range,
-                                    TypeCheckOptions::with_call_context(
-                                        call_errors,
-                                        tcc,
-                                        call_context,
-                                    ),
+                                    TypeCheckOptions::new(call_errors, tcc)
+                                        .with_call_context(call_context),
                                 );
                             }
                             (*x).clone()
@@ -1319,17 +1310,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ty,
                         want,
                         *range,
-                        TypeCheckOptions::with_call_context(
-                            call_errors,
-                            &|| {
-                                TypeCheckContext::of_kind(TypeCheckKind::CallUnpackKwArg(
-                                    (*name).clone(),
-                                    callable_name.cloned(),
-                                ))
-                                .with_context(context.map(|ctx| ctx()))
-                            },
-                            call_context,
-                        ),
+                        TypeCheckOptions::new(call_errors, &|| {
+                            TypeCheckContext::of_kind(TypeCheckKind::CallUnpackKwArg(
+                                (*name).clone(),
+                                callable_name.cloned(),
+                            ))
+                            .with_context(context.map(|ctx| ctx()))
+                        })
+                        .with_call_context(call_context),
                     );
                 }
             }
@@ -1343,16 +1331,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 &default_ty,
                 ty,
                 arguments_range,
-                TypeCheckOptions::with_call_context(
-                    call_errors,
-                    &|| {
-                        TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
-                            name.cloned(),
-                            callable_name.cloned(),
-                        ))
-                    },
-                    call_context,
-                ),
+                TypeCheckOptions::new(call_errors, &|| {
+                    TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
+                        name.cloned(),
+                        callable_name.cloned(),
+                    ))
+                })
+                .with_call_context(call_context),
             );
         }
         let num_extra_positional_args = extra_positional_args.len();

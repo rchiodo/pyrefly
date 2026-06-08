@@ -6173,7 +6173,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             &typeform_ty,
             hint,
             range,
-            TypeCheckOptions::with_call_context(errors, tcc, call_context),
+            TypeCheckOptions::new(errors, tcc).with_call_context(call_context),
         );
         Some(typeform_ty)
     }

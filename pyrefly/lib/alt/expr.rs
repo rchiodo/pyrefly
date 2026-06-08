@@ -332,7 +332,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.expr_infer_impl(x, Some(HintRef::new(want, Some(errors))), options.errors);
                 let check_options = match call_context {
                     Some(call_context) => {
-                        TypeCheckOptions::with_call_context(errors, context, call_context)
+                        TypeCheckOptions::new(errors, context).with_call_context(call_context)
                     }
                     None => TypeCheckOptions::new(errors, context),
                 };
