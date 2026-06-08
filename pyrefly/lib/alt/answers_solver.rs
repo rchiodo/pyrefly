@@ -92,6 +92,34 @@ use crate::types::type_info::TypeInfo;
 use crate::types::types::Type;
 use crate::types::types::Var;
 
+pub struct TypeCheckOptions<'a> {
+    errors: &'a ErrorCollector,
+    context: &'a dyn Fn() -> TypeCheckContext,
+    call_context: Option<&'a CallContext>,
+}
+
+impl<'a> TypeCheckOptions<'a> {
+    pub fn new(errors: &'a ErrorCollector, context: &'a dyn Fn() -> TypeCheckContext) -> Self {
+        Self {
+            errors,
+            context,
+            call_context: None,
+        }
+    }
+
+    pub fn with_call_context(
+        errors: &'a ErrorCollector,
+        context: &'a dyn Fn() -> TypeCheckContext,
+        call_context: &'a CallContext,
+    ) -> Self {
+        Self {
+            errors,
+            context,
+            call_context: Some(call_context),
+        }
+    }
+}
+
 /// Compactly represents the identity of a binding, for the purposes of
 /// understanding the calculation stack.
 #[derive(Clone, Dupe)]
@@ -3023,7 +3051,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         tcc: &dyn Fn() -> TypeCheckContext,
     ) -> TypeInfo {
-        if self.check_type(got.ty(), want, loc, errors, tcc) {
+        if self.check_type_with_options(got.ty(), want, loc, TypeCheckOptions::new(errors, tcc)) {
             got
         } else {
             got.with_ty(want.clone())
@@ -3039,7 +3067,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         tcc: &dyn Fn() -> TypeCheckContext,
         call_context: &CallContext,
     ) -> TypeInfo {
-        if self.check_type_with_call_context(got.ty(), want, loc, errors, tcc, call_context) {
+        if self.check_type_with_options(
+            got.ty(),
+            want,
+            loc,
+            TypeCheckOptions::with_call_context(errors, tcc, call_context),
+        ) {
             got
         } else {
             got.with_ty(want.clone())
@@ -3055,7 +3088,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         tcc: &dyn Fn() -> TypeCheckContext,
     ) -> Type {
-        if self.check_type(&got, want, loc, errors, tcc) {
+        if self.check_type_with_options(&got, want, loc, TypeCheckOptions::new(errors, tcc)) {
             got
         } else {
             want.clone()
@@ -3071,7 +3104,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         tcc: &dyn Fn() -> TypeCheckContext,
         call_context: &CallContext,
     ) -> Type {
-        if self.check_type_with_call_context(&got, want, loc, errors, tcc, call_context) {
+        if self.check_type_with_options(
+            &got,
+            want,
+            loc,
+            TypeCheckOptions::with_call_context(errors, tcc, call_context),
+        ) {
             got
         } else {
             want.clone()
@@ -3087,30 +3125,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         tcc: &dyn Fn() -> TypeCheckContext,
     ) -> bool {
-        // Record expected type for LSP query
-        self.record_expected_type_trace(loc, want);
-
-        let subset_result = match tcc().kind {
-            TypeCheckKind::CallArgument(..)
-            | TypeCheckKind::CallVarArgs(..)
-            | TypeCheckKind::CallKwArgs(..)
-            | TypeCheckKind::CallUnpackKwArg(..) => {
-                let call_context = CallContext::outside().with_argument_side(ArgumentSide::Got);
-                self.solver()
-                    .is_subset_eq(got, want, self.type_order(), Some(&call_context))
-            }
-            _ => self.is_subset_eq_with_reason(got, want),
-        };
-        match subset_result {
-            Ok(()) => {
-                self.check_string_as_iterable(got, want, loc, errors);
-                true
-            }
-            Err(error) => {
-                self.report_type_error(got, want, errors, loc, tcc, error);
-                false
-            }
-        }
+        self.check_type_with_options(got, want, loc, TypeCheckOptions::new(errors, tcc))
     }
 
     pub fn check_type_with_call_context(
@@ -3122,19 +3137,48 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         tcc: &dyn Fn() -> TypeCheckContext,
         call_context: &CallContext,
     ) -> bool {
+        self.check_type_with_options(
+            got,
+            want,
+            loc,
+            TypeCheckOptions::with_call_context(errors, tcc, call_context),
+        )
+    }
+
+    fn check_type_with_options(
+        &self,
+        got: &Type,
+        want: &Type,
+        loc: TextRange,
+        options: TypeCheckOptions,
+    ) -> bool {
         // Record expected type for LSP query
         self.record_expected_type_trace(loc, want);
 
-        match self
-            .solver()
-            .is_subset_eq(got, want, self.type_order(), Some(call_context))
-        {
+        let subset_result = match options.call_context {
+            Some(call_context) => {
+                self.solver()
+                    .is_subset_eq(got, want, self.type_order(), Some(call_context))
+            }
+            None => match (options.context)().kind {
+                TypeCheckKind::CallArgument(..)
+                | TypeCheckKind::CallVarArgs(..)
+                | TypeCheckKind::CallKwArgs(..)
+                | TypeCheckKind::CallUnpackKwArg(..) => {
+                    let call_context = CallContext::outside().with_argument_side(ArgumentSide::Got);
+                    self.solver()
+                        .is_subset_eq(got, want, self.type_order(), Some(&call_context))
+                }
+                _ => self.is_subset_eq_with_reason(got, want),
+            },
+        };
+        match subset_result {
             Ok(()) => {
-                self.check_string_as_iterable(got, want, loc, errors);
+                self.check_string_as_iterable(got, want, loc, options.errors);
                 true
             }
             Err(error) => {
-                self.report_type_error(got, want, errors, loc, tcc, error);
+                self.report_type_error(got, want, options.errors, loc, options.context, error);
                 false
             }
         }
