@@ -35,6 +35,7 @@ use tracing::info;
 use crate::error::error::Error;
 use crate::state::errors::find_containing_range;
 use crate::state::errors::sorted_backslash_continuation_ranges;
+use crate::state::errors::sorted_bracketed_continuation_ranges;
 use crate::state::errors::sorted_multi_line_string_ranges;
 
 /// Regex to match pyrefly/type/pyre ignore comments with optional error codes and trailing text.
@@ -282,6 +283,11 @@ fn add_suppressions(
         let lines: Vec<&str> = file.lines().collect();
         let backslash_ranges =
             sorted_backslash_continuation_ranges(&lines, &multiline_string_ranges);
+        let bracket_ranges = sorted_bracketed_continuation_ranges(&ast, &module);
+
+        // Error lines that must be suppressed with an inline (same-line) comment
+        // rather than a comment on the line above. Keyed by 0-indexed line.
+        let mut force_inline_lines: SmallSet<usize> = SmallSet::new();
 
         // Remap error lines inside multi-line strings or backslash
         // continuations to the block's start line so the suppression comment
@@ -290,9 +296,26 @@ fn add_suppressions(
             .iter()
             .map(|e| {
                 let error_line = LineNumber::from_zero_indexed(e.line as u32);
-                let new_line = find_containing_range(&multiline_string_ranges, error_line)
+                let new_line = match find_containing_range(&multiline_string_ranges, error_line)
                     .or_else(|| find_containing_range(&backslash_ranges, error_line))
-                    .map_or(error_line, |(start, _)| start);
+                {
+                    Some((start, _)) => start,
+                    None => {
+                        // An error on a non-first line of a bracketed (parenthesized)
+                        // multi-line statement cannot be suppressed with a comment on
+                        // the line above: a formatter may relocate that comment out of
+                        // the bracketed expression, and the checker associates the error
+                        // with the inner line rather than the line above. Suppress these
+                        // inline on the error line instead, which is stable under
+                        // formatting and is honored as-is by the checker.
+                        if find_containing_range(&bracket_ranges, error_line)
+                            .is_some_and(|(start, _)| start < error_line)
+                        {
+                            force_inline_lines.insert(e.line);
+                        }
+                        error_line
+                    }
+                };
                 SerializedError {
                     path: e.path.clone(),
                     line: new_line.to_zero_indexed() as usize,
@@ -362,7 +385,8 @@ fn add_suppressions(
                     let updated_line = replace_ignore_comment(line, error_comment);
                     buf.push_str(&updated_line);
                     buf.push_str(line_ending);
-                } else if comment_location == CommentLocation::SameLine
+                } else if (comment_location == CommentLocation::SameLine
+                    || force_inline_lines.contains(&idx))
                     && !fstring_start_lines.contains(&idx)
                     && find_containing_range(
                         &backslash_ranges,
@@ -880,6 +904,52 @@ def foo() -> None:
         ]
     unrelated_line = 0
         "#,
+        );
+    }
+
+    #[test]
+    fn test_add_suppressions_bracketed_continuation_inline() {
+        // Regression test: an error on a non-first line of a multi-line
+        // bracketed (parenthesized) statement is suppressed with an inline
+        // comment, not a comment on the line above. A line-above comment would
+        // be relocated by a formatter out of the bracketed expression and would
+        // not be associated with the error by the checker.
+        assert_suppress_errors(
+            r#"
+def f(x: str) -> None:
+    result = (
+        x
+        if x.startswith("a")
+        else "z" + x.split(",")
+    )
+    print(result)
+"#,
+            r#"
+def f(x: str) -> None:
+    result = (
+        x
+        if x.startswith("a")
+        else "z" + x.split(",")  # pyrefly: ignore [unsupported-operation]
+    )
+    print(result)
+"#,
+        );
+    }
+
+    #[test]
+    fn test_add_suppressions_bracketed_continuation_first_line() {
+        // The error is on the first line of the bracketed statement, so a
+        // comment on the line above is stable and is used (no inline fallback).
+        assert_suppress_errors(
+            r#"
+x: int = ("a"
+    "b")
+"#,
+            r#"
+# pyrefly: ignore [bad-assignment]
+x: int = ("a"
+    "b")
+"#,
         );
     }
 

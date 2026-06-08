@@ -22,6 +22,9 @@ use pyrefly_util::lined_buffer::LineNumber;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Expr;
 use ruff_python_ast::ModModule;
+use ruff_python_ast::Stmt;
+use ruff_python_ast::visitor::Visitor;
+use ruff_python_ast::visitor::walk_stmt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
@@ -155,6 +158,60 @@ pub fn find_containing_range(
     } else {
         None
     }
+}
+
+/// Extracts `(start_line, end_line)` ranges for *simple* statements (those
+/// without an indented suite, e.g. assignments, returns, expression statements,
+/// `del`, `assert`) that span more than one physical line via bracketed
+/// (parenthesized/implicit) line continuation.
+///
+/// Compound statements (`def`, `class`, `if`, `for`, `while`, `with`, `try`,
+/// `match`) are intentionally *not* recorded: their range covers an indented
+/// body, so a suppression placed above the header must not stand in for an
+/// error deep inside the body. We still recurse into them to find nested simple
+/// statements.
+///
+/// The returned list is sorted by start line. Simple statements never nest, so
+/// the ranges are non-overlapping.
+pub fn sorted_bracketed_continuation_ranges(
+    ast: &ModModule,
+    module: &Module,
+) -> Vec<(LineNumber, LineNumber)> {
+    struct Collector<'a> {
+        module: &'a Module,
+        ranges: Vec<(LineNumber, LineNumber)>,
+    }
+    impl<'a> Visitor<'a> for Collector<'a> {
+        fn visit_stmt(&mut self, stmt: &'a Stmt) {
+            let is_compound = matches!(
+                stmt,
+                Stmt::FunctionDef(_)
+                    | Stmt::ClassDef(_)
+                    | Stmt::If(_)
+                    | Stmt::For(_)
+                    | Stmt::While(_)
+                    | Stmt::With(_)
+                    | Stmt::Try(_)
+                    | Stmt::Match(_)
+            );
+            if !is_compound {
+                let display = self.module.display_range(stmt.range());
+                let start = display.start.line_within_file();
+                let end = display.end.line_within_file();
+                if start != end {
+                    self.ranges.push((start, end));
+                }
+            }
+            walk_stmt(self, stmt);
+        }
+    }
+    let mut collector = Collector {
+        module,
+        ranges: Vec::new(),
+    };
+    collector.visit_body(&ast.body);
+    collector.ranges.sort();
+    collector.ranges
 }
 
 /// Per-module multi-line ranges and ignore-all directives, computed after parsing.
