@@ -9,10 +9,13 @@ use itertools::Itertools as _;
 use pretty_assertions::assert_eq;
 use pyrefly_build::handle::Handle;
 use pyrefly_python::module::TextRangeWithModule;
+use ruff_text_size::TextRange;
 use ruff_text_size::TextSize;
 
 use crate::state::state::State;
+use crate::test::util::TestEnv;
 use crate::test::util::code_frame_of_source_at_range;
+use crate::test::util::extract_cursors_for_test;
 use crate::test::util::get_batched_lsp_operations_report;
 use crate::test::util::get_batched_lsp_operations_report_allow_error;
 
@@ -3126,5 +3129,80 @@ Definition Result:
 "#
         .trim(),
         report.trim(),
+    );
+}
+
+/// When importing a name from a non-Python module (e.g. a .thrift file),
+/// go-to-definition on the imported name should fall back to navigating
+/// to the module file itself.
+#[test]
+fn non_python_module_import_fallback_test() {
+    let thrift_content =
+        "// This is a comment\nstruct AggregatedAlertSpec {\n  1: string name\n}\n";
+    let main_code = r#"
+from aggregation_rule.thrift import AggregatedAlertSpec
+#                                   ^
+x = AggregatedAlertSpec
+#   ^
+"#;
+    let positions = extract_cursors_for_test(main_code);
+    let mut test_env = TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned()]);
+    test_env.add_with_path(
+        "aggregation_rule.thrift",
+        "aggregation_rule.thrift",
+        thrift_content,
+    );
+    test_env.add("main", main_code);
+    let (state, handle) = test_env.to_state();
+    let main_handle = handle("main");
+
+    // Test positions:
+    // "from aggregation_rule.thrift import AggregatedAlertSpec"
+    //                                      ^
+    let import_name_pos = positions[0];
+    let defs = state
+        .transaction()
+        .goto_definition(&main_handle, import_name_pos)
+        .expect("go-to-definition should return a result for non-Python imports");
+    let report = defs
+        .iter()
+        .map(|d| format!("module={}, range={:?}", d.module.path(), d.range))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        !defs.is_empty(),
+        "go-to-definition should return a non-empty result"
+    );
+    assert!(
+        defs[0]
+            .module
+            .path()
+            .to_string()
+            .contains("aggregation_rule.thrift"),
+        "should navigate to the .thrift file, got: {report}",
+    );
+    assert_eq!(defs[0].range, TextRange::empty(TextSize::new(0)));
+
+    // Test positions:
+    // "from aggregation_rule.thrift import AggregatedAlertSpec"
+    // "x = AggregatedAlertSpec
+    //      ^
+    let use_name_pos = positions[1];
+    let defs = state
+        .transaction()
+        .goto_definition(&main_handle, use_name_pos)
+        .expect("go-to-definition should return a result for non-Python imports");
+    let report = defs
+        .iter()
+        .map(|d| format!("module={}, range={:?}", d.module.path(), d.range))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        !defs.is_empty(),
+        "go-to-definition should return a non-empty result"
+    );
+    assert!(
+        defs[0].module.path().to_string().contains("main.py"),
+        "should navigate to the main.py import, got: {report}",
     );
 }

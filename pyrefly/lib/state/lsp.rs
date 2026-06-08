@@ -18,6 +18,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 use itertools::Itertools;
 use lsp_types::CompletionItem;
 use pyrefly_build::handle::Handle;
+use pyrefly_python::PYTHON_EXTENSIONS;
 use pyrefly_python::ast::Ast;
 use pyrefly_python::docstring::Docstring;
 use pyrefly_python::dunder;
@@ -242,7 +243,8 @@ pub enum ImportBehavior {
     StopAtEverything,
     /// Stop at renamed imports (e.g., `from foo import bar as baz`), but jump through non-renamed imports
     StopAtRenamedImports,
-    /// Jump through all imports
+    /// Jump through all imports. For non-Python files, this means selecting the definition file,
+    /// even if we can't parse/process that definition file.
     JumpThroughEverything,
 }
 
@@ -310,6 +312,25 @@ where
         }
     }
     false
+}
+
+/// For relative imports (dots > 0), resolve the module name using
+/// the current file's module name as context.
+fn resolve_relative_module_name(handle: &Handle, module_name: ModuleName, dots: u32) -> ModuleName {
+    if dots > 0 {
+        let is_init = handle.path().is_init();
+        let suffix = if module_name.as_str().is_empty() {
+            None
+        } else {
+            Some(&Name::new(module_name.as_str()))
+        };
+        handle
+            .module()
+            .new_maybe_relative(is_init, dots, suffix)
+            .unwrap_or(module_name)
+    } else {
+        module_name
+    }
 }
 
 #[derive(Debug)]
@@ -2195,6 +2216,14 @@ impl<'a> Transaction<'a> {
             .collect()
     }
 
+    fn config_has_extra_extensions(&self, handle: &Handle) -> bool {
+        !self
+            .config_finder()
+            .python_file(handle.module_kind(), handle.path())
+            .extra_file_extensions
+            .is_empty()
+    }
+
     /// Find the definition, metadata and optionally the docstring for the given position.
     pub fn find_definition(
         &self,
@@ -2273,22 +2302,7 @@ impl<'a> Transaction<'a> {
                         dots,
                     },
             }) => {
-                // For relative imports (dots > 0), resolve the module name using
-                // the current file's module name as context.
-                let resolved_module_name = if dots > 0 {
-                    let is_init = handle.path().is_init();
-                    let suffix = if module_name.as_str().is_empty() {
-                        None
-                    } else {
-                        Some(&Name::new(module_name.as_str()))
-                    };
-                    handle
-                        .module()
-                        .new_maybe_relative(is_init, dots, suffix)
-                        .unwrap_or(module_name)
-                } else {
-                    module_name
-                };
+                let resolved_module_name = resolve_relative_module_name(handle, module_name, dots);
 
                 // Build the module name for lookup based on identifier position.
                 let components = resolved_module_name.components();
@@ -2325,11 +2339,58 @@ impl<'a> Transaction<'a> {
                 identifier,
                 context:
                     IdentifierContext::ImportedName {
-                        name_after_import, ..
+                        module_name,
+                        dots,
+                        name_after_import,
                     },
             }) => {
                 match self.find_definition_for_name_def(handle, &name_after_import, preference)? {
-                    Some(item) => Ok(vec1![item]),
+                    Some(item) => {
+                        // When extra file extensions are configured and jumping through
+                        // everything, if the definition resolved back to the import
+                        // statement itself, the import couldn't be followed (e.g. the
+                        // source module is a non-Python file like .thrift). Fall through
+                        // to navigate to the source module file instead.
+                        let config_has_extra_extensions = self.config_has_extra_extensions(handle);
+                        // Do we want to get as close to the definition as possible?
+                        // If not, we don't want to keep searching for the module
+                        // on a non-Python file
+                        let jump_through_everything = matches!(
+                            preference.import_behavior,
+                            ImportBehavior::JumpThroughEverything,
+                        );
+                        // Is the thing we found the import statement?
+                        let found_item_is_import = item.definition_range == name_after_import.range;
+
+                        let is_eligible_for_fallback = config_has_extra_extensions
+                            && jump_through_everything
+                            && found_item_is_import;
+                        if !is_eligible_for_fallback {
+                            return Ok(vec1![item]);
+                        }
+                        let resolved_module_name =
+                            resolve_relative_module_name(handle, module_name, dots);
+                        if let Ok(Some(module_item)) = self.find_definition_for_imported_module(
+                            handle,
+                            resolved_module_name,
+                            preference,
+                        ) {
+                            let is_python_module = module_item
+                                .module
+                                .path()
+                                .as_path()
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext));
+                            if is_python_module {
+                                Ok(vec1![item])
+                            } else {
+                                Ok(vec1![module_item])
+                            }
+                        } else {
+                            Ok(vec1![item])
+                        }
+                    }
                     None => Err(EmptyResponseReason::DefinitionNotFound {
                         name: identifier.id.to_string(),
                         context: DefinitionContext::ImportedName,
