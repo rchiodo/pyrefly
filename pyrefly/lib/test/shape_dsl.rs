@@ -119,8 +119,7 @@ fn shaped_array_env_with_shaped_torch_and_jaxtyping() -> TestEnv {
 }
 
 fn shaped_array_env_with_numpy() -> TestEnv {
-    let path = std::env::var("SHAPE_DSL_TEST_PATH").expect("SHAPE_DSL_TEST_PATH must be set");
-    let mut env = TestEnv::new_with_site_package_paths(&[&path]);
+    let mut env = TestEnv::new();
     env.add_with_path(
         "shape_extensions",
         "shape_extensions/__init__.pyi",
@@ -129,6 +128,19 @@ from typing import Any, Callable
 
 shaped_array: Any
 def uses_shape_dsl(ir_fn: Callable[..., Any], *, capture_init: list[str] | None = None) -> Callable[[Callable[..., Any]], Callable[..., Any]]: ...
+"#,
+    );
+    env.add_with_path(
+        "shape_extensions.dsl",
+        "shape_extensions/dsl.pyi",
+        r#"
+from typing import Any, Callable
+
+def shape_dsl_function(fn: Callable[..., Any]) -> Callable[..., Any]: ...
+
+class ShapedArray:
+    shape: list[int]
+    def __init__(self, *, shape: list[int]) -> None: ...
 "#,
     );
     env.add_with_path(
