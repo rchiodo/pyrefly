@@ -991,6 +991,29 @@ fn find_module_prefixes<'a>(
     results.iter().map(|(_, name)| *name).collect::<Vec<_>>()
 }
 
+/// Configerator file extensions that use the keyword-escaping convention.
+/// When a path component matches a Python keyword (e.g. `if`), module names
+/// escape it with a trailing underscore (`if_`). This convention is specific
+/// to configerator repos and should not apply to other extra file extensions.
+///
+/// Kept consistent with `CONFIGERATOR_FILE_SUFFIX_EXCLUDE_THRIFT` in Pyright's
+/// `configerator-file-system.ts`.
+const CONFIGERATOR_EXTENSIONS: &[&str] = &["cinc", "cconf", "thrift-cvalidator", "ctest", "mcconf"];
+
+/// If `component` has a trailing underscore and the base is a Python keyword
+/// (e.g. `if_` → `if`), return the keyword. Otherwise return the component
+/// unchanged. This handles configerator paths where directories or filename
+/// segments are named with Python keywords, and the module path uses `if_`
+/// because Python syntax forbids bare keywords as identifiers.
+fn unescape_keyword(component: &str) -> &str {
+    if let Some(base) = component.strip_suffix('_')
+        && pyrefly_python::keywords::is_keyword(base)
+    {
+        return base;
+    }
+    component
+}
+
 /// Attempt to find a module that uses an extra file extension where dots in
 /// filenames act as module separators.
 ///
@@ -1003,6 +1026,12 @@ fn find_module_prefixes<'a>(
 ///
 /// Files "closer" to the source directory (more directory components) take
 /// precedence over files further away.
+///
+/// For configerator extensions (`cinc`, `cconf`, etc.), module components
+/// matching Python keywords with a trailing underscore (e.g. `if_`) are
+/// unescaped to their real names (e.g. `if`). This handles configerator repos
+/// where path segments can be named with Python keywords. Non-configerator
+/// extra extensions are not affected.
 fn find_extra_extension_module<'a>(
     module: ModuleName,
     roots: impl Iterator<Item = &'a PathBuf>,
@@ -1022,12 +1051,21 @@ fn find_extra_extension_module<'a>(
         return None;
     }
 
+    // Keyword unescaping (e.g. `if_` → `if`) only applies to configerator
+    // extensions. Other extra file extensions don't use this convention.
+    let should_unescape = CONFIGERATOR_EXTENSIONS.contains(&last.as_str());
+
     for root in roots {
         let mut dir = root.clone();
         // Push directory components for the first (most-directories) candidate.
         // The max dir_count is len-2 since the last component is the extension.
         for part in &components[..components.len() - 2] {
-            dir.push(part.as_str());
+            let part_str = part.as_str();
+            dir.push(if should_unescape {
+                unescape_keyword(part_str)
+            } else {
+                part_str
+            });
         }
         // Try splitting at each point: dir_count components form the directory
         // path and the remaining components form a dot-joined filename.
@@ -1039,9 +1077,16 @@ fn find_extra_extension_module<'a>(
         //   dir_count=0: dir=root,     filename=a.b.c.cinc
         for dir_count in (0..components.len() - 1).rev() {
             // Form the dotted filename from the remaining components.
+            // Unescape Python keywords only for configerator extensions.
             let filename: String = components[dir_count..]
                 .iter()
-                .map(|p| p.as_str())
+                .map(|p| {
+                    if should_unescape {
+                        unescape_keyword(p.as_str())
+                    } else {
+                        p.as_str()
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join(".");
             let candidate = dir.join(&filename);
@@ -5096,5 +5141,60 @@ mod tests {
         assert!(cache.file_exists(&pkg.join("a.py")));
         assert!(cache.file_exists(&pkg.join("b.py")));
         assert!(!cache.file_exists(&pkg.join("c.py")));
+    }
+
+    #[test]
+    fn test_find_extra_extension_module_keyword_escaping() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        // Configerator directories can be named with Python keywords (e.g. `if`).
+        // Since `if` is a Python keyword, the module name uses `if_` (with trailing
+        // underscore). The finder should strip the underscore to find the real directory.
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir(
+                "some",
+                vec![TestPath::dir("if", vec![TestPath::file("config.cconf")])],
+            )],
+        );
+        let extra = vec!["cconf".to_owned()];
+
+        assert_eq!(
+            find_extra_extension_module(
+                ModuleName::from_str("some.if_.config.cconf"),
+                [root.to_path_buf()].iter(),
+                &extra,
+                &mut None,
+            )
+            .unwrap(),
+            FindingOrError::new_finding(ModulePath::filesystem(root.join("some/if/config.cconf")))
+        );
+    }
+
+    #[test]
+    fn test_find_extra_extension_module_keyword_in_filename() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        // When a Python keyword appears as part of the dotted filename portion
+        // (not just directory), the trailing underscore should also be stripped.
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir(
+                "rules",
+                vec![TestPath::file("if.config.cconf")],
+            )],
+        );
+        let extra = vec!["cconf".to_owned()];
+
+        assert_eq!(
+            find_extra_extension_module(
+                ModuleName::from_str("rules.if_.config.cconf"),
+                [root.to_path_buf()].iter(),
+                &extra,
+                &mut None,
+            )
+            .unwrap(),
+            FindingOrError::new_finding(ModulePath::filesystem(root.join("rules/if.config.cconf")))
+        );
     }
 }
