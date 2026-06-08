@@ -17,7 +17,7 @@ const Sandbox = React.lazy(() => import('../sandbox/Sandbox'));
 
 export const SANDBOX_FILE_NAME = 'sandbox.py';
 
-export default function SandboxPage(): JSX.Element {
+export default function SandboxPage(): React.JSX.Element {
     const { siteConfig = {} } = useDocusaurusContext();
     return (
         <Layout
