@@ -45,12 +45,12 @@ use pyrefly_types::callable_residual::CallableResidualKind;
 use pyrefly_types::class::Class;
 use pyrefly_types::class::ClassType as PyreflyClassType;
 use pyrefly_types::literal::Lit;
-use ruff_python_ast::name::Name;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::quantified::QuantifiedOrigin;
 use pyrefly_types::types::BoundMethodType;
 use pyrefly_types::types::Forallable;
 use pyrefly_types::types::Type as PyreflyType;
+use ruff_python_ast::name::Name;
 use ruff_text_size::TextRange;
 use tsp_types::BuiltInType;
 use tsp_types::ClassType as TspClassType;
@@ -315,7 +315,9 @@ impl TypeConverter<'_> {
             }
 
             // --- LiteralString → typing.LiteralString class ---
-            PyreflyType::LiteralString(_) => self.typing_class("LiteralString", TypeFlags::INSTANCE),
+            PyreflyType::LiteralString(_) => {
+                self.typing_class("LiteralString", TypeFlags::INSTANCE)
+            }
 
             // --- Annotated[X, ...] → unwrap to X ---
             PyreflyType::Annotated(inner, _) => self.convert(inner),
@@ -350,7 +352,9 @@ impl TypeConverter<'_> {
             // `Literal`/`Final`/`ClassVar` as BuiltIn was off-spec and surfaced
             // as Unknown on the consumer side. Emit them as ClassType
             // referencing the typing module instead.
-            PyreflyType::SpecialForm(sf) => self.typing_class(&sf.to_string(), TypeFlags::INSTANTIABLE),
+            PyreflyType::SpecialForm(sf) => {
+                self.typing_class(&sf.to_string(), TypeFlags::INSTANTIABLE)
+            }
 
             // --- Unpack(X) → convert inner ---
             PyreflyType::Unpack(inner) => self.convert(inner),
@@ -371,10 +375,14 @@ impl TypeConverter<'_> {
             | PyreflyType::KwargsValue(q) => synthesized_typevar(q.name.as_str()),
 
             // --- ParamSpecValue → typing.ParamSpec ---
-            PyreflyType::ParamSpecValue(_) => self.typing_class("ParamSpec", TypeFlags::INSTANTIABLE),
+            PyreflyType::ParamSpecValue(_) => {
+                self.typing_class("ParamSpec", TypeFlags::INSTANTIABLE)
+            }
 
             // --- Concatenate → typing.Concatenate ---
-            PyreflyType::Concatenate(..) => self.typing_class("Concatenate", TypeFlags::INSTANTIABLE),
+            PyreflyType::Concatenate(..) => {
+                self.typing_class("Concatenate", TypeFlags::INSTANTIABLE)
+            }
 
             // --- KwCall → convert the return type ---
             PyreflyType::KwCall(kw) => self.convert(&kw.return_ty),
@@ -744,7 +752,8 @@ fn convert_literal(lit: &pyrefly_types::literal::Literal) -> TspType {
 }
 
 /// Build a declaration for a class in `builtins.pyi`.
-fn make_builtin_class_declaration(name: &str) -> RegularDeclaration {    let module_path =
+fn make_builtin_class_declaration(name: &str) -> RegularDeclaration {
+    let module_path =
         pyrefly_python::module_path::ModulePath::bundled_typeshed(PathBuf::from("builtins.pyi"));
     RegularDeclaration {
         kind: DeclarationKind::Regular,
@@ -1471,7 +1480,10 @@ mod tests {
         let resolver = |module: ModuleName, name: &Name| {
             assert_eq!(module, ModuleName::from_str("mymod"));
             assert_eq!(name.as_str(), "T");
-            Some((ModulePath::filesystem(PathBuf::from("/repo/mymod.py")), range))
+            Some((
+                ModulePath::filesystem(PathBuf::from("/repo/mymod.py")),
+                range,
+            ))
         };
         match convert_type_with_resolvers(&ty, None, None, Some(&resolver)) {
             TspType::Var(v) => {
