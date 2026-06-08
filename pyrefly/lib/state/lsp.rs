@@ -2358,17 +2358,29 @@ impl<'a> Transaction<'a> {
                         // Fallback: use the whole module name.
                         resolved_module_name
                     };
-                match self.find_definition_for_imported_module(
-                    handle,
-                    target_module_name,
-                    preference,
-                )? {
-                    Some(item) => Ok(vec1![item]),
-                    None => Err(EmptyResponseReason::DefinitionNotFound {
-                        name: identifier.id.to_string(),
-                        context: DefinitionContext::ImportedModule,
-                    }),
+                if let Ok(Some(item)) =
+                    self.find_definition_for_imported_module(handle, target_module_name, preference)
+                {
+                    return Ok(vec1![item]);
                 }
+                // Fallback: for __files__/__recursefiles__ directory imports, the
+                // virtual module doesn't exist on disk. Navigate to the parent module.
+                let module_str = resolved_module_name.as_str();
+                if let Some(parent) = module_str
+                    .strip_suffix(".__files__")
+                    .or_else(|| module_str.strip_suffix(".__recursefiles__"))
+                    && let Some(item) = self.find_definition_for_imported_module(
+                        handle,
+                        ModuleName::from_str(parent),
+                        preference,
+                    )?
+                {
+                    return Ok(vec1![item]);
+                }
+                Err(EmptyResponseReason::DefinitionNotFound {
+                    name: identifier.id.to_string(),
+                    context: DefinitionContext::ImportedModule,
+                })
             }
             Some(IdentifierWithContext {
                 identifier,

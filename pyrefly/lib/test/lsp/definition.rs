@@ -3250,3 +3250,71 @@ x = thrift_mod.AggregatedAlertSpec
     );
     assert_eq!(defs[0].range, TextRange::empty(TextSize::new(0)));
 }
+
+/// Go-to-definition on a __files__ directory import should fall back to
+/// the parent module when the virtual __files__ module doesn't exist on disk.
+#[test]
+fn files_directory_import_goto_definition_test() {
+    let main_code = r#"
+import foo.bar.__files__ as files
+#                ^
+"#;
+    let positions = extract_cursors_for_test(main_code);
+    let mut test_env = TestEnv::new();
+    test_env.add("foo.bar", "x = 1\n");
+    test_env.add("main", main_code);
+    let (state, handle) = test_env.to_state();
+    let main_handle = handle("main");
+
+    let defs = state
+        .transaction()
+        .goto_definition(&main_handle, positions[0])
+        .expect("go-to-definition should return a result for __files__ import");
+    let report = defs
+        .iter()
+        .map(|d| format!("module={}, range={:?}", d.module.path(), d.range))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        !defs.is_empty(),
+        "go-to-definition should return a non-empty result"
+    );
+    assert!(
+        defs[0].module.path().to_string().contains("foo/bar"),
+        "should navigate to the parent module foo.bar, got: {report}",
+    );
+}
+
+/// Go-to-definition on a __recursefiles__ directory import should fall back to
+/// the parent module when the virtual __recursefiles__ module doesn't exist on disk.
+#[test]
+fn recursefiles_directory_import_goto_definition_test() {
+    let main_code = r#"
+import foo.bar.__recursefiles__ as files
+#                   ^
+"#;
+    let positions = extract_cursors_for_test(main_code);
+    let mut test_env = TestEnv::new();
+    test_env.add("foo.bar", "x = 1\n");
+    test_env.add("main", main_code);
+    let (state, handle) = test_env.to_state();
+    let main_handle = handle("main");
+
+    let defs = state
+        .transaction()
+        .goto_definition(&main_handle, positions[0])
+        .expect("go-to-definition should return a result for __recursefiles__ import");
+    let report = defs
+        .iter()
+        .map(|d| format!("module={}, range={:?}", d.module.path(), d.range))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        !defs.is_empty(),
+        "go-to-definition should return a non-empty result"
+    );
+    assert!(
+        defs[0].module.path().to_string().contains("foo/bar"),
+        "should navigate to the parent module foo.bar, got: {report}",
+    );
+}

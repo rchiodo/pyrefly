@@ -1413,15 +1413,21 @@ impl<'a> BindingsBuilder<'a> {
                     let m = ModuleName::from_name(&x.name.id);
                     // Handle __files__/__recursefiles__ directory imports.
                     // These import all files from a directory into a namespace object.
-                    // We bind the alias as Any since we can't resolve individual files.
+                    // We bind the alias as Module to enable navigation to the parent module,
+                    // passing None for TextRange to suppress missing-module diagnostics.
                     if is_directory_import(m) {
                         if let Some(asname) = x.asname {
                             self.scopes.register_import(&asname);
-                            let key = self.insert_binding(
-                                Key::Import(Box::new((asname.id.clone(), asname.range))),
-                                Binding::Any(AnyStyle::Implicit),
+                            self.bind_definition(
+                                &asname,
+                                Binding::Module(Box::new((
+                                    m,
+                                    m.components().into_boxed_slice(),
+                                    None,
+                                    None,
+                                ))),
+                                FlowStyle::ImportAs(m),
                             );
-                            self.bind_name(&asname.id, key, FlowStyle::Other);
                         }
                         continue;
                     }

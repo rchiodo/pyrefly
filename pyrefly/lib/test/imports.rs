@@ -2021,3 +2021,14 @@ import some.dir.__recursefiles__ as all_files
 x = all_files
 "#,
 );
+
+// Test that __files__ aliases work inside function bodies without crashing.
+testcase!(
+    test_import_files_directory_in_function,
+    r#"
+import myproject.data.__files__ as data_schema_files
+
+def get_files():
+    return data_schema_files
+"#,
+);
