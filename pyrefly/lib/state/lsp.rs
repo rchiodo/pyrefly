@@ -615,6 +615,17 @@ pub struct FindDefinitionItemWithDocstring {
     pub display_name: Option<String>,
 }
 
+impl FindDefinitionItemWithDocstring {
+    fn is_python_module(&self) -> bool {
+        self.module
+            .path()
+            .as_path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext))
+    }
+}
+
 #[derive(Debug)]
 pub struct FindDefinitionItem {
     pub metadata: DefinitionMetadata,
@@ -2073,7 +2084,31 @@ impl<'a> Transaction<'a> {
         let base_type = answers
             .get_type_trace(base_range)
             .ok_or(EmptyResponseReason::TypeTraceNotFound)?;
-        self.find_attribute_definition_for_base_type(handle, preference, base_type, name)
+        if let Ok(defs) = self.find_attribute_definition_for_base_type(
+            handle,
+            preference,
+            base_type.clone(),
+            name,
+        ) {
+            return Ok(defs);
+        }
+        // Fallback for non-Python modules (e.g. .thrift files that can't be
+        // parsed as Python): navigate to the module file itself. Only applies
+        // when extra file extensions are configured.
+        let config_has_extra_extensions = self.config_has_extra_extensions(handle);
+        if config_has_extra_extensions && let Type::Module(ref module) = base_type {
+            let module_name = ModuleName::from_parts(module.parts());
+            if let Ok(Some(item)) =
+                self.find_definition_for_imported_module(handle, module_name, preference)
+                && !item.is_python_module()
+            {
+                return Ok(vec1![item]);
+            }
+        }
+        Err(EmptyResponseReason::DefinitionNotFound {
+            name: name.to_string(),
+            context: DefinitionContext::Attribute,
+        })
     }
 
     pub(crate) fn find_definition_for_imported_module(
@@ -2375,14 +2410,7 @@ impl<'a> Transaction<'a> {
                             resolved_module_name,
                             preference,
                         ) {
-                            let is_python_module = module_item
-                                .module
-                                .path()
-                                .as_path()
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .is_some_and(|ext| PYTHON_EXTENSIONS.contains(&ext));
-                            if is_python_module {
+                            if module_item.is_python_module() {
                                 Ok(vec1![item])
                             } else {
                                 Ok(vec1![module_item])
