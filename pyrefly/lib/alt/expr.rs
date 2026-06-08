@@ -174,7 +174,7 @@ impl<'a, 'b> ExprOptions<'a, 'b> {
         Self::infer_with_hint(errors, None)
     }
 
-    fn infer_with_hint(errors: &'a ErrorCollector, hint: Option<HintRef<'a, 'b>>) -> Self {
+    pub fn infer_with_hint(errors: &'a ErrorCollector, hint: Option<HintRef<'a, 'b>>) -> Self {
         Self {
             errors,
             expectation: ExprExpectation::Infer(hint),
@@ -349,7 +349,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// The core logic for inferring a type for an expression.
     /// Returns a TypeInfo that includes narrowing information.
-    pub fn expr_infer_impl(
+    fn expr_infer_impl(
         &self,
         x: &Expr,
         hint: Option<HintRef>,
