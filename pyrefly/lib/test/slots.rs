@@ -352,6 +352,36 @@ class D(A, B, C): ...  # E: incompatible disjoint bases
 "#,
 );
 
+// `Combined(Child, Base)` is OK when `Child(Base)` already covers `Base`'s layout.
+testcase!(
+    test_slots_disjoint_base_subclass_and_ancestor_ok,
+    r#"
+class Base:
+    __slots__ = ("x",)
+
+class Child(Base):
+    __slots__ = ("y",)
+
+class Combined(Child, Base): ...
+"#,
+);
+
+testcase!(
+    test_slots_disjoint_base_propagation_through_unslotted,
+    r#"
+class Left:
+    __slots__ = ("x",)
+
+class LeftChild(Left):
+    pass
+
+class Right:
+    __slots__ = ("y",)
+
+class Bad(LeftChild, Right): ...  # E: incompatible disjoint bases
+"#,
+);
+
 testcase!(
     test_slots_dunder_name_no_false_positive,
     r#"

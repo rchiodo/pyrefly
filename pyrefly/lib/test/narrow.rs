@@ -2854,6 +2854,30 @@ def f(x: LeftChild) -> None:
 "#,
 );
 
+// Slotted analogue of `test_disjoint_bases_custom_propagation`.
+testcase!(
+    test_disjoint_bases_slots_propagation,
+    r#"
+from typing import assert_never
+
+class Left:
+    __slots__ = ("x",)
+
+class LeftChild(Left):
+    pass
+
+class LeftGrandchild(LeftChild):
+    pass
+
+class Right:
+    __slots__ = ("y",)
+
+def f(x: LeftGrandchild) -> None:
+    if isinstance(x, Right):
+        assert_never(x)
+"#,
+);
+
 testcase!(
     test_literals_are_disjoint,
     r#"
