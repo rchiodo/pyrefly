@@ -1333,16 +1333,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Check whether a type alias body contains a cyclic self-reference.
     ///
     /// Two kinds of invalid self-reference are detected:
-    /// 1. Direct top-level union member: `type X = int | X` (X appears as a
-    ///    direct union alternative, producing `int | int | ...` which is just `int`)
-    /// 2. Unguarded nested reference inside a builtin class, `type[...]`, or
-    ///    tuple: `type X = list[X]` (X appears inside a container with no union
-    ///    base case, producing an uninhabitable infinite type)
+    /// 1. Direct top-level member of a union or tuple:
+    ///    * `type X = int | X` - produces `int | int | ...` which is just `int`
+    ///    * `type X = tuple[int, X]` - uninhabitable infinite type
+    ///    * `type X = tuple[X, ...]` - inhabited only by arbitrarily nested empty tuples
+    /// 2. Reference nested inside a union or builtin class containing no non-self-reference:
+    ///    * `type X = list[X]` - inhabited only by arbitrarily nested empty lists
     ///
-    /// Valid recursive aliases like `type X = int | list[X]` have a base case
-    /// (`int`) in the union, so the self-reference is "guarded".
-    ///
-    /// We only check for unguarded references inside builtin classes,
+    /// We only check for invalid self-references inside builtin classes,
     /// `type[...]`, and tuples, not user-defined generic classes. A
     /// user-defined `class C[T]: x: T | None` makes `type A = C[A]`
     /// inhabitable (e.g. `C(x=C(x=None))`), so we can't assume all generic
@@ -1367,67 +1365,65 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         };
         let is_self_ref = |ty: &Type| matches!(ty, Type::UntypedAlias(ta) if ta.name() == name);
 
-        // Check 1: Direct top-level union member (e.g. `int | X`).
-        let mut direct_self_ref = false;
-        self.map_over_union(body, |ty| {
-            direct_self_ref |= is_self_ref(ty);
-        });
+        fn collect_tuple_members(tuple: &Tuple) -> Vec<&Type> {
+            match tuple {
+                Tuple::Concrete(ts) => ts.iter().collect(),
+                Tuple::Unbounded(t) => vec![t],
+                Tuple::Unpacked(ts) => {
+                    ts.0.iter()
+                        .chain(if let Type::Tuple(inner) = &ts.1 {
+                            collect_tuple_members(inner)
+                        } else {
+                            Vec::new()
+                        })
+                        .chain(ts.2.iter())
+                        .collect()
+                }
+            }
+        }
 
-        // Check 2: Unguarded nested reference (e.g. `list[X]`).
-        // A self-reference is "guarded" if it appears inside a union where at
-        // least one sibling branch does not (transitively) contain the self-ref.
-        // Returns true if the type contains a self-reference that is not guarded
-        // by a union base case, only recursing into known builtin collections.
-        fn has_unguarded_self_ref(ty: &Type, is_self_ref: &dyn Fn(&Type) -> bool) -> bool {
+        // Check 1: Direct top-level union or tuple member (e.g. `int | X`).
+        let has_direct_self_ref = {
+            let mut has_self_ref = false;
+            self.map_over_union(body, |t| {
+                has_self_ref |= is_self_ref(t);
+            });
+            has_self_ref |= matches!(body, Type::Tuple(tuple) if collect_tuple_members(tuple).into_iter().any(is_self_ref));
+            has_self_ref
+        };
+
+        // Check 2: nested self-reference without a non-self-reference (e.g. `list[X]`).
+        fn contains_only_self_ref(ty: &Type, is_self_ref: &dyn Fn(&Type) -> bool) -> bool {
             if is_self_ref(ty) {
                 return true;
             }
             match ty {
-                Type::Union(f) => {
-                    // If any member is free of self-refs, it provides a base case
-                    // and all other self-referencing members are guarded.
-                    let mut has_self_ref = false;
-                    let mut has_base_case = false;
-                    for m in &f.members {
-                        if has_unguarded_self_ref(m, is_self_ref) {
-                            has_self_ref = true;
-                        } else {
-                            has_base_case = true;
-                        }
-                    }
-                    has_self_ref && !has_base_case
-                }
-                // Builtin classes use their type parameters in required
-                // positions (as elements, fields, or yielded values), so a
-                // self-reference with no union base case is uninhabitable.
-                Type::ClassType(cls) if cls.class_object().module_name().as_str() == "builtins" => {
+                Type::Union(union) => union
+                    .members
+                    .iter()
+                    .all(|t| contains_only_self_ref(t, is_self_ref)),
+                Type::ClassType(cls)
+                    if cls.class_object().module_name().as_str() == "builtins"
+                        && !cls.targs().is_empty() =>
+                {
                     cls.targs()
                         .as_slice()
                         .iter()
-                        .any(|arg| has_unguarded_self_ref(arg, is_self_ref))
+                        .all(|t| contains_only_self_ref(t, is_self_ref))
                 }
-                // type[X] wraps X, so a self-ref is unguarded here too.
-                Type::Type(inner) => has_unguarded_self_ref(inner, is_self_ref),
-                // Tuples: fixed-length tuples require all elements, and
-                // unbounded tuples are degenerate (only empty tuple inhabits).
-                // In either case a self-ref with no union base case is invalid.
-                Type::Tuple(_) => {
-                    let mut found = false;
-                    ty.recurse(&mut |child: &Type| {
-                        if has_unguarded_self_ref(child, is_self_ref) {
-                            found = true;
-                        }
-                    });
-                    found
+                Type::Type(t) => contains_only_self_ref(t, is_self_ref),
+                Type::Tuple(tuple) => {
+                    let members = collect_tuple_members(tuple);
+                    !members.is_empty()
+                        && members
+                            .into_iter()
+                            .all(|t| contains_only_self_ref(t, is_self_ref))
                 }
-                // For user-defined generic classes and other types, we don't
-                // recurse — the class may have optional fields of type T that
-                // provide a base case we can't see here.
                 _ => false,
             }
         }
 
-        if direct_self_ref || has_unguarded_self_ref(body, &is_self_ref) {
+        if has_direct_self_ref || contains_only_self_ref(body, &is_self_ref) {
             self.error(
                 errors,
                 range,
