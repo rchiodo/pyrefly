@@ -239,7 +239,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Infer a type for an expression, with an optional type hint that influences the inferred type.
     /// The inferred type is also checked against the hint.
-    pub fn expr(
+    pub fn expr_check(
         &self,
         x: &Expr,
         check: Option<(&Type, &dyn Fn() -> TypeCheckContext)>,
@@ -248,7 +248,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.expr_type_info(x, check, errors).into_ty()
     }
 
-    /// Like expr(), but errors from the infer and check steps are recorded to separate error collectors.
+    /// Like expr_check(), but errors from the infer and check steps are recorded to separate error collectors.
     pub fn expr_with_separate_check_errors(
         &self,
         x: &Expr,
@@ -277,24 +277,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Infer a type for an expression.
     pub fn expr_infer(&self, x: &Expr, errors: &ErrorCollector) -> Type {
-        self.expr_infer_type_info_with_hint(x, None, errors)
-            .into_ty()
+        self.expr_infer_impl(x, None, errors).into_ty()
     }
 
     /// Infer a type for an expression, with an optional type hint that influences the inferred type.
-    /// Unlike expr(), the inferred type is not checked against the hint.
+    /// Unlike expr_check(), the inferred type is not checked against the hint.
     pub fn expr_infer_with_hint(
         &self,
         x: &Expr,
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        self.expr_infer_type_info_with_hint(x, hint, errors)
-            .into_ty()
+        self.expr_infer_impl(x, hint, errors).into_ty()
     }
 
-    /// Like expr_infer_with_hint(), but returns a TypeInfo that includes narrowing information.
-    pub fn expr_infer_type_info_with_hint(
+    /// The core logic for inferring a type for an expression.
+    /// Returns a TypeInfo that includes narrowing information.
+    pub fn expr_infer_impl(
         &self,
         x: &Expr,
         hint: Option<HintRef>,
@@ -317,7 +316,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
             Expr::Attribute(x) => {
-                let base = self.expr_infer_type_info_with_hint(&x.value, None, errors);
+                let base = self.expr_infer_impl(&x.value, None, errors);
                 self.record_external_attribute_definition_index(
                     base.ty(),
                     x.attr.id(),
@@ -337,19 +336,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Expr::Subscript(x) => {
                 // TODO: We don't deal properly with hint here, we should.
-                let base = self.expr_infer_type_info_with_hint(&x.value, None, errors);
+                let base = self.expr_infer_impl(&x.value, None, errors);
                 self.subscript_infer(&base, &x.slice, x.range(), errors)
             }
             Expr::Named(x) => match &*x.target {
                 Expr::Name(name) if !Ast::is_synthesized_empty_name(name) => self
                     .get(&Key::Definition(ShortIdentifier::expr_name(name)))
                     .arc_clone(),
-                _ => self.expr_infer_type_info_with_hint(&x.value, hint, errors),
+                _ => self.expr_infer_impl(&x.value, hint, errors),
             },
             // All other expressions operate at the `Type` level only, so we avoid the overhead of
             // wrapping and unwrapping `TypeInfo` by computing the result as a `Type` and only wrapping
             // at the end.
-            _ => TypeInfo::of_ty(self.expr_infer_type_no_trace(x, hint, errors)),
+            _ => TypeInfo::of_ty(self.expr_infer_impl_helper(x, hint, errors)),
         };
         // Check for deprecation
         self.check_for_deprecated_call(res.ty(), x.range(), errors);
@@ -378,14 +377,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> TypeInfo {
         match check {
             Some((hint, hint_errors, tcc)) if !hint.is_any() => {
-                let got = self.expr_infer_type_info_with_hint(
-                    x,
-                    Some(HintRef::new(hint, Some(hint_errors))),
-                    errors,
-                );
+                let got =
+                    self.expr_infer_impl(x, Some(HintRef::new(hint, Some(hint_errors))), errors);
                 self.check_and_return_type_info(got, hint, x.range(), hint_errors, tcc)
             }
-            _ => self.expr_infer_type_info_with_hint(x, None, errors),
+            _ => self.expr_infer_impl(x, None, errors),
         }
     }
 
@@ -398,11 +394,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> TypeInfo {
         match check {
             Some((hint, hint_errors, tcc)) if !hint.is_any() => {
-                let got = self.expr_infer_type_info_with_hint(
-                    x,
-                    Some(HintRef::new(hint, Some(hint_errors))),
-                    errors,
-                );
+                let got =
+                    self.expr_infer_impl(x, Some(HintRef::new(hint, Some(hint_errors))), errors);
                 self.check_and_return_type_info_with_call_context(
                     got,
                     hint,
@@ -412,14 +405,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     call_context,
                 )
             }
-            _ => self.expr_infer_type_info_with_hint(x, None, errors),
+            _ => self.expr_infer_impl(x, None, errors),
         }
     }
 
     /// This function should not be used directly: we want every expression to record a type trace,
-    /// and that is handled in expr_infer_type_info_with_hint. This function should *only* be called
-    /// via expr_infer_type_info_with_hint.
-    fn expr_infer_type_no_trace(
+    /// and that is handled in expr_infer_impl. This function should *only* be called via expr_infer_impl.
+    fn expr_infer_impl_helper(
         &self,
         x: &Expr,
         hint: Option<HintRef>,
@@ -429,17 +421,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Expr::Name(..) | Expr::Attribute(..) | Expr::Named(..) | Expr::Subscript(..) => {
                 // These cases are required to preserve attribute narrowing information. But anyone calling
                 // this function only needs the Type, so we can just pull it out.
-                self.expr_infer_type_info_with_hint(x, hint, errors)
-                    .into_ty()
+                self.expr_infer_impl(x, hint, errors).into_ty()
             }
             Expr::If(x) => {
                 let condition_type = self.expr_infer(&x.test, errors);
-                let body_type = self
-                    .expr_infer_type_info_with_hint(&x.body, hint, errors)
-                    .into_ty();
-                let orelse_type = self
-                    .expr_infer_type_info_with_hint(&x.orelse, hint, errors)
-                    .into_ty();
+                let body_type = self.expr_infer_impl(&x.body, hint, errors).into_ty();
+                let orelse_type = self.expr_infer_impl(&x.orelse, hint, errors).into_ty();
                 self.check_dunder_bool_is_callable(&condition_type, x.range(), errors);
                 self.check_redundant_condition(&condition_type, x.range(), errors);
                 match self.as_bool(&condition_type, x.test.range(), errors) {
@@ -515,7 +502,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             let _specialization_errors =
                                 self.solver().finish_all_quantified(hint, self.type_order());
                         }
-                        let ret = self.expr_infer_type_no_trace(
+                        let ret = self.expr_infer_impl_helper(
                             &lambda.body,
                             HintRef::with_ty_opt(hint, return_hint.as_ref()),
                             callable_errors,
@@ -654,7 +641,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 |yield_hint| {
                     self.ifs_infer(&x.generators, errors);
                     let yield_ty = self
-                        .expr_infer_type_info_with_hint(
+                        .expr_infer_impl(
                             &x.elt,
                             HintRef::with_ty_opt(hint, yield_hint.as_ref()),
                             errors,
@@ -778,6 +765,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    /// Convenience function to call `expr_infer_with_hint` and promote literals in the result
     fn expr_infer_with_hint_promote(
         &self,
         x: &Expr,
@@ -1506,7 +1494,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = &args.args[0] else {
             return None;
         };
-        let obj_ty = self.expr_infer_type_info_with_hint(&attr_expr.value, None, errors);
+        let obj_ty = self.expr_infer_impl(&attr_expr.value, None, errors);
         if self.is_dict_like(obj_ty.ty()) {
             Some((obj_ty, key.clone()))
         } else {
@@ -2332,7 +2320,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
                 Type::ClassDef(ref cls) if self.get_enum_from_class(cls).is_some() => {
                     if self.is_subset_eq(
-                        &self.expr(slice, None, errors),
+                        &self.expr_check(slice, None, errors),
                         &self.heap.mk_class_type(self.stdlib.str().clone()),
                     ) {
                         self.heap.mk_class_type(self.as_class_type_unchecked(cls))
@@ -2354,7 +2342,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         self.heap.mk_type(self.heap.mk_quantified(quantified.clone()));
                     if self.is_restricted_to_enum_class_def_type(&quantified) {
                         if self.is_subset_eq(
-                            &self.expr(slice, None, errors),
+                            &self.expr_check(slice, None, errors),
                             &self.heap.mk_class_type(self.stdlib.str().clone()),
                         ) {
                             quantified.to_type(self.heap)
@@ -2385,7 +2373,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let base_display_ty = self.heap.mk_type_of((*inner).clone());
                     let enum_value_ty = *inner;
                     if self.is_subset_eq(
-                        &self.expr(slice, None, errors),
+                        &self.expr_check(slice, None, errors),
                         &self.heap.mk_class_type(self.stdlib.str().clone()),
                     ) {
                         enum_value_ty

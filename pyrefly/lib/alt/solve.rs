@@ -3296,7 +3296,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let receiver_ty = self.get_idx(receiver_idx).arc_clone_ty();
             let tcc: &dyn Fn() -> TypeCheckContext =
                 &|| TypeCheckContext::of_kind(TypeCheckKind::AnnotatedName(name.clone()));
-            let expr_ty = self.expr(expr, Some((&receiver_ty, tcc)), errors);
+            let expr_ty = self.expr_check(expr, Some((&receiver_ty, tcc)), errors);
             let visible_ty = if self.is_subset_eq(&expr_ty, &receiver_ty) {
                 expr_ty
             } else {
@@ -3320,7 +3320,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 let annot_ty = annot.ty(self.heap, self.stdlib);
                 let hint = annot_ty.as_ref().map(|t| (t, tcc));
-                let expr_ty = self.expr(expr, hint, errors);
+                let expr_ty = self.expr_check(expr, hint, errors);
                 let ty = if style == &AnnotationStyle::Direct {
                     // For direct assignments, user-provided annotation takes
                     // precedence over inferred expr type.
@@ -3346,7 +3346,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // `x = ...` in a stub file means that the type of `x` is unknown
                 (None, self.heap.mk_any_implicit())
             }
-            None => (None, self.expr(expr, None, errors)),
+            None => (None, self.expr_check(expr, None, errors)),
         }
     }
 
@@ -3576,7 +3576,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .with_annotation(annot_range, "declared return type".to_owned())
             };
             if let Some(expr) = &x.expr {
-                self.expr(expr, hint.as_ref().map(|t| (t, tcc)), errors)
+                self.expr_check(expr, hint.as_ref().map(|t| (t, tcc)), errors)
             } else if let Some(hint) = hint {
                 let none = self.heap.mk_none();
                 self.check_type(&none, &hint, x.range, errors, tcc);
@@ -3589,7 +3589,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let tcc: &dyn Fn() -> TypeCheckContext =
                 &|| TypeCheckContext::of_kind(TypeCheckKind::TypeGuardReturn);
             if let Some(expr) = &x.expr {
-                self.expr(expr, hint.as_ref().map(|t| (t, tcc)), errors)
+                self.expr_check(expr, hint.as_ref().map(|t| (t, tcc)), errors)
             } else if let Some(hint) = hint {
                 let none = self.heap.mk_none();
                 self.check_type(&none, &hint, x.range, errors, tcc);
@@ -3604,7 +3604,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .with_annotation(annot_range, "declared return type".to_owned())
             };
             if let Some(expr) = &x.expr {
-                self.expr(expr, hint.as_ref().map(|t| (t, tcc)), errors)
+                self.expr_check(expr, hint.as_ref().map(|t| (t, tcc)), errors)
             } else if let Some(hint) = hint {
                 let none = self.heap.mk_none();
                 self.check_type(&none, &hint, x.range, errors, tcc);
@@ -3946,7 +3946,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     TypeCheckContext::of_kind(TypeCheckKind::from_annotation_target(&annot.target))
                 };
                 self.check_final_reassignment(&annot, e.range(), errors);
-                self.expr(
+                self.expr_check(
                     e,
                     annot.ty(self.heap, self.stdlib).as_ref().map(|t| (t, tcc)),
                     errors,
@@ -3954,7 +3954,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             None => {
                 // TODO(stroxler): propagate attribute narrows here
-                self.expr(e, None, errors)
+                self.expr_check(e, None, errors)
             }
         }
     }
@@ -4173,7 +4173,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         special_export: Option<SpecialExport>,
         errors: &ErrorCollector,
     ) -> Type {
-        let result = self.expr(e, None, errors);
+        let result = self.expr_check(e, None, errors);
         if special_export != Some(SpecialExport::AssertType)
             && let Type::ClassType(cls) = &result
             && self.is_coroutine(&result)
@@ -4749,7 +4749,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ))
             };
             match value {
-                ExprOrBinding::Expr(e) => self.expr(e, Some((field_ty, context)), errors),
+                ExprOrBinding::Expr(e) => self.expr_check(e, Some((field_ty, context)), errors),
                 ExprOrBinding::Binding(b) => {
                     let binding_ty = self.solve_binding(b, assign_range, errors).arc_clone_ty();
                     self.check_and_return_type(binding_ty, field_ty, assign_range, errors, context)
@@ -5395,7 +5395,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if let Some(hints) = hints {
                     let (yield_hints, send_tys) = hints.into_iter().unzip();
                     let yield_ty = if let Some(expr) = x.value.as_ref() {
-                        self.expr(
+                        self.expr_check(
                             expr,
                             Some((&self.unions(yield_hints), &|| {
                                 TypeCheckContext::of_kind(TypeCheckKind::YieldValue)

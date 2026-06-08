@@ -103,7 +103,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let ret = if args.len() == 1 {
-            let mut type_info = self.expr_infer_type_info_with_hint(&args[0], hint, errors);
+            let mut type_info = self.expr_infer_impl(&args[0], hint, errors);
             let ret = type_info.ty().clone();
             type_info.visit_mut(&mut |ty| {
                 *ty = self.for_display(ty.clone());

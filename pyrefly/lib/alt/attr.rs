@@ -1108,7 +1108,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         narrowed_types: &mut Vec<Type>,
     ) {
         let ty = match &got {
-            TypeOrExpr::Expr(got) => self.expr(
+            TypeOrExpr::Expr(got) => self.expr_check(
                 got,
                 Some((&attr_ty, &|| {
                     TypeCheckContext::of_kind(TypeCheckKind::Attribute(attr_name.clone()))

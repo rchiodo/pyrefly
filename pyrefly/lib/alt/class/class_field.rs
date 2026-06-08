@@ -1972,7 +1972,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let ctx: &dyn Fn() -> TypeCheckContext =
                     &|| TypeCheckContext::of_kind(TypeCheckKind::Attribute(name.clone()));
                 let hint = Some((annotation.get_type(), ctx));
-                self.expr(x, hint, errors)
+                self.expr_check(x, hint, errors)
             }
             // We interpret `self.foo = None` to mean the type of foo is None or some unknown type.
             (None, Expr::NoneLiteral(_)) => {

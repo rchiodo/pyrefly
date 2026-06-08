@@ -997,7 +997,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         let mut qs = SmallSet::new();
                         expected_ty.collect_quantifieds(&mut qs);
                         if qs.is_empty() {
-                            self.expr(default, check, errors)
+                            self.expr_check(default, check, errors)
                         } else {
                             let owner = Owner::new();
                             let upper_mp = qs
@@ -1007,7 +1007,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             let upper_ty = expected_ty.clone().subst(&upper_mp);
                             // Check if the default is compatible with the parameter type.
                             let default_errors = self.error_collector();
-                            self.expr(default, Some((&upper_ty, tcc)), &default_errors);
+                            self.expr_check(default, Some((&upper_ty, tcc)), &default_errors);
                             if default_errors.is_empty() {
                                 // The default is compatible; re-infer using the original expected
                                 // type so that Quantifieds (which will be freshened on each call)
@@ -1025,7 +1025,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             }
                         }
                     }
-                    None => self.expr(default, None, errors),
+                    None => self.expr_check(default, None, errors),
                 };
                 // Mark literals as explicit so we don't promote them.
                 let ty = ty.with_literal_style(LitStyle::Explicit);
