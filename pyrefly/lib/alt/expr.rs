@@ -67,6 +67,7 @@ use vec1::vec1;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
+use crate::alt::answers_solver::TypeCheckOptions;
 use crate::alt::callable::CallArg;
 use crate::alt::class::typed_dict::TypedDictErrorKind;
 use crate::alt::nn_module_specials::is_nn_module_dict;
@@ -150,6 +151,52 @@ impl<'a> TypeOrExpr<'a> {
             TypeOrExpr::Type(owner.push(transformed), self.range()),
             changed,
         )
+    }
+}
+
+pub struct ExprOptions<'a, 'b> {
+    errors: &'a ErrorCollector,
+    expectation: ExprExpectation<'a, 'b>,
+}
+
+enum ExprExpectation<'a, 'b> {
+    Infer(Option<HintRef<'a, 'b>>),
+    Check {
+        want: &'b Type,
+        errors: &'a ErrorCollector,
+        context: &'a dyn Fn() -> TypeCheckContext,
+        call_context: Option<&'a CallContext>,
+    },
+}
+
+impl<'a, 'b> ExprOptions<'a, 'b> {
+    pub fn infer(errors: &'a ErrorCollector) -> Self {
+        Self::infer_with_hint(errors, None)
+    }
+
+    fn infer_with_hint(errors: &'a ErrorCollector, hint: Option<HintRef<'a, 'b>>) -> Self {
+        Self {
+            errors,
+            expectation: ExprExpectation::Infer(hint),
+        }
+    }
+
+    pub fn check(
+        want: &'b Type,
+        errors: &'a ErrorCollector,
+        check_errors: &'a ErrorCollector,
+        context: &'a dyn Fn() -> TypeCheckContext,
+        call_context: Option<&'a CallContext>,
+    ) -> Self {
+        Self {
+            errors,
+            expectation: ExprExpectation::Check {
+                want,
+                errors: check_errors,
+                context,
+                call_context,
+            },
+        }
     }
 }
 
@@ -245,7 +292,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         check: Option<(&Type, &dyn Fn() -> TypeCheckContext)>,
         errors: &ErrorCollector,
     ) -> Type {
-        self.expr_type_info(x, check, errors).into_ty()
+        let options = match check {
+            Some((want, context)) => ExprOptions::check(want, errors, errors, context, None),
+            None => ExprOptions::infer(errors),
+        };
+        self.expr_with_options(x, options).into_ty()
     }
 
     /// Like expr_check(), but errors from the infer and check steps are recorded to separate error collectors.
@@ -255,8 +306,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         check: Option<(&Type, &ErrorCollector, &dyn Fn() -> TypeCheckContext)>,
         errors: &ErrorCollector,
     ) -> Type {
-        self.expr_type_info_with_separate_check_errors(x, check, errors)
-            .into_ty()
+        let options = match check {
+            Some((want, check_errors, context)) => {
+                ExprOptions::check(want, errors, check_errors, context, None)
+            }
+            None => ExprOptions::infer(errors),
+        };
+        self.expr_with_options(x, options).into_ty()
     }
 
     pub fn expr_with_separate_check_errors_with_call_context(
@@ -266,18 +322,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         call_context: &CallContext,
     ) -> Type {
-        self.expr_type_info_with_separate_check_errors_with_call_context(
-            x,
-            check,
-            errors,
-            call_context,
-        )
-        .into_ty()
+        let options = match check {
+            Some((want, check_errors, context)) => {
+                ExprOptions::check(want, errors, check_errors, context, Some(call_context))
+            }
+            None => ExprOptions::infer(errors),
+        };
+        self.expr_with_options(x, options).into_ty()
     }
 
     /// Infer a type for an expression.
     pub fn expr_infer(&self, x: &Expr, errors: &ErrorCollector) -> Type {
-        self.expr_infer_impl(x, None, errors).into_ty()
+        self.expr_with_options(x, ExprOptions::infer(errors))
+            .into_ty()
     }
 
     /// Infer a type for an expression, with an optional type hint that influences the inferred type.
@@ -288,7 +345,37 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        self.expr_infer_impl(x, hint, errors).into_ty()
+        self.expr_with_options(x, ExprOptions::infer_with_hint(errors, hint))
+            .into_ty()
+    }
+
+    /// Infer a type for an expression, with options to influence the inference and control whether
+    /// and how the type is checked against an expected type.
+    pub fn expr_with_options(&self, x: &Expr, options: ExprOptions) -> TypeInfo {
+        match options.expectation {
+            ExprExpectation::Check {
+                want,
+                errors,
+                context,
+                call_context,
+            } if !want.is_any() => {
+                let got =
+                    self.expr_infer_impl(x, Some(HintRef::new(want, Some(errors))), options.errors);
+                let check_options = match call_context {
+                    Some(call_context) => {
+                        TypeCheckOptions::with_call_context(errors, context, call_context)
+                    }
+                    None => TypeCheckOptions::new(errors, context),
+                };
+                if self.check_type_with_options(got.ty(), want, x.range(), check_options) {
+                    got
+                } else {
+                    got.with_ty(want.clone())
+                }
+            }
+            ExprExpectation::Check { .. } => self.expr_infer_impl(x, None, options.errors),
+            ExprExpectation::Infer(hint) => self.expr_infer_impl(x, hint, options.errors),
+        }
     }
 
     /// The core logic for inferring a type for an expression.
@@ -356,6 +443,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         res
     }
 
+    #[expect(dead_code)]
     fn expr_type_info(
         &self,
         x: &Expr,
@@ -385,6 +473,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
+    #[expect(dead_code)]
     fn expr_type_info_with_separate_check_errors_with_call_context(
         &self,
         x: &Expr,
