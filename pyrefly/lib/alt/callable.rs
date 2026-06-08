@@ -37,6 +37,7 @@ use starlark_map::small_set::SmallSet;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::answers_solver::TypeCheckOptions;
+use crate::alt::expr::ExprOptions;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::solve::Iterable;
 use crate::alt::unwrap::HintRef;
@@ -406,12 +407,20 @@ impl CallArgPreEval<'_> {
                 {
                     return Some(ty);
                 }
-                Some(solver.expr_with_separate_check_errors_with_call_context(
-                    x,
-                    Some((hint, call_errors, tcc)),
-                    arg_errors,
-                    call_context,
-                ))
+                Some(
+                    solver
+                        .expr_with_options(
+                            x,
+                            ExprOptions::check(
+                                hint,
+                                arg_errors,
+                                call_errors,
+                                tcc,
+                                Some(call_context),
+                            ),
+                        )
+                        .into_ty(),
+                )
             }
             Self::Star(ty, done) => {
                 *done = vararg;
@@ -1211,12 +1220,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     };
                     let arg_ty = match kw.value {
                         TypeOrExpr::Expr(x) => self
-                            .expr_with_separate_check_errors_with_call_context(
+                            .expr_with_options(
                                 x,
-                                hint.map(|ty| (ty, call_errors, tcc)),
-                                arg_errors,
-                                call_context,
-                            ),
+                                match hint {
+                                    Some(ty) => ExprOptions::check(
+                                        ty,
+                                        arg_errors,
+                                        call_errors,
+                                        tcc,
+                                        Some(call_context),
+                                    ),
+                                    None => ExprOptions::infer(arg_errors),
+                                },
+                            )
+                            .into_ty(),
                         TypeOrExpr::Type(x, range) => {
                             if let Some(hint) = &hint
                                 && !hint.is_any()

@@ -26,6 +26,7 @@ use vec1::vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::class_field::ClassField;
+use crate::alt::expr::ExprOptions;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassSynthesizedField;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
@@ -103,26 +104,36 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                         Some(field) => {
-                            self.expr_with_separate_check_errors(
+                            self.expr_with_options(
                                 &x.value,
-                                Some((&field.ty, check_errors, &|| {
-                                    TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
-                                        Some(key_name.clone()),
-                                        false,
-                                    ))
-                                })),
-                                item_errors,
+                                ExprOptions::check(
+                                    &field.ty,
+                                    item_errors,
+                                    check_errors,
+                                    &|| {
+                                        TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
+                                            Some(key_name.clone()),
+                                            false,
+                                        ))
+                                    },
+                                    None,
+                                ),
                             );
                         }
                         None if let ExtraItems::Extra(extra) = &extra_items => {
-                            self.expr_with_separate_check_errors(
+                            self.expr_with_options(
                                 &x.value,
-                                Some((&extra.ty, check_errors, &|| {
-                                    TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
-                                        None, false,
-                                    ))
-                                })),
-                                item_errors,
+                                ExprOptions::check(
+                                    &extra.ty,
+                                    item_errors,
+                                    check_errors,
+                                    &|| {
+                                        TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
+                                            None, false,
+                                        ))
+                                    },
+                                    None,
+                                ),
                             );
                         }
                         None => {
