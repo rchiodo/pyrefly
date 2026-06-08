@@ -102,6 +102,8 @@ pub fn unions_with_literals(
 }
 
 pub fn intersect(ts: Vec<Type>, fallback: Type, heap: &TypeHeap) -> Type {
+    let is_object = |t: &Type| matches!(t, Type::ClassType(cls) if cls.is_builtin("object"));
+    let has_non_object = ts.iter().any(|t| !is_object(t));
     let mut flattened = Vec::new();
     for t in ts {
         match t {
@@ -110,7 +112,12 @@ pub fn intersect(ts: Vec<Type>, fallback: Type, heap: &TypeHeap) -> Type {
                 return fallback;
             }
             Type::Intersect(x) => flattened.extend(x.0),
-            t => flattened.push(t),
+            t => {
+                // `object & T` is just `T`
+                if !has_non_object || !is_object(&t) {
+                    flattened.push(t);
+                }
+            }
         }
     }
     flattened.sort();
