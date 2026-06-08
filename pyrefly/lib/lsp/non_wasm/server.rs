@@ -6443,11 +6443,19 @@ impl TspInterface for Server {
         let source_path = self.path_for_uri_or_notebook_cell(&url)?;
 
         let source_handle = make_open_handle(&self.state, &source_path);
-        let transaction = self.state.transaction();
+        let mut transaction = self.state.transaction();
         let target_handle = transaction
             .import_handle(&source_handle, module_name, None)
             .finding()
             .map(|finding| handle_from_module_path(&self.state, finding.path().dupe()))?;
+
+        // `lookup_export_location` demands the target module's exports, which in turn
+        // requires the `Stdlib` for the target's `SysInfo` to be present. A bare
+        // transaction inherits stdlib from the last committed run, which may be empty
+        // (e.g. when serving TSP queries against modules not yet committed). Run the
+        // target handle for `Require::Exports` first so `compute_stdlib` populates the
+        // stdlib map before the lookup demands it.
+        transaction.run(&[target_handle.dupe()], Require::Exports, None);
 
         let (module, range) = transaction.lookup_export_location(&target_handle, name)?;
         Some((module.path().dupe(), module.to_lsp_range(range)))
