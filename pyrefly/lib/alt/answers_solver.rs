@@ -3145,7 +3145,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         )
     }
 
-    fn check_type_with_options(
+    pub fn check_type_with_options(
         &self,
         got: &Type,
         want: &Type,

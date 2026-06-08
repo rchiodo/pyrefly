@@ -48,6 +48,7 @@ use vec1::Vec1;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
+use crate::alt::answers_solver::TypeCheckOptions;
 use crate::alt::callable::CallArg;
 use crate::alt::class::class_field::ClassField;
 use crate::alt::class::typed_dict::TypedDictErrorKind;
@@ -6168,7 +6169,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let silent = ErrorCollector::new(errors.module().dupe(), ErrorStyle::Never);
         let ty = self.untype_opt((*export_ty).clone(), x.range(), &silent)?;
         let typeform_ty = self.heap.mk_typeform(ty);
-        self.check_type_with_call_context(&typeform_ty, hint, range, errors, tcc, call_context);
+        self.check_type_with_options(
+            &typeform_ty,
+            hint,
+            range,
+            TypeCheckOptions::with_call_context(errors, tcc, call_context),
+        );
         Some(typeform_ty)
     }
 }
