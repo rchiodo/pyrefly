@@ -1045,6 +1045,17 @@ fn find_extra_extension_module<'a>(
                 .collect::<Vec<_>>()
                 .join(".");
             let candidate = dir.join(&filename);
+            // Prefer .pyi stub files (e.g., foo.thrift.pyi) over raw files
+            // (e.g., foo.thrift). This allows generated type stubs to provide
+            // Python type information for non-Python file extensions.
+            let pyi_candidate = dir.join(format!("{}.pyi", &filename));
+            if pyi_candidate.is_file() {
+                return Some(FindingOrError::new_finding(ModulePath::filesystem(
+                    pyi_candidate,
+                )));
+            } else if let Some(v) = phantom_paths.as_deref_mut() {
+                v.push(pyi_candidate);
+            }
             if candidate.is_file() {
                 return Some(FindingOrError::new_finding(ModulePath::filesystem(
                     candidate,
@@ -4941,12 +4952,104 @@ mod tests {
             &mut Some(&mut phantom_paths),
         );
         assert!(result.is_none());
-        // For module `a.b.cinc` with one root, the finder checks two candidates:
-        //   dir_count=1: root/a/b.cinc
-        //   dir_count=0: root/a.b.cinc
+        // For module `a.b.cinc` with one root, the finder checks two candidates
+        // plus their .pyi stubs:
+        //   dir_count=1: root/a/b.cinc.pyi, root/a/b.cinc
+        //   dir_count=0: root/a.b.cinc.pyi, root/a.b.cinc
         assert_eq!(
             phantom_paths,
-            vec![root.join("a/b.cinc"), root.join("a.b.cinc")]
+            vec![
+                root.join("a/b.cinc.pyi"),
+                root.join("a/b.cinc"),
+                root.join("a.b.cinc.pyi"),
+                root.join("a.b.cinc"),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_find_extra_extension_module_pyi_stub_preferred() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        // When both `a/b.thrift` and `a/b.thrift.pyi` exist, prefer the .pyi stub.
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir(
+                "a",
+                vec![TestPath::file("b.thrift"), TestPath::file("b.thrift.pyi")],
+            )],
+        );
+        let extra = vec!["thrift".to_owned()];
+
+        assert_eq!(
+            find_extra_extension_module(
+                ModuleName::from_str("a.b.thrift"),
+                [root.to_path_buf()].iter(),
+                &extra,
+                &mut None,
+            )
+            .unwrap(),
+            FindingOrError::new_finding(ModulePath::filesystem(root.join("a/b.thrift.pyi")))
+        );
+    }
+
+    #[test]
+    fn test_find_extra_extension_module_pyi_stub_only() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root = tempdir.path();
+        // When only `a/b.thrift.pyi` exists (no raw .thrift file), it should
+        // still be found. This is the typical case for python_type_stubs/.
+        TestPath::setup_test_directory(
+            root,
+            vec![TestPath::dir("a", vec![TestPath::file("b.thrift.pyi")])],
+        );
+        let extra = vec!["thrift".to_owned()];
+
+        assert_eq!(
+            find_extra_extension_module(
+                ModuleName::from_str("a.b.thrift"),
+                [root.to_path_buf()].iter(),
+                &extra,
+                &mut None,
+            )
+            .unwrap(),
+            FindingOrError::new_finding(ModulePath::filesystem(root.join("a/b.thrift.pyi")))
+        );
+    }
+
+    #[test]
+    fn test_find_extra_extension_module_pyi_stub_across_roots() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let root1 = tempdir.path().join("source");
+        let root2 = tempdir.path().join("source/python_type_stubs");
+        // Root 1 has the raw .thrift file, root 2 has the .pyi stub.
+        // The stub in root 2 should be found because root 2 is searched first
+        // (when listed first in the search path).
+        TestPath::setup_test_directory(
+            tempdir.path(),
+            vec![TestPath::dir(
+                "source",
+                vec![
+                    TestPath::dir("a", vec![TestPath::file("b.thrift")]),
+                    TestPath::dir(
+                        "python_type_stubs",
+                        vec![TestPath::dir("a", vec![TestPath::file("b.thrift.pyi")])],
+                    ),
+                ],
+            )],
+        );
+        let extra = vec!["thrift".to_owned()];
+
+        // When python_type_stubs root is listed first, the .pyi stub is found.
+        assert_eq!(
+            find_extra_extension_module(
+                ModuleName::from_str("a.b.thrift"),
+                [root2.clone(), root1.clone()].iter(),
+                &extra,
+                &mut None,
+            )
+            .unwrap(),
+            FindingOrError::new_finding(ModulePath::filesystem(root2.join("a/b.thrift.pyi")))
         );
     }
 

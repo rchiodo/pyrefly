@@ -1862,6 +1862,46 @@ import_thrift("nonexistent/module.thrift", "mod")
 "#,
 );
 
+// --- Extra extension .pyi type stub tests ---
+
+fn env_pyi_type_stub() -> TestEnv {
+    // Module name ends with an extra extension but path is a .pyi stub.
+    let mut t = TestEnv::new().with_extra_file_extensions(vec!["thrift".to_owned()]);
+    t.add_with_path(
+        "service.types.thrift",
+        "stubs/service/types.thrift.pyi",
+        r#"
+class MyRecord:
+    name: str
+"#,
+    );
+    t
+}
+
+// Test that `from module.ext import Name` works with .ext.pyi stubs.
+testcase!(
+    test_pyi_type_stub_import,
+    env_pyi_type_stub(),
+    r#"
+from typing import assert_type
+from service.types.thrift import MyRecord
+r = MyRecord()
+assert_type(r.name, str)
+"#,
+);
+
+// Test that `import module.ext as alias` works with .ext.pyi stubs.
+testcase!(
+    test_pyi_type_stub_import_alias,
+    env_pyi_type_stub(),
+    r#"
+from typing import assert_type
+import service.types.thrift as types_mod
+r = types_mod.MyRecord()
+assert_type(r.name, str)
+"#,
+);
+
 // --- __files__ directory import tests ---
 
 // Test that `import foo.__files__ as alias` binds alias without errors.
