@@ -104,8 +104,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> Type {
         let ret = if args.len() == 1 {
-            let mut type_info =
-                self.expr_with_options(&args[0], ExprOptions::infer_with_hint(errors, hint));
+            let mut type_info = self.expr_with_options(&args[0], ExprOptions::infer(errors, hint));
             let ret = type_info.ty().clone();
             type_info.visit_mut(&mut |ty| {
                 *ty = self.for_display(ty.clone());

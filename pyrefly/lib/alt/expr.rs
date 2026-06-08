@@ -170,11 +170,7 @@ enum ExprExpectation<'a, 'b> {
 }
 
 impl<'a, 'b> ExprOptions<'a, 'b> {
-    pub fn infer(errors: &'a ErrorCollector) -> Self {
-        Self::infer_with_hint(errors, None)
-    }
-
-    pub fn infer_with_hint(errors: &'a ErrorCollector, hint: Option<HintRef<'a, 'b>>) -> Self {
+    pub fn infer(errors: &'a ErrorCollector, hint: Option<HintRef<'a, 'b>>) -> Self {
         Self {
             errors,
             expectation: ExprExpectation::Infer(hint),
@@ -295,14 +291,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Type {
         let options = match check {
             Some((want, context)) => ExprOptions::check(want, errors, errors, context, None),
-            None => ExprOptions::infer(errors),
+            None => ExprOptions::infer(errors, None),
         };
         self.expr_with_options(x, options).into_ty()
     }
 
     /// Infer a type for an expression. Convenience wrapper around `expr_with_options`.
     pub fn expr_infer(&self, x: &Expr, errors: &ErrorCollector) -> Type {
-        self.expr_with_options(x, ExprOptions::infer(errors))
+        self.expr_with_options(x, ExprOptions::infer(errors, None))
             .into_ty()
     }
 
@@ -314,7 +310,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         hint: Option<HintRef>,
         errors: &ErrorCollector,
     ) -> Type {
-        self.expr_with_options(x, ExprOptions::infer_with_hint(errors, hint))
+        self.expr_with_options(x, ExprOptions::infer(errors, hint))
             .into_ty()
     }
 

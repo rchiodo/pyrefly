@@ -1224,7 +1224,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                         tcc,
                                         Some(call_context),
                                     ),
-                                    None => ExprOptions::infer(arg_errors),
+                                    None => ExprOptions::infer(arg_errors, None),
                                 },
                             )
                             .into_ty(),
