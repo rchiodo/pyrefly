@@ -3043,43 +3043,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     /// Check if `got` matches `want`, returning `want` if the check fails.
-    pub fn check_and_return_type_info(
-        &self,
-        got: TypeInfo,
-        want: &Type,
-        loc: TextRange,
-        errors: &ErrorCollector,
-        tcc: &dyn Fn() -> TypeCheckContext,
-    ) -> TypeInfo {
-        if self.check_type_with_options(got.ty(), want, loc, TypeCheckOptions::new(errors, tcc)) {
-            got
-        } else {
-            got.with_ty(want.clone())
-        }
-    }
-
-    pub fn check_and_return_type_info_with_call_context(
-        &self,
-        got: TypeInfo,
-        want: &Type,
-        loc: TextRange,
-        errors: &ErrorCollector,
-        tcc: &dyn Fn() -> TypeCheckContext,
-        call_context: &CallContext,
-    ) -> TypeInfo {
-        if self.check_type_with_options(
-            got.ty(),
-            want,
-            loc,
-            TypeCheckOptions::with_call_context(errors, tcc, call_context),
-        ) {
-            got
-        } else {
-            got.with_ty(want.clone())
-        }
-    }
-
-    /// Check if `got` matches `want`, returning `want` if the check fails.
+    /// Convenience wrapper around `check_type_with_options`.
     pub fn check_and_return_type(
         &self,
         got: Type,
@@ -3095,28 +3059,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn check_and_return_type_with_call_context(
-        &self,
-        got: Type,
-        want: &Type,
-        loc: TextRange,
-        errors: &ErrorCollector,
-        tcc: &dyn Fn() -> TypeCheckContext,
-        call_context: &CallContext,
-    ) -> Type {
-        if self.check_type_with_options(
-            &got,
-            want,
-            loc,
-            TypeCheckOptions::with_call_context(errors, tcc, call_context),
-        ) {
-            got
-        } else {
-            want.clone()
-        }
-    }
-
-    /// Check if `got` matches `want`, returning `true` on success and `false` on failure.
+    /// Check if `got` matches `want`. Convenience wrapper around `check_type_with_options`.
     pub fn check_type(
         &self,
         got: &Type,
@@ -3128,23 +3071,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.check_type_with_options(got, want, loc, TypeCheckOptions::new(errors, tcc))
     }
 
-    pub fn check_type_with_call_context(
-        &self,
-        got: &Type,
-        want: &Type,
-        loc: TextRange,
-        errors: &ErrorCollector,
-        tcc: &dyn Fn() -> TypeCheckContext,
-        call_context: &CallContext,
-    ) -> bool {
-        self.check_type_with_options(
-            got,
-            want,
-            loc,
-            TypeCheckOptions::with_call_context(errors, tcc, call_context),
-        )
-    }
-
+    /// Check if `got` matches `want`.
     pub fn check_type_with_options(
         &self,
         got: &Type,
