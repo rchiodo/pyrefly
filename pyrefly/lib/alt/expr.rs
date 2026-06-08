@@ -803,6 +803,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Check whether a type corresponds to a deprecated function or method, and if so, log a deprecation warning.
     fn check_for_deprecated_call(&self, ty: &Type, range: TextRange, errors: &ErrorCollector) {
+        if ty.property_metadata().is_some() {
+            // This prevents misfiring deprecation warnings on property setters and deleters.
+            return;
+        }
         let Some(deprecation) = ty.function_deprecation() else {
             return;
         };

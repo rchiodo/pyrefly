@@ -135,6 +135,38 @@ def f(c: C):
 );
 
 testcase!(
+    test_deprecated_overloaded_property_setter,
+    r#"
+from typing import overload
+from warnings import deprecated
+
+class C:
+    @property
+    def x(self) -> int:
+        ...
+
+    @x.setter
+    @overload
+    @deprecated("Setting x to None is deprecated")
+    def x(self, value: None) -> None:
+        ...
+
+    @x.setter
+    @overload
+    def x(self, value: int) -> None:
+        ...
+
+    @x.setter
+    def x(self, value: int | None) -> None:
+        ...
+
+c = C()
+c.x = None  # E: Call to deprecated overload `C.x`
+c.x = 1
+    "#,
+);
+
+testcase!(
     test_property_with_setter_and_deleter,
     r#"
 from typing import assert_type, reveal_type

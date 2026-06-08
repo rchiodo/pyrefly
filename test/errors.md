@@ -23,10 +23,6 @@ $ touch $TMPDIR/pyrefly.toml && \
 > echo "x: str = 12" > $TMPDIR/shown1.py && \
 > echo "import shown1; y: int = shown1.x" > $TMPDIR/shown2.py && \
 > $PYREFLY check --python-version 3.13.0 $TMPDIR/shown2.py --check-all --output-format=min-text --min-severity=warn
- WARN ast.pyi:1110:10-11: `Constant.n` is deprecated [deprecated]
- WARN ast.pyi:1110:10-18: `Constant.n` is deprecated [deprecated]
- WARN ast.pyi:1121:10-11: `Constant.s` is deprecated [deprecated]
- WARN ast.pyi:1121:10-18: `Constant.s` is deprecated [deprecated]
  WARN importlib/abc.pyi:147:9-41: `ResourceReader` is deprecated [deprecated]
  WARN importlib/resources/__init__.pyi:49:9-29: `contents` is deprecated [deprecated]
  WARN importlib/resources/__init__.pyi:79:41-73: `ResourceReader` is deprecated [deprecated]
