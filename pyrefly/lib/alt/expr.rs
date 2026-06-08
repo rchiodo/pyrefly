@@ -286,6 +286,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Infer a type for an expression, with an optional type hint that influences the inferred type.
     /// The inferred type is also checked against the hint.
+    /// Convenience wrapper around `expr_with_options`.
     pub fn expr_check(
         &self,
         x: &Expr,
@@ -299,46 +300,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.expr_with_options(x, options).into_ty()
     }
 
-    /// Like expr_check(), but errors from the infer and check steps are recorded to separate error collectors.
-    pub fn expr_with_separate_check_errors(
-        &self,
-        x: &Expr,
-        check: Option<(&Type, &ErrorCollector, &dyn Fn() -> TypeCheckContext)>,
-        errors: &ErrorCollector,
-    ) -> Type {
-        let options = match check {
-            Some((want, check_errors, context)) => {
-                ExprOptions::check(want, errors, check_errors, context, None)
-            }
-            None => ExprOptions::infer(errors),
-        };
-        self.expr_with_options(x, options).into_ty()
-    }
-
-    pub fn expr_with_separate_check_errors_with_call_context(
-        &self,
-        x: &Expr,
-        check: Option<(&Type, &ErrorCollector, &dyn Fn() -> TypeCheckContext)>,
-        errors: &ErrorCollector,
-        call_context: &CallContext,
-    ) -> Type {
-        let options = match check {
-            Some((want, check_errors, context)) => {
-                ExprOptions::check(want, errors, check_errors, context, Some(call_context))
-            }
-            None => ExprOptions::infer(errors),
-        };
-        self.expr_with_options(x, options).into_ty()
-    }
-
-    /// Infer a type for an expression.
+    /// Infer a type for an expression. Convenience wrapper around `expr_with_options`.
     pub fn expr_infer(&self, x: &Expr, errors: &ErrorCollector) -> Type {
         self.expr_with_options(x, ExprOptions::infer(errors))
             .into_ty()
     }
 
     /// Infer a type for an expression, with an optional type hint that influences the inferred type.
-    /// Unlike expr_check(), the inferred type is not checked against the hint.
+    /// Convenience wrapper around `expr_with_options`.
     pub fn expr_infer_with_hint(
         &self,
         x: &Expr,
@@ -441,61 +410,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.check_for_deprecated_call(res.ty(), x.range(), errors);
         self.record_type_trace(x.range(), res.ty());
         res
-    }
-
-    #[expect(dead_code)]
-    fn expr_type_info(
-        &self,
-        x: &Expr,
-        check: Option<(&Type, &dyn Fn() -> TypeCheckContext)>,
-        errors: &ErrorCollector,
-    ) -> TypeInfo {
-        self.expr_type_info_with_separate_check_errors(
-            x,
-            check.map(|(ty, tcc)| (ty, errors, tcc)),
-            errors,
-        )
-    }
-
-    fn expr_type_info_with_separate_check_errors(
-        &self,
-        x: &Expr,
-        check: Option<(&Type, &ErrorCollector, &dyn Fn() -> TypeCheckContext)>,
-        errors: &ErrorCollector,
-    ) -> TypeInfo {
-        match check {
-            Some((hint, hint_errors, tcc)) if !hint.is_any() => {
-                let got =
-                    self.expr_infer_impl(x, Some(HintRef::new(hint, Some(hint_errors))), errors);
-                self.check_and_return_type_info(got, hint, x.range(), hint_errors, tcc)
-            }
-            _ => self.expr_infer_impl(x, None, errors),
-        }
-    }
-
-    #[expect(dead_code)]
-    fn expr_type_info_with_separate_check_errors_with_call_context(
-        &self,
-        x: &Expr,
-        check: Option<(&Type, &ErrorCollector, &dyn Fn() -> TypeCheckContext)>,
-        errors: &ErrorCollector,
-        call_context: &CallContext,
-    ) -> TypeInfo {
-        match check {
-            Some((hint, hint_errors, tcc)) if !hint.is_any() => {
-                let got =
-                    self.expr_infer_impl(x, Some(HintRef::new(hint, Some(hint_errors))), errors);
-                self.check_and_return_type_info_with_call_context(
-                    got,
-                    hint,
-                    x.range(),
-                    hint_errors,
-                    tcc,
-                    call_context,
-                )
-            }
-            _ => self.expr_infer_impl(x, None, errors),
-        }
     }
 
     /// This function should not be used directly: we want every expression to record a type trace,
