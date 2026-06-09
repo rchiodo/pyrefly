@@ -1759,11 +1759,7 @@ impl<'a> Transaction<'a> {
     /// Look up the location of an exported name in a module.
     /// Follows re-exports (ExportLocation::OtherModule) to find the original definition.
     /// Returns the module and text range where the name is defined.
-    pub(crate) fn lookup_export_location(
-        &self,
-        handle: &Handle,
-        name: &Name,
-    ) -> Option<(Module, TextRange)> {
+    fn lookup_export_location(&self, handle: &Handle, name: &Name) -> Option<(Module, TextRange)> {
         let module_data = self.get_module(handle);
         let exports = self.lookup_export(module_data);
         let export_map = exports.exports(&self.lookup(module_data));
