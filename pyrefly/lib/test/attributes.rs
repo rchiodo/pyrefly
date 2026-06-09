@@ -2632,7 +2632,6 @@ def g[T: (bytes, str)](x: T) -> T:
 );
 
 testcase!(
-    bug = "We lose the fact that `x.f()` is still `T`",
     test_method_returning_self_preserves_typevar,
     r#"
 from typing import reveal_type, Self
@@ -2643,7 +2642,7 @@ class A:
 
 def f[T](x: T) -> T:
     if isinstance(x, A):
-        return x.f()  # E: `A` is not assignable to declared return type `T`
+        return x.f()
     return x
     "#,
 );
