@@ -842,6 +842,7 @@ pub enum FunctionKind {
     Dataclass,
     DataclassField,
     DataclassReplace,
+    DataclassAsdict,
     /// `typing.dataclass_transform`. Note that this is `dataclass_transform` itself, *not* the
     /// decorator created by a `dataclass_transform(...)` call. See
     /// https://typing.python.org/en/latest/spec/dataclasses.html#specification.
@@ -1234,6 +1235,7 @@ impl FunctionKind {
             ("dataclasses", None, "dataclass") => Self::Dataclass,
             ("dataclasses", None, "field") => Self::DataclassField,
             ("dataclasses", None, "replace") => Self::DataclassReplace,
+            ("dataclasses", None, "asdict") => Self::DataclassAsdict,
             ("typing" | "typing_extensions", None, "overload") => Self::Overload,
             ("typing" | "typing_extensions", None, "override") => Self::Override,
             ("typing" | "typing_extensions", None, "cast") => Self::Cast,
@@ -1268,6 +1270,7 @@ impl FunctionKind {
             Self::Dataclass => ModuleName::dataclasses(),
             Self::DataclassField => ModuleName::dataclasses(),
             Self::DataclassReplace => ModuleName::dataclasses(),
+            Self::DataclassAsdict => ModuleName::dataclasses(),
             Self::DataclassTransform => ModuleName::typing(),
             Self::Final => ModuleName::typing(),
             Self::Overload => ModuleName::typing(),
@@ -1296,6 +1299,7 @@ impl FunctionKind {
             Self::Dataclass => Cow::Owned(Name::new_static("dataclass")),
             Self::DataclassField => Cow::Owned(Name::new_static("field")),
             Self::DataclassReplace => Cow::Owned(Name::new_static("replace")),
+            Self::DataclassAsdict => Cow::Owned(Name::new_static("asdict")),
             Self::DataclassTransform => Cow::Owned(Name::new_static("dataclass_transform")),
             Self::Final => Cow::Owned(Name::new_static("final")),
             Self::Overload => Cow::Owned(Name::new_static("overload")),
@@ -1324,6 +1328,7 @@ impl FunctionKind {
             Self::Dataclass => None,
             Self::DataclassField => None,
             Self::DataclassReplace => None,
+            Self::DataclassAsdict => None,
             Self::DataclassTransform => None,
             Self::Final => None,
             Self::Overload => None,
