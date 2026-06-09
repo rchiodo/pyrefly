@@ -719,18 +719,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // This mirrors the same check in binop_infer.
                     (Type::Any(style), _) => style.propagate(),
                     (_, Type::Any(style)) => style.propagate(),
-                    _ if let Some(ret_if_quantified) =
-                        self.on_quantifieds(left, right, &|left, right| {
-                            self.compare_types(
-                                x,
-                                op,
-                                left,
-                                right,
-                                current_left_range,
-                                current_right_range,
-                                errors,
-                            )
-                        }) =>
+                    // If the RHS of a containment check isn't a quantified, it may contain a
+                    // nested quantified that on_quantifieds would fail to detect.
+                    _ if (!matches!(op, CmpOp::In | CmpOp::NotIn)
+                        || matches!(right, Type::Quantified(_)))
+                        && let Some(ret_if_quantified) =
+                            self.on_quantifieds(left, right, &|left, right| {
+                                self.compare_types(
+                                    x,
+                                    op,
+                                    left,
+                                    right,
+                                    current_left_range,
+                                    current_right_range,
+                                    errors,
+                                )
+                            }) =>
                     {
                         ret_if_quantified
                     }

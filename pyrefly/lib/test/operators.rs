@@ -1146,3 +1146,17 @@ def f[T: (bytes, str)](x: T) -> T:
         return x + ""
     "#,
 );
+
+testcase!(
+    test_containment_with_typevars,
+    r#"
+from typing import Iterable
+def f1[T: (str, bytes)](x: T, y: Iterable[T]):
+    return x in y
+def f2[T: (str, bytes)](x: T, y: Iterable[T]):
+    if isinstance(x, str):
+        return x in y
+def f3[T: (str, bytes)](x: T, y: T):
+    return x in y
+    "#,
+);
