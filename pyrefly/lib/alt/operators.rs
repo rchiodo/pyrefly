@@ -15,6 +15,7 @@ use pyrefly_types::literal::LitStyle;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::shaped_array::broadcast_shapes;
+use pyrefly_types::simplify::intersect;
 use pyrefly_types::type_var::Restriction;
 use pyrefly_util::prelude::SliceExt;
 use ruff_python_ast::CmpOp;
@@ -389,19 +390,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn on_quantified(&self, q: &Quantified, f: &dyn Fn(&Type) -> Type) -> Type {
         if let Restriction::Constraints(constraints) = &q.restriction {
-            let mut all_constraints_preserved = true;
-            let res = self.unions(constraints.map(|constraint| {
+            self.unions(constraints.map(|constraint| {
                 let res = f(constraint);
-                all_constraints_preserved &= res == *constraint;
-                res
-            }));
-            // If f returned the constraint unchanged for every constraint,
-            // the result is the input quantified.
-            if all_constraints_preserved {
-                q.clone().to_type(self.heap)
-            } else {
-                res
-            }
+                if res == *constraint {
+                    // If f returned the constraint unchanged, preserve the quantified.
+                    intersect(
+                        vec![q.clone().to_type(self.heap), res.clone()],
+                        res,
+                        self.heap,
+                    )
+                } else {
+                    res
+                }
+            }))
         } else {
             f(&q.upper_bound(self.stdlib, self.heap))
         }
