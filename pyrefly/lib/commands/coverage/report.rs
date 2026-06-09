@@ -6,7 +6,7 @@
  */
 
 use clap::Parser;
-use pyrefly_config::args::ConfigOverrideArgs;
+use pyrefly_config::args::EnvironmentArgs;
 use pyrefly_util::thread_pool::ThreadCount;
 
 use crate::commands::config_finder::ConfigConfigurerWrapper;
@@ -28,7 +28,7 @@ pub struct ReportArgs {
     files: FilesArgs,
 
     #[command(flatten)]
-    config_override: ConfigOverrideArgs,
+    config_override: EnvironmentArgs,
 
     /// When enabled, `.py` files are skipped if a corresponding `.pyi`
     /// file is also present in the set of files to check.
@@ -60,7 +60,7 @@ impl ReportArgs {
         }
 
         let (files_to_check, config_finder, _) =
-            self.files.resolve(self.config_override, wrapper)?;
+            self.files.resolve(self.config_override.into(), wrapper)?;
         let (module_reports, _) = collect_module_reports(
             files_to_check,
             config_finder,
