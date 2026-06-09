@@ -3467,3 +3467,21 @@ def f[T](x: T) -> T:
         return x
     "#,
 );
+
+testcase!(
+    bug = "Wrong revealed types",
+    test_narrow_after_method_call_on_typevar,
+    r#"
+from typing import reveal_type, Self
+class A:
+    def lower(self) -> Self: ...
+class B:
+    def lower(self) -> Self: ...
+def f[T: A | B](x: T):
+    x = x.lower()
+    if isinstance(x, A):
+        reveal_type(x)  # E: revealed type: T
+    else:
+        reveal_type(x)  # E: revealed type: Never
+    "#,
+);

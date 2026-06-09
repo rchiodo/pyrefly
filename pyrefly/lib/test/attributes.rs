@@ -2620,3 +2620,31 @@ C.create(42)
 C.create(a=42)
 "#,
 );
+
+testcase!(
+    bug = "We lose the fact that `x.lower()` is still `T`",
+    test_method_preserves_typevar,
+    r#"
+def f[T: (bytes, str)](x: T, y: T) -> T: ...
+def g[T: (bytes, str)](x: T) -> T:
+    y = x.lower()
+    return f(y, y)  # E: `bytes | str` is not assignable to any of constraints `bytes`, `str` of type variable `T`
+    "#,
+);
+
+testcase!(
+    bug = "We lose the fact that `x.f()` is still `T`",
+    test_method_returning_self_preserves_typevar,
+    r#"
+from typing import reveal_type, Self
+
+class A:
+    def f(self) -> Self:
+        return self
+
+def f[T](x: T) -> T:
+    if isinstance(x, A):
+        return x.f()  # E: `A` is not assignable to declared return type `T`
+    return x
+    "#,
+);
