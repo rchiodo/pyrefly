@@ -71,6 +71,7 @@ use crate::alt::attr::AttrDefinition;
 use crate::alt::attr::AttrInfo;
 use crate::binding::binding::Key;
 use crate::config::error_kind::ErrorKind;
+use crate::error::suppress::detect_line_ending;
 use crate::export::exports::Export;
 use crate::export::exports::ExportLocation;
 use crate::lsp::module_helpers::collect_symbol_def_paths;
@@ -2933,6 +2934,17 @@ impl<'a> Transaction<'a> {
             import_actions.into_iter().map(|a| a.to_tuple()).collect();
         actions.extend(generate_actions);
         actions.extend(other_actions);
+
+        // The edit builders above emit `\n`-terminated text. Normalize each edit's
+        // inserted text to the line ending used by the file it targets, so the edits
+        // are correct on CRLF files instead of mixing line endings.
+        for (_, module, _, insert_text) in &mut actions {
+            let line_ending = detect_line_ending(module.contents().as_str());
+            if line_ending != "\n" {
+                *insert_text = insert_text.replace('\n', line_ending);
+            }
+        }
+
         (!actions.is_empty()).then_some(actions)
     }
 

@@ -107,7 +107,7 @@ impl SerializedError {
 
 /// Detects the line ending style used in a string.
 /// Returns "\r\n" if CRLF is detected, otherwise returns "\n".
-fn detect_line_ending(content: &str) -> &'static str {
+pub(crate) fn detect_line_ending(content: &str) -> &'static str {
     if content.contains("\r\n") {
         "\r\n"
     } else {
