@@ -3483,3 +3483,27 @@ def f[T: A | B](x: T):
         reveal_type(x)  # E: revealed type: B & T
     "#,
 );
+
+testcase!(
+    bug = "We can't handle a quantified intersected with multiple concrete types",
+    test_narrow_typevar_multiple_times,
+    r#"
+class A:
+    def __add__(self, other) -> "A": ...
+    def f(self) -> "A": ...
+
+class B:
+    def __add__(self, other) -> "B": ...
+    def f(self) -> "B": ...
+
+def f[T: (A, B)](x: T, y: T) -> T | None:
+    if isinstance(x, A):
+        if isinstance(x, B):
+            return x + y  # E: `B` is not assignable to declared return type `T | None`
+
+def g[T: (A, B)](x: T) -> T | None:
+    if isinstance(x, A):
+        if isinstance(x, B):
+            return x.f()  # E: `B` is not assignable to declared return type `T | None`
+    "#,
+);
