@@ -853,7 +853,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         }
         // Preserve Pos vs PosOnly so that the subset checker can reject name mismatches
         // (e.g. Pos("a", int) vs Pos("self", K) fails, but PosOnly matches any name).
-        let args: Vec<Param> = want_ts.iter().map(|p| p.to_subset_param()).collect();
+        let args: Vec<Param> = want_ts.iter().map(|p| p.to_param_preserve_name()).collect();
         let (pre, post) = got.items().split_at(args.len());
         self.is_subset_param_list(pre, &args)?;
         self.is_subset_eq(
@@ -874,7 +874,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         if want.len() < got_ts.len() {
             return Err(SubsetError::Other);
         }
-        let args: Vec<Param> = got_ts.iter().map(|p| p.to_subset_param()).collect();
+        let args: Vec<Param> = got_ts.iter().map(|p| p.to_param_preserve_name()).collect();
         let (pre, post) = want.items().split_at(args.len());
         self.is_subset_param_list(&args, pre)?;
         self.is_subset_eq(

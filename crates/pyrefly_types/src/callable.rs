@@ -228,19 +228,21 @@ impl ParamList {
         Self(xs)
     }
 
-    /// Create a new ParamList from a list of types
+    /// Create a new ParamList from a list of types,
+    /// converting each one into a positional-only param
     pub fn new_types(xs: Vec<PrefixParam>) -> Self {
-        Self(xs.into_map(|p| p.into_param()))
+        Self(xs.into_map(|p| p.into_posonly_param()))
     }
 
-    /// Prepend some positional parameters, for `Concatenate`
+    /// Prepend some parameters for `Concatenate`
     pub fn prepend_types(&self, pre: &[PrefixParam]) -> Cow<'_, ParamList> {
         if pre.is_empty() {
             Cow::Borrowed(self)
         } else {
+            // Use `to_subset_param` to preserve Pos v.s. PosOnly
             Cow::Owned(ParamList(
                 pre.iter()
-                    .map(|p| p.to_param())
+                    .map(|p| p.to_param_preserve_name())
                     .chain(self.0.iter().cloned())
                     .collect(),
             ))
@@ -377,29 +379,17 @@ impl PrefixParam {
     /// Convert to a positional-only `Param`. Per the typing spec, params in
     /// `Concatenate` are positional-only at the call site. This is also appropriate
     /// for ParamSpec forwarding where prefix params must be passed positionally.
-    pub fn into_param(self) -> Param {
+    pub fn into_posonly_param(self) -> Param {
         match self {
             Self::PosOnly(name, ty, required) => Param::PosOnly(name, ty, required),
             Self::Pos(name, ty, required) => Param::PosOnly(Some(name), ty, required),
         }
     }
 
-    /// Convert to a positional-only `Param` by cloning. See `into_param`.
-    pub fn to_param(&self) -> Param {
-        match self {
-            Self::PosOnly(name, ty, required) => {
-                Param::PosOnly(name.clone(), ty.clone(), required.clone())
-            }
-            Self::Pos(name, ty, required) => {
-                Param::PosOnly(Some(name.clone()), ty.clone(), required.clone())
-            }
-        }
-    }
-
     /// Convert to a `Param` preserving the Pos vs PosOnly distinction.
     /// Used for subset/subtype checking where name matching matters,
     /// and for direct calls where prefix params should remain keyword-passable.
-    pub fn to_subset_param(&self) -> Param {
+    pub fn to_param_preserve_name(&self) -> Param {
         match self {
             Self::PosOnly(name, ty, required) => {
                 Param::PosOnly(name.clone(), ty.clone(), required.clone())
