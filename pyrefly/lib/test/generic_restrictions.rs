@@ -1527,11 +1527,20 @@ def f[T: (int, str)](x: T) -> T:
 );
 
 testcase!(
-    bug = "isinstance(x, str) should also narrow the type of y to str",
     test_binop_on_two_typevars_after_narrow_one,
     r#"
+from typing import reveal_type
 def f[T: (str, bytes)](x: T, y: T):
     if isinstance(x, str):
-        return x + y  # E: `+` is not supported between `str & T` and `bytes`
+        return reveal_type(x + y)  # E: revealed type: str & T
+    "#,
+);
+
+testcase!(
+    test_binop_on_typevar_with_union_bound,
+    r#"
+def f[T: bytes | str](x: T):
+    if isinstance(x, str):
+        y: str = 2 * x
     "#,
 );

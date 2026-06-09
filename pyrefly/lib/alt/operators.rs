@@ -17,7 +17,7 @@ use pyrefly_types::shaped_array::ShapedArrayType;
 use pyrefly_types::shaped_array::broadcast_shapes;
 use pyrefly_types::simplify::intersect;
 use pyrefly_types::type_var::Restriction;
-use pyrefly_util::prelude::SliceExt;
+use pyrefly_util::prelude::VecExt;
 use ruff_python_ast::CmpOp;
 use ruff_python_ast::ExprBinOp;
 use ruff_python_ast::ExprCompare;
@@ -388,9 +388,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         matches!(ty, Type::Literal(f) if f.value == Lit::Int(LitInt::new(0)))
     }
 
-    fn on_quantified(&self, q: &Quantified, f: &dyn Fn(&Type) -> Type) -> Type {
+    /// Performs an operation `f` on a quantified `q`, which may be narrowed to a concrete type.
+    fn on_quantified(
+        &self,
+        q: &Quantified,
+        narrowed_type: Option<&Type>,
+        f: &dyn Fn(&Type) -> Type,
+    ) -> Type {
         if let Restriction::Constraints(constraints) = &q.restriction {
-            self.unions(constraints.map(|constraint| {
+            let cur_constraints = if let Some(narrowed_type) = narrowed_type {
+                vec![narrowed_type]
+            } else {
+                constraints.iter().collect()
+            };
+            self.unions(cur_constraints.into_map(|constraint| {
                 let res = f(constraint);
                 if res == *constraint {
                     // If f returned the constraint unchanged, preserve the quantified.
@@ -403,6 +414,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     res
                 }
             }))
+        } else if let Some(narrowed_type) = narrowed_type {
+            f(narrowed_type)
         } else {
             f(&q.upper_bound(self.stdlib, self.heap))
         }
@@ -414,29 +427,41 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         right: &Type,
         f: &dyn Fn(&Type, &Type) -> Type,
     ) -> Option<Type> {
-        match (left, right) {
-            (Type::Quantified(left_q), Type::Quantified(right_q))
+        match (left.as_quantified(), right.as_quantified()) {
+            (Some((left_q, left_narrow)), Some((right_q, right_narrow)))
                 if matches!(left_q.restriction(), Restriction::Constraints(_))
                     && left_q == right_q =>
             {
-                Some(self.on_quantified(left_q, &|constraint| f(constraint, constraint)))
+                Some(
+                    self.on_quantified(left_q, left_narrow.or(right_narrow), &|constraint| {
+                        f(constraint, constraint)
+                    }),
+                )
             }
             // We skip non-union bounds to avoid accidentally erasing `Self` typevars.
-            (Type::Quantified(left_q), _)
+            (Some((left_q, left_narrow)), _)
                 if matches!(
                     left_q.restriction(),
                     Restriction::Constraints(_) | Restriction::Bound(Type::Union(_))
                 ) =>
             {
-                Some(self.on_quantified(left_q, &|left_restriction| f(left_restriction, right)))
+                Some(
+                    self.on_quantified(left_q, left_narrow, &|left_restriction| {
+                        f(left_restriction, right)
+                    }),
+                )
             }
-            (_, Type::Quantified(right_q))
+            (_, Some((right_q, right_narrow)))
                 if matches!(
                     right_q.restriction(),
                     Restriction::Constraints(_) | Restriction::Bound(Type::Union(_))
                 ) =>
             {
-                Some(self.on_quantified(right_q, &|right_restriction| f(left, right_restriction)))
+                Some(
+                    self.on_quantified(right_q, right_narrow, &|right_restriction| {
+                        f(left, right_restriction)
+                    }),
+                )
             }
             _ => None,
         }
@@ -722,7 +747,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // If the RHS of a containment check isn't a quantified, it may contain a
                     // nested quantified that on_quantifieds would fail to detect.
                     _ if (!matches!(op, CmpOp::In | CmpOp::NotIn)
-                        || matches!(right, Type::Quantified(_)))
+                        || right.as_quantified().is_some())
                         && let Some(ret_if_quantified) =
                             self.on_quantifieds(left, right, &|left, right| {
                                 self.compare_types(
