@@ -954,6 +954,77 @@ x: int = ("a"
     }
 
     #[test]
+    fn test_add_suppressions_collection_literal_elements_stay_above() {
+        // Regression test: errors on the per-line elements of a multi-line
+        // collection literal must be suppressed with a comment on the line
+        // above, not inline. Each element sits on its own line, so a line-above
+        // comment is stable under formatting. Forcing these inline pushes the
+        // element past the line-length limit, causing the formatter to split it
+        // and the suppression (and error) to migrate across passes.
+        assert_suppress_errors(
+            r#"
+def g(x: int) -> int:
+    return x
+
+
+def f() -> None:
+    items = [
+        g("a"),
+        g("b"),
+    ]
+    print(items)
+"#,
+            r#"
+def g(x: int) -> int:
+    return x
+
+
+def f() -> None:
+    items = [
+        # pyrefly: ignore [bad-argument-type]
+        g("a"),
+        # pyrefly: ignore [bad-argument-type]
+        g("b"),
+    ]
+    print(items)
+"#,
+        );
+    }
+
+    #[test]
+    fn test_add_suppressions_nested_ternary_inside_collection_inline() {
+        // A multi-line ternary used as a collection element is still suppressed
+        // inline: the enclosing list literal is excluded, but the nested
+        // conditional expression is recorded, so an error on its non-first line
+        // is placed inline (a line-above comment would be relocated out of the
+        // parenthesized expression).
+        assert_suppress_errors(
+            r#"
+def f(x: str) -> None:
+    items = [
+        (
+            x
+            if x.startswith("a")
+            else "z" + x.split(",")
+        ),
+    ]
+    print(items)
+"#,
+            r#"
+def f(x: str) -> None:
+    items = [
+        (
+            x
+            if x.startswith("a")
+            else "z" + x.split(",")  # pyrefly: ignore [unsupported-operation]
+        ),
+    ]
+    print(items)
+"#,
+        );
+    }
+
+    #[test]
     fn test_no_suppress_generated_files() {
         let file_contents = format!(
             r#"
