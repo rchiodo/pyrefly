@@ -1135,3 +1135,14 @@ _ = [{"col": None}] * 1000
 assert_type([1, 2, 3] * 5, list[int])
 "#,
 );
+
+testcase!(
+    test_add_after_narrow,
+    r#"
+def f[T: (bytes, str)](x: T) -> T:
+    if isinstance(x, bytes):
+        return x + b""
+    else:
+        return x + ""
+    "#,
+);

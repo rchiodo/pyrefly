@@ -1738,13 +1738,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     ))
                 }
             }
-            (t1, Type::Quantified(q)) => match q.restriction() {
-                // This only works for constraints and not bounds, because a TypeVar must resolve to exactly one of its constraints.
-                Restriction::Constraints(constraints) => any(constraints.iter(), |constraint| {
-                    self.is_subset_eq(t1, constraint)
-                }),
-                _ => Err(SubsetError::Other),
-            },
+            (_, Type::Quantified(_)) => Err(SubsetError::Other),
             (l, Type::Intersect(u)) => all(u.0.iter(), |u| self.is_subset_eq(l, u)),
             (l, Type::Union(u_union)) => {
                 let ordered_us = self.solver.partial_sort_by_vars(&u_union.members);
