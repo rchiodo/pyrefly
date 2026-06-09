@@ -2622,13 +2622,12 @@ C.create(a=42)
 );
 
 testcase!(
-    bug = "We lose the fact that `x.lower()` is still `T`",
     test_method_preserves_typevar,
     r#"
 def f[T: (bytes, str)](x: T, y: T) -> T: ...
 def g[T: (bytes, str)](x: T) -> T:
     y = x.lower()
-    return f(y, y)  # E: `bytes | str` is not assignable to any of constraints `bytes`, `str` of type variable `T`
+    return f(y, y)
     "#,
 );
 
@@ -2646,5 +2645,23 @@ def f[T](x: T) -> T:
     if isinstance(x, A):
         return x.f()  # E: `A` is not assignable to declared return type `T`
     return x
+    "#,
+);
+
+testcase!(
+    test_getitem_on_constrained_typevar,
+    r#"
+from typing import assert_type
+
+class A:
+    def __getitem__(self, key) -> "A": ...
+
+class B:
+    def __getitem__(self, key: str) -> A: ...
+
+class C[T: (A, B)]:
+    def f(self) -> T: ...
+    def g(self):
+        return self.f()[""][0]
     "#,
 );
