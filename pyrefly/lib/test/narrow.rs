@@ -3313,6 +3313,7 @@ def example(variable: str | None) -> str:
 
 // https://github.com/facebook/pyrefly/issues/1575
 testcase!(
+    bug = "Most of the narrowed types are missing `& T`",
     test_typevar_isinstance_narrow_else,
     r#"
 from typing import TypeVar, assert_type, reveal_type
@@ -3437,4 +3438,33 @@ def b():
         def inner() -> None:
             assert_type(val, int)
 "#,
+);
+
+testcase!(
+    bug = "Missing negative narrowing",
+    test_isinstance_on_bounded_typevar,
+    r#"
+from typing import reveal_type
+def f[T: int | str](x: T) -> T:
+    if isinstance(x, int):
+        reveal_type(x)  # E: revealed type: int & T
+        return x
+    else:
+        reveal_type(x)  # E: revealed type: T
+        return x
+    "#,
+);
+
+testcase!(
+    test_isinstance_on_unrestricted_typevar,
+    r#"
+from typing import reveal_type
+def f[T](x: T) -> T:
+    if isinstance(x, int):
+        reveal_type(x)  # E: revealed type: int & T
+        return x
+    else:
+        reveal_type(x)  # E: revealed type: T
+        return x
+    "#,
 );
