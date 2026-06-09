@@ -440,7 +440,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors,
                 context,
                 &closest_overload.func.1.signature,
-                &closest_overload.call_errors,
+                closest_overload.call_errors,
             );
             (
                 self.heap.mk_any_error(),
@@ -501,7 +501,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         closest_overload_signature: &Callable,
-        closest_overload_call_errors: &ErrorCollector,
+        closest_overload_call_errors: ErrorCollector,
     ) {
         // Build a string showing the argument types for error messages
         let mut arg_type_strs = Vec::new();
@@ -550,9 +550,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .for_display(self.heap.mk_callable_from(signature));
             details.push(format!("  {signature}{suffix}"));
         }
-        // We intentionally discard closest_overload.call_errors. When no overload matches,
-        // there's a high likelihood that the "closest" one by our heuristic isn't the right
-        // one, in which case the call errors are just noise.
         let mut builder = errors
             .error_builder(arguments_range, ErrorKind::NoMatchingOverload, header)
             .with_context(context)
@@ -598,6 +595,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     })
                 });
             builder = builder.with_detail(arity_mismatch);
+        } else {
+            builder = builder.with_errors_as_details(closest_overload_call_errors);
         }
         builder.emit();
     }

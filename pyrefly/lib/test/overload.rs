@@ -1438,6 +1438,21 @@ g(x=1, y="hello")  # E: No matching overload found for function `g` called with 
 );
 
 testcase!(
+    test_overload_error_shows_call_error,
+    r#"
+from typing import overload
+
+@overload
+def f(x: int) -> int: ...
+@overload
+def f(x: str) -> str: ...
+def f(x): return x
+
+f(3.14)  # E: `float` is not assignable to parameter `x` with type `int`
+    "#,
+);
+
+testcase!(
     test_varargs_materialization,
     r#"
 from typing import Any, assert_type, overload
