@@ -61,7 +61,6 @@ use crate::types::lit_int::LitInt;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
-use crate::types::type_var::Restriction;
 use crate::types::types::CalleeKind;
 use crate::types::types::TParams;
 use crate::types::types::Type;
@@ -497,14 +496,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let (vs, right) = self
                         .solver()
                         .fresh_quantified(&tparams, right, self.uniques);
-                    // For constrained TypeVars, subtract from the concrete constraints
+                    // For TypeVars, subtract from the concrete constraints
                     // so that e.g. isinstance(x, (int, float)) with T(int, str, float)
                     // narrows the else branch to str instead of leaving it as T.
-                    result = if let Type::Quantified(q) = &result
-                        && let Restriction::Constraints(_) = q.restriction()
-                    {
+                    result = if let Type::Quantified(q) = &result {
                         let concrete = q.upper_bound(self.stdlib, self.heap);
-                        self.subtract(&concrete, &right)
+                        let subtraction = self.subtract(&concrete, &right);
+                        self.intersect_with_fallback(&result, &subtraction, &|| subtraction.clone())
                     } else {
                         self.subtract(&result, &right)
                     };

@@ -3441,7 +3441,6 @@ def b():
 );
 
 testcase!(
-    bug = "Missing negative narrowing",
     test_isinstance_on_bounded_typevar,
     r#"
 from typing import reveal_type
@@ -3450,7 +3449,7 @@ def f[T: int | str](x: T) -> T:
         reveal_type(x)  # E: revealed type: int & T
         return x
     else:
-        reveal_type(x)  # E: revealed type: T
+        reveal_type(x)  # E: revealed type: str & T
         return x
     "#,
 );
