@@ -1865,9 +1865,19 @@ impl Type {
         self
     }
 
-    pub fn as_quantified(&self) -> Option<Quantified> {
+    /// If this type represents a (possibly narrowed) quantified (i.e., `Q`  or `Q & T`), returns
+    /// the quantified `Q` plus the type `T` it is narrowed to.
+    pub fn as_quantified(&self) -> Option<(&Quantified, Option<&Type>)> {
         match self {
-            Type::Quantified(q) => Some((**q).clone()),
+            Type::Quantified(q) => Some((q, None)),
+            Type::Intersect(x) => match x.0.as_slice() {
+                [Type::Quantified(q), t] | [t, Type::Quantified(q)]
+                    if !matches!(t, Type::Quantified(_)) =>
+                {
+                    Some((q, Some(t)))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
