@@ -1658,7 +1658,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
     ) -> TypeInfo {
         match op {
-            NarrowOp::Atomic(subject, AtomicNarrowOp::HasKey(key)) => {
+            NarrowOp::Atomic(
+                subject,
+                key_op @ (AtomicNarrowOp::HasKey(key) | AtomicNarrowOp::NotHasKey(key)),
+            ) => {
+                let key_present = matches!(key_op, AtomicNarrowOp::HasKey(_));
                 let resolved_chain = subject
                     .as_ref()
                     .and_then(|s| self.resolve_facet_chain(s.chain.clone()));
@@ -1667,7 +1671,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (Some(_), None) => return type_info.clone(),
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
-                let narrowed_base = self.narrow_key_membership(&base_ty, key, true);
+                let narrowed_base = self.narrow_key_membership(&base_ty, key, key_present);
                 let has_dict_member = self.has_dict_like_member(&narrowed_base);
                 let mut narrowed = match &resolved_chain {
                     Some(chain) => type_info.with_narrow(chain.facets(), narrowed_base),
@@ -1676,30 +1680,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 if has_dict_member {
                     let facet = FacetKind::Key(key.to_string());
                     let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
-                    narrowed.record_present(&facets);
-                }
-                narrowed
-            }
-            NarrowOp::Atomic(subject, AtomicNarrowOp::NotHasKey(key)) => {
-                let resolved_chain = subject
-                    .as_ref()
-                    .and_then(|s| self.resolve_facet_chain(s.chain.clone()));
-                let base_ty = match (&subject, &resolved_chain) {
-                    (Some(_), Some(chain)) => self.get_facet_chain_type(type_info, chain, range),
-                    (Some(_), None) => return type_info.clone(),
-                    (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
-                };
-                let narrowed_base = self.narrow_key_membership(&base_ty, key, false);
-                let has_dict_member = self.has_dict_like_member(&narrowed_base);
-                let mut narrowed = match &resolved_chain {
-                    Some(chain) => type_info.with_narrow(chain.facets(), narrowed_base),
-                    None => type_info.clone().with_ty(narrowed_base),
-                };
-                if has_dict_member {
-                    let facet = FacetKind::Key(key.to_string());
-                    let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
-                    // Invalidate existing facet narrows
-                    narrowed.update_for_assignment(&facets, None);
+                    if key_present {
+                        // `key in x` records presence only; subscript inference computes the value type.
+                        narrowed.record_present(&facets);
+                    } else {
+                        // `key not in x`: invalidate any narrow recorded for the key.
+                        narrowed.update_for_assignment(&facets, None);
+                    }
                 }
                 narrowed
             }
