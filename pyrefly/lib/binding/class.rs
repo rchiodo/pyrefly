@@ -1384,10 +1384,12 @@ impl<'a> BindingsBuilder<'a> {
         let (member_definitions, has_dynamic_fields) =
             self.parse_collections_namedtuple_fields(members, class_name.range);
         let n_members = member_definitions.len();
+        for kw in keywords.iter_mut() {
+            self.ensure_expr(&mut kw.value, class_object.usage());
+        }
         let mut illegal_identifier_handling = IllegalIdentifierHandling::Error;
         let mut defaults: Vec<Option<Expr>> = vec![None; n_members];
-        for kw in keywords {
-            self.ensure_expr(&mut kw.value, class_object.usage());
+        for kw in keywords.iter() {
             if let Some(name) = &kw.arg
                 && name.id == "rename"
                 && let Expr::BooleanLiteral(lit) = &kw.value
@@ -1427,8 +1429,11 @@ impl<'a> BindingsBuilder<'a> {
                 );
             }
         }
-        if let Some(ref default_elts) = adjacent_defaults {
-            apply_adjacent_defaults(default_elts, n_members, &mut defaults);
+        if let Some(mut default_elts) = adjacent_defaults {
+            for elt in default_elts.iter_mut() {
+                self.ensure_expr(elt, class_object.usage());
+            }
+            apply_adjacent_defaults(&default_elts, n_members, &mut defaults);
         }
         let member_definitions_with_defaults: Vec<(
             String,
@@ -1484,19 +1489,23 @@ impl<'a> BindingsBuilder<'a> {
             self.parse_typing_namedtuple_fields(members, class_name.range);
         let n_members = parsed_fields.len();
         let mut defaults: Vec<Option<Expr>> = vec![None; n_members];
-        if let Some(ref default_elts) = adjacent_defaults {
-            apply_adjacent_defaults(default_elts, n_members, &mut defaults);
+        if let Some(mut default_elts) = adjacent_defaults {
+            for elt in default_elts.iter_mut() {
+                self.ensure_expr(elt, class_object.usage());
+            }
+            apply_adjacent_defaults(&default_elts, n_members, &mut defaults);
         }
         let member_definitions: Vec<(String, TextRange, Option<Expr>, Option<ExprOrBinding>)> =
             parsed_fields
                 .into_iter()
                 .zip(defaults)
                 .map(|((name, range, annotation), default)| {
+                    let bound_default = default.map(ExprOrBinding::Expr);
                     if let Some(mut ann) = annotation {
                         self.ensure_type(&mut ann, &mut None);
-                        (name, range, Some(ann), default.map(ExprOrBinding::Expr))
+                        (name, range, Some(ann), bound_default)
                     } else {
-                        (name, range, None, default.map(ExprOrBinding::Expr))
+                        (name, range, None, bound_default)
                     }
                 })
                 .collect();
