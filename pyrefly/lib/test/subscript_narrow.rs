@@ -328,6 +328,23 @@ def use(options: dict[str, str]) -> None:
 );
 
 testcase!(
+    test_typed_dict_contains_merge_value_narrow_and_presence,
+    TestEnv::new().enable_not_required_key_access_error(),
+    r#"
+from typing import TypedDict, assert_type
+
+class TD(TypedDict, total=False):
+    k: str
+
+def f(o: TD, cond: bool) -> None:
+    if "k" in o:
+        if cond:
+            o["k"] = "value"
+        assert_type(o["k"], str)
+"#,
+);
+
+testcase!(
     test_typeddict_get_literal_key_narrow,
     TestEnv::new().enable_not_required_key_access_error(),
     r#"

@@ -685,14 +685,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
-                } else if let Some((obj_ty, key)) =
+                } else if let Some((obj_ty, key_expr, key)) =
                     self.is_dict_get_with_literal(&x.func, &x.arguments, errors)
                 {
-                    obj_ty
-                        .at_facet(&FacetKind::Key(key.to_string()), || {
-                            self.expr_call_infer(x, callee_ty.clone(), hint, errors)
-                        })
-                        .into_ty()
+                    let facet = FacetKind::Key(key.to_string());
+                    if obj_ty.has_value_less_presence(&facet) {
+                        self.subscript_infer_for_type_with_key_present(
+                            obj_ty.ty(),
+                            key_expr,
+                            x.range,
+                            errors,
+                            true,
+                        )
+                    } else {
+                        obj_ty
+                            .at_facet(&facet, || {
+                                self.expr_call_infer(x, callee_ty.clone(), hint, errors)
+                            })
+                            .into_ty()
+                    }
                 } else {
                     self.expr_call_infer(x, callee_ty, hint, errors)
                 }
@@ -1477,12 +1488,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     }
 
     // Is this a call to `dict.get` with a single string literal argument
-    fn is_dict_get_with_literal(
+    fn is_dict_get_with_literal<'args>(
         &self,
         func: &Expr,
-        args: &Arguments,
+        args: &'args Arguments,
         errors: &ErrorCollector,
-    ) -> Option<(TypeInfo, StringLiteralValue)> {
+    ) -> Option<(TypeInfo, &'args Expr, StringLiteralValue)> {
         let Expr::Attribute(attr_expr) = func else {
             return None;
         };
@@ -1492,12 +1503,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if args.args.len() != 1 {
             return None;
         }
-        let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = &args.args[0] else {
+        let key_expr = &args.args[0];
+        let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = key_expr else {
             return None;
         };
         let obj_ty = self.expr_infer_impl(&attr_expr.value, None, errors);
         if self.is_dict_like(obj_ty.ty()) {
-            Some((obj_ty, key.clone()))
+            Some((obj_ty, key_expr, key.clone()))
         } else {
             None
         }
@@ -1684,21 +1696,48 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.subscript_infer_for_type(base.ty(), slice, range, errors)
             })
         } else if let Expr::StringLiteral(ExprStringLiteral { value, .. }) = slice {
-            TypeInfo::at_facet(base, &FacetKind::Key(value.to_string()), || {
-                self.subscript_infer_for_type(base.ty(), slice, range, errors)
-            })
+            self.subscript_infer_for_key_facet(
+                base,
+                FacetKind::Key(value.to_string()),
+                slice,
+                range,
+                errors,
+            )
         } else {
             let swallower = self.error_swallower();
             match self.expr_infer(slice, &swallower) {
                 Type::Literal(ref lit) if let Lit::Str(value) = &lit.value => {
-                    TypeInfo::at_facet(base, &FacetKind::Key(value.to_string()), || {
-                        self.subscript_infer_for_type(base.ty(), slice, range, errors)
-                    })
+                    let facet = FacetKind::Key(value.to_string());
+                    self.subscript_infer_for_key_facet(base, facet, slice, range, errors)
                 }
                 _ => {
                     TypeInfo::of_ty(self.subscript_infer_for_type(base.ty(), slice, range, errors))
                 }
             }
+        }
+    }
+
+    /// Resolve a string-key subscript taking into account whether the key is definitely known to be present.
+    fn subscript_infer_for_key_facet(
+        &self,
+        base: &TypeInfo,
+        facet: FacetKind,
+        slice: &Expr,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) -> TypeInfo {
+        if base.has_value_less_presence(&facet) {
+            TypeInfo::of_ty(self.subscript_infer_for_type_with_key_present(
+                base.ty(),
+                slice,
+                range,
+                errors,
+                true,
+            ))
+        } else {
+            TypeInfo::at_facet(base, &facet, || {
+                self.subscript_infer_for_type(base.ty(), slice, range, errors)
+            })
         }
     }
 
@@ -2318,6 +2357,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         range: TextRange,
         errors: &ErrorCollector,
     ) -> Type {
+        self.subscript_infer_for_type_with_key_present(base, slice, range, errors, false)
+    }
+
+    fn subscript_infer_for_type_with_key_present(
+        &self,
+        base: &Type,
+        slice: &Expr,
+        range: TextRange,
+        errors: &ErrorCollector,
+        key_present: bool, // true if the key is definitely known to be present
+    ) -> Type {
         let xs = Ast::unpack_slice(slice);
         self.distribute_over_union(base, |base| {
             let mut base = base.clone();
@@ -2571,12 +2621,23 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ),
                 Type::Quantified(ref q) if q.is_type_var() && q.restriction().is_restricted() => {
                     match q.restriction() {
-                        Restriction::Bound(bound) => {
-                            self.subscript_infer_for_type(bound, slice, range, errors)
-                        }
+                        Restriction::Bound(bound) => self
+                            .subscript_infer_for_type_with_key_present(
+                                bound,
+                                slice,
+                                range,
+                                errors,
+                                key_present,
+                            ),
                         Restriction::Constraints(constraints) => {
                             self.unions(constraints.map(|constraint| {
-                                self.subscript_infer_for_type(constraint, slice, range, errors)
+                                self.subscript_infer_for_type_with_key_present(
+                                    constraint,
+                                    slice,
+                                    range,
+                                    errors,
+                                    key_present,
+                                )
                             }))
                         }
                         Restriction::Unrestricted => {
@@ -2592,7 +2653,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         Type::Literal(lit) if let Lit::Str(field_name) = &lit.value => {
                             let key_name = Name::new(field_name);
                             if let Some(field) = self.typed_dict_field(&typed_dict, &key_name) {
-                                if warn_on_not_required_access && !field.required {
+                                if warn_on_not_required_access && !field.required && !key_present {
                                     errors
                                         .error_builder(
                                             slice.range(),
@@ -2609,29 +2670,34 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                         .emit();
                                 }
                                 field.ty.clone()
-                            } else if let ExtraItems::Extra(extra) =
-                                self.typed_dict_extra_items(&typed_dict)
-                            {
-                                extra.ty
                             } else {
-                                let mut builder = errors.error_builder(
-                                    slice.range(),
-                                    typed_dict.key_error_kind(),
-                                    format!(
-                                        "{} does not have key `{field_name}`",
-                                        typed_dict.label()
-                                    ),
-                                );
-                                let fields = self.typed_dict_fields(&typed_dict);
-                                if let Some(suggestion) = best_suggestion(
-                                    &key_name,
-                                    fields.keys().map(|candidate| (candidate, 0usize)),
-                                ) {
-                                    builder = builder
-                                        .with_detail(format!("Did you mean `{suggestion}`?"));
+                                match self.typed_dict_extra_items(&typed_dict) {
+                                    ExtraItems::Extra(extra) => extra.ty,
+                                    extra_items if key_present => {
+                                        extra_items.extra_item(self.stdlib).ty
+                                    }
+                                    _ => {
+                                        let mut builder = errors.error_builder(
+                                            slice.range(),
+                                            typed_dict.key_error_kind(),
+                                            format!(
+                                                "{} does not have key `{field_name}`",
+                                                typed_dict.label()
+                                            ),
+                                        );
+                                        let fields = self.typed_dict_fields(&typed_dict);
+                                        if let Some(suggestion) = best_suggestion(
+                                            &key_name,
+                                            fields.keys().map(|candidate| (candidate, 0usize)),
+                                        ) {
+                                            builder = builder.with_detail(format!(
+                                                "Did you mean `{suggestion}`?"
+                                            ));
+                                        }
+                                        builder.emit();
+                                        self.heap.mk_any_error()
+                                    }
                                 }
-                                builder.emit();
-                                self.heap.mk_any_error()
                             }
                         }
                         _ => {
@@ -2660,7 +2726,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         }
                     })
                 }
-                Type::UntypedAlias(ta) => self.subscript_infer_for_type(&self.untype_alias(&ta), slice, range, errors),
+                Type::UntypedAlias(ta) => self.subscript_infer_for_type_with_key_present(
+                    &self.untype_alias(&ta),
+                    slice,
+                    range,
+                    errors,
+                    key_present,
+                ),
                 t => self.error(
                     errors,
                     range,
