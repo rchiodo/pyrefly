@@ -606,3 +606,25 @@ reveal_type(Module.__init__)  # E: revealed type: (self: Module) -> None
 Module()
     "#,
 );
+
+testcase!(
+    test_property_override_field,
+    r#"
+from typing import dataclass_transform
+
+@dataclass_transform()
+class Base: ...
+
+class A(Base):
+    foo: int
+
+class B(A):
+    @property
+    def foo(self) -> int:  # E: Class member `B.foo` overrides parent class `A` in an inconsistent manner
+        return 1
+# `foo` keeps `A`'s required `int` field rather than the property's type.
+B(foo=5)
+B(foo="x")  # E: `Literal['x']` is not assignable to parameter `foo` with type `int`
+B()  # E: Missing argument `foo`
+    "#,
+);

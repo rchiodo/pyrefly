@@ -3826,11 +3826,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Option<WithDefiningClass<Arc<ClassField>>> {
         self.get_field_from_mro(cls, name, &|cls, name| {
             let field = self.get_non_synthesized_field_from_current_class_only(cls, name)?;
-            if matches!(
-                field.initialization(),
-                ClassFieldInitialization::Method | ClassFieldInitialization::ClassMethod
-            ) {
-                // This parent happens to assign to the field in a method but doesn't define it.
+            if !field.has_explicit_annotation()
+                || matches!(
+                    field.initialization(),
+                    ClassFieldInitialization::Method | ClassFieldInitialization::ClassMethod
+                )
+            {
                 None
             } else {
                 Some(field)

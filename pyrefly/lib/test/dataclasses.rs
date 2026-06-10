@@ -903,6 +903,145 @@ B(0, 1.0)  # E: Argument `Literal[0]` is not assignable to parameter `x` with ty
     "#,
 );
 
+// A property that shadows an inherited field without re-annotating it must not redefine
+// the field's type or keywords (e.g. `init=False`).
+
+testcase!(
+    test_property_override_init_false_field,
+    r#"
+import dataclasses
+@dataclasses.dataclass
+class A:
+    foo: int = dataclasses.field(init=False)
+@dataclasses.dataclass
+class B(A):
+    @property
+    def foo(self) -> int:  # E: Class member `B.foo` overrides parent class `A` in an inconsistent manner
+        return 1
+# `foo` is `init=False`, inherited from `A`: it is not a constructor parameter.
+B()  # OK
+B(foo=2)  # E: Unexpected keyword argument `foo`
+    "#,
+);
+
+testcase!(
+    test_classvar_override_field,
+    r#"
+import dataclasses
+from typing import ClassVar
+@dataclasses.dataclass
+class A:
+    foo: int
+@dataclasses.dataclass
+class B(A):
+    foo: ClassVar[int] = 0  # E: ClassVar `B.foo` overrides instance variable of the same name in parent class `A`
+# A `ClassVar` override removes `foo` from the constructor entirely.
+B()  # OK
+B(foo=1)  # E: Unexpected keyword argument `foo`
+    "#,
+);
+
+testcase!(
+    test_property_override_field_diamond_mro,
+    r#"
+import dataclasses
+@dataclasses.dataclass
+class Base:
+    foo: int = dataclasses.field(init=False)
+@dataclasses.dataclass
+class Mixin:
+    @property
+    def foo(self) -> int:
+        return 1
+@dataclasses.dataclass
+class C(Mixin, Base):
+    pass
+# Resolution walks the MRO past `Mixin`'s property to `Base`'s `init=False` field.
+C()  # OK
+C(foo=2)  # E: Unexpected keyword argument `foo`
+    "#,
+);
+
+testcase!(
+    test_property_override_attribute_access_uses_property,
+    r#"
+import dataclasses
+from typing import assert_type
+@dataclasses.dataclass
+class A:
+    foo: int = dataclasses.field(init=False)
+@dataclasses.dataclass
+class B(A):
+    @property
+    def foo(self) -> str:  # E: Class member `B.foo` overrides parent class `A` in an inconsistent manner
+        return "x"
+def f(b: B):
+    # Attribute access still resolves to the property getter, not the inherited field.
+    assert_type(b.foo, str)
+    "#,
+);
+
+testcase!(
+    test_property_override_preserves_match_args,
+    r#"
+import dataclasses
+@dataclasses.dataclass
+class A:
+    foo: int = 0
+    bar: int = 0
+@dataclasses.dataclass
+class B(A):
+    @property
+    def foo(self) -> int:  # E: Class member `B.foo` overrides parent class `A` in an inconsistent manner
+        return 1
+def f(b: B):
+    # `foo` is still a field, so it stays in `__match_args__` alongside `bar`;
+    # this irrefutable two-element pattern must match without error.
+    match b:
+        case B(x, y):
+            pass
+    "#,
+);
+
+testcase!(
+    test_property_override_replace_uses_field_type,
+    r#"
+import dataclasses
+@dataclasses.dataclass
+class A:
+    foo: int = 0
+@dataclasses.dataclass
+class B(A):
+    @property
+    def foo(self) -> int:  # E: Class member `B.foo` overrides parent class `A` in an inconsistent manner
+        return 1
+def f(b: B):
+    # The synthesized `__replace__` also uses the inherited field's `int` type.
+    dataclasses.replace(b, foo=10)
+    dataclasses.replace(b, foo="bad")  # E: Argument `Literal['bad']` is not assignable to parameter `foo` with type `int`
+    "#,
+);
+
+testcase!(
+    test_field_overrides_parent_property,
+    r#"
+import dataclasses
+@dataclasses.dataclass
+class A:
+    @property
+    def foo(self) -> int:
+        return 1
+@dataclasses.dataclass
+class B(A):
+    foo: int = 5
+# The reverse direction: an annotated field DOES redefine the inherited property,
+# so `foo` becomes a real constructor parameter with a default.
+B()  # OK
+B(5)  # OK
+B("x")  # E: Argument `Literal['x']` is not assignable to parameter `foo` with type `int`
+    "#,
+);
+
 testcase!(
     test_inherit_from_multiple_dataclasses,
     r#"
