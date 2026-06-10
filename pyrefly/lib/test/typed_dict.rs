@@ -2308,6 +2308,118 @@ def test_empty_not_in(e: Empty, k: str):
 );
 
 testcase!(
+    test_typed_dict_union_subject_contains_narrowing,
+    r#"
+from typing import TypedDict, assert_type
+
+class Foo(TypedDict, closed=True):
+    a: int
+
+class Bar(TypedDict, closed=True):
+    b: int
+
+def test(foo: Foo | Bar) -> None:
+    if "a" in foo:
+        assert_type(foo, Foo)
+        assert_type(foo["a"], int)
+    else:
+        assert_type(foo, Bar)
+        assert_type(foo["b"], int)
+"#,
+);
+
+testcase!(
+    test_typed_dict_open_contains_narrowing,
+    r#"
+from typing import TypedDict, assert_type
+
+class TD(TypedDict):
+    x: int
+
+class TD2(TypedDict):
+    x: int
+    y: int
+
+def test(td: TD) -> None:
+    if "y" in td:
+        assert_type(td["y"], object)
+
+def test_union(td: TD | TD2) -> None:
+    if "y" in td:
+        assert_type(td, TD | TD2)
+        assert_type(td["y"], object)
+    else:
+        assert_type(td, TD)
+"#,
+);
+
+testcase!(
+    test_typed_dict_not_required_key_contains_narrowing,
+    r#"
+from typing import NotRequired, TypedDict, assert_type
+
+class TD(TypedDict):
+    y: NotRequired[str]
+
+def test(td: TD) -> None:
+    if "y" in td:
+        assert_type(td["y"], str)
+"#,
+);
+
+testcase!(
+    test_typed_dict_nested_contains_narrowing,
+    r#"
+from typing import NotRequired, TypedDict, assert_type
+
+class Inner(TypedDict):
+    pass
+
+class Outer(TypedDict):
+    inner: NotRequired[Inner]
+
+def f(o: Outer) -> None:
+    if "inner" in o:
+        if "deep" in o["inner"]:
+            assert_type(o["inner"], Inner)
+            assert_type(o["inner"]["deep"], object)
+"#,
+);
+
+testcase!(
+    test_typed_dict_contains_chain_subject_open_key_narrowing,
+    r#"
+from typing import TypedDict, assert_type
+
+class TD(TypedDict):
+    pass
+
+def f(o: TD) -> None:
+    if "k" in o:
+        if o["k"]:
+            assert_type(o["k"], object)
+"#,
+);
+
+testcase!(
+    test_typed_dict_non_dict_union_member_contains_narrowing,
+    r#"
+from typing import TypedDict
+
+class TD(TypedDict):
+    x: int
+
+def f(v: TD | list[str]) -> None:
+    if "x" in v:
+        v["x"]  # E: No matching overload found for function `list.__getitem__`
+
+def g(v: TD | list[str]) -> None:
+    if "y" in v:
+        v["y"]  # E: No matching overload found for function `list.__getitem__`
+"#,
+);
+
+testcase!(
     test_illegal_unpacking_in_def,
     r#"
 from typing import TypedDict

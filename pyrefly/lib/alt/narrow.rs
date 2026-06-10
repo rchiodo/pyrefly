@@ -22,6 +22,7 @@ use pyrefly_types::facet::UnresolvedFacetKind;
 use pyrefly_types::simplify::intersect;
 use pyrefly_types::simplify::simplify_tuples;
 use pyrefly_types::type_info::JoinStyle;
+use pyrefly_types::typed_dict::ExtraItems;
 use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::visit::Visit;
 use ruff_python_ast::Arguments;
@@ -742,6 +743,40 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             },
             _ => ty.clone(),
         })
+    }
+
+    /// Keep the union members consistent with `key` being present or absent.
+    fn narrow_key_membership(&self, ty: &Type, key: &Name, present: bool) -> Type {
+        self.distribute_over_union(ty, |member| {
+            let Type::TypedDict(typed_dict) = member else {
+                return member.clone();
+            };
+            if present {
+                match self.typed_dict_field(typed_dict, key) {
+                    Some(_) => member.clone(),
+                    None => match self.typed_dict_extra_items(typed_dict) {
+                        ExtraItems::Closed => self.heap.mk_never(),
+                        ExtraItems::Default | ExtraItems::Extra(_) => member.clone(),
+                    },
+                }
+            } else {
+                match self.typed_dict_field(typed_dict, key) {
+                    Some(field) if field.required => self.heap.mk_never(),
+                    Some(_) | None => member.clone(),
+                }
+            }
+        })
+    }
+
+    /// Unlike `is_dict_like`, this treats unions member-wise.
+    fn has_dict_like_member(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Union(union) => union
+                .members
+                .iter()
+                .any(|member| self.has_dict_like_member(member)),
+            _ => self.is_dict_like(ty),
+        }
     }
 
     /// Narrow a union by keeping only members whose facet is identity-compatible with `right`.
@@ -1596,12 +1631,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 match remaining_facets.split_first() {
                     None => match base.type_at_facet(first_facet) {
                         Some(ty) => self.force_for_narrowing(ty, range, errors),
-                        None => self.subscript_infer_for_type(
-                            base.ty(),
-                            &synthesized_slice,
-                            range,
-                            errors,
-                        ),
+                        None => self
+                            .subscript_infer(base, &synthesized_slice, range, errors)
+                            .into_ty(),
                     },
                     Some((next_name, remaining_facets)) => {
                         let base_ty = self.subscript_infer(base, &synthesized_slice, range, errors);
@@ -1635,17 +1667,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (Some(_), None) => return type_info.clone(),
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
-                if self.is_dict_like(&base_ty) {
+                let narrowed_base = self.narrow_key_membership(&base_ty, key, true);
+                let has_dict_member = self.has_dict_like_member(&narrowed_base);
+                let mut narrowed = match &resolved_chain {
+                    Some(chain) => type_info.with_narrow(chain.facets(), narrowed_base),
+                    None => type_info.clone().with_ty(narrowed_base),
+                };
+                if has_dict_member {
                     let facet = FacetKind::Key(key.to_string());
                     let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
-                    let chain = FacetChain::new(facets);
-                    // Apply a facet narrow w/ that key's type, so that the usual subscript inference
-                    // code path which raises a warning for NotRequired keys does not execute later
-                    let value_ty = self.get_facet_chain_type(type_info, &chain, range);
-                    type_info.with_narrow(chain.facets(), value_ty)
-                } else {
-                    type_info.clone()
+                    narrowed.record_present(&facets);
                 }
+                narrowed
             }
             NarrowOp::Atomic(subject, AtomicNarrowOp::NotHasKey(key)) => {
                 let resolved_chain = subject
@@ -1656,16 +1689,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (Some(_), None) => return type_info.clone(),
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
-                if self.is_dict_like(&base_ty) {
+                let narrowed_base = self.narrow_key_membership(&base_ty, key, false);
+                let has_dict_member = self.has_dict_like_member(&narrowed_base);
+                let mut narrowed = match &resolved_chain {
+                    Some(chain) => type_info.with_narrow(chain.facets(), narrowed_base),
+                    None => type_info.clone().with_ty(narrowed_base),
+                };
+                if has_dict_member {
                     let facet = FacetKind::Key(key.to_string());
                     let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
                     // Invalidate existing facet narrows
-                    let mut type_info = type_info.clone();
-                    type_info.update_for_assignment(&facets, None);
-                    type_info
-                } else {
-                    type_info.clone()
+                    narrowed.update_for_assignment(&facets, None);
                 }
+                narrowed
             }
             NarrowOp::Atomic(subject, AtomicNarrowOp::HasAttr(attr)) => {
                 let resolved_chain = subject

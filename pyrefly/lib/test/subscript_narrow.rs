@@ -328,6 +328,16 @@ def use(options: dict[str, str]) -> None:
 );
 
 testcase!(
+    test_dict_contains_wrong_key_type_get_still_errors,
+    r#"
+def use(d: dict[int, str]) -> None:
+    if "x" in d:
+        d["x"]  # E: Cannot index into `dict[int, str]`
+        d.get("x")  # E: Cannot index into `dict[int, str]`
+"#,
+);
+
+testcase!(
     test_typed_dict_contains_merge_value_narrow_and_presence,
     TestEnv::new().enable_not_required_key_access_error(),
     r#"
