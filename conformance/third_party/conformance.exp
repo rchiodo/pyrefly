@@ -4666,6 +4666,17 @@
     },
     {
       "code": -2,
+      "column": 5,
+      "concise_description": "`y` is a dataclass field but has no type annotation",
+      "description": "`y` is a dataclass field but has no type annotation",
+      "line": 229,
+      "name": "bad-class-definition",
+      "severity": "error",
+      "stop_column": 6,
+      "stop_line": 229
+    },
+    {
+      "code": -2,
       "column": 12,
       "concise_description": "Expected 2 positional arguments, got 3 in function `DC19.__init__`",
       "description": "Expected 2 positional arguments, got 3 in function `DC19.__init__`",

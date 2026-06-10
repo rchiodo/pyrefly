@@ -1509,6 +1509,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     && let Expr::Call(call) = e
                 {
                     let flags = self.compute_dataclass_field_initialization(call, dm);
+                    // A bare assignment of a `field()` specifier with no type annotation is a runtime error in CPython
+                    if flags.is_some() && direct_annotation.is_none() && !metadata.is_attrs_class()
+                    {
+                        self.error(
+                            errors,
+                            range,
+                            ErrorKind::BadClassDefinition,
+                            format!("`{name}` is a dataclass field but has no type annotation"),
+                        );
+                    }
                     ClassFieldInitialization::ClassBody(flags.map(Box::new))
                 } else {
                     ClassFieldInitialization::ClassBody(None)

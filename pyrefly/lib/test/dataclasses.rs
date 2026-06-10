@@ -996,15 +996,14 @@ assert_type(c.__match_args__, tuple[Literal['x']])  # Ok
 );
 
 testcase!(
-    bug = "TODO: consider erroring on unannotated attributes",
+    bug = "TODO: consider erroring on a plain unannotated assignment like `y = 3`",
     test_unannotated_attribute,
     r#"
 import dataclasses
 @dataclasses.dataclass
 class C:
-    # Not annotating a field with value dataclasses.field(...) is a runtime error, so we should
-    # probably error on this.
-    x = dataclasses.field()
+    # Not annotating a field with value dataclasses.field(...) is a runtime error.
+    x = dataclasses.field()  # E: `x` is a dataclass field but has no type annotation
     # This is confusing and likely indicative of a programming error; consider erroring on this, too.
     y = 3
     "#,
@@ -2370,5 +2369,40 @@ class Mutable:
 
     def __setattr__(self, name: str, val: object) -> None: ...
     def __delattr__(self, name: str) -> None: ...
+"#,
+);
+
+testcase!(
+    test_field_without_annotation,
+    r#"
+from dataclasses import dataclass, field
+from typing import ClassVar
+
+@dataclass
+class HasUnannotatedField:
+    idx = field(default=1)  # E: `idx` is a dataclass field but has no type annotation
+    another: int
+
+@dataclass
+class HasAnnotatedField:
+    another: int
+    idx: int = field(default=1)  # !E: type annotation
+
+@dataclass
+class HasClassVarField:
+    x: ClassVar[int] = field(default=1)  # !E: type annotation
+
+class NotADataclass:
+    # Outside a dataclass, an unannotated `field()` is just an ordinary assignment.
+    x = field(default=1)  # !E: type annotation
+
+def user_defined_field() -> None:
+    # A user-defined `field` is not a recognized field specifier, so an
+    # unannotated assignment to it is fine even inside a dataclass.
+    def field(default: int = 0) -> int:
+        return default
+    @dataclass
+    class C:
+        x = field(default=1)  # !E: type annotation
 "#,
 );

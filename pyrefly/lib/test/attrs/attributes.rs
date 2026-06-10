@@ -77,3 +77,25 @@ class A:
 reveal_type(A.__init__)  # E: revealed type: (self: A, x: Unknown, y: Unknown = ...) -> None
 "#,
 );
+
+attrs_testcase!(
+    test_attrs_unannotated_attrib_ok,
+    r#"
+import attr
+@attr.s()
+class A:
+    x = attr.ib()  # !E: type annotation
+    y = attr.ib(default=0)  # !E: type annotation
+"#,
+);
+
+attrs_testcase!(
+    bug = "auto_attribs=True requires annotations, but we suppress the field-annotation error for all attrs classes",
+    test_attrs_unannotated_attrib_auto_attribs,
+    r#"
+import attr
+@attr.s(auto_attribs=True)
+class A:
+    x = attr.ib()  # !E: type annotation
+"#,
+);
