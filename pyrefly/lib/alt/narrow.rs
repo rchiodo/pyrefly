@@ -90,6 +90,18 @@ fn synthesize_int_slice(idx: i64) -> Expr {
     }
 }
 
+/// Append `facet` to an existing facet chain, or start a new one.
+fn extend_facet_chain(resolved_chain: Option<&FacetChain>, facet: FacetKind) -> Vec1<FacetKind> {
+    match resolved_chain {
+        Some(chain) => {
+            let mut facets = chain.facets().clone();
+            facets.push(facet);
+            facets
+        }
+        None => Vec1::new(facet),
+    }
+}
+
 /// Beyond this size, don't try and narrow an enum.
 ///
 /// If we have over 100 fields, the odds of the negative-type being useful is vanishingly small.
@@ -1624,15 +1636,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
                 if self.is_dict_like(&base_ty) {
-                    let key_facet = FacetKind::Key(key.to_string());
-                    let facets = match resolved_chain {
-                        Some(chain) => {
-                            let mut new_facets = chain.facets().clone();
-                            new_facets.push(key_facet);
-                            new_facets
-                        }
-                        None => Vec1::new(key_facet),
-                    };
+                    let facet = FacetKind::Key(key.to_string());
+                    let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
                     let chain = FacetChain::new(facets);
                     // Apply a facet narrow w/ that key's type, so that the usual subscript inference
                     // code path which raises a warning for NotRequired keys does not execute later
@@ -1652,15 +1657,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     (None, _) => self.force_for_narrowing(type_info.ty(), range, errors),
                 };
                 if self.is_dict_like(&base_ty) {
-                    let key_facet = FacetKind::Key(key.to_string());
-                    let facets = match resolved_chain {
-                        Some(chain) => {
-                            let mut new_facets = chain.facets().clone();
-                            new_facets.push(key_facet);
-                            new_facets
-                        }
-                        None => Vec1::new(key_facet),
-                    };
+                    let facet = FacetKind::Key(key.to_string());
+                    let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
                     // Invalidate existing facet narrows
                     let mut type_info = type_info.clone();
                     type_info.update_for_assignment(&facets, None);
@@ -1684,15 +1682,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // specific attribute types (rather than using a blanket `Any`) ensures
                 // fixpoint convergence when `hasattr` is used in loops with reassignment.
                 if let Some(narrow_ty) = self.hasattr_narrow_type(&base_ty, attr, range, errors) {
-                    let attr_facet = FacetKind::Attribute(attr.clone());
-                    let facets = match resolved_chain {
-                        Some(chain) => {
-                            let mut new_facets = chain.facets().clone();
-                            new_facets.push(attr_facet);
-                            new_facets
-                        }
-                        None => Vec1::new(attr_facet),
-                    };
+                    let facet = FacetKind::Attribute(attr.clone());
+                    let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
                     type_info.with_narrow(&facets, narrow_ty)
                 } else {
                     type_info.clone()
@@ -1719,15 +1710,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 };
                 let attr_ty =
                     self.attr_infer_for_type(&base_ty, attr, range, &suppress_errors, None);
-                let attr_facet = FacetKind::Attribute(attr.clone());
-                let facets = match resolved_chain {
-                    Some(chain) => {
-                        let mut new_facets = chain.facets().clone();
-                        new_facets.push(attr_facet);
-                        new_facets
-                    }
-                    None => Vec1::new(attr_facet),
-                };
+                let facet = FacetKind::Attribute(attr.clone());
+                let facets = extend_facet_chain(resolved_chain.as_ref(), facet);
                 // Given that the default is falsy:
                 // If the attribute does not exist we narrow to `Any`
                 // If the attribute exists we narrow it to be truthy
