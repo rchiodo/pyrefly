@@ -185,6 +185,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             } else {
                 right.clone()
             }
+        } else if left.is_typed_dict() != right.is_typed_dict() {
+            // Use runtime representation of TypedDict for intersections w/ non-TypedDicts
+            // Normally, TypedDict is not assignable to dict to avoid unsafe aliasing
+            let runtime_class = self.heap.mk_class_type(self.stdlib.dict(
+                self.heap.mk_class_type(self.stdlib.str().clone()),
+                self.heap.mk_class_type(self.stdlib.object().clone()),
+            ));
+            if left.is_typed_dict() && self.is_subset_eq(&runtime_class, right) {
+                left.clone()
+            } else if right.is_typed_dict() && self.is_subset_eq(&runtime_class, left) {
+                right.clone()
+            } else {
+                self.heap.mk_never()
+            }
         } else if self.is_subset_eq(left, right) {
             left.clone()
         } else if let (Type::ClassType(cls), Type::SelfType(self_cls))
@@ -262,8 +276,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn subtract(&self, left: &Type, right: &Type) -> Type {
         self.distribute_over_union(left, |left| {
-            // Special is_any check because `Any <: int` as a special case, but would mess up this.
-            if !left.is_any() && self.is_subset_eq(left, right) {
+            if !left.is_any() && !right.is_any() && left.is_typed_dict() && !right.is_typed_dict() {
+                // Use runtime representation of TypedDict for subtraction w/ non-TypedDicts
+                // Normally, TypedDict is not assignable to dict to avoid unsafe aliasing
+                let runtime_class = self.heap.mk_class_type(self.stdlib.dict(
+                    self.heap.mk_class_type(self.stdlib.str().clone()),
+                    self.heap.mk_class_type(self.stdlib.object().clone()),
+                ));
+                if self.is_subset_eq(&runtime_class, right) {
+                    self.heap.mk_never()
+                } else {
+                    left.clone()
+                }
+            } else if !left.is_any() && self.is_subset_eq(left, right) {
+                // is_any check because `Any <: int` is always true, but `Any - int` shouldn't produce Never.
                 self.heap.mk_never()
             } else {
                 left.clone()
