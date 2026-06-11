@@ -669,6 +669,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut rparams = params.items().iter().rev().collect::<Vec<_>>();
         let mut num_positional_params = 0;
         let mut extra_positional_args = Vec::new();
+        // Map from seen parameter name to (Type, definitely_seen).
+        // NotRequired fields of unpacked typed dicts are not definitely seen.
         let mut seen_names = SmallMap::new();
         let mut extra_arg_pos = None;
         let mut unpacked_vararg = None;
@@ -762,7 +764,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         {
                             // Remember names of positional parameters to detect duplicates.
                             // We ignore positional-only parameters because they can't be passed in by name.
-                            seen_names.insert(name, ty);
+                            seen_names.insert(name, (ty, true));
                         }
                         expected_types.insert(arg.range(), ty.clone());
                         let unhinted_arg_ty = bound_args
@@ -1059,10 +1061,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         let mut splat_kwargs = Vec::new();
-        // Tracks names added to `seen_names` from NotRequired TypedDict fields.
-        // These entries represent potentially-absent keys, so an explicit kwarg
-        // with the same name is not a guaranteed "Multiple values" conflict.
-        let mut not_required_td_names: SmallSet<&Name> = SmallSet::new();
         for kw in keywords {
             match kw.arg {
                 None => {
@@ -1071,19 +1069,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         for (name, field) in self.typed_dict_fields(&typed_dict).into_iter() {
                             let name = name_owner.push(name);
                             let mut hint = kwargs.as_ref().and_then(|(_, ty)| *ty);
-                            if let Some(ty) = seen_names.get(name) {
+                            if let Some((ty, definitely_seen)) = seen_names.get(name) {
                                 // For Required fields, the conflict is guaranteed, so report
                                 // BadKeywordArgument. For NotRequired fields, the conflict is
                                 // only potential (field may be absent at runtime), so report
                                 // PotentialBadKeywordArgument instead. This allows users to
                                 // opt-in to the stricter check while avoiding false positives
                                 // in basic mode.
-                                let error_kind =
-                                    if field.required && !not_required_td_names.contains(name) {
-                                        ErrorKind::BadKeywordArgument
-                                    } else {
-                                        ErrorKind::PotentialBadKeywordArgument
-                                    };
+                                let error_kind = if field.required && *definitely_seen {
+                                    ErrorKind::BadKeywordArgument
+                                } else {
+                                    ErrorKind::PotentialBadKeywordArgument
+                                };
                                 error(
                                     call_errors,
                                     kw.range,
@@ -1092,10 +1089,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 );
                                 hint = Some(*ty);
                             } else if let Some((ty, _)) = kwparams.get(name) {
-                                seen_names.insert(name, *ty);
-                                if !field.required {
-                                    not_required_td_names.insert(name);
-                                }
+                                seen_names.insert(name, (*ty, field.required));
                                 hint = Some(*ty)
                             } else if kwargs.is_none() {
                                 unexpected_keyword_error(name, kw.range);
@@ -1171,10 +1165,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(id) => {
                     let mut hint = kwargs.as_ref().and_then(|(_, ty)| *ty);
                     let mut has_matching_param = false;
-                    if let Some(ty) = seen_names.get(&id.id) {
+                    if let Some((ty, definitely_seen)) = seen_names.get(&id.id) {
                         // Use PotentialBadKeywordArgument when the prior entry came from a
                         // NotRequired TypedDict field — the conflict is only potential.
-                        let error_kind = if not_required_td_names.contains(&id.id) {
+                        let error_kind = if !*definitely_seen {
                             ErrorKind::PotentialBadKeywordArgument
                         } else {
                             ErrorKind::BadKeywordArgument
@@ -1187,8 +1181,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         );
                         hint = Some(*ty);
                         has_matching_param = true;
-                    } else if let Some((ty, _)) = kwparams.get(&id.id) {
-                        seen_names.insert(&id.id, *ty);
+                    } else if let Some((ty, req)) = kwparams.get(&id.id) {
+                        seen_names.insert(&id.id, (*ty, **req == Required::Required));
                         hint = Some(*ty);
                         has_matching_param = true;
                     } else if kwargs.is_none_or(|(_, ty)| ty.is_none()) {
