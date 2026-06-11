@@ -2049,6 +2049,34 @@ impl<'a> Transaction<'a> {
             .transpose()
     }
 
+    /// For a cursor inside a subscript's brackets (e.g. `c[0]`) that isn't on a
+    /// named identifier, return the subscript dunder method type so hover matches
+    /// the spaced form `c [0]`.
+    pub(crate) fn subscript_operator_type_at(
+        &self,
+        handle: &Handle,
+        position: TextSize,
+    ) -> Option<Type> {
+        // A named identifier (the base, or a named index like `c[idx]`) has its
+        // own meaningful hover; don't override it.
+        if self.identifier_at(handle, position).is_some() {
+            return None;
+        }
+        let module = self.get_ast(handle)?;
+        let subscript =
+            Ast::locate_node(&module, position)
+                .into_iter()
+                .find_map(|node| match node {
+                    AnyNodeRef::ExprSubscript(subscript) => Some(subscript),
+                    _ => None,
+                })?;
+        // Only fire inside the bracket region, never on the base expression.
+        if position < subscript.value.range().end() {
+            return None;
+        }
+        self.get_chosen_overload_trace_for_surface(handle, subscript.range(), true)
+    }
+
     /// Try operator-based go-to-definition. Returns `Ok(None)` when there is
     /// no operator at the cursor, `Ok(Some(...))` on success, or
     /// `Err(...)` when an operator was found but couldn't be resolved.

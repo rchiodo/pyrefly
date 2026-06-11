@@ -698,8 +698,9 @@ pub fn get_hover(
         });
     }
 
-    // Otherwise, fall through to the existing type hover logic
-    let mut type_ = transaction.get_type_at_for_display(handle, position)?;
+    let mut type_ = transaction
+        .subscript_operator_type_at(handle, position)
+        .or_else(|| transaction.get_type_at_for_display(handle, position))?;
 
     // Helper function to check if we're hovering over a callee and get its range
     let find_callee_range_at_position = || -> Option<TextRange> {
