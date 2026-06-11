@@ -1376,6 +1376,64 @@ Box[str]("hello")
 }
 
 #[test]
+fn hover_on_class_type_parameter_shows_variance_covariant() {
+    let code = r#"
+class Foo[T]:
+#         ^
+    def foo(self) -> T: ...
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert!(
+        report.contains("(type parameter) T: T@Foo (covariant)"),
+        "Expected covariant hover, got: {report}"
+    );
+}
+
+#[test]
+fn hover_on_class_type_parameter_shows_variance_contravariant() {
+    let code = r#"
+class Sink[T]:
+#          ^
+    def consume(self, value: T) -> None: ...
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert!(
+        report.contains("(type parameter) T: T@Sink (contravariant)"),
+        "Expected contravariant hover, got: {report}"
+    );
+}
+
+#[test]
+fn hover_on_class_type_parameter_shows_variance_invariant() {
+    let code = r#"
+class Container[T]:
+#               ^
+    def get(self) -> T: ...
+    def set(self, value: T) -> None: ...
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert!(
+        report.contains("(type parameter) T: T@Container (invariant)"),
+        "Expected invariant hover, got: {report}"
+    );
+}
+
+#[test]
+fn hover_on_class_type_parameter_shows_bivariant_as_invariant() {
+    // T is unused in the class body — bivariant, but displayed as invariant
+    let code = r#"
+class Phantom[T]:
+#             ^
+    pass
+"#;
+    let report = get_batched_lsp_operations_report(&[("main", code)], get_test_report);
+    assert!(
+        report.contains("(type parameter) T: T@Phantom (invariant)"),
+        "Expected bivariant displayed as invariant, got: {report}"
+    );
+}
+
+#[test]
 fn hover_over_in_keyword_for_membership_in_comprehension() {
     let code = r#"
 result = [x for x in [1, 2, 3] if x in [1]]
