@@ -146,6 +146,9 @@ fn remove_maximum<T: Ord>(xs: &mut Vec<T>) {
     xs.pop();
 }
 
+static MAX_LITERAL_UNION_MEMBERS: usize = 256;
+static MAX_ENUM_UNION_MEMBERS: usize = 4096;
+
 /// Perform all literal transformations we can think of.
 ///
 /// 1. Literal[True, False] ==> bool
@@ -160,7 +163,7 @@ fn collapse_literals(
     enum_members: &dyn Fn(&Class) -> Option<usize>,
     heap: &TypeHeap,
 ) {
-    // All literal types we see, plus `true` to indicate they are found
+    // All literal types we see, plus `true` to indicate the promoted class was found
     let mut literal_types = SmallMap::new();
     // Specific flags to watch out for
     let mut has_literal_string = false;
@@ -173,6 +176,10 @@ fn collapse_literals(
 
     // Mapping of enum classes to the number of members contained in the union
     let mut enums: SmallMap<ClassType, usize> = SmallMap::new();
+    // Number of literals of these types contained in the union
+    let mut strings = 0;
+    let mut ints = 0;
+    let mut bytes = 0;
 
     // Invariant (from the sorting order) is that all Literal/Lit values occur
     // before any instances of the types.
@@ -188,12 +195,20 @@ fn collapse_literals(
                 match &x.value {
                     Lit::Bool(true) => has_true = true,
                     Lit::Bool(false) => has_false = true,
-                    Lit::Str(_) => has_specific_str = true,
+                    Lit::Str(_) => {
+                        has_specific_str = true;
+                        strings += 1;
+                    }
+                    Lit::Bytes(_) => {
+                        bytes += 1;
+                    }
+                    Lit::Int(_) => {
+                        ints += 1;
+                    }
                     Lit::Enum(x) => {
                         let v = enums.entry(x.class.clone()).or_insert(0);
                         *v += 1;
                     }
-                    _ => {}
                 }
                 literal_types.insert(x.value.general_class_type(stdlib).clone(), false);
             }
@@ -210,23 +225,58 @@ fn collapse_literals(
         }
     }
 
+    // True when a literal kind appears too many times to be worth tracking precisely.
+    let over_cap = |count: usize| count > MAX_LITERAL_UNION_MEMBERS;
+
     let enums_to_delete: SmallSet<ClassType> = enums
         .into_iter()
         .filter(|(k, n)| {
-            if let Some(num_members) = enum_members(k.class_object()) {
-                return *n >= num_members;
-            }
-            false
+            // `enum_members` returns a count only for classes it classifies as enums, and
+            // `None` otherwise. That `None` case is reachable, so when we can't get a count
+            // we leave the literals alone rather than promoting.
+            let Some(num_members) = enum_members(k.class_object()) else {
+                return false;
+            };
+            // Promote to the enum class once every member is present, or once the union
+            // exceeds the cap (some generated enums have thousands of members).
+            *n >= num_members || *n >= MAX_ENUM_UNION_MEMBERS
         })
         .map(|x| x.0)
         .collect();
     for e in &enums_to_delete {
-        types.push(heap.mk_class_type(e.clone()));
+        if !literal_types.is_empty() && literal_types.get(e) == Some(&false) {
+            types.push(heap.mk_class_type(e.clone()));
+        }
     }
+    // Promote each non-enum literal kind whose count exceeds the cap to its general class
+    // (e.g. 257 distinct `str` literals -> `str`). The class is resolved lazily via a fn
+    // pointer because the `stdlib` accessors panic before that builtin is bootstrapped, and
+    // only an over-cap kind ever needs its class.
+    for (count, get_cls) in [
+        (strings, Stdlib::str as fn(&Stdlib) -> &ClassType),
+        (ints, Stdlib::int),
+        (bytes, Stdlib::bytes),
+    ] {
+        if !over_cap(count) {
+            continue;
+        }
+        let cls = get_cls(stdlib);
+        if literal_types.get(cls) == Some(&false) {
+            types.push(heap.mk_class_type(cls.clone()));
+            // Mark the class as present so the retain step below drops the now-redundant
+            // literals (and `LiteralString`, for `str`) rather than leaving e.g.
+            // `LiteralString | str`.
+            literal_types.insert(cls.clone(), true);
+        }
+    }
+
     remove_maximum(&mut any_styles);
     remove_maximum(&mut never_styles);
 
-    if literal_types.values().any(|x| *x)
+    if over_cap(ints)
+        || over_cap(strings)
+        || over_cap(bytes)
+        || literal_types.values().any(|x| *x)
         || (has_true && has_false)
         || (has_literal_string && has_specific_str)
         || !any_styles.is_empty()
@@ -239,7 +289,9 @@ fn collapse_literals(
             Type::Literal(x) => {
                 match &x.value {
                     Lit::Bool(_) if has_true && has_false => return false,
-                    Lit::Str(_) if has_literal_string => return false,
+                    Lit::Str(_) if has_literal_string || over_cap(strings) => return false,
+                    Lit::Int(_) if over_cap(ints) => return false,
+                    Lit::Bytes(_) if over_cap(bytes) => return false,
                     Lit::Enum(lit_enum) if enums_to_delete.contains(&lit_enum.class) => {
                         return false;
                     }
