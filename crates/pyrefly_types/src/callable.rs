@@ -174,12 +174,10 @@ impl Callable {
 
 impl Display for Callable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ctx = TypeDisplayContext::new(&[]);
+        let ty = Type::Callable(Box::new(self.clone()));
+        let ctx = TypeDisplayContext::new(&[&ty]);
         let mut output = DisplayOutput::new(&ctx, f);
-        self.fmt_with_type(&mut output, &|t, o| {
-            // Use the type's own Display impl to get simple names
-            o.write_str(&format!("{}", t))
-        })
+        self.fmt_with_type(&mut output, &|t, o| ctx.fmt_helper_generic(t, false, o))
     }
 }
 
@@ -1177,12 +1175,9 @@ impl Param {
 
 impl Display for Param {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ctx = TypeDisplayContext::new(&[]);
+        let ctx = TypeDisplayContext::new(&[self.as_type()]);
         let mut output = DisplayOutput::new(&ctx, f);
-        self.fmt_with_type(&mut output, &|t, o| {
-            // Use the type's own Display impl to get simple names
-            o.write_str(&format!("{}", t))
-        })
+        self.fmt_with_type(&mut output, &|t, o| ctx.fmt_helper_generic(t, false, o))
     }
 }
 
