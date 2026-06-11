@@ -666,15 +666,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Creates a reversed copy of the parameters that we iterate through from back to front,
         // so that we can easily peek at and pop from the end.
-        let mut rparams: Vec<&Param> = params.items().iter().rev().collect::<Vec<_>>();
-        let mut num_positional_params: usize = 0;
-        let mut extra_positional_args: Vec<TextRange> = Vec::new();
-        let mut seen_names: SmallMap<&Name, &Type> = SmallMap::new();
-        let mut extra_arg_pos: Option<TextRange> = None;
-        let mut unpacked_vararg: Option<(Option<&Name>, &Type)> = None;
-        let mut unpacked_vararg_matched_args: Vec<CallArgPreEval<'_>> = Vec::new();
-        let mut variadic_name: Option<&Name> = None;
-        let mut variadic_collected: Vec<Type> = Vec::new();
+        let mut rparams = params.items().iter().rev().collect::<Vec<_>>();
+        let mut num_positional_params = 0;
+        let mut extra_positional_args = Vec::new();
+        let mut seen_names = SmallMap::new();
+        let mut extra_arg_pos = None;
+        let mut unpacked_vararg = None;
+        let mut unpacked_vararg_matched_args = Vec::new();
+        let mut variadic_name = None;
+        let mut variadic_collected = Vec::new();
 
         // Resolve a deferred ParamSpec Var into additional parameters.
         // Returns `Err(q)` when the Var resolved to a quantified ParamSpec `q`
