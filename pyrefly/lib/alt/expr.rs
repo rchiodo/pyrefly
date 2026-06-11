@@ -745,7 +745,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(lit) => lit.to_implicit_type(),
                 None => self.heap.mk_literal_string(LitStyle::Implicit),
             },
-            Expr::BytesLiteral(x) => Lit::from_bytes_literal(x).to_implicit_type(),
+            Expr::BytesLiteral(x) => match Lit::from_bytes_literal(x) {
+                Some(lit) => lit.to_implicit_type(),
+                None => self.heap.mk_class_type(self.stdlib.bytes().clone()),
+            },
             Expr::NumberLiteral(x) => match &x.value {
                 Number::Int(x) => Lit::from_int(x).to_implicit_type(),
                 Number::Float(_) => self.heap.mk_class_type(self.stdlib.float().clone()),

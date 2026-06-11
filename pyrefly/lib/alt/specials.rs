@@ -245,7 +245,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(lit) => literals.push(lit.to_explicit_type()),
                 None => literals.push(self.heap.mk_literal_string(LitStyle::Explicit)),
             },
-            Expr::BytesLiteral(x) => literals.push(Lit::from_bytes_literal(x).to_explicit_type()),
+            Expr::BytesLiteral(x) => match Lit::from_bytes_literal(x) {
+                Some(lit) => literals.push(lit.to_explicit_type()),
+                None => literals.push(self.heap.mk_class_type(self.stdlib.bytes().clone())),
+            },
             Expr::BooleanLiteral(x) => {
                 literals.push(Lit::from_boolean_literal(x).to_explicit_type())
             }
