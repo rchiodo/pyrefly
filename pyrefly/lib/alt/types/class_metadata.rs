@@ -555,7 +555,15 @@ impl Default for InitDefaults {
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
 pub struct DataclassMetadata {
     /// The dataclass fields, e.g., `{'x'}` for `@dataclass class C: x: int`.
+    /// Retains pseudo-fields and pydantic privates — filtered downstream in
+    /// `get_dataclass_member`. See `instance_fields` for the pre-filtered set.
     pub fields: SmallSet<Name>,
+    /// `fields` minus `ClassVar`/`InitVar`/`KW_ONLY` and pydantic privates,
+    /// with inherited entries dropped when the current class re-annotates
+    /// them as a pseudo-field. Matches CPython's `fields(cls)` — the names
+    /// that materialize as instance attributes. Used by metadata-time
+    /// consumers that can't re-walk annotations cross-module.
+    pub instance_fields: SmallSet<Name>,
     pub kws: DataclassKeywords,
     pub field_specifiers: Vec<CalleeKind>,
     pub alias_keyword: Name,

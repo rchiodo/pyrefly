@@ -54,6 +54,7 @@ use crate::alt::types::class_metadata::TotalOrderingMetadata;
 use crate::alt::types::class_metadata::TypedDictMetadata;
 use crate::alt::types::decorated_function::Decorator;
 use crate::alt::types::pydantic::PydanticConfig;
+use crate::alt::types::pydantic::PydanticModelKind;
 use crate::binding::base_class::BaseClass;
 use crate::binding::base_class::BaseClassExpr;
 use crate::binding::base_class::BaseClassGeneric;
@@ -62,6 +63,7 @@ use crate::binding::binding::BindingShapedArrayMetadata;
 use crate::binding::binding::ClassFieldDefinition;
 use crate::binding::binding::ExprOrBinding;
 use crate::binding::binding::Key;
+use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyDecorator;
 use crate::binding::django::DjangoFieldInfo;
@@ -1025,6 +1027,88 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         has_attrs_field_specifiers || has_attrs_base
     }
 
+    /// Single annotation walk returning local `(instance, pseudo_overrides)`.
+    /// `pseudo_overrides` are local `ClassVar`/`InitVar`/`KW_ONLY` annotations
+    /// that drop the matching inherited dataclass entry (CPython
+    /// `_process_class` semantics). Pydantic privates are skipped entirely.
+    /// Cycle-safe: must not call helpers that consume solved class fields.
+    fn local_dataclass_field_classification(
+        &self,
+        cls: &Class,
+        pydantic_config: Option<&PydanticConfig>,
+    ) -> (SmallSet<Name>, SmallSet<Name>) {
+        let mut instance = SmallSet::new();
+        let mut pseudo_overrides = SmallSet::new();
+        let Some(class_fields) = self.get_class_fields(cls) else {
+            return (instance, pseudo_overrides);
+        };
+        let pydantic_drops_private = pydantic_config.is_some_and(|pydantic| {
+            matches!(
+                pydantic.pydantic_model_kind,
+                PydanticModelKind::BaseModel
+                    | PydanticModelKind::RootModel
+                    | PydanticModelKind::BaseSettings
+            )
+        });
+        for name in class_fields.class_body_fields() {
+            if !class_fields.is_field_annotated(name) {
+                continue;
+            }
+            if pydantic_drops_private && name.as_str().starts_with('_') {
+                continue;
+            }
+            let key = KeyClassField(cls.index(), name.clone());
+            let Some(field_idx) = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key)) else {
+                continue;
+            };
+            let binding = self.bindings().get::<KeyClassField>(field_idx);
+            let annotation_key: Idx<KeyAnnotation> = match &binding.definition {
+                ClassFieldDefinition::DeclaredByAnnotation { annotation, .. } => *annotation,
+                ClassFieldDefinition::AssignedInBody {
+                    annotation: Some(annotation),
+                    ..
+                } => *annotation,
+                _ => continue,
+            };
+            let annotation = &self.get_idx(annotation_key).annotation;
+            if annotation.is_class_var()
+                || annotation.is_init_var()
+                || matches!(annotation.get_type(), Type::ClassType(c) if c.has_qname("dataclasses", "KW_ONLY"))
+            {
+                pseudo_overrides.insert(name.clone());
+                continue;
+            }
+            instance.insert(name.clone());
+        }
+        (instance, pseudo_overrides)
+    }
+
+    /// Populates `DataclassMetadata.instance_fields`: inherited instance
+    /// fields minus local pseudo-overrides, plus local instance fields.
+    /// Sibling of `get_dataclass_fields` but filtered to actual CPython
+    /// instance-storage names.
+    fn get_dataclass_instance_fields(
+        &self,
+        cls: &Class,
+        bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
+        pydantic_config: Option<&PydanticConfig>,
+    ) -> SmallSet<Name> {
+        let (local_instance, local_pseudo_overrides) =
+            self.local_dataclass_field_classification(cls, pydantic_config);
+        let mut all_fields = SmallSet::new();
+        for (_, metadata) in bases_with_metadata.iter().rev() {
+            if let Some(dataclass) = metadata.dataclass_metadata() {
+                for name in &dataclass.instance_fields {
+                    if !local_pseudo_overrides.contains(name) {
+                        all_fields.insert(name.clone());
+                    }
+                }
+            }
+        }
+        all_fields.extend(local_instance);
+        all_fields
+    }
+
     fn dataclass_metadata(
         &self,
         cls: &Class,
@@ -1067,8 +1151,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(CalleeKind::Function(FunctionKind::Dataclass)) => {
                     has_dataclass_decorator = true;
                     let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
+                    let instance_fields = self.get_dataclass_instance_fields(
+                        cls,
+                        bases_with_metadata,
+                        pydantic_config,
+                    );
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
+                        instance_fields,
                         kws: DataclassKeywords::new(),
                         field_specifiers: vec![
                             CalleeKind::Function(FunctionKind::DataclassField),
@@ -1086,8 +1176,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     has_dataclass_decorator = true;
                     let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
+                    let instance_fields = self.get_dataclass_instance_fields(
+                        cls,
+                        bases_with_metadata,
+                        pydantic_config,
+                    );
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
+                        instance_fields,
                         kws: DataclassKeywords::from_type_map(
                             &call.keywords,
                             &DataclassTransformMetadata::new(),
@@ -1152,6 +1248,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .extend(pydantic_before_validator_fields.iter().cloned());
             dataclass_metadata = Some(DataclassMetadata {
                 fields: self.get_dataclass_fields(cls, bases_with_metadata),
+                instance_fields: self.get_dataclass_instance_fields(
+                    cls,
+                    bases_with_metadata,
+                    pydantic_config,
+                ),
                 kws,
                 field_specifiers,
                 alias_keyword,
