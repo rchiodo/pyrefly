@@ -958,7 +958,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let mut missing_named_posonly = SmallSet::new();
         let mut kwparams = OrderedMap::new();
         let mut kwargs = None;
-        let mut kwargs_is_unpack = false;
         // Parameters with default values that are not matched to call args.
         let mut default_check = Vec::new();
         loop {
@@ -1032,12 +1031,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         });
                     if let ExtraItems::Extra(extra) = self.typed_dict_extra_items(typed_dict) {
-                        kwargs = Some((name.as_ref(), type_owner.push(extra.ty)))
+                        kwargs = Some((name.as_ref(), Some(type_owner.push(extra.ty))))
+                    } else {
+                        kwargs = Some((name.as_ref(), None))
                     }
-                    kwargs_is_unpack = true;
                 }
                 Param::Kwargs(name, ty) => {
-                    kwargs = Some((name.as_ref(), ty));
+                    kwargs = Some((name.as_ref(), Some(ty)));
                 }
             }
         }
@@ -1070,7 +1070,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     if let Type::TypedDict(typed_dict) = ty {
                         for (name, field) in self.typed_dict_fields(&typed_dict).into_iter() {
                             let name = name_owner.push(name);
-                            let mut hint = kwargs.as_ref().map(|(_, ty)| *ty);
+                            let mut hint = kwargs.as_ref().and_then(|(_, ty)| *ty);
                             if let Some(ty) = seen_names.get(name) {
                                 // For Required fields, the conflict is guaranteed, so report
                                 // BadKeywordArgument. For NotRequired fields, the conflict is
@@ -1097,7 +1097,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     not_required_td_names.insert(name);
                                 }
                                 hint = Some(*ty)
-                            } else if kwargs.is_none() && !kwargs_is_unpack {
+                            } else if kwargs.is_none() {
                                 unexpected_keyword_error(name, kw.range);
                             }
                             if let Some(want) = &hint {
@@ -1123,7 +1123,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     &key,
                                     &self.heap.mk_class_type(self.stdlib.str().clone()),
                                 ) {
-                                    if let Some((name, want)) = kwargs.as_ref() {
+                                    if let Some((name, Some(want))) = kwargs.as_ref() {
                                         self.check_type_with_options(
                                             &value,
                                             want,
@@ -1169,7 +1169,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                 }
                 Some(id) => {
-                    let mut hint = kwargs.as_ref().map(|(_, ty)| *ty);
+                    let mut hint = kwargs.as_ref().and_then(|(_, ty)| *ty);
                     let mut has_matching_param = false;
                     if let Some(ty) = seen_names.get(&id.id) {
                         // Use PotentialBadKeywordArgument when the prior entry came from a
@@ -1191,7 +1191,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         seen_names.insert(&id.id, *ty);
                         hint = Some(*ty);
                         has_matching_param = true;
-                    } else if kwargs.is_none() {
+                    } else if kwargs.is_none_or(|(_, ty)| ty.is_none()) {
                         unexpected_keyword_error(&id.id, id.range);
                     }
                     if let Some(expected) = hint {
