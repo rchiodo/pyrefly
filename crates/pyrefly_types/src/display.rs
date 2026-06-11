@@ -755,12 +755,14 @@ impl<'a> TypeDisplayContext<'a> {
                                 self.write_func_fqn(output, &func_name, &metadata.kind)?;
                                 // Strip the `self` parameter only in ProvideType mode;
                                 // hover/signature help should show the full signature.
-                                let effective_sig =
-                                    if self.lsp_display_mode == LspDisplayMode::ProvideType {
-                                        signature.strip_self_param()
-                                    } else {
-                                        signature.clone()
-                                    };
+                                let effective_sig = if self.lsp_display_mode
+                                    == LspDisplayMode::ProvideType
+                                    && let Some(stripped_signature) = signature.strip_first_param()
+                                {
+                                    stripped_signature
+                                } else {
+                                    signature.clone()
+                                };
                                 match self.lsp_display_mode {
                                     LspDisplayMode::Hover => {
                                         effective_sig
@@ -800,12 +802,14 @@ impl<'a> TypeDisplayContext<'a> {
                                         .map(|q| Fmt(|f| self.fmt_tparam(q, f))))
                                 )?;
                                 output.write_str("]")?;
-                                let effective_sig =
-                                    if self.lsp_display_mode == LspDisplayMode::ProvideType {
-                                        signature.strip_self_param()
-                                    } else {
-                                        signature.clone()
-                                    };
+                                let effective_sig = if self.lsp_display_mode
+                                    == LspDisplayMode::ProvideType
+                                    && let Some(stripped_signature) = signature.strip_first_param()
+                                {
+                                    stripped_signature
+                                } else {
+                                    signature.clone()
+                                };
                                 let _scope = self.push_forall_scope(tparams.iter());
                                 let result = match self.lsp_display_mode {
                                     LspDisplayMode::Hover => effective_sig

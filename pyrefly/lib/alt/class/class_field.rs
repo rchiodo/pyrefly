@@ -4662,9 +4662,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // Property setters are always a single function (never an
                     // overload), so callable_signatures() returns exactly one.
                     let setter_sigs = want_setter.callable_signatures();
-                    let mut owner = Owner::new();
                     if let Some(setter_sig) = setter_sigs.first()
-                        && let Some((_, rest)) = setter_sig.split_first_param(&mut owner)
+                        && let Some(rest) = setter_sig.strip_first_param()
                         && let Some(setter_value_type) = rest.get_first_param()
                     {
                         is_subset(&setter_value_type, got).map_err(|subset_error| {

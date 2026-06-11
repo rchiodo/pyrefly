@@ -2027,11 +2027,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             // Set the return type to `Any` so that we check just the input signature.
             sig.ret = self.heap.mk_any_implicit();
             // Skip self/cls to avoid false positive overload errors on narrowed self types.
-            if has_self_param {
-                let mut owner = Owner::new();
-                if let Some((_, rest)) = sig.split_first_param(&mut owner) {
-                    sig = rest;
-                }
+            if has_self_param && let Some(rest) = sig.strip_first_param() {
+                sig = rest;
             }
             sig
         };
@@ -2331,14 +2328,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Option<Type> {
         let mut owner = Owner::new();
         match func {
-            BoundMethodType::Function(func) => {
-                func.signature.split_first_param(&mut owner).map(|(_, c)| {
-                    self.heap.mk_function(Function {
-                        signature: c,
-                        metadata: func.metadata.clone(),
-                    })
+            BoundMethodType::Function(func) => func.signature.strip_first_param().map(|c| {
+                self.heap.mk_function(Function {
+                    signature: c,
+                    metadata: func.metadata.clone(),
                 })
-            }
+            }),
             BoundMethodType::Forall(forall) => forall
                 .body
                 .signature
@@ -2362,8 +2357,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .try_mapped_ref(|x| match x {
                     OverloadType::Function(f) => f
                         .signature
-                        .split_first_param(&mut owner)
-                        .map(|(_, c)| {
+                        .strip_first_param()
+                        .map(|c| {
                             OverloadType::Function(Function {
                                 signature: c,
                                 metadata: f.metadata.clone(),
@@ -2445,8 +2440,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Forallable::TypeAlias(_) => None,
             },
             Type::Callable(callable) => callable
-                .split_first_param(&mut owner)
-                .map(|(_, c)| self.heap.mk_callable_from(c)),
+                .strip_first_param()
+                .map(|c| self.heap.mk_callable_from(c)),
             // Function/Overload variants delegate to the shared implementation.
             Type::Function(func) => self.bind_bound_method_type(
                 &BoundMethodType::Function((**func).clone()),

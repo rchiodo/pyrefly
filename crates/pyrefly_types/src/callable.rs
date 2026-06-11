@@ -333,12 +333,6 @@ impl ParamList {
         self.0.is_empty()
     }
 
-    pub fn split_first(&self) -> Option<(&Type, ParamList)> {
-        self.0
-            .split_first()
-            .map(|(first, rest)| (first.as_type(), ParamList(rest.to_vec())))
-    }
-
     /// Type signature that permits everything, namely `*args, **kwargs`.
     pub fn everything() -> ParamList {
         ParamList(vec![
@@ -984,18 +978,9 @@ impl Callable {
     }
 
     /// Return a new Callable with the first parameter removed (the `self` param for bound methods).
-    /// Returns a clone if the params are not a list or the list is empty.
-    pub fn strip_self_param(&self) -> Self {
-        match &self.params {
-            Params::List(params) => {
-                if let Some((_, rest)) = params.split_first() {
-                    Callable::list(rest, self.ret.clone())
-                } else {
-                    self.clone()
-                }
-            }
-            _ => self.clone(),
-        }
+    pub fn strip_first_param(&self) -> Option<Self> {
+        self.split_first_param(&mut Owner::new())
+            .map(|(_, rest)| rest)
     }
 
     pub fn split_first_param<'a>(&'a self, owner: &'a mut Owner<Type>) -> Option<(&'a Type, Self)> {
@@ -1004,8 +989,11 @@ impl Callable {
                 params: Params::List(params),
                 ret,
             } => {
-                let (first, rest) = params.split_first()?;
-                Some((first, Self::list(rest, ret.clone())))
+                let (first, rest) = params.0.split_first()?;
+                Some((
+                    first.as_type(),
+                    Self::list(ParamList(rest.to_vec()), ret.clone()),
+                ))
             }
             Self {
                 params: Params::ParamSpec(ts, p),

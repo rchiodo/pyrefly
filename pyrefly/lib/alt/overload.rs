@@ -540,8 +540,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(_) => overload
                     .1
                     .signature
-                    .split_first_param(&mut Owner::new())
-                    .map(|(_, signature)| signature)
+                    .strip_first_param()
                     .unwrap_or_else(|| overload.1.signature.clone()),
                 None => overload.1.signature.clone(),
             };
