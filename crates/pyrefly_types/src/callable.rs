@@ -990,10 +990,14 @@ impl Callable {
                 ret,
             } => {
                 let (first, rest) = params.0.split_first()?;
-                Some((
-                    first.as_type(),
-                    Self::list(ParamList(rest.to_vec()), ret.clone()),
-                ))
+                if let Param::Varargs(_, first) = first {
+                    Some((first, self.clone()))
+                } else {
+                    Some((
+                        first.as_type(),
+                        Self::list(ParamList(rest.to_vec()), ret.clone()),
+                    ))
+                }
             }
             Self {
                 params: Params::ParamSpec(ts, p),
@@ -1014,26 +1018,8 @@ impl Callable {
     }
 
     pub fn get_first_param(&self) -> Option<Type> {
-        match self {
-            Self {
-                params: Params::List(params),
-                ret: _,
-            } if let Some(param) = params.items().first() => match param {
-                Param::PosOnly(_, ty, _) | Param::Pos(_, ty, _) | Param::Varargs(_, ty) => {
-                    Some(ty.clone())
-                }
-                _ => None,
-            },
-            Self {
-                params: Params::ParamSpec(ts, _),
-                ret: _,
-            } => ts.first().map(|x| x.ty().clone()),
-            Self {
-                params: Params::Ellipsis,
-                ret: _,
-            } => Some(Type::any_implicit()),
-            _ => None,
-        }
+        self.split_first_param(&mut Owner::new())
+            .map(|(first, _)| first.clone())
     }
 
     pub fn is_typeguard(&self) -> bool {
