@@ -38,12 +38,36 @@ use crate::types::stdlib::Stdlib;
 use crate::types::types::CalleeKind;
 use crate::types::types::Type;
 
-/// Slot names declared directly on a class via `__slots__`.
+/// Slot names declared directly on a class via `__slots__`, when the value is
+/// statically extractable.
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
 pub struct SlotsInfo {
     pub names: SmallSet<Name>,
     /// Whether `__dict__` appears among the slot names, which disables enforcement.
     pub has_dict: bool,
+}
+
+/// Whether a class body declares `__slots__`, and whether the slot names are
+/// known. Dynamic `__slots__` values are present but not usable for slot-name
+/// enforcement or explicit-slot disjoint-base promotion.
+#[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
+pub enum ExplicitSlots {
+    Absent,
+    Unknown,
+    Known(SlotsInfo),
+}
+
+impl ExplicitSlots {
+    pub fn has_explicit_slots(&self) -> bool {
+        !matches!(self, Self::Absent)
+    }
+
+    pub fn slots_info(&self) -> Option<&SlotsInfo> {
+        match self {
+            Self::Absent | Self::Unknown => None,
+            Self::Known(slots) => Some(slots),
+        }
+    }
 }
 
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
@@ -74,7 +98,7 @@ pub struct ClassMetadata {
     is_factory_boy_factory: bool,
     /// Whether this class is a metaclass (i.e., a subclass of `type`).
     is_metaclass: bool,
-    slots_info: Option<SlotsInfo>,
+    explicit_slots: ExplicitSlots,
     /// `__init__` parameter names to capture for shape inference, extracted from
     /// `@uses_shape_dsl(..., capture_init=[...])` on a `forward` method.
     capture_init: Option<Vec<Name>>,
@@ -139,7 +163,7 @@ impl ClassMetadata {
         is_marshmallow_schema: bool,
         is_factory_boy_factory: bool,
         is_metaclass: bool,
-        slots_info: Option<SlotsInfo>,
+        explicit_slots: ExplicitSlots,
         capture_init: Option<Vec<Name>>,
         shaped_array_shape: Option<Quantified>,
     ) -> ClassMetadata {
@@ -167,7 +191,7 @@ impl ClassMetadata {
             is_marshmallow_schema,
             is_factory_boy_factory,
             is_metaclass,
-            slots_info,
+            explicit_slots,
             capture_init,
             shaped_array_shape,
         }
@@ -198,7 +222,7 @@ impl ClassMetadata {
             is_marshmallow_schema: false,
             is_factory_boy_factory: false,
             is_metaclass: false,
-            slots_info: None,
+            explicit_slots: ExplicitSlots::Absent,
             capture_init: None,
             shaped_array_shape: None,
         }
@@ -350,7 +374,7 @@ impl ClassMetadata {
     }
 
     pub fn slots_info(&self) -> Option<&SlotsInfo> {
-        self.slots_info.as_ref()
+        self.explicit_slots.slots_info()
     }
 
     pub fn dataclass_transform_metadata(&self) -> Option<&DataclassTransformMetadata> {

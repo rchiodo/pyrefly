@@ -740,3 +740,25 @@ class Right:
 class OK(C, Right): ...  # no conflict
 "#,
 );
+
+// Like the prior test but with dynamic explicit `__slots__`: slot names are
+// unknown, but the class-body `__slots__` presence still blocks synthesis.
+testcase!(
+    test_slots_dataclass_slots_dynamic_explicit_slots_does_not_promote,
+    r#"
+from dataclasses import dataclass
+from typing import Sequence
+
+def get_slots() -> Sequence[str]: ...
+
+@dataclass(slots=True)
+class C:  # E: Cannot specify both `slots=True` and `__slots__`
+    __slots__ = get_slots()
+    x: int
+
+class Right:
+    __slots__ = ("y",)
+
+class OK(C, Right): ...  # no conflict
+"#,
+);

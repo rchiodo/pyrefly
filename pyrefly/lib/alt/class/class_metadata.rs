@@ -45,6 +45,7 @@ use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::DataclassMetadata;
 use crate::alt::types::class_metadata::DjangoModelMetadata;
 use crate::alt::types::class_metadata::EnumMetadata;
+use crate::alt::types::class_metadata::ExplicitSlots;
 use crate::alt::types::class_metadata::InitDefaults;
 use crate::alt::types::class_metadata::Metaclass;
 use crate::alt::types::class_metadata::NamedTupleMetadata;
@@ -363,9 +364,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .iter()
             .find_map(|(decorator, _)| decorator.deprecation.clone());
 
-        let slots_info = self.extract_slots_info(cls);
-        let has_nonempty_explicit_slots = slots_info
-            .as_ref()
+        let explicit_slots = self.explicit_slots(cls);
+        let has_nonempty_explicit_slots = explicit_slots
+            .slots_info()
             .is_some_and(|slots| !slots.names.is_empty());
         // PEP 800: `@disjoint_base` is only valid on nominal classes. Marking
         // an invalid TypedDict/Protocol target as disjoint would let narrowing
@@ -448,13 +449,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         );
         // PEP 800: only promote when a fresh `@dataclass(slots=True)`-like
         // decorator would actually synthesize non-empty slots. Inherited
-        // slots=True flows through `ClassMro` instead. `slots_info.is_none()`
-        // suppresses promotion when an explicit `__slots__` is present —
-        // `get_dataclass_synthesized_fields` errors out and skips synthesis
-        // in that case (the gate is tightened in the next diff to also
-        // cover unextractable `__slots__` expressions).
+        // slots=True flows through `ClassMro` instead. The explicit-slots
+        // gate matches the synthesis-time check in
+        // `get_dataclass_synthesized_fields`: any class-body `__slots__`
+        // blocks dataclass slot synthesis, even if the slot names are dynamic
+        // and unavailable for explicit-slot promotion.
         let has_nonempty_fresh_dataclass_slots = has_fresh_local_slots_decorator
-            && slots_info.is_none()
+            && !explicit_slots.has_explicit_slots()
             && self.local_has_nonempty_generated_slots(
                 cls,
                 &bases_with_metadata,
@@ -533,7 +534,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_marshmallow_schema,
             is_factory_boy_factory,
             is_metaclass,
-            slots_info,
+            explicit_slots,
             capture_init.map(|names| names.to_vec()),
             shaped_array_shape,
         )
@@ -577,15 +578,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    fn extract_slots_info(&self, cls: &Class) -> Option<SlotsInfo> {
+    fn explicit_slots(&self, cls: &Class) -> ExplicitSlots {
         let key = KeyClassField(cls.index(), dunder::SLOTS.clone());
-        let idx = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key))?;
+        let Some(idx) = self.bindings().key_to_idx_hashed_opt(Hashed::new(&key)) else {
+            return ExplicitSlots::Absent;
+        };
         let binding = self.bindings().get::<KeyClassField>(idx);
         let ClassFieldDefinition::AssignedInBody { value, .. } = &binding.definition else {
-            return None;
+            return ExplicitSlots::Unknown;
         };
         let ExprOrBinding::Expr(expr) = value.as_ref() else {
-            return None;
+            return ExplicitSlots::Unknown;
         };
 
         fn extract_names_from_elts(elts: &[Expr]) -> Option<SlotsInfo> {
@@ -604,7 +607,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(SlotsInfo { names, has_dict })
         }
 
-        match expr {
+        let Some(slots) = (match expr {
             Expr::Tuple(t) => extract_names_from_elts(&t.elts),
             Expr::List(l) => extract_names_from_elts(&l.elts),
             Expr::StringLiteral(s) => {
@@ -615,7 +618,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 Some(SlotsInfo { names, has_dict })
             }
             _ => None,
-        }
+        }) else {
+            return ExplicitSlots::Unknown;
+        };
+        ExplicitSlots::Known(slots)
     }
 
     fn initial_protocol_metadata(
