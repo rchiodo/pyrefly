@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+use std::iter;
 use std::sync::Arc;
 
 use dupe::Dupe;
@@ -591,37 +592,27 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return ExplicitSlots::Unknown;
         };
 
-        fn extract_names_from_elts(elts: &[Expr]) -> Option<SlotsInfo> {
-            let mut names = SmallSet::new();
-            let mut has_dict = false;
-            for elt in elts {
-                let Expr::StringLiteral(s) = elt else {
-                    return None;
-                };
-                let name = Name::new(s.value.to_str());
-                if name == dunder::DICT {
-                    has_dict = true;
-                }
-                names.insert(name);
+        fn name_of(expr: &Expr) -> Option<Name> {
+            match expr {
+                Expr::StringLiteral(s) => Some(Name::new(s.value.to_str())),
+                _ => None,
             }
-            Some(SlotsInfo { names, has_dict })
         }
-
-        let Some(slots) = (match expr {
-            Expr::Tuple(t) => extract_names_from_elts(&t.elts),
-            Expr::List(l) => extract_names_from_elts(&l.elts),
-            Expr::StringLiteral(s) => {
-                let mut names = SmallSet::new();
-                let name = Name::new(s.value.to_str());
-                let has_dict = name == dunder::DICT;
-                names.insert(name);
-                Some(SlotsInfo { names, has_dict })
-            }
-            _ => None,
-        }) else {
-            return ExplicitSlots::Unknown;
+        let names: Option<SmallSet<Name>> = match expr {
+            Expr::Tuple(t) => t.elts.iter().map(name_of).collect(),
+            Expr::List(l) => l.elts.iter().map(name_of).collect(),
+            Expr::Dict(d) => d
+                .items
+                .iter()
+                .map(|item| item.key.as_ref().and_then(name_of))
+                .collect(),
+            Expr::StringLiteral(s) => Some(iter::once(Name::new(s.value.to_str())).collect()),
+            _ => return ExplicitSlots::Unknown,
         };
-        ExplicitSlots::Known(slots)
+        match names {
+            Some(names) => ExplicitSlots::Known(SlotsInfo { names }),
+            None => ExplicitSlots::Unknown,
+        }
     }
 
     fn initial_protocol_metadata(

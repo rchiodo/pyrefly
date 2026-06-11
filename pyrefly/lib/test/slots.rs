@@ -33,6 +33,18 @@ class C:
 );
 
 testcase!(
+    test_slots_manual_dict_rejects_undeclared,
+    r#"
+class C:
+    __slots__ = {"x": "docstring for x"}
+
+    def __init__(self):
+        self.x = 1
+        self.y = 2  # E: not declared in `__slots__`
+"#,
+);
+
+testcase!(
     test_slots_inherited_union,
     r#"
 class Base:
@@ -68,6 +80,18 @@ testcase!(
     r#"
 class C:
     __slots__ = ("x", "__dict__")
+
+    def __init__(self):
+        self.x = 1
+        self.y = 2  # OK: __dict__ in slots allows arbitrary attrs
+"#,
+);
+
+testcase!(
+    test_slots_dict_literal_allows_dynamic,
+    r#"
+class C:
+    __slots__ = {"x": "docstring for x", "__dict__": "instance dict"}
 
     def __init__(self):
         self.x = 1
@@ -291,6 +315,19 @@ class Right:
     __slots__ = "c"
 
 class Combined(Left, Right): ...  # E: incompatible disjoint bases
+"#,
+);
+
+testcase!(
+    test_slots_dict_layout_conflict,
+    r#"
+class Left:
+    __slots__ = {"x": "docstring for x"}
+
+class Right:
+    __slots__ = ("y",)
+
+class Combined(Left, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
 "#,
 );
 

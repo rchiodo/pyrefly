@@ -1146,7 +1146,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return Some((names, has_dict));
         }
         let slots = metadata.slots_info()?;
-        Some((slots.names.clone(), slots.has_dict))
+        Some((slots.names.clone(), slots.has_dict()))
     }
 
     /// Compute the effective slots policy for a class instance write.

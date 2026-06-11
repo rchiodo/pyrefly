@@ -14,6 +14,7 @@ use std::sync::Arc;
 use dupe::Dupe;
 use pyrefly_derive::TypeEq;
 use pyrefly_derive::VisitMut;
+use pyrefly_python::dunder;
 use pyrefly_types::callable::Deprecation;
 use pyrefly_types::quantified::Quantified;
 use pyrefly_types::typed_dict::ExtraItems;
@@ -43,8 +44,13 @@ use crate::types::types::Type;
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
 pub struct SlotsInfo {
     pub names: SmallSet<Name>,
+}
+
+impl SlotsInfo {
     /// Whether `__dict__` appears among the slot names, which disables enforcement.
-    pub has_dict: bool,
+    pub fn has_dict(&self) -> bool {
+        self.names.contains(&dunder::DICT)
+    }
 }
 
 /// Whether a class body declares `__slots__`, and whether the slot names are
