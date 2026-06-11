@@ -476,3 +476,270 @@ class Foo:
 assert_type(Foo.__name__, str)
 "#,
 );
+
+testcase!(
+    bug =
+        "@dataclass(slots=True) should make a class disjoint; `Bad`/`MixedBad` should be rejected",
+    test_slots_dataclass_slots_disjoint_base_conflicts,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(slots=True)
+class Left:
+    x: int
+
+@dataclass(slots=True)
+class Right:
+    y: int
+
+class Bad(Left, Right): ...
+
+class Explicit:
+    __slots__ = ("y",)
+
+class MixedBad(Left, Explicit): ...
+"#,
+);
+
+// Empty / pseudo-field-only dataclasses synthesize empty `__slots__`.
+testcase!(
+    test_slots_dataclass_empty_and_pseudo_slots_do_not_promote,
+    r#"
+from dataclasses import KW_ONLY, InitVar, dataclass
+from typing import ClassVar
+
+@dataclass(slots=True)
+class Empty:
+    pass
+
+@dataclass(slots=True)
+class OnlyClassVar:
+    x: ClassVar[int]
+
+@dataclass(slots=True)
+class OnlyInitVar:
+    x: InitVar[int]
+
+@dataclass(slots=True)
+class OnlyKwOnly:
+    _: KW_ONLY
+
+class Slotted:
+    __slots__ = ("y",)
+
+class EmptyOK(Empty, Slotted): ...
+class ClassVarOK(OnlyClassVar, Slotted): ...
+class InitVarOK(OnlyInitVar, Slotted): ...
+class KwOnlyOK(OnlyKwOnly, Slotted): ...
+"#,
+);
+
+// Subclasses without a new non-empty slot tuple should propagate the
+// inherited representative; `ChildWithLocalField` should become its own.
+testcase!(
+    bug = "@dataclass(slots=True) should make Left/ChildWithLocalField disjoint; all four conflicts should be flagged",
+    test_slots_dataclass_slots_propagate_through_subclasses,
+    r#"
+from dataclasses import InitVar, dataclass
+from typing import ClassVar
+
+@dataclass(slots=True)
+class Left:
+    x: int
+
+class LeftChild(Left):
+    pass
+
+@dataclass(slots=True)
+class DecoratedLeftChild(Left):
+    pass
+
+@dataclass(slots=True)
+class ChildWithLocalField(Left):
+    child: int
+
+@dataclass(slots=True)
+class ChildWithOnlyPseudoFields(Left):
+    class_var: ClassVar[int]
+    init_var: InitVar[int]
+
+@dataclass(slots=True)
+class Right:
+    y: int
+
+class Bad(LeftChild, Right): ...
+class DecoratedBad(DecoratedLeftChild, Right): ...
+class ChildBad(ChildWithLocalField, Right): ...
+class PseudoChildBad(ChildWithOnlyPseudoFields, Right): ...
+"#,
+);
+
+testcase!(
+    test_slots_empty_dataclass_slot_base_with_nonempty_dataclass_slot_base_ok,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(slots=True)
+class Empty:
+    pass
+
+@dataclass(slots=True)
+class NonEmpty:
+    x: int
+
+class OK(Empty, NonEmpty): ...
+"#,
+);
+
+// All three `dataclass_transform` entry points (base, metaclass, decorator).
+testcase!(
+    bug = "dataclass_transform `slots=True` should make the class disjoint; all three conflicts should be flagged",
+    test_slots_dataclass_transform_slots_disjoint_base_conflict,
+    r#"
+from typing import dataclass_transform
+
+@dataclass_transform()
+class ModelBase: ...
+
+class BaseLeft(ModelBase, slots=True):
+    x: int
+
+@dataclass_transform()
+class ModelMeta(type): ...
+
+class MetaLeft(metaclass=ModelMeta, slots=True):
+    x: int
+
+@dataclass_transform()
+def transform(**kwargs): ...
+
+@transform(slots=True)
+class DecoratedLeft:
+    x: int
+
+class Right:
+    __slots__ = ("y",)
+
+class BaseBad(BaseLeft, Right): ...
+class MetaBad(MetaLeft, Right): ...
+class DecoratedBad(DecoratedLeft, Right): ...
+"#,
+);
+
+// `fields(cls)` includes inherited dataclass fields, so an unslotted
+// dataclass ancestor still materializes a non-empty `__slots__` in a
+// slotted subclass.
+testcase!(
+    bug = "Promoted should be disjoint because @dataclass(slots=True) materializes UnslottedBase.x as a slot",
+    test_slots_dataclass_slots_promotes_via_inherited_fields,
+    r#"
+from dataclasses import dataclass
+
+@dataclass
+class UnslottedBase:
+    x: int
+
+@dataclass(slots=True)
+class Promoted(UnslottedBase):
+    pass
+
+class Right:
+    __slots__ = ("y",)
+
+class Bad(Promoted, Right): ...
+"#,
+);
+
+// CPython dedups child slots against transitive ancestor slots, so the
+// representative reported here must be `A`, not `C`.
+testcase!(
+    bug = "Bad should flag `A, Right` once @dataclass(slots=True) promotes via the transitive MRO",
+    test_slots_dataclass_slots_dedup_through_unslotted_middle,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(slots=True)
+class A:
+    x: int
+
+@dataclass
+class B(A):
+    pass
+
+@dataclass(slots=True)
+class C(B):
+    pass
+
+@dataclass(slots=True)
+class Right:
+    y: int
+
+class Bad(C, Right): ...
+"#,
+);
+
+// Inherited pseudo-fields must not count as storage for slot synthesis.
+testcase!(
+    test_slots_dataclass_slots_ignores_inherited_pseudo_fields,
+    r#"
+from dataclasses import dataclass
+from typing import ClassVar
+
+@dataclass
+class PseudoOnlyBase:
+    x: ClassVar[int] = 0
+
+@dataclass(slots=True)
+class Child(PseudoOnlyBase):
+    pass
+
+class Right:
+    __slots__ = ("y",)
+
+class OK(Child, Right): ...  # no conflict: Child's slots are empty
+"#,
+);
+
+// A local pseudo-field annotation overrides the inherited dataclass entry,
+// dropping it from `fields(cls)` and the synthesized slots.
+testcase!(
+    test_slots_dataclass_slots_local_pseudo_override_drops_inherited_storage,
+    r#"
+from dataclasses import InitVar, dataclass
+from typing import ClassVar
+
+@dataclass
+class Base:
+    x: int
+    y: int
+
+@dataclass(slots=True)
+class Child(Base):
+    x: ClassVar[int] = 0  # E: ClassVar `Child.x` overrides instance variable of the same name in parent class `Base`
+    y: InitVar[int] = 0
+
+class Right:
+    __slots__ = ("z",)
+
+class OK(Child, Right): ...  # no conflict: x, y were pseudo-overridden
+"#,
+);
+
+// `@dataclass(slots=True)` + explicit `__slots__` errors at synthesis;
+// the disjoint-base gate must also suppress promotion.
+testcase!(
+    test_slots_dataclass_slots_explicit_slots_conflict_does_not_promote,
+    r#"
+from dataclasses import dataclass
+
+@dataclass(slots=True)
+class C:  # E: Cannot specify both `slots=True` and `__slots__`
+    __slots__ = ()
+    x: int
+
+class Right:
+    __slots__ = ("y",)
+
+class OK(C, Right): ...  # no conflict
+"#,
+);
