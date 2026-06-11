@@ -685,6 +685,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
+                } else if let Some(ty) =
+                    self.anonymous_typed_dict_get_with_literal(&x.func, &x.arguments, errors)
+                {
+                    ty
                 } else if let Some((obj_ty, key_expr, key)) =
                     self.is_dict_get_with_literal(&x.func, &x.arguments, errors)
                 {
@@ -1487,32 +1491,80 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }))
     }
 
-    // Is this a call to `dict.get` with a single string literal argument
-    fn is_dict_get_with_literal<'args>(
+    /// If `func(args)` is a `.get("<literal>", ...)` call, return the receiver's type,
+    /// the key expression, and the literal key. Callers apply their own
+    /// receiver/arg-count constraints.
+    fn dict_get_literal_key<'b>(
         &self,
         func: &Expr,
-        args: &'args Arguments,
+        args: &'b Arguments,
         errors: &ErrorCollector,
-    ) -> Option<(TypeInfo, &'args Expr, StringLiteralValue)> {
+    ) -> Option<(TypeInfo, &'b Expr, &'b StringLiteralValue)> {
         let Expr::Attribute(attr_expr) = func else {
             return None;
         };
         if attr_expr.attr.id.as_str() != "get" {
             return None;
         }
-        if args.args.len() != 1 {
-            return None;
-        }
-        let key_expr = &args.args[0];
+        let key_expr = args.args.first()?;
         let Expr::StringLiteral(ExprStringLiteral { value: key, .. }) = key_expr else {
             return None;
         };
         let obj_ty = self.expr_infer_impl(&attr_expr.value, None, errors);
-        if self.is_dict_like(obj_ty.ty()) {
-            Some((obj_ty, key_expr, key.clone()))
-        } else {
-            None
+        Some((obj_ty, key_expr, key))
+    }
+
+    // Is this a call to `dict.get` with a single string literal argument
+    fn is_dict_get_with_literal<'b>(
+        &self,
+        func: &Expr,
+        args: &'b Arguments,
+        errors: &ErrorCollector,
+    ) -> Option<(TypeInfo, &'b Expr, StringLiteralValue)> {
+        if args.args.len() != 1 {
+            return None;
         }
+        let (obj_ty, key_expr, key) = self.dict_get_literal_key(func, args, errors)?;
+        self.is_dict_like(obj_ty.ty())
+            .then(|| (obj_ty, key_expr, key.clone()))
+    }
+
+    /// Special-case `.get` on an anonymous TypedDict with a literal key, which would
+    /// otherwise resolve to the imprecise `dict.get`. Anonymous fields are always
+    /// non-required, so the result is `field.ty | None`, or `field.ty | default`.
+    fn anonymous_typed_dict_get_with_literal(
+        &self,
+        func: &Expr,
+        args: &Arguments,
+        errors: &ErrorCollector,
+    ) -> Option<Type> {
+        if !args.keywords.is_empty() || args.args.len() > 2 {
+            return None;
+        }
+        let (obj_ty, _key_expr, key) = self.dict_get_literal_key(func, args, errors)?;
+        let Type::TypedDict(td @ TypedDict::Anonymous(_)) = obj_ty.ty() else {
+            return None;
+        };
+        let field = self.typed_dict_field(td, &Name::new(key.to_str()))?;
+        // A presence-narrowed key (e.g. after `if "x" in d:`) is known to be present, so the
+        // value cannot be `None` and any default is unreachable.
+        if obj_ty.has_value_less_presence(&FacetKind::Key(key.to_string())) {
+            return Some(field.ty);
+        }
+        let result = if let Some(default) = args.args.get(1) {
+            self.union(
+                field.ty,
+                self.expr_infer(default, errors)
+                    .promote_implicit_literals(self.stdlib),
+            )
+        } else {
+            self.heap.mk_optional(field.ty)
+        };
+        Some(
+            obj_ty
+                .at_facet(&FacetKind::Key(key.to_string()), || result.clone())
+                .into_ty(),
+        )
     }
 
     // Is this type a `TypedDict` or subtype of `dict`, but not `Any`?
