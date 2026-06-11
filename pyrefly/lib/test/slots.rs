@@ -478,8 +478,6 @@ assert_type(Foo.__name__, str)
 );
 
 testcase!(
-    bug =
-        "@dataclass(slots=True) should make a class disjoint; `Bad`/`MixedBad` should be rejected",
     test_slots_dataclass_slots_disjoint_base_conflicts,
     r#"
 from dataclasses import dataclass
@@ -492,12 +490,12 @@ class Left:
 class Right:
     y: int
 
-class Bad(Left, Right): ...
+class Bad(Left, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
 
 class Explicit:
     __slots__ = ("y",)
 
-class MixedBad(Left, Explicit): ...
+class MixedBad(Left, Explicit): ...  # E: inherits from incompatible disjoint bases `Left`, `Explicit`
 "#,
 );
 
@@ -534,10 +532,9 @@ class KwOnlyOK(OnlyKwOnly, Slotted): ...
 "#,
 );
 
-// Subclasses without a new non-empty slot tuple should propagate the
-// inherited representative; `ChildWithLocalField` should become its own.
+// Subclasses without a new non-empty slot tuple propagate the inherited
+// representative; `ChildWithLocalField` becomes its own.
 testcase!(
-    bug = "@dataclass(slots=True) should make Left/ChildWithLocalField disjoint; all four conflicts should be flagged",
     test_slots_dataclass_slots_propagate_through_subclasses,
     r#"
 from dataclasses import InitVar, dataclass
@@ -567,10 +564,10 @@ class ChildWithOnlyPseudoFields(Left):
 class Right:
     y: int
 
-class Bad(LeftChild, Right): ...
-class DecoratedBad(DecoratedLeftChild, Right): ...
-class ChildBad(ChildWithLocalField, Right): ...
-class PseudoChildBad(ChildWithOnlyPseudoFields, Right): ...
+class Bad(LeftChild, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
+class DecoratedBad(DecoratedLeftChild, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
+class ChildBad(ChildWithLocalField, Right): ...  # E: inherits from incompatible disjoint bases `ChildWithLocalField`, `Right`
+class PseudoChildBad(ChildWithOnlyPseudoFields, Right): ...  # E: inherits from incompatible disjoint bases `Left`, `Right`
 "#,
 );
 
@@ -593,7 +590,6 @@ class OK(Empty, NonEmpty): ...
 
 // All three `dataclass_transform` entry points (base, metaclass, decorator).
 testcase!(
-    bug = "dataclass_transform `slots=True` should make the class disjoint; all three conflicts should be flagged",
     test_slots_dataclass_transform_slots_disjoint_base_conflict,
     r#"
 from typing import dataclass_transform
@@ -620,9 +616,9 @@ class DecoratedLeft:
 class Right:
     __slots__ = ("y",)
 
-class BaseBad(BaseLeft, Right): ...
-class MetaBad(MetaLeft, Right): ...
-class DecoratedBad(DecoratedLeft, Right): ...
+class BaseBad(BaseLeft, Right): ...  # E: inherits from incompatible disjoint bases `BaseLeft`, `Right`
+class MetaBad(MetaLeft, Right): ...  # E: inherits from incompatible disjoint bases `MetaLeft`, `Right`
+class DecoratedBad(DecoratedLeft, Right): ...  # E: inherits from incompatible disjoint bases `DecoratedLeft`, `Right`
 "#,
 );
 
@@ -630,7 +626,6 @@ class DecoratedBad(DecoratedLeft, Right): ...
 // dataclass ancestor still materializes a non-empty `__slots__` in a
 // slotted subclass.
 testcase!(
-    bug = "Promoted should be disjoint because @dataclass(slots=True) materializes UnslottedBase.x as a slot",
     test_slots_dataclass_slots_promotes_via_inherited_fields,
     r#"
 from dataclasses import dataclass
@@ -646,14 +641,13 @@ class Promoted(UnslottedBase):
 class Right:
     __slots__ = ("y",)
 
-class Bad(Promoted, Right): ...
+class Bad(Promoted, Right): ...  # E: inherits from incompatible disjoint bases `Promoted`, `Right`
 "#,
 );
 
 // CPython dedups child slots against transitive ancestor slots, so the
 // representative reported here must be `A`, not `C`.
 testcase!(
-    bug = "Bad should flag `A, Right` once @dataclass(slots=True) promotes via the transitive MRO",
     test_slots_dataclass_slots_dedup_through_unslotted_middle,
     r#"
 from dataclasses import dataclass
@@ -674,7 +668,10 @@ class C(B):
 class Right:
     y: int
 
-class Bad(C, Right): ...
+# The diagnostic must name `A`, not `C`: `C`'s generated `__slots__` is
+# empty because `x` is already covered by `A`, so `C` inherits `A`'s
+# representative through the MRO rather than introducing its own.
+class Bad(C, Right): ...  # E: inherits from incompatible disjoint bases `A`, `Right`
 "#,
 );
 

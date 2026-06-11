@@ -2974,7 +2974,6 @@ def f(x: LeftGrandchild) -> None:
 
 // Dataclass-slotted analogue of `test_disjoint_bases_slots_propagation`.
 testcase!(
-    bug = "@dataclass(slots=True) should make a class disjoint; narrowing should reach Never here",
     test_disjoint_bases_dataclass_slots_propagation,
     r#"
 from dataclasses import dataclass
@@ -2993,7 +2992,7 @@ class Right:
 
 def f(x: LeftChild) -> None:
     if isinstance(x, Right):
-        assert_never(x)  # E: Argument `LeftChild & Right` is not assignable to parameter `arg` with type `Never` in function `typing.assert_never`
+        assert_never(x)
 "#,
 );
 

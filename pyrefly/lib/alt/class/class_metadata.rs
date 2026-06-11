@@ -395,10 +395,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 true
             }
         });
-        // PEP 800: non-empty `__slots__` also makes a nominal class disjoint.
-        let is_disjoint_base = has_valid_disjoint_base_decorator
-            || (!is_typed_dict && protocol_metadata.is_none() && has_nonempty_explicit_slots);
-
         let total_ordering_metadata = decorators.iter().find_map(|(decorator, decorator_range)| {
             decorator.ty.callee_kind().and_then(|kind| {
                 if kind == CalleeKind::Function(FunctionKind::TotalOrdering) {
@@ -437,7 +433,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let is_attrs_class =
             self.is_attrs_class(&dataclass_from_dataclass_transform, &bases_with_metadata);
         let is_from_dataclass_transform = dataclass_from_dataclass_transform.is_some();
-        let dataclass_metadata = self.dataclass_metadata(
+        let (dataclass_metadata, has_fresh_local_slots_decorator) = self.dataclass_metadata(
             cls,
             &decorators,
             &bases_with_metadata,
@@ -450,6 +446,26 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_typed_dict,
             errors,
         );
+        // PEP 800: only promote when a fresh `@dataclass(slots=True)`-like
+        // decorator would actually synthesize non-empty slots. Inherited
+        // slots=True flows through `ClassMro` instead. `slots_info.is_none()`
+        // suppresses promotion when an explicit `__slots__` is present —
+        // `get_dataclass_synthesized_fields` errors out and skips synthesis
+        // in that case (the gate is tightened in the next diff to also
+        // cover unextractable `__slots__` expressions).
+        let has_nonempty_fresh_dataclass_slots = has_fresh_local_slots_decorator
+            && slots_info.is_none()
+            && self.local_has_nonempty_generated_slots(
+                cls,
+                &bases_with_metadata,
+                pydantic_config.as_ref(),
+            );
+        // PEP 800: non-empty `__slots__` (explicit or synthesized) makes a
+        // nominal class disjoint.
+        let is_disjoint_base = has_valid_disjoint_base_decorator
+            || (!is_typed_dict
+                && protocol_metadata.is_none()
+                && (has_nonempty_explicit_slots || has_nonempty_fresh_dataclass_slots));
         if let Some(dm) = dataclass_metadata.as_ref()
             && pydantic_config.is_none()
         {
@@ -1109,6 +1125,70 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         all_fields
     }
 
+    /// Models CPython `_add_slots`: would `@dataclass(slots=True)` produce a
+    /// non-empty `__slots__` tuple? Walks ancestors transitively — a
+    /// grandparent slot is invisible through a plain dataclass middle class
+    /// whose own `kws.slots` is false but still covers the name at runtime.
+    fn local_has_nonempty_generated_slots(
+        &self,
+        cls: &Class,
+        bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
+        pydantic_config: Option<&PydanticConfig>,
+    ) -> bool {
+        // Slot names already covered somewhere in the transitive MRO. Use
+        // `instance_fields` (not `fields`) so ancestor pseudo-fields don't
+        // leak in.
+        let mut inherited_slot_names: SmallSet<Name> = SmallSet::new();
+        let mut visited: SmallSet<Class> = SmallSet::new();
+        let mut stack: Vec<Class> = bases_with_metadata
+            .iter()
+            .map(|(base, _)| base.clone())
+            .collect();
+        while let Some(ancestor) = stack.pop() {
+            if !visited.insert(ancestor.clone()) {
+                continue;
+            }
+            let ancestor_metadata = self.get_metadata_for_class(&ancestor);
+            if let Some(s) = ancestor_metadata.slots_info() {
+                inherited_slot_names.extend(s.names.iter().cloned());
+            }
+            if let Some(dm) = ancestor_metadata
+                .dataclass_metadata()
+                .filter(|dm| dm.kws.slots)
+            {
+                inherited_slot_names.extend(dm.instance_fields.iter().cloned());
+            }
+            stack.extend(ancestor_metadata.base_class_objects().iter().cloned());
+        }
+
+        // Local pseudo-overrides also drop matching inherited entries —
+        // compute once, reuse below.
+        let (local_instance, local_pseudo_overrides) =
+            self.local_dataclass_field_classification(cls, pydantic_config);
+        for name in &local_instance {
+            if !inherited_slot_names.contains(name) {
+                return true;
+            }
+        }
+
+        // Inherited instance fields re-materialize unless covered upstream
+        // or pseudo-overridden locally.
+        for (_, metadata) in bases_with_metadata {
+            if let Some(dm) = metadata.dataclass_metadata() {
+                for name in &dm.instance_fields {
+                    if local_pseudo_overrides.contains(name) {
+                        continue;
+                    }
+                    if !inherited_slot_names.contains(name) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     fn dataclass_metadata(
         &self,
         cls: &Class,
@@ -1122,7 +1202,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         is_enum: bool,
         is_typed_dict: bool,
         errors: &ErrorCollector,
-    ) -> Option<DataclassMetadata> {
+    ) -> (Option<DataclassMetadata>, bool) {
         // If we inherit from a dataclass, inherit its metadata. Note that if this class is
         // itself decorated with @dataclass, we'll compute new metadata and overwrite this.
         let mut dataclass_metadata = bases_with_metadata.iter().find_map(|(_, metadata)| {
@@ -1131,6 +1211,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             m.kws.init = false;
             Some(m)
         });
+        let mut has_fresh_local_slots_decorator = false;
 
         let init_defaults = pydantic_config
             .map(|pyd| InitDefaults {
@@ -1156,10 +1237,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         bases_with_metadata,
                         pydantic_config,
                     );
+                    let kws = DataclassKeywords::new();
+                    // Bare `@dataclass` never sets slots.
+                    has_fresh_local_slots_decorator = false;
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
                         instance_fields,
-                        kws: DataclassKeywords::new(),
+                        kws,
                         field_specifiers: vec![
                             CalleeKind::Function(FunctionKind::DataclassField),
                             CalleeKind::Class(ClassKind::DataclassField),
@@ -1181,14 +1265,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         bases_with_metadata,
                         pydantic_config,
                     );
+                    let kws = DataclassKeywords::from_type_map(
+                        &call.keywords,
+                        &DataclassTransformMetadata::new(),
+                        true, // Regular dataclasses are always strict
+                    );
+                    has_fresh_local_slots_decorator = kws.slots;
                     dataclass_metadata = Some(DataclassMetadata {
                         fields: dataclass_fields,
                         instance_fields,
-                        kws: DataclassKeywords::from_type_map(
-                            &call.keywords,
-                            &DataclassTransformMetadata::new(),
-                            true, // Regular dataclasses are always strict
-                        ),
+                        kws,
                         field_specifiers: vec![
                             CalleeKind::Function(FunctionKind::DataclassField),
                             CalleeKind::Class(ClassKind::DataclassField),
@@ -1203,7 +1289,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         }
         // @dataclass cannot be applied to Protocol, Enum, or TypedDict classes.
-        // Emit the error and return None so the class is not treated as a dataclass.
+        // Emit the error and return no metadata so the class is not treated as a dataclass.
         if has_dataclass_decorator {
             if is_protocol {
                 self.error(
@@ -1215,7 +1301,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         cls.name()
                     ),
                 );
-                return None;
+                return (None, false);
             }
             if is_enum {
                 self.error(
@@ -1224,7 +1310,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ErrorKind::BadClassDefinition,
                     format!("Cannot apply `@dataclass` to Enum `{}`", cls.name()),
                 );
-                return None;
+                return (None, false);
             }
             if is_typed_dict {
                 self.error(
@@ -1233,7 +1319,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ErrorKind::BadClassDefinition,
                     format!("Cannot apply `@dataclass` to TypedDict `{}`", cls.name()),
                 );
-                return None;
+                return (None, false);
             }
         }
         if let Some((kws, field_specifiers)) = dataclass_from_dataclass_transform {
@@ -1246,6 +1332,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .collect();
             inherited_before_validator_fields
                 .extend(pydantic_before_validator_fields.iter().cloned());
+            // TODO: a transform-derived spec silently drops the explicit
+            // `@dataclass(...)` kws from the loop above. Needs a merge policy.
+            has_fresh_local_slots_decorator = kws.slots;
             dataclass_metadata = Some(DataclassMetadata {
                 fields: self.get_dataclass_fields(cls, bases_with_metadata),
                 instance_fields: self.get_dataclass_instance_fields(
@@ -1261,7 +1350,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 pydantic_before_validator_fields: inherited_before_validator_fields,
             });
         }
-        dataclass_metadata
+        (dataclass_metadata, has_fresh_local_slots_decorator)
     }
 
     // To avoid circular computation on targs, we have a special version of `expr_infer` that does not look into any subscript of any expr
