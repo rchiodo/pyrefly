@@ -24,6 +24,7 @@ use pyrefly_python::dunder;
 use pyrefly_python::module::Module;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use pyrefly_util::display::Fmt;
 use pyrefly_util::owner::Owner;
 use pyrefly_util::prelude::VecExt;
 use pyrefly_util::visit::Visit;
@@ -39,6 +40,7 @@ use crate::equality::TypeEqCtx;
 use crate::keywords::DataclassTransformMetadata;
 use crate::meta_shape_dsl::ShapeDslFunction;
 use crate::meta_shape_dsl::ShapeTransform;
+use crate::type_output::DisplayOutput;
 use crate::type_output::TypeOutput;
 use crate::types::AnyStyle;
 use crate::types::Type;
@@ -172,9 +174,6 @@ impl Callable {
 
 impl Display for Callable {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::display::TypeDisplayContext;
-        use crate::type_output::DisplayOutput;
-
         let ctx = TypeDisplayContext::new(&[]);
         let mut output = DisplayOutput::new(&ctx, f);
         self.fmt_with_type(&mut output, &|t, o| {
@@ -1190,10 +1189,6 @@ impl Param {
     /// This is similar to the `Display` impl, but allows passing in a `TypeDisplayContext`
     /// for context-aware formatting (e.g., disambiguating types with the same name).
     pub fn format_for_signature(&self, type_ctx: &TypeDisplayContext) -> String {
-        use pyrefly_util::display::Fmt;
-
-        use crate::type_output::DisplayOutput;
-
         format!(
             "{}",
             Fmt(|f| {
@@ -1208,9 +1203,6 @@ impl Param {
 
 impl Display for Param {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::display::TypeDisplayContext;
-        use crate::type_output::DisplayOutput;
-
         let ctx = TypeDisplayContext::new(&[]);
         let mut output = DisplayOutput::new(&ctx, f);
         self.fmt_with_type(&mut output, &|t, o| {
