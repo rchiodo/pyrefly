@@ -850,87 +850,56 @@ impl Solver {
             let query_var = query_var.or(Some(*x));
             let lock = self.variables.lock();
             if let Some(_guard) = lock.recurse(*x, recurser) {
-                match policy {
-                    VarExpansionPolicy::Force => {
+                let variable = lock.get(*x);
+                match &*variable {
+                    Variable::Answer(ty) => {
+                        *t = ty.clone();
+                        drop(variable);
+                        drop(lock);
+                        self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var);
+                    }
+                    Variable::ResidualAnswer { target_vars, ty } => {
+                        *t = self.residual_read_for_query_var(query_var, target_vars, ty);
+                        drop(variable);
+                        drop(lock);
+                        self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var);
+                    }
+                    Variable::Quantified {
+                        quantified: _,
+                        bounds,
+                    }
+                    | Variable::Unwrap(bounds)
+                        if policy == VarExpansionPolicy::ExpandWithBounds
+                            && let Some(bound) = self.solve_bounds(bounds.clone()) =>
+                    {
+                        *t = bound;
+                        drop(variable);
+                        drop(lock);
+                        self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var);
+                    }
+                    _ if policy == VarExpansionPolicy::Force => {
+                        drop(variable);
                         let mut e = lock.get_mut(*x);
-                        match &mut *e {
-                            Variable::Answer(ty) => {
-                                *t = ty.clone();
-                            }
-                            Variable::ResidualAnswer { target_vars, ty } => {
-                                *t = self.residual_read_for_query_var(query_var, target_vars, ty);
-                            }
-                            _ => {
-                                let ty = match &mut *e {
-                                    Variable::Quantified {
-                                        quantified: q,
-                                        bounds,
-                                    } => self
-                                        .solve_bounds(mem::take(bounds))
-                                        .unwrap_or_else(|| q.as_gradual_type()),
-                                    Variable::PartialQuantified(q) => q.as_gradual_type(),
-                                    Variable::Unwrap(bounds) => self
-                                        .solve_bounds(mem::take(bounds))
-                                        .unwrap_or_else(|| self.heap.mk_any_implicit()),
-                                    _ => self.heap.mk_any_implicit(),
-                                };
-                                *e = Variable::Answer(ty.clone());
-                                *t = ty;
-                            }
-                        }
+                        let ty = match &mut *e {
+                            Variable::Quantified {
+                                quantified: q,
+                                bounds,
+                            } => self
+                                .solve_bounds(mem::take(bounds))
+                                .unwrap_or_else(|| q.as_gradual_type()),
+                            Variable::PartialQuantified(q) => q.as_gradual_type(),
+                            Variable::Unwrap(bounds) => self
+                                .solve_bounds(mem::take(bounds))
+                                .unwrap_or_else(|| self.heap.mk_any_implicit()),
+                            _ => self.heap.mk_any_implicit(),
+                        };
+                        *e = Variable::Answer(ty.clone());
+                        *t = ty;
                         drop(e);
                         drop(lock);
                         self.resolve_vars_with_limit(t, limit - 1, policy, recurser, query_var);
                     }
-                    _ => {
-                        let variable = lock.get(*x);
-                        match &*variable {
-                            Variable::Answer(ty) => {
-                                *t = ty.clone();
-                                drop(variable);
-                                drop(lock);
-                                self.resolve_vars_with_limit(
-                                    t,
-                                    limit - 1,
-                                    policy,
-                                    recurser,
-                                    query_var,
-                                );
-                            }
-                            Variable::ResidualAnswer { target_vars, ty } => {
-                                *t = self.residual_read_for_query_var(query_var, target_vars, ty);
-                                drop(variable);
-                                drop(lock);
-                                self.resolve_vars_with_limit(
-                                    t,
-                                    limit - 1,
-                                    policy,
-                                    recurser,
-                                    query_var,
-                                );
-                            }
-                            Variable::Quantified {
-                                quantified: _,
-                                bounds,
-                            }
-                            | Variable::Unwrap(bounds)
-                                if policy == VarExpansionPolicy::ExpandWithBounds
-                                    && let Some(bound) = self.solve_bounds(bounds.clone()) =>
-                            {
-                                *t = bound;
-                                drop(variable);
-                                drop(lock);
-                                self.resolve_vars_with_limit(
-                                    t,
-                                    limit - 1,
-                                    policy,
-                                    recurser,
-                                    query_var,
-                                );
-                            }
-                            _ => {}
-                        }
-                    }
+                    _ => {}
                 }
             } else {
                 *t = self.heap.mk_any_implicit();
