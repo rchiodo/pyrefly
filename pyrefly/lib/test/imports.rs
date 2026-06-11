@@ -289,6 +289,82 @@ import foo
 "#,
 );
 
+fn env_main_guard() -> TestEnv {
+    let mut t = TestEnv::new();
+    t.add(
+        "foo",
+        r#"
+x = 1
+z = 0
+if __name__ == "__main__":
+    y = 2
+    z = 3
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_main_guard_not_exported,
+    env_main_guard(),
+    r#"
+from foo import x
+from foo import y  # E: Could not import `y` from `foo`
+"#,
+);
+
+testcase!(
+    test_main_guard_not_in_wildcard,
+    env_main_guard(),
+    r#"
+from foo import *
+x
+y  # E: Could not find name `y`
+"#,
+);
+
+// `z` is defined both at module level and inside the main guard. The
+// `main_guard_only &= in_main_guard` merge must keep it importable via both
+// direct and wildcard import. Regression guard against the `&=` becoming `=`.
+testcase!(
+    test_main_guard_merge_keeps_export,
+    env_main_guard(),
+    r#"
+from foo import z
+from foo import *
+z
+"#,
+);
+
+// `__all__` is defined at module level but mutated inside the main guard.
+// The guard-only `append`/`extend` mutations must not leak into the wildcard
+// surface, since they don't run at import time.
+fn env_main_guard_dunder_all_mutation() -> TestEnv {
+    let mut t = TestEnv::new();
+    t.add(
+        "foo",
+        r#"
+x = 1
+y = 2
+__all__ = ["x"]
+if __name__ == "__main__":
+    __all__.append("y")
+    __all__.extend(["y"])
+"#,
+    );
+    t
+}
+
+testcase!(
+    test_main_guard_dunder_all_mutation_not_in_wildcard,
+    env_main_guard_dunder_all_mutation(),
+    r#"
+from foo import *
+x
+y  # E: Could not find name `y`
+"#,
+);
+
 fn env_relative_import_star() -> TestEnv {
     let mut t = TestEnv::new();
     t.add_with_path("foo", "foo/__init__.pyi", "from .bar import *");
