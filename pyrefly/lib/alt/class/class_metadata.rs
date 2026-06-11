@@ -1043,20 +1043,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         has_attrs_field_specifiers || has_attrs_base
     }
 
-    /// Single annotation walk returning local `(instance, pseudo_overrides)`.
-    /// `pseudo_overrides` are local `ClassVar`/`InitVar`/`KW_ONLY` annotations
-    /// that drop the matching inherited dataclass entry (CPython
-    /// `_process_class` semantics). Pydantic privates are skipped entirely.
-    /// Cycle-safe: must not call helpers that consume solved class fields.
+    /// Single annotation walk returning local
+    /// `(instance, pseudo_overrides, pydantic_privates)` — pairwise disjoint;
+    /// together they cover every annotated body field. `pseudo_overrides`
+    /// (`ClassVar`/`InitVar`/`KW_ONLY`) replace the matching inherited
+    /// dataclass entry per CPython `_process_class`; pydantic privates are
+    /// non-overriding non-instance fields that still belong in
+    /// `DataclassMetadata.pseudo_fields`. Cycle-safe: must not call helpers
+    /// that consume solved class fields.
     fn local_dataclass_field_classification(
         &self,
         cls: &Class,
         pydantic_config: Option<&PydanticConfig>,
-    ) -> (SmallSet<Name>, SmallSet<Name>) {
+    ) -> (SmallSet<Name>, SmallSet<Name>, SmallSet<Name>) {
         let mut instance = SmallSet::new();
         let mut pseudo_overrides = SmallSet::new();
+        let mut pydantic_privates = SmallSet::new();
         let Some(class_fields) = self.get_class_fields(cls) else {
-            return (instance, pseudo_overrides);
+            return (instance, pseudo_overrides, pydantic_privates);
         };
         let pydantic_drops_private = pydantic_config.is_some_and(|pydantic| {
             matches!(
@@ -1071,6 +1075,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 continue;
             }
             if pydantic_drops_private && name.as_str().starts_with('_') {
+                pydantic_privates.insert(name.clone());
                 continue;
             }
             let key = KeyClassField(cls.index(), name.clone());
@@ -1096,33 +1101,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             instance.insert(name.clone());
         }
-        (instance, pseudo_overrides)
+        (instance, pseudo_overrides, pydantic_privates)
     }
 
-    /// Populates `DataclassMetadata.instance_fields`: inherited instance
-    /// fields minus local pseudo-overrides, plus local instance fields.
-    /// Sibling of `get_dataclass_fields` but filtered to actual CPython
-    /// instance-storage names.
-    fn get_dataclass_instance_fields(
+    /// Populates `DataclassMetadata.pseudo_field_names`.
+    fn get_dataclass_pseudo_field_names(
         &self,
         cls: &Class,
         bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
         pydantic_config: Option<&PydanticConfig>,
     ) -> SmallSet<Name> {
-        let (local_instance, local_pseudo_overrides) =
+        let (local_instance, local_pseudo_overrides, local_pydantic_privates) =
             self.local_dataclass_field_classification(cls, pydantic_config);
-        let mut all_fields = SmallSet::new();
+        let mut pseudo_field_names = SmallSet::new();
         for (_, metadata) in bases_with_metadata.iter().rev() {
-            if let Some(dataclass) = metadata.dataclass_metadata() {
-                for name in &dataclass.instance_fields {
-                    if !local_pseudo_overrides.contains(name) {
-                        all_fields.insert(name.clone());
+            if let Some(dm) = metadata.dataclass_metadata() {
+                for name in &dm.pseudo_field_names {
+                    // A local instance annotation overrides an inherited pseudo entry.
+                    if !local_instance.contains(name) {
+                        pseudo_field_names.insert(name.clone());
                     }
                 }
             }
         }
-        all_fields.extend(local_instance);
-        all_fields
+        pseudo_field_names.extend(local_pseudo_overrides);
+        pseudo_field_names.extend(local_pydantic_privates);
+        pseudo_field_names
     }
 
     /// Models CPython `_add_slots`: would `@dataclass(slots=True)` produce a
@@ -1156,14 +1160,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 .dataclass_metadata()
                 .filter(|dm| dm.kws.slots)
             {
-                inherited_slot_names.extend(dm.instance_fields.iter().cloned());
+                inherited_slot_names.extend(dm.instance_fields().cloned());
             }
             stack.extend(ancestor_metadata.base_class_objects().iter().cloned());
         }
 
         // Local pseudo-overrides also drop matching inherited entries —
-        // compute once, reuse below.
-        let (local_instance, local_pseudo_overrides) =
+        // compute once, reuse below. `pydantic_privates` doesn't matter
+        // here: it doesn't override inheritance and isn't slot-eligible.
+        let (local_instance, local_pseudo_overrides, _) =
             self.local_dataclass_field_classification(cls, pydantic_config);
         for name in &local_instance {
             if !inherited_slot_names.contains(name) {
@@ -1175,7 +1180,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         // or pseudo-overridden locally.
         for (_, metadata) in bases_with_metadata {
             if let Some(dm) = metadata.dataclass_metadata() {
-                for name in &dm.instance_fields {
+                for name in dm.instance_fields() {
                     if local_pseudo_overrides.contains(name) {
                         continue;
                     }
@@ -1231,8 +1236,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // `@dataclass`
                 Some(CalleeKind::Function(FunctionKind::Dataclass)) => {
                     has_dataclass_decorator = true;
-                    let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
-                    let instance_fields = self.get_dataclass_instance_fields(
+                    let fields = self.get_dataclass_fields(cls, bases_with_metadata);
+                    let pseudo_field_names = self.get_dataclass_pseudo_field_names(
                         cls,
                         bases_with_metadata,
                         pydantic_config,
@@ -1241,8 +1246,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // Bare `@dataclass` never sets slots.
                     has_fresh_local_slots_decorator = false;
                     dataclass_metadata = Some(DataclassMetadata {
-                        fields: dataclass_fields,
-                        instance_fields,
+                        fields,
+                        pseudo_field_names,
                         kws,
                         field_specifiers: vec![
                             CalleeKind::Function(FunctionKind::DataclassField),
@@ -1259,8 +1264,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     && call.has_function_kind(FunctionKind::Dataclass) =>
                 {
                     has_dataclass_decorator = true;
-                    let dataclass_fields = self.get_dataclass_fields(cls, bases_with_metadata);
-                    let instance_fields = self.get_dataclass_instance_fields(
+                    let fields = self.get_dataclass_fields(cls, bases_with_metadata);
+                    let pseudo_field_names = self.get_dataclass_pseudo_field_names(
                         cls,
                         bases_with_metadata,
                         pydantic_config,
@@ -1272,8 +1277,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     );
                     has_fresh_local_slots_decorator = kws.slots;
                     dataclass_metadata = Some(DataclassMetadata {
-                        fields: dataclass_fields,
-                        instance_fields,
+                        fields,
+                        pseudo_field_names,
                         kws,
                         field_specifiers: vec![
                             CalleeKind::Function(FunctionKind::DataclassField),
@@ -1337,7 +1342,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             has_fresh_local_slots_decorator = kws.slots;
             dataclass_metadata = Some(DataclassMetadata {
                 fields: self.get_dataclass_fields(cls, bases_with_metadata),
-                instance_fields: self.get_dataclass_instance_fields(
+                pseudo_field_names: self.get_dataclass_pseudo_field_names(
                     cls,
                     bases_with_metadata,
                     pydantic_config,

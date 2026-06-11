@@ -554,16 +554,13 @@ impl Default for InitDefaults {
 
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
 pub struct DataclassMetadata {
-    /// The dataclass fields, e.g., `{'x'}` for `@dataclass class C: x: int`.
-    /// Retains pseudo-fields and pydantic privates — filtered downstream in
-    /// `get_dataclass_member`. See `instance_fields` for the pre-filtered set.
+    /// Every annotated dataclass field, in class-body declaration order.
     pub fields: SmallSet<Name>,
-    /// `fields` minus `ClassVar`/`InitVar`/`KW_ONLY` and pydantic privates,
-    /// with inherited entries dropped when the current class re-annotates
-    /// them as a pseudo-field. Matches CPython's `fields(cls)` — the names
-    /// that materialize as instance attributes. Used by metadata-time
-    /// consumers that can't re-walk annotations cross-module.
-    pub instance_fields: SmallSet<Name>,
+    /// Subset of `fields` that are NOT instance attributes:
+    /// `ClassVar`/`InitVar`/`KW_ONLY` plus pydantic privates. Stored as
+    /// the (typically small) complement of `instance_fields()` to avoid
+    /// duplicating every instance-field name.
+    pub pseudo_field_names: SmallSet<Name>,
     pub kws: DataclassKeywords,
     pub field_specifiers: Vec<CalleeKind>,
     pub alias_keyword: Name,
@@ -572,6 +569,19 @@ pub struct DataclassMetadata {
     pub default_can_be_positional: bool,
     /// Fields targeted by `@field_validator(mode='before'|'plain')`, including inherited.
     pub pydantic_before_validator_fields: SmallSet<Name>,
+}
+
+impl DataclassMetadata {
+    /// Matches CPython's `fields(cls)`, in declaration order.
+    pub fn instance_fields(&self) -> impl Iterator<Item = &Name> + '_ {
+        self.fields
+            .iter()
+            .filter(move |n| !self.pseudo_field_names.contains(*n))
+    }
+
+    pub fn is_instance_field(&self, name: &Name) -> bool {
+        self.fields.contains(name) && !self.pseudo_field_names.contains(name)
+    }
 }
 
 #[derive(Clone, Debug, TypeEq, PartialEq, Eq)]
