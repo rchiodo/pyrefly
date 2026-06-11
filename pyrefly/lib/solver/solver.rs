@@ -1684,14 +1684,44 @@ impl Solver {
                 return true;
             }
         };
-        bounds
-            .lower
-            .iter()
-            .all(|lower| is_subset(lower, solved_ty).is_ok())
-            && bounds
-                .upper
-                .iter()
-                .all(|upper| is_subset(solved_ty, upper).is_ok())
+        // The captured bounds may reference self-referential vars; sanitize them before testing
+        // compatibility so a degenerate cycle does not spuriously prune a valid branch.
+        bounds.lower.iter().all(|lower| {
+            let sanitized = self.sanitize_self_referential_vars(lower, solved_ty);
+            is_subset(sanitized.as_ref().unwrap_or(lower), solved_ty).is_ok()
+        }) && bounds.upper.iter().all(|upper| {
+            let sanitized = self.sanitize_self_referential_vars(upper, solved_ty);
+            is_subset(solved_ty, sanitized.as_ref().unwrap_or(upper)).is_ok()
+        })
+    }
+
+    /// Replace any placeholder var whose answer mentions the var itself with the solved type.
+    fn sanitize_self_referential_vars(&self, ty: &Type, solved_ty: &Type) -> Option<Type> {
+        let vars = ty.collect_maybe_placeholder_vars();
+        if vars.is_empty() {
+            return None;
+        }
+        let self_referential: Vec<Var> = {
+            let variables = self.variables.lock();
+            vars.into_iter()
+                .filter(|v| {
+                    matches!(&*variables.get(*v), Variable::Answer(answer)
+                        if answer.collect_maybe_placeholder_vars().contains(v))
+                })
+                .collect()
+        };
+        if self_referential.is_empty() {
+            return None;
+        }
+        let mut ty = ty.clone();
+        ty.transform_mut(&mut |inner| {
+            if let Type::Var(v) = inner
+                && self_referential.contains(v)
+            {
+                *inner = solved_ty.clone();
+            }
+        });
+        Some(ty)
     }
 
     fn quantified_name_for_var(
