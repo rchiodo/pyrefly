@@ -689,6 +689,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     self.anonymous_typed_dict_get_with_literal(&x.func, &x.arguments, errors)
                 {
                     ty
+                } else if let Some(ty) =
+                    self.anonymous_typed_dict_pop_with_literal(&x.func, &x.arguments, errors)
+                {
+                    ty
                 } else if let Some((obj_ty, key_expr, key)) =
                     self.is_dict_get_with_literal(&x.func, &x.arguments, errors)
                 {
@@ -1494,19 +1498,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }))
     }
 
-    /// If `func(args)` is a `.get("<literal>", ...)` call, return the receiver's type,
-    /// the key expression, and the literal key. Callers apply their own
+    /// If `func(args)` is a `.<method>("<literal>", ...)` call, return the receiver's
+    /// type, the key expression, and the literal key. Callers apply their own
     /// receiver/arg-count constraints.
-    fn dict_get_literal_key<'b>(
+    fn dict_method_literal_key<'b>(
         &self,
         func: &Expr,
         args: &'b Arguments,
+        method: &str,
         errors: &ErrorCollector,
     ) -> Option<(TypeInfo, &'b Expr, &'b StringLiteralValue)> {
         let Expr::Attribute(attr_expr) = func else {
             return None;
         };
-        if attr_expr.attr.id.as_str() != "get" {
+        if attr_expr.attr.id.as_str() != method {
             return None;
         }
         let key_expr = args.args.first()?;
@@ -1527,7 +1532,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if args.args.len() != 1 {
             return None;
         }
-        let (obj_ty, key_expr, key) = self.dict_get_literal_key(func, args, errors)?;
+        let (obj_ty, key_expr, key) = self.dict_method_literal_key(func, args, "get", errors)?;
         self.is_dict_like(obj_ty.ty())
             .then(|| (obj_ty, key_expr, key.clone()))
     }
@@ -1544,7 +1549,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if !args.keywords.is_empty() || args.args.len() > 2 {
             return None;
         }
-        let (obj_ty, _key_expr, key) = self.dict_get_literal_key(func, args, errors)?;
+        let (obj_ty, _key_expr, key) = self.dict_method_literal_key(func, args, "get", errors)?;
         let Type::TypedDict(td @ TypedDict::Anonymous(_)) = obj_ty.ty() else {
             return None;
         };
@@ -1562,6 +1567,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             )
         } else {
             self.heap.mk_optional(field.ty)
+        };
+        Some(
+            obj_ty
+                .at_facet(&FacetKind::Key(key.to_string()), || result.clone())
+                .into_ty(),
+        )
+    }
+
+    /// `.pop` on an anonymous TypedDict with a literal key. Unlike `.get`, a missing key
+    /// raises `KeyError` instead of returning `None`, so the result is `field.ty`, or
+    /// `field.ty | default` when a default is given.
+    fn anonymous_typed_dict_pop_with_literal(
+        &self,
+        func: &Expr,
+        args: &Arguments,
+        errors: &ErrorCollector,
+    ) -> Option<Type> {
+        if !args.keywords.is_empty() || args.args.len() > 2 {
+            return None;
+        }
+        let (obj_ty, _key_expr, key) = self.dict_method_literal_key(func, args, "pop", errors)?;
+        let Type::TypedDict(td @ TypedDict::Anonymous(_)) = obj_ty.ty() else {
+            return None;
+        };
+        let field = self.typed_dict_field(td, &Name::new(key.to_str()))?;
+        // A presence-narrowed key is known to be present, so any default is unreachable.
+        if obj_ty.has_value_less_presence(&FacetKind::Key(key.to_string())) {
+            return Some(field.ty);
+        }
+        let result = if let Some(default) = args.args.get(1) {
+            self.union(
+                field.ty,
+                self.expr_infer(default, errors)
+                    .promote_implicit_literals(self.stdlib),
+            )
+        } else {
+            field.ty
         };
         Some(
             obj_ty

@@ -2181,6 +2181,36 @@ assert_type(d.get("y"), str | None)
 );
 
 testcase!(
+    test_anonymous_typed_dict_pop_literal_key,
+    r#"
+from typing import assert_type
+d = { "x": 1, "y": "2" }
+d = { "x": 2, "y": "3" }  # reassignment makes `d` an anonymous TypedDict
+# unlike `.get`, `.pop` raises on a missing key, so the result excludes `None`
+assert_type(d.pop("x"), int)
+assert_type(d.pop("y"), str)
+assert_type(d.pop("x", "default"), int | str)
+# unknown keys fall back to dict.pop
+assert_type(d.pop("missing"), int | str)
+assert_type(d.pop("missing", b"d"), int | str | bytes)
+"#,
+);
+
+testcase!(
+    test_anonymous_typed_dict_pop_literal_key_presence_narrowed,
+    r#"
+from typing import assert_type
+d = { "x": 1, "y": "2" }
+d = { "x": 2, "y": "3" }  # reassignment makes `d` an anonymous TypedDict
+if "x" in d:
+    # the key is known to be present, so any default is unreachable
+    assert_type(d.pop("x"), int)
+    assert_type(d.pop("x", "default"), int)
+assert_type(d.pop("y"), str)
+"#,
+);
+
+testcase!(
     test_typed_dict_empty_container_no_implicit_any,
     TestEnv::new().enable_implicit_any_error(),
     r#"
