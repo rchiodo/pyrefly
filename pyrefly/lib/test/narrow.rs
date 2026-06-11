@@ -2948,6 +2948,41 @@ def f(x: LeftChild) -> None:
 "#,
 );
 
+testcase!(
+    test_disjoint_bases_self_type,
+    r#"
+from typing import Self, assert_never
+from typing_extensions import disjoint_base
+
+@disjoint_base
+class Left:
+    def f(self, x: Self) -> None:
+        if isinstance(x, Right):
+            assert_never(x)
+
+@disjoint_base
+class Right: ...
+"#,
+);
+
+testcase!(
+    test_disjoint_bases_bounded_typevar,
+    r#"
+from typing import assert_never
+from typing_extensions import disjoint_base
+
+@disjoint_base
+class Left: ...
+
+@disjoint_base
+class Right: ...
+
+def f[T: Left](x: T) -> None:
+    if isinstance(x, Right):
+        assert_never(x)
+"#,
+);
+
 // Slotted analogue of `test_disjoint_bases_custom_propagation`.
 testcase!(
     test_disjoint_bases_slots_propagation,

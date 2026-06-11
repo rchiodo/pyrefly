@@ -62,6 +62,7 @@ use crate::types::lit_int::LitInt;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
+use crate::types::type_var::Restriction;
 use crate::types::types::CalleeKind;
 use crate::types::types::TParams;
 use crate::types::types::Type;
@@ -144,10 +145,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ///
     /// Uses the cache on `ClassMro`, but checks the class itself first so a
     /// locally disjoint class still works when its MRO is cyclic or nonlinear.
+    /// `Self` and bounded type variables inherit the representative of their
+    /// class/bound, since every value they can denote is constrained by it.
     /// Falls back to `object` for anything not explicitly disjoint.
     pub fn disjoint_base(&self, t: &Type) -> Class {
         match t {
-            Type::ClassType(cls) => {
+            Type::ClassType(cls) | Type::SelfType(cls) => {
                 let class = cls.class_object();
                 if self.get_metadata_for_class(class).is_disjoint_base() {
                     return class.dupe();
@@ -157,6 +160,12 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .map(|class| class.dupe())
                     .unwrap_or_else(|| self.stdlib.object().class_object().dupe())
             }
+            Type::Quantified(q) if q.is_type_var() => match q.restriction() {
+                Restriction::Bound(bound) => self.disjoint_base(bound),
+                Restriction::Constraints(_) | Restriction::Unrestricted => {
+                    self.stdlib.object().class_object().dupe()
+                }
+            },
             Type::Tuple(_) => self.stdlib.tuple_object().clone(),
             _ => self.stdlib.object().class_object().clone(),
         }
