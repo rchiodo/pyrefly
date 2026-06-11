@@ -685,8 +685,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.check_pytorch_redundant_to_call(x, &callee_ty, errors);
                 if let Some(d) = self.call_to_dict(&callee_ty, &x.arguments) {
                     self.dict_infer(&d, hint, x.range, errors)
-                } else if let Some(ty) =
-                    self.anonymous_typed_dict_get_with_literal(&x.func, &x.arguments, errors)
+                } else if let Some(ty) = self
+                    .anonymous_typed_dict_get_or_setdefault_with_literal(
+                        &x.func,
+                        &x.arguments,
+                        "get",
+                        errors,
+                    )
+                    .or_else(|| {
+                        self.anonymous_typed_dict_get_or_setdefault_with_literal(
+                            &x.func,
+                            &x.arguments,
+                            "setdefault",
+                            errors,
+                        )
+                    })
                 {
                     ty
                 } else if let Some(ty) =
@@ -1537,19 +1550,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .then(|| (obj_ty, key_expr, key.clone()))
     }
 
-    /// Special-case `.get` on an anonymous TypedDict with a literal key, which would
-    /// otherwise resolve to the imprecise `dict.get`. Anonymous fields are always
-    /// non-required, so the result is `field.ty | None`, or `field.ty | default`.
-    fn anonymous_typed_dict_get_with_literal(
+    /// `.get`/`.setdefault` on an anonymous TypedDict with a literal key. Both yield the
+    /// value if present, else `None`/the default, so the result is `field.ty | None`, or
+    /// `field.ty | default`. (`.setdefault` also inserts the key; the result type is the same.)
+    fn anonymous_typed_dict_get_or_setdefault_with_literal(
         &self,
         func: &Expr,
         args: &Arguments,
+        method: &str,
         errors: &ErrorCollector,
     ) -> Option<Type> {
         if !args.keywords.is_empty() || args.args.len() > 2 {
             return None;
         }
-        let (obj_ty, _key_expr, key) = self.dict_method_literal_key(func, args, "get", errors)?;
+        let (obj_ty, _key_expr, key) = self.dict_method_literal_key(func, args, method, errors)?;
         let Type::TypedDict(td @ TypedDict::Anonymous(_)) = obj_ty.ty() else {
             return None;
         };

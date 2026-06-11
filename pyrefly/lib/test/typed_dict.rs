@@ -2211,6 +2211,33 @@ assert_type(d.pop("y"), str)
 );
 
 testcase!(
+    test_anonymous_typed_dict_setdefault_literal_key,
+    r#"
+from typing import assert_type
+d = { "x": 1, "y": "2" }
+d = { "x": 2, "y": "3" }  # reassignment makes `d` an anonymous TypedDict
+# like `.get`, `.setdefault` returns `None` (or the default) when the key is absent
+assert_type(d.setdefault("x"), int | None)
+assert_type(d.setdefault("y"), str | None)
+assert_type(d.setdefault("x", 5), int)
+"#,
+);
+
+testcase!(
+    test_anonymous_typed_dict_setdefault_literal_key_presence_narrowed,
+    r#"
+from typing import assert_type
+d = { "x": 1, "y": "2" }
+d = { "x": 2, "y": "3" }  # reassignment makes `d` an anonymous TypedDict
+if "x" in d:
+    # the key is known to be present, so the result excludes `None`
+    assert_type(d.setdefault("x"), int)
+    assert_type(d.setdefault("x", 5), int)
+assert_type(d.setdefault("y"), str | None)
+"#,
+);
+
+testcase!(
     test_typed_dict_empty_container_no_implicit_any,
     TestEnv::new().enable_implicit_any_error(),
     r#"
