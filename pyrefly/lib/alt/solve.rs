@@ -72,11 +72,11 @@ use crate::binding::binding::Binding;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
+use crate::binding::binding::BindingClassChecks;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSynthesizedFields;
-use crate::binding::binding::BindingConsistentOverrideCheck;
 use crate::binding::binding::BindingDecoratedFunction;
 use crate::binding::binding::BindingDecorator;
 use crate::binding::binding::BindingExpect;
@@ -85,7 +85,6 @@ use crate::binding::binding::BindingTParams;
 use crate::binding::binding::BindingTypeAlias;
 use crate::binding::binding::BindingUndecoratedFunction;
 use crate::binding::binding::BindingVariance;
-use crate::binding::binding::BindingVarianceCheck;
 use crate::binding::binding::BindingYield;
 use crate::binding::binding::BindingYieldFrom;
 use crate::binding::binding::BranchInfo;
@@ -2643,33 +2642,45 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
     }
 
-    pub fn solve_consistent_override_check(
+    /// Run class-level diagnostics that do not produce downstream answers.
+    ///
+    /// The checks share one `EmptyAnswer` key so class diagnostics can be forced without
+    /// allocating separate pure side-effect bindings. The order has no semantic dependency;
+    /// override checks run first to match the previous diagnostic order.
+    pub fn solve_class_checks(
         &self,
-        binding: &BindingConsistentOverrideCheck,
+        binding: &BindingClassChecks,
         errors: &ErrorCollector,
     ) -> Arc<EmptyAnswer> {
-        if let Some(cls) = &self.get_idx(binding.class_key).0 {
-            let class_bases = self.get_base_types_for_class(cls);
-
-            self.populate_parent_methods_map(cls);
-
-            for (name, field) in self.get_class_field_map(cls).iter() {
-                self.check_consistent_override_for_field(
-                    cls,
-                    name,
-                    field.as_ref(),
-                    class_bases.as_ref(),
-                    errors,
-                );
-            }
-
-            // If we are inheriting from multiple base types, we should
-            // check whether the multiple inheritance is consistent
-            if class_bases.as_ref().base_type_count() > 1 {
-                self.check_consistent_multiple_inheritance(cls, errors);
-            }
+        let class = self.get_idx(binding.class_idx);
+        if let Some(cls) = &class.0 {
+            self.check_consistent_override_for_class(cls, errors);
+            self.check_variance_for_class(cls, errors);
         }
         Arc::new(EmptyAnswer)
+    }
+
+    /// Check method and attribute override consistency for a class.
+    fn check_consistent_override_for_class(&self, cls: &Class, errors: &ErrorCollector) {
+        let class_bases = self.get_base_types_for_class(cls);
+
+        self.populate_parent_methods_map(cls);
+
+        for (name, field) in self.get_class_field_map(cls).iter() {
+            self.check_consistent_override_for_field(
+                cls,
+                name,
+                field.as_ref(),
+                class_bases.as_ref(),
+                errors,
+            );
+        }
+
+        // If we are inheriting from multiple base types, we should
+        // check whether the multiple inheritance is consistent
+        if class_bases.as_ref().base_type_count() > 1 {
+            self.check_consistent_multiple_inheritance(cls, errors);
+        }
     }
 
     pub fn solve_class(
@@ -2790,8 +2801,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         if let Some(class) = &class.0 {
             // Only compute variance map, don't check violations here.
-            // Violations are checked separately in solve_variance_check to avoid
-            // cycles from calling get_class_field_map during variance computation.
+            // Variance violations are checked as part of `KeyClassChecks` alongside
+            // other class-level diagnostics to avoid cycles from calling
+            // get_class_field_map during variance computation.
             let result = self.compute_variance(class, false);
             Arc::new(result.variance_map)
         } else {
@@ -2808,78 +2820,69 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// - Base classes: DEEP checking (recurse into all nested generics)
     /// - Methods: SHALLOW checking (only direct TypeVar usage, not nested Callables)
     /// - Fields: NO checking (mutable fields constrain variance during inference only)
-    pub fn solve_variance_check(
-        &self,
-        binding: &BindingVarianceCheck,
-        errors: &ErrorCollector,
-    ) -> Arc<EmptyAnswer> {
-        let class = self.get_idx(binding.class_idx);
+    fn check_variance_for_class(&self, class: &Class, errors: &ErrorCollector) {
+        // Get type parameters and their declared variances
+        let tparams = self.get_class_tparams(class);
 
-        if let Some(class) = &class.0 {
-            // Get type parameters and their declared variances
-            let tparams = self.get_class_tparams(class);
+        // Only check violations when there are covariant/contravariant
+        // TypeVars — invariant TypeVars are valid in any position.
+        let has_non_invariant_variance = tparams.as_vec().iter().any(|p| {
+            matches!(
+                p.variance(),
+                PreInferenceVariance::Covariant | PreInferenceVariance::Contravariant
+            )
+        });
 
-            // Only check violations when there are covariant/contravariant
-            // TypeVars — invariant TypeVars are valid in any position.
-            let has_non_invariant_variance = tparams.as_vec().iter().any(|p| {
-                matches!(
-                    p.variance(),
-                    PreInferenceVariance::Covariant | PreInferenceVariance::Contravariant
-                )
-            });
+        if has_non_invariant_variance {
+            let result = self.compute_variance(class, true);
 
-            if has_non_invariant_variance {
-                let result = self.compute_variance(class, true);
-
-                for violation in &result.violations {
-                    let message = violation.format_message();
-                    self.error(errors, violation.range, ErrorKind::InvalidVariance, message);
-                }
+            for violation in &result.violations {
+                let message = violation.format_message();
+                self.error(errors, violation.range, ErrorKind::InvalidVariance, message);
             }
+        }
 
-            // For protocols: warn when an invariant TypeVar could be declared
-            // with a narrower variance. We only check invariant TypeVars here
-            // because wrong variance on covariant/contravariant TypeVars is
-            // already caught by InvalidVariance at the usage site.
-            let metadata = self.get_metadata_for_class(class);
-            if metadata.is_protocol()
-                && tparams.as_vec().iter().any(|p| {
-                    p.kind() == QuantifiedKind::TypeVar
-                        && p.variance() == PreInferenceVariance::Invariant
-                })
-            {
-                let inferred = self.infer_variance_ignoring_declared(class);
-                for tparam in tparams.as_vec() {
-                    if tparam.kind() != QuantifiedKind::TypeVar
-                        || tparam.variance() != PreInferenceVariance::Invariant
-                    {
-                        continue;
-                    }
-                    let inferred_v = inferred.get(tparam.name());
-                    let effective_v = if inferred_v == Variance::Bivariant {
-                        Variance::Covariant
-                    } else {
-                        inferred_v
-                    };
-                    if effective_v != Variance::Invariant {
-                        self.error(
-                            errors,
-                            // TODO: ideally this would point to where the TypeVar
-                            // is bound in the class header rather than the class name.
-                            class.range(),
-                            ErrorKind::VarianceMismatch,
-                            format!(
-                                "Type variable `{}` in class `{}` is declared as invariant, but could be {} based on its usage",
-                                tparam.name(),
-                                class.name(),
-                                effective_v,
-                            ),
-                        );
-                    }
+        // For protocols: warn when an invariant TypeVar could be declared
+        // with a narrower variance. We only check invariant TypeVars here
+        // because wrong variance on covariant/contravariant TypeVars is
+        // already caught by InvalidVariance at the usage site.
+        let metadata = self.get_metadata_for_class(class);
+        if metadata.is_protocol()
+            && tparams.as_vec().iter().any(|p| {
+                p.kind() == QuantifiedKind::TypeVar
+                    && p.variance() == PreInferenceVariance::Invariant
+            })
+        {
+            let inferred = self.infer_variance_ignoring_declared(class);
+            for tparam in tparams.as_vec() {
+                if tparam.kind() != QuantifiedKind::TypeVar
+                    || tparam.variance() != PreInferenceVariance::Invariant
+                {
+                    continue;
+                }
+                let inferred_v = inferred.get(tparam.name());
+                let effective_v = if inferred_v == Variance::Bivariant {
+                    Variance::Covariant
+                } else {
+                    inferred_v
+                };
+                if effective_v != Variance::Invariant {
+                    self.error(
+                        errors,
+                        // TODO: ideally this would point to where the TypeVar
+                        // is bound in the class header rather than the class name.
+                        class.range(),
+                        ErrorKind::VarianceMismatch,
+                        format!(
+                            "Type variable `{}` in class `{}` is declared as invariant, but could be {} based on its usage",
+                            tparam.name(),
+                            class.name(),
+                            effective_v,
+                        ),
+                    );
                 }
             }
         }
-        Arc::new(EmptyAnswer)
     }
 
     /// Get the class that attribute lookup on `super(cls, obj)` should be done on.

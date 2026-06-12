@@ -43,17 +43,16 @@ use crate::binding::binding::BindingAbstractClassCheck;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
+use crate::binding::binding::BindingClassChecks;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSubscriptSymmetry;
 use crate::binding::binding::BindingClassSynthesizedFields;
-use crate::binding::binding::BindingConsistentOverrideCheck;
 use crate::binding::binding::BindingExpect;
 use crate::binding::binding::BindingShapedArrayMetadata;
 use crate::binding::binding::BindingTParams;
 use crate::binding::binding::BindingVariance;
-use crate::binding::binding::BindingVarianceCheck;
 use crate::binding::binding::ClassBinding;
 use crate::binding::binding::ClassDefData;
 use crate::binding::binding::ClassFieldDefinition;
@@ -63,16 +62,15 @@ use crate::binding::binding::KeyAbstractClassCheck;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassBaseType;
+use crate::binding::binding::KeyClassChecks;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSubscriptSymmetry;
 use crate::binding::binding::KeyClassSynthesizedFields;
-use crate::binding::binding::KeyConsistentOverrideCheck;
 use crate::binding::binding::KeyExpect;
 use crate::binding::binding::KeyTParams;
 use crate::binding::binding::KeyVariance;
-use crate::binding::binding::KeyVarianceCheck;
 use crate::binding::bindings::BindingsBuilder;
 use crate::binding::bindings::CurrentIdx;
 use crate::binding::bindings::LegacyTParamCollector;
@@ -136,9 +134,7 @@ impl<'a> BindingsBuilder<'a> {
             mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
             synthesized_fields_idx: self.idx_for_promise(KeyClassSynthesizedFields(def_index)),
             variance_idx: self.idx_for_promise(KeyVariance(def_index)),
-            variance_check_idx: self.idx_for_promise(KeyVarianceCheck(def_index)),
-            consistent_override_check_idx: self
-                .idx_for_promise(KeyConsistentOverrideCheck(def_index)),
+            class_checks_idx: self.idx_for_promise(KeyClassChecks(def_index)),
             abstract_class_check_idx: self.idx_for_promise(KeyAbstractClassCheck(def_index)),
             subscript_symmetry_idx: self.idx_for_promise(KeyClassSubscriptSymmetry(def_index)),
         };
@@ -540,15 +536,9 @@ impl<'a> BindingsBuilder<'a> {
             },
         );
         self.insert_binding_idx(
-            class_indices.variance_check_idx,
-            BindingVarianceCheck {
+            class_indices.class_checks_idx,
+            BindingClassChecks {
                 class_idx: class_indices.class_idx,
-            },
-        );
-        self.insert_binding_idx(
-            class_indices.consistent_override_check_idx,
-            BindingConsistentOverrideCheck {
-                class_key: class_indices.class_idx,
             },
         );
         self.insert_binding_idx(
@@ -1223,15 +1213,9 @@ impl<'a> BindingsBuilder<'a> {
             },
         );
         self.insert_binding_idx(
-            class_indices.variance_check_idx,
-            BindingVarianceCheck {
+            class_indices.class_checks_idx,
+            BindingClassChecks {
                 class_idx: class_indices.class_idx,
-            },
-        );
-        self.insert_binding_idx(
-            class_indices.consistent_override_check_idx,
-            BindingConsistentOverrideCheck {
-                class_key: class_indices.class_idx,
             },
         );
         self.insert_binding_idx(

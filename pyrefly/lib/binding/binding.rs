@@ -101,6 +101,7 @@ assert_bytes!(KeyTParams, 4);
 assert_bytes!(KeyClassBaseType, 4);
 assert_words!(KeyClassField, 4);
 assert_bytes!(KeyClassSynthesizedFields, 4);
+assert_bytes!(KeyClassChecks, 4);
 assert_bytes!(KeyAnnotation, 12);
 assert_bytes!(KeyClassMetadata, 4);
 assert_bytes!(KeyClassMro, 4);
@@ -122,6 +123,7 @@ assert_words!(BindingTParams, 10);
 assert_words!(BindingClassBaseType, 3);
 assert_words!(BindingClassMetadata, 14);
 assert_bytes!(BindingClassMro, 4);
+assert_bytes!(BindingClassChecks, 4);
 assert_bytes!(BindingAbstractClassCheck, 4);
 assert_bytes!(BindingClassSubscriptSymmetry, 4);
 assert_words!(BindingClassField, 11);
@@ -138,13 +140,12 @@ pub enum AnyIdx {
     Key(Idx<Key>),
     KeyExpect(Idx<KeyExpect>),
     KeyTypeAlias(Idx<KeyTypeAlias>),
-    KeyConsistentOverrideCheck(Idx<KeyConsistentOverrideCheck>),
     KeyClass(Idx<KeyClass>),
     KeyTParams(Idx<KeyTParams>),
     KeyClassBaseType(Idx<KeyClassBaseType>),
     KeyClassField(Idx<KeyClassField>),
     KeyVariance(Idx<KeyVariance>),
-    KeyVarianceCheck(Idx<KeyVarianceCheck>),
+    KeyClassChecks(Idx<KeyClassChecks>),
     KeyClassSynthesizedFields(Idx<KeyClassSynthesizedFields>),
     KeyExport(Idx<KeyExport>),
     KeyDecorator(Idx<KeyDecorator>),
@@ -188,9 +189,6 @@ macro_rules! dispatch_anyidx {
             AnyIdx::KeyExpect(idx) => $self.$method::<$crate::binding::binding::KeyExpect>(*idx),
             AnyIdx::KeyTypeAlias(idx) => {
                 $self.$method::<$crate::binding::binding::KeyTypeAlias>(*idx)
-            }
-            AnyIdx::KeyConsistentOverrideCheck(idx) => {
-                $self.$method::<$crate::binding::binding::KeyConsistentOverrideCheck>(*idx)
             }
             AnyIdx::KeyClass(idx) => $self.$method::<$crate::binding::binding::KeyClass>(*idx),
             AnyIdx::KeyTParams(idx) => $self.$method::<$crate::binding::binding::KeyTParams>(*idx),
@@ -241,8 +239,8 @@ macro_rules! dispatch_anyidx {
             AnyIdx::KeyYieldFrom(idx) => {
                 $self.$method::<$crate::binding::binding::KeyYieldFrom>(*idx)
             }
-            AnyIdx::KeyVarianceCheck(idx) => {
-                $self.$method::<$crate::binding::binding::KeyVarianceCheck>(*idx)
+            AnyIdx::KeyClassChecks(idx) => {
+                $self.$method::<$crate::binding::binding::KeyClassChecks>(*idx)
             }
         }
     };
@@ -255,9 +253,6 @@ macro_rules! dispatch_anyidx {
             }
             AnyIdx::KeyTypeAlias(idx) => {
                 $self.$method::<$crate::binding::binding::KeyTypeAlias>(*idx, $($args),+)
-            }
-            AnyIdx::KeyConsistentOverrideCheck(idx) => {
-                $self.$method::<$crate::binding::binding::KeyConsistentOverrideCheck>(*idx, $($args),+)
             }
             AnyIdx::KeyClass(idx) => {
                 $self.$method::<$crate::binding::binding::KeyClass>(*idx, $($args),+)
@@ -316,8 +311,8 @@ macro_rules! dispatch_anyidx {
             AnyIdx::KeyYieldFrom(idx) => {
                 $self.$method::<$crate::binding::binding::KeyYieldFrom>(*idx, $($args),+)
             }
-            AnyIdx::KeyVarianceCheck(idx) => {
-                $self.$method::<$crate::binding::binding::KeyVarianceCheck>(*idx, $($args),+)
+            AnyIdx::KeyClassChecks(idx) => {
+                $self.$method::<$crate::binding::binding::KeyClassChecks>(*idx, $($args),+)
             }
         }
     };
@@ -329,13 +324,12 @@ impl DisplayWith<Bindings> for AnyIdx {
             Self::Key(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyExpect(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyTypeAlias(idx) => write!(f, "{}", ctx.display(*idx)),
-            Self::KeyConsistentOverrideCheck(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClass(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyTParams(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassBaseType(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassField(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyVariance(idx) => write!(f, "{}", ctx.display(*idx)),
-            Self::KeyVarianceCheck(idx) => write!(f, "{}", ctx.display(*idx)),
+            Self::KeyClassChecks(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassSynthesizedFields(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyExport(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyDecorator(idx) => write!(f, "{}", ctx.display(*idx)),
@@ -449,17 +443,17 @@ impl Exported for KeyTypeAlias {
         AnyExportedKey::KeyTypeAlias(self.clone())
     }
 }
-impl Keyed for KeyConsistentOverrideCheck {
-    type Value = BindingConsistentOverrideCheck;
+impl Keyed for KeyClassChecks {
+    type Value = BindingClassChecks;
     type Answer = EmptyAnswer;
     fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
-        AnyIdx::KeyConsistentOverrideCheck(idx)
+        AnyIdx::KeyClassChecks(idx)
     }
     fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
     where
         BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
     {
-        bindings.idx_to_key(bindings.get(idx).class_key).range()
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
     }
 }
 impl Keyed for KeyClass {
@@ -583,23 +577,6 @@ impl Keyed for KeyVariance {
 impl Exported for KeyVariance {
     fn to_anykey(&self) -> AnyExportedKey {
         AnyExportedKey::KeyVariance(self.clone())
-    }
-}
-impl Keyed for KeyVarianceCheck {
-    const EXPORTED: bool = false;
-    type Value = BindingVarianceCheck;
-    type Answer = EmptyAnswer;
-    fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
-        AnyIdx::KeyVarianceCheck(idx)
-    }
-    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
-    where
-        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
-    {
-        bindings.idx_to_key(bindings.get(idx).class_idx).range()
-    }
-    fn try_to_anykey(&self) -> Option<AnyExportedKey> {
-        None
     }
 }
 impl Keyed for KeyExport {
@@ -1551,23 +1528,13 @@ impl DisplayWith<ModuleInfo> for KeyVariance {
     }
 }
 
-// A key for checking variance violations (separate from KeyVariance to avoid cycles)
+// Side-effect checks for class-level diagnostics that do not produce downstream answers.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct KeyVarianceCheck(pub ClassDefIndex);
+pub struct KeyClassChecks(pub ClassDefIndex);
 
-impl DisplayWith<ModuleInfo> for KeyVarianceCheck {
+impl DisplayWith<ModuleInfo> for KeyClassChecks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
-        write!(f, "KeyVarianceCheck(class{})", self.0)
-    }
-}
-
-// An expectation that attributes in this class need checking for inconsistent override
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct KeyConsistentOverrideCheck(pub ClassDefIndex);
-
-impl DisplayWith<ModuleInfo> for KeyConsistentOverrideCheck {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
-        write!(f, "KeyConsistentOverrideCheck(class{})", self.0)
+        write!(f, "KeyClassChecks(class{})", self.0)
     }
 }
 
@@ -3140,31 +3107,17 @@ impl DisplayWith<Bindings> for BindingVariance {
     }
 }
 
-/// Binding for checking variance violations.
-/// This is separate from BindingVariance to avoid cycles when checking violations.
+/// Class-level diagnostics grouped behind one `EmptyAnswer` key.
+///
+/// Checks that produce answers used by downstream lookups should remain separate keys.
 #[derive(Clone, Debug)]
-pub struct BindingVarianceCheck {
+pub struct BindingClassChecks {
     pub class_idx: Idx<KeyClass>,
 }
 
-impl DisplayWith<Bindings> for BindingVarianceCheck {
+impl DisplayWith<Bindings> for BindingClassChecks {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
-        write!(f, "BindingVarianceCheck({})", ctx.display(self.class_idx))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct BindingConsistentOverrideCheck {
-    pub class_key: Idx<KeyClass>,
-}
-
-impl DisplayWith<Bindings> for BindingConsistentOverrideCheck {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
-        write!(
-            f,
-            "BindingConsistentOverrideCheck({})",
-            ctx.display(self.class_key)
-        )
+        write!(f, "BindingClassChecks({})", ctx.display(self.class_idx))
     }
 }
 

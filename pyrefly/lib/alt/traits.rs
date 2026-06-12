@@ -34,12 +34,12 @@ use crate::binding::binding::BindingAbstractClassCheck;
 use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
+use crate::binding::binding::BindingClassChecks;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
 use crate::binding::binding::BindingClassSubscriptSymmetry;
 use crate::binding::binding::BindingClassSynthesizedFields;
-use crate::binding::binding::BindingConsistentOverrideCheck;
 use crate::binding::binding::BindingDecoratedFunction;
 use crate::binding::binding::BindingDecorator;
 use crate::binding::binding::BindingExpect;
@@ -50,7 +50,6 @@ use crate::binding::binding::BindingTypeAlias;
 use crate::binding::binding::BindingUndecoratedFunction;
 use crate::binding::binding::BindingUndecoratedFunctionRange;
 use crate::binding::binding::BindingVariance;
-use crate::binding::binding::BindingVarianceCheck;
 use crate::binding::binding::BindingYield;
 use crate::binding::binding::BindingYieldFrom;
 use crate::binding::binding::EmptyAnswer;
@@ -59,12 +58,12 @@ use crate::binding::binding::KeyAbstractClassCheck;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassBaseType;
+use crate::binding::binding::KeyClassChecks;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSubscriptSymmetry;
 use crate::binding::binding::KeyClassSynthesizedFields;
-use crate::binding::binding::KeyConsistentOverrideCheck;
 use crate::binding::binding::KeyDecoratedFunction;
 use crate::binding::binding::KeyDecorator;
 use crate::binding::binding::KeyExpect;
@@ -75,7 +74,6 @@ use crate::binding::binding::KeyTypeAlias;
 use crate::binding::binding::KeyUndecoratedFunction;
 use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::binding::binding::KeyVariance;
-use crate::binding::binding::KeyVarianceCheck;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::binding::Keyed;
@@ -213,14 +211,14 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyTypeAlias {
     }
 }
 
-impl<Ans: LookupAnswer> Solve<Ans> for KeyConsistentOverrideCheck {
+impl<Ans: LookupAnswer> Solve<Ans> for KeyClassChecks {
     fn solve(
         answers: &AnswersSolver<Ans>,
-        binding: &BindingConsistentOverrideCheck,
+        binding: &BindingClassChecks,
         _range: TextRange,
         errors: &ErrorCollector,
     ) -> Arc<EmptyAnswer> {
-        answers.solve_consistent_override_check(binding, errors)
+        answers.solve_class_checks(binding, errors)
     }
 
     fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
@@ -411,21 +409,6 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyVariance {
 
     fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
         VarianceMap::default()
-    }
-}
-
-impl<Ans: LookupAnswer> Solve<Ans> for KeyVarianceCheck {
-    fn solve(
-        answers: &AnswersSolver<Ans>,
-        binding: &BindingVarianceCheck,
-        _range: TextRange,
-        errors: &ErrorCollector,
-    ) -> Arc<EmptyAnswer> {
-        answers.solve_variance_check(binding, errors)
-    }
-
-    fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
-        EmptyAnswer
     }
 }
 

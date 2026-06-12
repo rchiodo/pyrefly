@@ -49,14 +49,13 @@ use crate::binding::binding::KeyAbstractClassCheck;
 use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassBaseType;
+use crate::binding::binding::KeyClassChecks;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
 use crate::binding::binding::KeyClassSubscriptSymmetry;
 use crate::binding::binding::KeyClassSynthesizedFields;
-use crate::binding::binding::KeyConsistentOverrideCheck;
 use crate::binding::binding::KeyDecoratedFunction;
 use crate::binding::binding::KeyVariance;
-use crate::binding::binding::KeyVarianceCheck;
 use crate::binding::binding::KeyYield;
 use crate::binding::binding::KeyYieldFrom;
 use crate::binding::binding::MethodSelfKind;
@@ -896,8 +895,7 @@ pub struct ClassIndices {
     pub mro_idx: Idx<KeyClassMro>,
     pub synthesized_fields_idx: Idx<KeyClassSynthesizedFields>,
     pub variance_idx: Idx<KeyVariance>,
-    pub variance_check_idx: Idx<KeyVarianceCheck>,
-    pub consistent_override_check_idx: Idx<KeyConsistentOverrideCheck>,
+    pub class_checks_idx: Idx<KeyClassChecks>,
     pub abstract_class_check_idx: Idx<KeyAbstractClassCheck>,
     pub subscript_symmetry_idx: Idx<KeyClassSubscriptSymmetry>,
 }
