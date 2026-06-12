@@ -6,6 +6,7 @@
  */
 
 use std::mem;
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use dupe::Dupe as _;
@@ -394,13 +395,14 @@ impl<'a> BindingsBuilder<'a> {
                 }
             });
         }
+        let bases: Arc<[BaseClass]> = Arc::from(bases.into_boxed_slice());
 
         self.insert_binding_idx(
             class_indices.base_type_idx,
             BindingClassBaseType {
                 class_idx: class_indices.class_idx,
                 is_new_type: false,
-                bases: bases.clone().into_boxed_slice(),
+                bases: bases.dupe(),
             },
         );
         self.insert_binding_idx(
@@ -553,7 +555,7 @@ impl<'a> BindingsBuilder<'a> {
             class_indices.metadata_idx,
             BindingClassMetadata {
                 class_idx: class_indices.class_idx,
-                bases: bases.clone().into_boxed_slice(),
+                bases,
                 keywords: keywords.into_boxed_slice(),
                 decorators: decorators.into_boxed_slice(),
                 is_new_type: false,
@@ -1147,20 +1149,21 @@ impl<'a> BindingsBuilder<'a> {
             .map(|base| self.base_class_of(base))
             .chain(special_base)
             .collect::<Vec<_>>();
+        let base_classes: Arc<[BaseClass]> = Arc::from(base_classes.into_boxed_slice());
         let is_new_type = class_kind == SynthesizedClassKind::NewType;
         self.insert_binding_idx(
             class_indices.base_type_idx,
             BindingClassBaseType {
                 class_idx: class_indices.class_idx,
                 is_new_type,
-                bases: base_classes.clone().into_boxed_slice(),
+                bases: base_classes.dupe(),
             },
         );
         self.insert_binding_idx(
             class_indices.metadata_idx,
             BindingClassMetadata {
                 class_idx: class_indices.class_idx,
-                bases: base_classes.into_boxed_slice(),
+                bases: base_classes,
                 keywords,
                 decorators: Box::new([]),
                 is_new_type,

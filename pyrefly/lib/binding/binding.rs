@@ -2963,7 +2963,7 @@ impl DisplayWith<Bindings> for BindingTParams {
 pub struct BindingClassBaseType {
     pub class_idx: Idx<KeyClass>,
     /// The base class list, as expressions.
-    pub bases: Box<[BaseClass]>,
+    pub bases: Arc<[BaseClass]>,
     pub is_new_type: bool,
 }
 
@@ -3181,7 +3181,7 @@ pub struct BindingShapedArrayMetadata {
 pub struct BindingClassMetadata {
     pub class_idx: Idx<KeyClass>,
     /// The base class list, as expressions.
-    pub bases: Box<[BaseClass]>,
+    pub bases: Arc<[BaseClass]>,
     /// The class keywords (these are keyword args that appear in the base class list, the
     /// Python runtime will dispatch most of them to the metaclass, but the metaclass
     /// itself can also potentially be one of these).
