@@ -68,6 +68,10 @@ fn simplify_intersections(xs: &mut [Type], heap: &TypeHeap) {
     }
 }
 
+/// After literal/enum squashing, a union with more than this many members is widened to
+/// `Any` to bound type complexity.
+static MAX_UNION_MEMBERS: usize = 4096;
+
 fn unions_internal(
     xs: Vec<Type>,
     stdlib: Option<&Stdlib>,
@@ -83,6 +87,11 @@ fn unions_internal(
         collapse_tuple_unions_with_empty(&mut res, heap);
         collapse_builtins_type(&mut res, heap);
         collapse_quantifieds(&mut res, heap);
+        // Second pass: squashing can still leave a pathologically large union (e.g. thousands
+        // of distinct class types). Widen anything still over the cap to `Any`.
+        if res.len() > MAX_UNION_MEMBERS {
+            return heap.mk_any_implicit();
+        }
         // `res` is collapsible again if `flatten_and_dedup` drops `xs` to 0 or 1 elements
         try_collapse(res, heap).unwrap_or_else(|members| heap.mk_union(members))
     })
@@ -515,6 +524,7 @@ mod tests {
     use ruff_text_size::TextRange;
 
     use crate::heap::TypeHeap;
+    use crate::lit_int::LitInt;
     use crate::quantified::AnchorIndex;
     use crate::quantified::Quantified;
     use crate::quantified::QuantifiedIdentity;
@@ -537,6 +547,21 @@ mod tests {
         ];
         let res = unions(xs, &heap);
         assert_eq!(res, Type::never());
+    }
+
+    #[test]
+    fn test_oversized_union_widens_to_any() {
+        let heap = TypeHeap::new();
+        // More than `MAX_UNION_MEMBERS` distinct members survive squashing, so the union is
+        // widened to `Any`.
+        let xs: Vec<Type> = (0..=(super::MAX_UNION_MEMBERS as i64))
+            .map(|i| LitInt::new(i).to_implicit_type())
+            .collect();
+        assert!(matches!(unions(xs, &heap), Type::Any(_)));
+
+        // A union under the cap is left untouched.
+        let xs: Vec<Type> = (0..8).map(|i| LitInt::new(i).to_implicit_type()).collect();
+        assert!(matches!(unions(xs, &heap), Type::Union(_)));
     }
 
     #[test]
