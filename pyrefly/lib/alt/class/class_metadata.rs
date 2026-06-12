@@ -446,6 +446,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             protocol_metadata.is_some(),
             enum_metadata.is_some(),
             is_typed_dict,
+            named_tuple_metadata.is_some(),
             errors,
         );
         // PEP 800: only promote when a fresh `@dataclass(slots=True)`-like
@@ -1203,6 +1204,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         is_protocol: bool,
         is_enum: bool,
         is_typed_dict: bool,
+        is_named_tuple: bool,
         errors: &ErrorCollector,
     ) -> (Option<DataclassMetadata>, bool) {
         // If we inherit from a dataclass, inherit its metadata. Note that if this class is
@@ -1290,7 +1292,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 _ => {}
             }
         }
-        // @dataclass cannot be applied to Protocol, Enum, or TypedDict classes.
+        // @dataclass cannot be applied to Protocol, Enum, TypedDict, or NamedTuple classes.
         // Emit the error and return no metadata so the class is not treated as a dataclass.
         if has_dataclass_decorator {
             if is_protocol {
@@ -1320,6 +1322,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     cls.range(),
                     ErrorKind::BadClassDefinition,
                     format!("Cannot apply `@dataclass` to TypedDict `{}`", cls.name()),
+                );
+                return (None, false);
+            }
+            if is_named_tuple {
+                self.error(
+                    errors,
+                    cls.range(),
+                    ErrorKind::BadClassDefinition,
+                    format!("Cannot apply `@dataclass` to NamedTuple `{}`", cls.name()),
                 );
                 return (None, false);
             }
