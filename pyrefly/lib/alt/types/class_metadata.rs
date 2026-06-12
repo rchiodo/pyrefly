@@ -747,6 +747,45 @@ impl ClassMro {
     }
 }
 
+/// A class's disjoint-base representative for PEP 800 narrowing and
+/// downstream inheritance checks.
+///
+/// `representative` is the chosen disjoint-base class, if any: the class
+/// itself when locally disjoint (explicit `@disjoint_base`, non-empty
+/// `__slots__`, or `@dataclass(slots=True)` that materializes fields), or
+/// the inherited representative from a direct base. `None` means no
+/// disjoint-base information, in which case narrowing falls back to
+/// `object`.
+#[derive(Clone, Debug, VisitMut, TypeEq, PartialEq, Eq)]
+pub struct ClassDisjointBase {
+    representative: Option<Class>,
+}
+
+impl Display for ClassDisjointBase {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match &self.representative {
+            Some(cls) => write!(f, "ClassDisjointBase({})", cls.name()),
+            None => write!(f, "ClassDisjointBase(None)"),
+        }
+    }
+}
+
+impl ClassDisjointBase {
+    pub fn from_representative(representative: Option<Class>) -> Self {
+        Self { representative }
+    }
+
+    pub fn recursive() -> Self {
+        Self {
+            representative: None,
+        }
+    }
+
+    pub fn representative(&self) -> Option<&Class> {
+        self.representative.as_ref()
+    }
+}
+
 /// Represents one linearized "chain" of ancestors in the C3 linearization algorithm, which involves
 /// building a series of linearized chains and then merging them. Each chain is one of:
 /// - The MRO for a base class of the current class, or

@@ -55,6 +55,7 @@ use crate::alt::class::typed_dict::TypedDictErrorKind;
 use crate::alt::class::variance_inference::VarianceMap;
 use crate::alt::types::abstract_class::AbstractClassMembers;
 use crate::alt::types::class_bases::ClassBases;
+use crate::alt::types::class_metadata::ClassDisjointBase;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
@@ -73,6 +74,7 @@ use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
 use crate::binding::binding::BindingClassChecks;
+use crate::binding::binding::BindingClassDisjointBase;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
@@ -379,6 +381,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             Some(cls) => self.calculate_class_mro(cls, errors),
         };
         Arc::new(mro)
+    }
+
+    /// NFC scaffolding: returns the same disjoint-base representative the
+    /// rest of the codebase already computes from `ClassMetadata` +
+    /// `ClassMro`. A follow-up diff replaces this with the real algorithm
+    /// and switches narrowing to read from this key.
+    pub fn solve_class_disjoint_base(
+        &self,
+        binding: &BindingClassDisjointBase,
+        _errors: &ErrorCollector,
+    ) -> Arc<ClassDisjointBase> {
+        let answer = match &self.get_idx(binding.class_idx).0 {
+            None => ClassDisjointBase::recursive(),
+            Some(cls) => {
+                let metadata = self.get_metadata_for_class(cls);
+                let representative = if !cls.is_builtin("object") && metadata.is_disjoint_base() {
+                    Some(cls.dupe())
+                } else {
+                    self.get_mro_for_class(cls)
+                        .nearest_disjoint_base()
+                        .map(|c| c.dupe())
+                };
+                ClassDisjointBase::from_representative(representative)
+            }
+        };
+        Arc::new(answer)
     }
 
     pub fn solve_abstract_members(

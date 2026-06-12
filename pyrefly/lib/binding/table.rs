@@ -42,6 +42,7 @@ macro_rules! table {
             $($vis)* annotations: $t<$crate::binding::binding::KeyAnnotation>,
             $($vis)* class_metadata: $t<$crate::binding::binding::KeyClassMetadata>,
             $($vis)* class_mros: $t<$crate::binding::binding::KeyClassMro>,
+            $($vis)* class_disjoint_bases: $t<$crate::binding::binding::KeyClassDisjointBase>,
             $($vis)* abstract_class_check: $t<$crate::binding::binding::KeyAbstractClassCheck>,
             $($vis)* class_subscript_symmetry: $t<$crate::binding::binding::KeyClassSubscriptSymmetry>,
             $($vis)* legacy_tparams: $t<$crate::binding::binding::KeyLegacyTypeParam>,
@@ -157,6 +158,12 @@ macro_rules! table {
             fn get_mut(&mut self) -> &mut Self::Value { &mut self.class_mros }
         }
 
+        impl $crate::binding::table::TableKeyed<$crate::binding::binding::KeyClassDisjointBase> for $name {
+            type Value = $t<$crate::binding::binding::KeyClassDisjointBase>;
+            fn get(&self) -> &Self::Value { &self.class_disjoint_bases }
+            fn get_mut(&mut self) -> &mut Self::Value { &mut self.class_disjoint_bases }
+        }
+
         impl $crate::binding::table::TableKeyed<$crate::binding::binding::KeyAbstractClassCheck> for $name {
             type Value = $t<$crate::binding::binding::KeyAbstractClassCheck>;
             fn get(&self) -> &Self::Value { &self.abstract_class_check }
@@ -228,6 +235,7 @@ macro_rules! table_for_each(
         $f(&($e).annotations);
         $f(&($e).class_metadata);
         $f(&($e).class_mros);
+        $f(&($e).class_disjoint_bases);
         $f(&($e).abstract_class_check);
         $f(&($e).class_subscript_symmetry);
         $f(&($e).legacy_tparams);
@@ -257,6 +265,7 @@ macro_rules! table_mut_for_each(
         $f(&mut ($e).annotations);
         $f(&mut ($e).class_metadata);
         $f(&mut ($e).class_mros);
+        $f(&mut ($e).class_disjoint_bases);
         $f(&mut ($e).abstract_class_check);
         $f(&mut ($e).class_subscript_symmetry);
         $f(&mut ($e).legacy_tparams);
@@ -286,6 +295,7 @@ macro_rules! table_try_for_each(
         $f(&($e).annotations)?;
         $f(&($e).class_metadata)?;
         $f(&($e).class_mros)?;
+        $f(&($e).class_disjoint_bases)?;
         $f(&($e).abstract_class_check)?;
         $f(&($e).class_subscript_symmetry)?;
         $f(&($e).legacy_tparams)?;

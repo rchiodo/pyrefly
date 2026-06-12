@@ -56,6 +56,7 @@ use crate::alt::class::variance_inference::VarianceMap;
 use crate::alt::solve::TypeFormContext;
 use crate::alt::types::abstract_class::AbstractClassMembers;
 use crate::alt::types::class_bases::ClassBases;
+use crate::alt::types::class_metadata::ClassDisjointBase;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
@@ -105,6 +106,7 @@ assert_bytes!(KeyClassChecks, 4);
 assert_bytes!(KeyAnnotation, 12);
 assert_bytes!(KeyClassMetadata, 4);
 assert_bytes!(KeyClassMro, 4);
+assert_bytes!(KeyClassDisjointBase, 4);
 assert_bytes!(KeyAbstractClassCheck, 4);
 assert_bytes!(KeyClassSubscriptSymmetry, 4);
 assert_words!(KeyLegacyTypeParam, 1);
@@ -124,6 +126,7 @@ assert_words!(BindingClassBaseType, 3);
 assert_words!(BindingClassMetadata, 14);
 assert_bytes!(BindingClassMro, 4);
 assert_bytes!(BindingClassChecks, 4);
+assert_bytes!(BindingClassDisjointBase, 4);
 assert_bytes!(BindingAbstractClassCheck, 4);
 assert_bytes!(BindingClassSubscriptSymmetry, 4);
 assert_words!(BindingClassField, 11);
@@ -155,6 +158,7 @@ pub enum AnyIdx {
     KeyAnnotation(Idx<KeyAnnotation>),
     KeyClassMetadata(Idx<KeyClassMetadata>),
     KeyClassMro(Idx<KeyClassMro>),
+    KeyClassDisjointBase(Idx<KeyClassDisjointBase>),
     KeyAbstractClassCheck(Idx<KeyAbstractClassCheck>),
     KeyClassSubscriptSymmetry(Idx<KeyClassSubscriptSymmetry>),
     KeyLegacyTypeParam(Idx<KeyLegacyTypeParam>),
@@ -226,6 +230,9 @@ macro_rules! dispatch_anyidx {
             AnyIdx::KeyClassMro(idx) => {
                 $self.$method::<$crate::binding::binding::KeyClassMro>(*idx)
             }
+            AnyIdx::KeyClassDisjointBase(idx) => {
+                $self.$method::<$crate::binding::binding::KeyClassDisjointBase>(*idx)
+            }
             AnyIdx::KeyAbstractClassCheck(idx) => {
                 $self.$method::<$crate::binding::binding::KeyAbstractClassCheck>(*idx)
             }
@@ -296,6 +303,9 @@ macro_rules! dispatch_anyidx {
             AnyIdx::KeyClassMro(idx) => {
                 $self.$method::<$crate::binding::binding::KeyClassMro>(*idx, $($args),+)
             }
+            AnyIdx::KeyClassDisjointBase(idx) => {
+                $self.$method::<$crate::binding::binding::KeyClassDisjointBase>(*idx, $($args),+)
+            }
             AnyIdx::KeyAbstractClassCheck(idx) => {
                 $self.$method::<$crate::binding::binding::KeyAbstractClassCheck>(*idx, $($args),+)
             }
@@ -339,6 +349,7 @@ impl DisplayWith<Bindings> for AnyIdx {
             Self::KeyAnnotation(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassMetadata(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassMro(idx) => write!(f, "{}", ctx.display(*idx)),
+            Self::KeyClassDisjointBase(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyAbstractClassCheck(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyClassSubscriptSymmetry(idx) => write!(f, "{}", ctx.display(*idx)),
             Self::KeyLegacyTypeParam(idx) => write!(f, "{}", ctx.display(*idx)),
@@ -360,6 +371,7 @@ pub enum AnyExportedKey {
     KeyExport(KeyExport),
     KeyClassMetadata(KeyClassMetadata),
     KeyClassMro(KeyClassMro),
+    KeyClassDisjointBase(KeyClassDisjointBase),
     KeyAbstractClassCheck(KeyAbstractClassCheck),
     KeyClassSubscriptSymmetry(KeyClassSubscriptSymmetry),
     KeyTypeAlias(KeyTypeAlias),
@@ -708,6 +720,28 @@ impl Keyed for KeyClassMro {
 impl Exported for KeyClassMro {
     fn to_anykey(&self) -> AnyExportedKey {
         AnyExportedKey::KeyClassMro(self.clone())
+    }
+}
+impl Keyed for KeyClassDisjointBase {
+    const EXPORTED: bool = true;
+    type Value = BindingClassDisjointBase;
+    type Answer = ClassDisjointBase;
+    fn to_anyidx(idx: Idx<Self>) -> AnyIdx {
+        AnyIdx::KeyClassDisjointBase(idx)
+    }
+    fn range_with(idx: Idx<Self>, bindings: &Bindings) -> TextRange
+    where
+        BindingTable: TableKeyed<Self, Value = BindingEntry<Self>>,
+    {
+        bindings.idx_to_key(bindings.get(idx).class_idx).range()
+    }
+    fn try_to_anykey(&self) -> Option<AnyExportedKey> {
+        Some(AnyExportedKey::KeyClassDisjointBase(self.clone()))
+    }
+}
+impl Exported for KeyClassDisjointBase {
+    fn to_anykey(&self) -> AnyExportedKey {
+        AnyExportedKey::KeyClassDisjointBase(self.clone())
     }
 }
 impl Keyed for KeyAbstractClassCheck {
@@ -1591,6 +1625,19 @@ pub struct KeyClassMro(pub ClassDefIndex);
 impl DisplayWith<ModuleInfo> for KeyClassMro {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
         write!(f, "KeyClassMro(class{})", self.0)
+    }
+}
+
+/// Disjoint-base representative for a class, used for PEP 800 narrowing and
+/// downstream inheritance checks. Owned by `KeyClassDisjointBase`, not
+/// `KeyClassMro`, so generated dataclass-slot promotion can read the
+/// already-solved MRO without a binding cycle.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KeyClassDisjointBase(pub ClassDefIndex);
+
+impl DisplayWith<ModuleInfo> for KeyClassDisjointBase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, _ctx: &ModuleInfo) -> fmt::Result {
+        write!(f, "KeyClassDisjointBase(class{})", self.0)
     }
 }
 
@@ -3176,6 +3223,24 @@ pub struct BindingClassMro {
 impl DisplayWith<Bindings> for BindingClassMro {
     fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
         write!(f, "BindingClassMro({}, ..)", ctx.display(self.class_idx))
+    }
+}
+
+/// Binding for the class's disjoint-base representative. The solver reads
+/// both metadata and MRO for `class_idx`; both must be available, so this
+/// binding must be inserted everywhere `BindingClassMro` is.
+#[derive(Clone, Debug)]
+pub struct BindingClassDisjointBase {
+    pub class_idx: Idx<KeyClass>,
+}
+
+impl DisplayWith<Bindings> for BindingClassDisjointBase {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>, ctx: &Bindings) -> fmt::Result {
+        write!(
+            f,
+            "BindingClassDisjointBase({})",
+            ctx.display(self.class_idx)
+        )
     }
 }
 

@@ -44,6 +44,7 @@ use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
 use crate::binding::binding::BindingClassChecks;
+use crate::binding::binding::BindingClassDisjointBase;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
@@ -63,6 +64,7 @@ use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassBaseType;
 use crate::binding::binding::KeyClassChecks;
+use crate::binding::binding::KeyClassDisjointBase;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
@@ -132,6 +134,7 @@ impl<'a> BindingsBuilder<'a> {
             base_type_idx: self.idx_for_promise(KeyClassBaseType(def_index)),
             metadata_idx: self.idx_for_promise(KeyClassMetadata(def_index)),
             mro_idx: self.idx_for_promise(KeyClassMro(def_index)),
+            disjoint_base_idx: self.idx_for_promise(KeyClassDisjointBase(def_index)),
             synthesized_fields_idx: self.idx_for_promise(KeyClassSynthesizedFields(def_index)),
             variance_idx: self.idx_for_promise(KeyVariance(def_index)),
             class_checks_idx: self.idx_for_promise(KeyClassChecks(def_index)),
@@ -404,6 +407,12 @@ impl<'a> BindingsBuilder<'a> {
         self.insert_binding_idx(
             class_indices.mro_idx,
             BindingClassMro {
+                class_idx: class_indices.class_idx,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.disjoint_base_idx,
+            BindingClassDisjointBase {
                 class_idx: class_indices.class_idx,
             },
         );
@@ -1167,6 +1176,12 @@ impl<'a> BindingsBuilder<'a> {
         self.insert_binding_idx(
             class_indices.mro_idx,
             BindingClassMro {
+                class_idx: class_indices.class_idx,
+            },
+        );
+        self.insert_binding_idx(
+            class_indices.disjoint_base_idx,
+            BindingClassDisjointBase {
                 class_idx: class_indices.class_idx,
             },
         );

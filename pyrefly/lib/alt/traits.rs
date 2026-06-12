@@ -18,6 +18,7 @@ use crate::alt::class::class_field::ClassField;
 use crate::alt::class::variance_inference::VarianceMap;
 use crate::alt::types::abstract_class::AbstractClassMembers;
 use crate::alt::types::class_bases::ClassBases;
+use crate::alt::types::class_metadata::ClassDisjointBase;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::ClassSynthesizedFields;
@@ -35,6 +36,7 @@ use crate::binding::binding::BindingAnnotation;
 use crate::binding::binding::BindingClass;
 use crate::binding::binding::BindingClassBaseType;
 use crate::binding::binding::BindingClassChecks;
+use crate::binding::binding::BindingClassDisjointBase;
 use crate::binding::binding::BindingClassField;
 use crate::binding::binding::BindingClassMetadata;
 use crate::binding::binding::BindingClassMro;
@@ -59,6 +61,7 @@ use crate::binding::binding::KeyAnnotation;
 use crate::binding::binding::KeyClass;
 use crate::binding::binding::KeyClassBaseType;
 use crate::binding::binding::KeyClassChecks;
+use crate::binding::binding::KeyClassDisjointBase;
 use crate::binding::binding::KeyClassField;
 use crate::binding::binding::KeyClassMetadata;
 use crate::binding::binding::KeyClassMro;
@@ -457,6 +460,21 @@ impl<Ans: LookupAnswer> Solve<Ans> for KeyClassMro {
 
     fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
         ClassMro::recursive()
+    }
+}
+
+impl<Ans: LookupAnswer> Solve<Ans> for KeyClassDisjointBase {
+    fn solve(
+        answers: &AnswersSolver<Ans>,
+        binding: &BindingClassDisjointBase,
+        _range: TextRange,
+        errors: &ErrorCollector,
+    ) -> Arc<ClassDisjointBase> {
+        answers.solve_class_disjoint_base(binding, errors)
+    }
+
+    fn promote_recursive(_heap: &TypeHeap, _: Var) -> Self::Answer {
+        ClassDisjointBase::recursive()
     }
 }
 
