@@ -41,6 +41,7 @@ use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::class::django::is_django_choices_subclass;
 use crate::alt::solve::TypeFormContext;
 use crate::alt::types::abstract_class::AbstractClassMembers;
+use crate::alt::types::class_metadata::ClassDisjointBase;
 use crate::alt::types::class_metadata::ClassMetadata;
 use crate::alt::types::class_metadata::ClassMro;
 use crate::alt::types::class_metadata::DataclassMetadata;
@@ -449,26 +450,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             named_tuple_metadata.is_some(),
             errors,
         );
-        // PEP 800: only promote when a fresh `@dataclass(slots=True)`-like
-        // decorator would actually synthesize non-empty slots. Inherited
-        // slots=True flows through `ClassMro` instead. The explicit-slots
-        // gate matches the synthesis-time check in
-        // `get_dataclass_synthesized_fields`: any class-body `__slots__`
-        // blocks dataclass slot synthesis, even if the slot names are dynamic
-        // and unavailable for explicit-slot promotion.
-        let has_nonempty_fresh_dataclass_slots = has_fresh_local_slots_decorator
-            && !explicit_slots.has_explicit_slots()
-            && self.local_has_nonempty_generated_slots(
-                cls,
-                &bases_with_metadata,
-                pydantic_config.as_ref(),
-            );
-        // PEP 800: non-empty `__slots__` (explicit or synthesized) makes a
-        // nominal class disjoint.
-        let is_disjoint_base = has_valid_disjoint_base_decorator
-            || (!is_typed_dict
-                && protocol_metadata.is_none()
-                && (has_nonempty_explicit_slots || has_nonempty_fresh_dataclass_slots));
+        // Store only local class-body disjointness here; generated dataclass
+        // slots and inherited representatives need the MRO and are resolved by
+        // `KeyClassDisjointBase`.
+        let is_local_disjoint_base = has_valid_disjoint_base_decorator
+            || (!is_typed_dict && protocol_metadata.is_none() && has_nonempty_explicit_slots);
         if let Some(dm) = dataclass_metadata.as_ref()
             && pydantic_config.is_none()
         {
@@ -527,7 +513,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             is_new_type,
             is_final,
             deprecation,
-            is_disjoint_base,
+            is_local_disjoint_base,
+            has_fresh_local_slots_decorator,
             total_ordering_metadata,
             dataclass_transform_metadata,
             pydantic_model_kind,
@@ -1125,71 +1112,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         pseudo_field_names.extend(local_pseudo_overrides);
         pseudo_field_names.extend(local_pydantic_privates);
         pseudo_field_names
-    }
-
-    /// Models CPython `_add_slots`: would `@dataclass(slots=True)` produce a
-    /// non-empty `__slots__` tuple? Walks ancestors transitively — a
-    /// grandparent slot is invisible through a plain dataclass middle class
-    /// whose own `kws.slots` is false but still covers the name at runtime.
-    fn local_has_nonempty_generated_slots(
-        &self,
-        cls: &Class,
-        bases_with_metadata: &[(Class, Arc<ClassMetadata>)],
-        pydantic_config: Option<&PydanticConfig>,
-    ) -> bool {
-        // Slot names already covered somewhere in the transitive MRO. Use
-        // `instance_fields` (not `fields`) so ancestor pseudo-fields don't
-        // leak in.
-        let mut inherited_slot_names: SmallSet<Name> = SmallSet::new();
-        let mut visited: SmallSet<Class> = SmallSet::new();
-        let mut stack: Vec<Class> = bases_with_metadata
-            .iter()
-            .map(|(base, _)| base.clone())
-            .collect();
-        while let Some(ancestor) = stack.pop() {
-            if !visited.insert(ancestor.clone()) {
-                continue;
-            }
-            let ancestor_metadata = self.get_metadata_for_class(&ancestor);
-            if let Some(s) = ancestor_metadata.slots_info() {
-                inherited_slot_names.extend(s.names.iter().cloned());
-            }
-            if let Some(dm) = ancestor_metadata
-                .dataclass_metadata()
-                .filter(|dm| dm.kws.slots)
-            {
-                inherited_slot_names.extend(dm.instance_fields().cloned());
-            }
-            stack.extend(ancestor_metadata.base_class_objects().iter().cloned());
-        }
-
-        // Local pseudo-overrides also drop matching inherited entries —
-        // compute once, reuse below. `pydantic_privates` doesn't matter
-        // here: it doesn't override inheritance and isn't slot-eligible.
-        let (local_instance, local_pseudo_overrides, _) =
-            self.local_dataclass_field_classification(cls, pydantic_config);
-        for name in &local_instance {
-            if !inherited_slot_names.contains(name) {
-                return true;
-            }
-        }
-
-        // Inherited instance fields re-materialize unless covered upstream
-        // or pseudo-overridden locally.
-        for (_, metadata) in bases_with_metadata {
-            if let Some(dm) = metadata.dataclass_metadata() {
-                for name in dm.instance_fields() {
-                    if local_pseudo_overrides.contains(name) {
-                        continue;
-                    }
-                    if !inherited_slot_names.contains(name) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
     }
 
     fn dataclass_metadata(
@@ -1824,36 +1746,29 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 (base, mro)
             })
             .collect();
-        // Safe to read: class metadata never reads its own MRO.
-        let metadata = self.get_metadata_for_class(cls);
-        let nearest_disjoint_base = self.check_incompatible_disjoint_bases_and_choose_nearest(
-            cls,
-            &metadata,
-            &bases_with_mros,
-            errors,
-        );
-        ClassMro::new(cls, nearest_disjoint_base, bases_with_mros, errors)
+        ClassMro::new(cls, bases_with_mros, errors)
     }
 
-    /// For each direct base, look up its nearest disjoint base. Drop any that
-    /// are subclasses of another; if more than one is left, emit
-    /// `incompatible disjoint bases`. Return the chosen representative to
-    /// cache on `cls`'s MRO, preferring `cls` itself when locally disjoint.
-    /// Local disjointness does NOT silence the diagnostic.
+    /// Resolve `cls`'s disjoint-base representative.
     ///
-    /// Cyclic direct bases contribute nothing here; the cycle diagnostic
-    /// already covers them. Other direct bases are still checked, so a
-    /// class like `(CyclicBase, Left, Right)` still flags `Left` vs `Right`.
-    fn check_incompatible_disjoint_bases_and_choose_nearest(
+    /// This is the first point where both metadata and MRO are available, so
+    /// generated dataclass slots are handled here rather than in `ClassMetadata`.
+    pub fn calculate_class_disjoint_base(
         &self,
         cls: &Class,
-        metadata: &ClassMetadata,
-        bases_with_mros: &[(&ClassType, Arc<ClassMro>)],
         errors: &ErrorCollector,
-    ) -> Option<Class> {
+    ) -> ClassDisjointBase {
+        let bases = self.get_base_types_for_class(cls);
+        // A cyclic direct base has no representative, but other bases can
+        // still be checked against each other.
         let mut survivors: Vec<Class> = Vec::new();
-        for (_, mro) in bases_with_mros {
-            let Some(candidate) = mro.nearest_disjoint_base() else {
+        for base in bases.iter() {
+            let mro = self.get_mro_for_class(base.class_object());
+            if matches!(&*mro, ClassMro::Cyclic) {
+                continue;
+            }
+            let base_disjoint = self.get_disjoint_base_for_class(base.class_object());
+            let Some(candidate) = base_disjoint.representative() else {
                 continue;
             };
             // A more-specific (or equal) base already survives, drop this one.
@@ -1887,11 +1802,67 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             );
         }
 
+        let metadata = self.get_metadata_for_class(cls);
+        let mro = self.get_mro_for_class(cls);
+        let has_nonempty_generated_slots =
+            self.has_nonempty_generated_slots_from_complete_mro(&metadata, &mro);
+
         // Skip `object` so narrowing's fallback to `object` stays meaningful.
-        if !cls.is_builtin("object") && metadata.is_disjoint_base() {
-            return Some(cls.dupe());
+        let local = !cls.is_builtin("object")
+            && (metadata.is_local_disjoint_base() || has_nonempty_generated_slots);
+        let local_representative = if local { Some(cls.dupe()) } else { None };
+        let inherited_representative = survivors.into_iter().next();
+        ClassDisjointBase::from_representative(local_representative.or(inherited_representative))
+    }
+
+    /// Returns whether the current class would synthesize non-empty dataclass slots.
+    ///
+    /// CPython dedups generated slots against inherited slot names, so this
+    /// requires a complete MRO. A class-body `__slots__` suppresses dataclass
+    /// slot synthesis even when the explicit slot names are dynamic.
+    fn has_nonempty_generated_slots_from_complete_mro(
+        &self,
+        metadata: &ClassMetadata,
+        mro: &ClassMro,
+    ) -> bool {
+        if metadata.is_typed_dict() || metadata.is_protocol() {
+            return false;
         }
-        survivors.into_iter().next()
+        if !metadata.has_local_dataclass_slots_request() {
+            return false;
+        }
+        if metadata.has_explicit_slots() {
+            return false;
+        }
+        if !mro.linearization_complete() {
+            return false;
+        }
+        let Some(dataclass) = metadata.dataclass_metadata() else {
+            return false;
+        };
+
+        let mut inherited_slot_names: SmallSet<Name> = SmallSet::new();
+        for ancestor in mro.ancestors_no_object() {
+            let ancestor_cls = ancestor.class_object();
+            let ancestor_metadata = self.get_metadata_for_class(ancestor_cls);
+            if let Some(s) = ancestor_metadata.slots_info() {
+                inherited_slot_names.extend(s.names.iter().cloned());
+            }
+            // Only ancestors that synthesized slots materialize dataclass fields
+            // as inherited slot names; inherited `kws.slots` is not enough.
+            let ancestor_is_nominal =
+                !ancestor_metadata.is_typed_dict() && !ancestor_metadata.is_protocol();
+            if ancestor_is_nominal
+                && ancestor_metadata.has_local_dataclass_slots_request()
+                && !ancestor_metadata.has_explicit_slots()
+                && let Some(ancestor_dataclass) = ancestor_metadata.dataclass_metadata()
+            {
+                inherited_slot_names.extend(ancestor_dataclass.instance_fields().cloned());
+            }
+        }
+        dataclass
+            .instance_fields()
+            .any(|name| !inherited_slot_names.contains(name))
     }
 
     pub fn calculate_abstract_members(&self, cls: &Class) -> AbstractClassMembers {

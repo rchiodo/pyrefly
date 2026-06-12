@@ -143,8 +143,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Return the most specific disjoint base for a type per PEP 800.
     ///
-    /// Uses the cache on `ClassMro`, but checks the class itself first so a
-    /// locally disjoint class still works when its MRO is cyclic or nonlinear.
     /// `Self` and bounded type variables inherit the representative of their
     /// class/bound, since every value they can denote is constrained by it.
     /// Falls back to `object` for anything not explicitly disjoint.
@@ -152,12 +150,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         match t {
             Type::ClassType(cls) | Type::SelfType(cls) => {
                 let class = cls.class_object();
-                if self.get_metadata_for_class(class).is_disjoint_base() {
-                    return class.dupe();
-                }
-                self.get_mro_for_class(class)
-                    .nearest_disjoint_base()
-                    .map(|class| class.dupe())
+                self.get_disjoint_base_for_class(class)
+                    .representative()
+                    .cloned()
                     .unwrap_or_else(|| self.stdlib.object().class_object().dupe())
             }
             Type::Quantified(q) if q.is_type_var() => match q.restriction() {

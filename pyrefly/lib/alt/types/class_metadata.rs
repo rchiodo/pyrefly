@@ -92,7 +92,14 @@ pub struct ClassMetadata {
     is_new_type: bool,
     is_final: bool,
     deprecation: Option<Deprecation>,
-    is_disjoint_base: bool,
+    /// True if this class directly declares disjoint-base status via
+    /// `@disjoint_base` or non-empty class-body `__slots__`.
+    /// Generated dataclass slots and inherited disjointness are resolved by
+    /// `ClassDisjointBase`.
+    is_local_disjoint_base: bool,
+    /// True if this class's own dataclass/dataclass-transform processing
+    /// requested slot synthesis. This is not inherited.
+    has_local_dataclass_slots_request: bool,
     total_ordering_metadata: Option<TotalOrderingMetadata>,
     /// If this class is decorated with `typing.dataclass_transform(...)`, the keyword arguments
     /// that were passed to the `dataclass_transform` call.
@@ -160,7 +167,8 @@ impl ClassMetadata {
         is_new_type: bool,
         is_final: bool,
         deprecation: Option<Deprecation>,
-        is_disjoint_base: bool,
+        is_local_disjoint_base: bool,
+        has_local_dataclass_slots_request: bool,
         total_ordering_metadata: Option<TotalOrderingMetadata>,
         dataclass_transform_metadata: Option<DataclassTransformMetadata>,
         pydantic_model_kind: Option<PydanticModelKind>,
@@ -188,7 +196,8 @@ impl ClassMetadata {
             is_new_type,
             is_final,
             deprecation,
-            is_disjoint_base,
+            is_local_disjoint_base,
+            has_local_dataclass_slots_request,
             total_ordering_metadata,
             dataclass_transform_metadata,
             pydantic_model_kind,
@@ -219,7 +228,8 @@ impl ClassMetadata {
             is_new_type: false,
             is_final: false,
             deprecation: None,
-            is_disjoint_base: false,
+            is_local_disjoint_base: false,
+            has_local_dataclass_slots_request: false,
             total_ordering_metadata: None,
             dataclass_transform_metadata: None,
             pydantic_model_kind: None,
@@ -317,8 +327,16 @@ impl ClassMetadata {
         self.deprecation.as_ref()
     }
 
-    pub fn is_disjoint_base(&self) -> bool {
-        self.is_disjoint_base
+    pub fn is_local_disjoint_base(&self) -> bool {
+        self.is_local_disjoint_base
+    }
+
+    pub fn has_local_dataclass_slots_request(&self) -> bool {
+        self.has_local_dataclass_slots_request
+    }
+
+    pub fn has_explicit_slots(&self) -> bool {
+        self.explicit_slots.has_explicit_slots()
     }
 
     pub fn has_generic_base_class(&self) -> bool {
@@ -657,13 +675,14 @@ pub struct TotalOrderingMetadata {
 /// different type arguments. The type arguments computed here will always be
 /// those coming from the instance that was selected during linearization.
 ///
-/// We also cache the nearest disjoint base (skipping `object`) so subclasses
-/// and narrowing don't re-walk the MRO to find it.
+/// `linearization_complete` is false when `ancestors` is only a recovery prefix
+/// after nonlinearizable inheritance. Callers that need an exact ancestor list
+/// must check it.
 #[derive(Clone, Debug, VisitMut, TypeEq, PartialEq, Eq)]
 pub enum ClassMro {
     Resolved {
         ancestors: Vec<ClassType>,
-        nearest_disjoint_base: Option<Class>,
+        linearization_complete: bool,
     },
     Cyclic,
 }
@@ -691,24 +710,24 @@ impl ClassMro {
     /// about the algorithm and a worked-through example here:
     /// https://en.wikipedia.org/wiki/C3_linearization
     ///
-    /// `nearest_disjoint_base` is computed by the caller and dropped when
-    /// the MRO is cyclic.
-    ///
     /// TODO: We currently omit some classes that are in the runtime MRO:
     /// `Generic`, `Protocol`, and `object`.
     pub fn new(
         cls: &Class,
-        nearest_disjoint_base: Option<Class>,
         bases_with_mro: Vec<(&ClassType, Arc<ClassMro>)>,
         errors: &ErrorCollector,
     ) -> Self {
         match Linearization::new(cls, bases_with_mro, errors) {
             Linearization::Cyclic => Self::Cyclic,
-            Linearization::Resolved(ancestor_chains) => {
-                let ancestors = Linearization::merge(cls, ancestor_chains, errors);
+            Linearization::Resolved {
+                ancestor_chains,
+                all_bases_complete,
+            } => {
+                let (ancestors, merge_complete) =
+                    Linearization::merge(cls, ancestor_chains, errors);
                 Self::Resolved {
                     ancestors,
-                    nearest_disjoint_base,
+                    linearization_complete: all_bases_complete && merge_complete,
                 }
             }
         }
@@ -729,17 +748,16 @@ impl ClassMro {
             .chain(iter::once(stdlib.object()))
     }
 
-    /// The nearest disjoint base for this class, if any. Returns `None` for
-    /// cyclic MROs; callers that care about the class itself should check
-    /// `ClassMetadata::is_disjoint_base()` first.
-    pub fn nearest_disjoint_base(&self) -> Option<&Class> {
-        match self {
+    /// Whether `ancestors_no_object` is the complete C3 MRO rather than a
+    /// recovery prefix.
+    pub fn linearization_complete(&self) -> bool {
+        matches!(
+            self,
             ClassMro::Resolved {
-                nearest_disjoint_base,
+                linearization_complete: true,
                 ..
-            } => nearest_disjoint_base.as_ref(),
-            ClassMro::Cyclic => None,
-        }
+            }
+        )
     }
 
     pub fn recursive() -> Self {
@@ -802,13 +820,20 @@ impl AncestorChain {
 }
 
 enum Linearization {
-    Resolved(Vec<AncestorChain>),
+    Resolved {
+        ancestor_chains: Vec<AncestorChain>,
+        /// True only if every direct base has a complete MRO.
+        all_bases_complete: bool,
+    },
     Cyclic,
 }
 
 impl Linearization {
     pub fn empty() -> Self {
-        Linearization::Resolved(vec![])
+        Linearization::Resolved {
+            ancestor_chains: vec![],
+            all_bases_complete: true,
+        }
     }
 
     /// Implements the linearize stage of the C3 linearization algorithm for method resolution order (MRO).
@@ -836,10 +861,17 @@ impl Linearization {
             Err(_) => return Linearization::empty(),
         };
         let mut ancestor_chains = Vec::new();
+        let mut all_bases_complete = true;
         let mut seen_ancestors: SmallMap<Class, ClassType> = SmallMap::new();
         for (base, mro) in bases_with_mro {
             match &*mro {
-                ClassMro::Resolved { ancestors, .. } => {
+                ClassMro::Resolved {
+                    ancestors,
+                    linearization_complete,
+                } => {
+                    if !linearization_complete {
+                        all_bases_complete = false;
+                    }
                     let ancestors_through_base = ancestors
                         .iter()
                         .map(|ancestor| ancestor.substitute_with(&base.substitution()))
@@ -912,22 +944,26 @@ impl Linearization {
             }
         }
         ancestor_chains.push(AncestorChain(bases));
-        Linearization::Resolved(ancestor_chains)
+        Linearization::Resolved {
+            ancestor_chains,
+            all_bases_complete,
+        }
     }
 
     /// Implements the `merge` step of the C3 linearization algorithm for method resolution order (MRO).
     ///
-    /// We detect linearization failures here; if one occurs we abort with the merge results thus far.
+    /// Returns a recovery prefix and `false` after reporting nonlinearizable inheritance.
     fn merge(
         cls: &Class,
         mut ancestor_chains: Vec<AncestorChain>,
         errors: &ErrorCollector,
-    ) -> Vec<ClassType> {
+    ) -> (Vec<ClassType>, bool) {
         // Merge the base class ancestors into a single Vec, in MRO order.
         //
         // The merge rule says we take the first available "head" of a chain (which are represented
         // as reversed vecs) that is not in the "tail" of any chain, then strip it from all chains.
         let mut ancestors = Vec::new();
+        let mut merge_complete = true;
         while !ancestor_chains.is_empty() {
             // Identify a candidate for the next MRO entry: it must be the next ancestor in some chain,
             // and not be in the tail of any chain.
@@ -993,9 +1029,10 @@ impl Linearization {
                     )
                     .emit();
 
-                ancestor_chains = Vec::new()
+                ancestor_chains = Vec::new();
+                merge_complete = false;
             }
         }
-        ancestors
+        (ancestors, merge_complete)
     }
 }
