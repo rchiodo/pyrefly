@@ -755,6 +755,28 @@ impl<'a> BindingsBuilder<'a> {
                             &mut type_usage,
                         );
                     }
+                } else if self.scopes.has_future_annotations()
+                    && let Expr::Name(name) = &**value
+                    && let Some((class_object_idx, FlowStyle::ClassDef { .. })) =
+                        self.scopes.binding_idx_for_name(&name.id)
+                    && self.class_object_is_generic(class_object_idx)
+                    && !matches!(
+                        &**slice,
+                        // String-keyed class subscripts, such as Enum member lookup, are runtime
+                        // expressions even when future annotations are active.
+                        Expr::StringLiteral(_)
+                    )
+                {
+                    self.ensure_expr(&mut *value, usage);
+                    self.ensure_type_impl(
+                        &mut *slice,
+                        &mut None,
+                        false,
+                        false,
+                        &mut Usage::StaticTypeInformation {
+                            is_annotation: false,
+                        },
+                    );
                 } else {
                     self.ensure_expr(&mut *value, usage);
                     self.ensure_expr(&mut *slice, usage);
