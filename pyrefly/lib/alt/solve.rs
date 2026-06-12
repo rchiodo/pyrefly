@@ -2596,7 +2596,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Uses MRO to walk ALL ancestors (not just direct bases).
     /// Only adds if the ancestor directly declares the field.
     /// Skips library code to keep the index focused on user source code.
-    fn populate_parent_methods_map(&self, cls: &Class) {
+    fn populate_parent_methods_map(
+        &self,
+        cls: &Class,
+        class_field_map: &SmallMap<Name, Arc<ClassField>>,
+    ) {
         if Self::should_skip_module_for_indexing(cls.module().path()) {
             return;
         }
@@ -2605,7 +2609,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return;
         };
         let mro = self.get_mro_for_class(cls);
-        for (field_name, _field) in self.get_class_field_map(cls).iter() {
+        for (field_name, _field) in class_field_map.iter() {
             // Apply the same filters as check_consistent_override_for_field.
             // Skip special methods that don't participate in override checks:
             // - Object construction: __new__, __init__, __init_subclass__
@@ -2654,31 +2658,42 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) -> Arc<EmptyAnswer> {
         let class = self.get_idx(binding.class_idx);
         if let Some(cls) = &class.0 {
-            self.check_consistent_override_for_class(cls, errors);
-            self.check_variance_for_class(cls, errors);
+            let class_bases = self.get_base_types_for_class(cls);
+            let class_field_map = self.get_class_field_map(cls);
+            self.check_consistent_override_for_class(
+                cls,
+                class_bases.as_ref(),
+                &class_field_map,
+                errors,
+            );
+            self.check_variance_for_class(cls, class_bases.as_ref(), &class_field_map, errors);
         }
         Arc::new(EmptyAnswer)
     }
 
     /// Check method and attribute override consistency for a class.
-    fn check_consistent_override_for_class(&self, cls: &Class, errors: &ErrorCollector) {
-        let class_bases = self.get_base_types_for_class(cls);
+    fn check_consistent_override_for_class(
+        &self,
+        cls: &Class,
+        class_bases: &ClassBases,
+        class_field_map: &SmallMap<Name, Arc<ClassField>>,
+        errors: &ErrorCollector,
+    ) {
+        self.populate_parent_methods_map(cls, class_field_map);
 
-        self.populate_parent_methods_map(cls);
-
-        for (name, field) in self.get_class_field_map(cls).iter() {
+        for (name, field) in class_field_map.iter() {
             self.check_consistent_override_for_field(
                 cls,
                 name,
                 field.as_ref(),
-                class_bases.as_ref(),
+                class_bases,
                 errors,
             );
         }
 
         // If we are inheriting from multiple base types, we should
         // check whether the multiple inheritance is consistent
-        if class_bases.as_ref().base_type_count() > 1 {
+        if class_bases.base_type_count() > 1 {
             self.check_consistent_multiple_inheritance(cls, errors);
         }
     }
@@ -2802,10 +2817,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if let Some(class) = &class.0 {
             // Only compute variance map, don't check violations here.
             // Variance violations are checked as part of `KeyClassChecks` alongside
-            // other class-level diagnostics to avoid cycles from calling
-            // get_class_field_map during variance computation.
-            let result = self.compute_variance(class, false);
-            Arc::new(result.variance_map)
+            // other class-level diagnostics. This avoids adding class-field dependencies
+            // for fully-specified generic classes, where computing the downstream
+            // `KeyVariance` answer does not need variance inference.
+            Arc::new(self.compute_variance(class))
         } else {
             Arc::new(VarianceMap::default())
         }
@@ -2813,14 +2828,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     /// Check variance violations for a class.
     ///
-    /// This is separate from solve_variance_binding to avoid cycles when
-    /// calling get_class_field_map during variance computation.
-    ///
-    /// Checking behavior:
-    /// - Base classes: DEEP checking (recurse into all nested generics)
-    /// - Methods: SHALLOW checking (only direct TypeVar usage, not nested Callables)
-    /// - Fields: NO checking (mutable fields constrain variance during inference only)
-    fn check_variance_for_class(&self, class: &Class, errors: &ErrorCollector) {
+    /// This is separate from solve_variance_binding so the downstream `KeyVariance`
+    /// answer does not pick up field dependencies only needed for diagnostics. See
+    /// `check_variance_violations` for the diagnostic traversal rules.
+    fn check_variance_for_class(
+        &self,
+        class: &Class,
+        class_bases: &ClassBases,
+        class_field_map: &SmallMap<Name, Arc<ClassField>>,
+        errors: &ErrorCollector,
+    ) {
         // Get type parameters and their declared variances
         let tparams = self.get_class_tparams(class);
 
@@ -2834,9 +2851,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         });
 
         if has_non_invariant_variance {
-            let result = self.compute_variance(class, true);
-
-            for violation in &result.violations {
+            for violation in self.check_variance_violations(class, class_bases, class_field_map) {
                 let message = violation.format_message();
                 self.error(errors, violation.range, ErrorKind::InvalidVariance, message);
             }

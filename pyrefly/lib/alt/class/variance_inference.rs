@@ -99,12 +99,6 @@ impl VarianceViolation {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct VarianceResult {
-    pub variance_map: VarianceMap,
-    pub violations: Vec<VarianceViolation>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct InferenceStatus {
     inferred_variance: Variance,
@@ -600,11 +594,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         VarianceMap(class_variances)
     }
 
-    /// Compute variance for a class, optionally checking for violations.
-    ///
-    /// When `check_violations` is true, also checks that type variables with
-    /// declared variance are used in compatible positions.
-    pub fn compute_variance(&self, class: &Class, check_violations: bool) -> VarianceResult {
+    /// Compute variance for a class.
+    pub fn compute_variance(&self, class: &Class) -> VarianceMap {
         let env = self.compute_variance_env(class);
         let class_variances = env
             .get(class)
@@ -623,18 +614,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 )
             })
             .collect::<SmallMap<_, _>>();
-        let variance_map = VarianceMap(class_variances);
-
-        let violations = if check_violations {
-            self.check_class_violations(class)
-        } else {
-            Vec::new()
-        };
-
-        VarianceResult {
-            variance_map,
-            violations,
-        }
+        VarianceMap(class_variances)
     }
 
     /// Check a class for variance violations.
@@ -643,11 +623,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// - Base classes: DEEP checking (recurse into all nested generics)
     /// - Methods: SHALLOW checking (only direct TypeVar usage, not nested Callables)
     /// - Fields: NO checking (mutable fields constrain variance during inference only)
-    fn check_class_violations(&self, class: &Class) -> Vec<VarianceViolation> {
+    pub fn check_variance_violations(
+        &self,
+        class: &Class,
+        class_bases: &ClassBases,
+        field_map: &SmallMap<Name, Arc<ClassField>>,
+    ) -> Vec<VarianceViolation> {
         let mut violations = Vec::new();
 
         // Check base classes deeply using on_type for traversal
-        for (base_type, range) in self.get_base_types_for_class(class).iter_with_ranges() {
+        for (base_type, range) in class_bases.iter_with_ranges() {
             let mut on_var =
                 |name: &Name, variance: Variance, _inj: bool, declared: PreInferenceVariance| {
                     check_typevar(name, variance, declared, range, &mut violations);
@@ -664,7 +649,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
         // Check methods shallowly
         let class_fields = self.get_class_fields(class);
-        let field_map = self.get_class_field_map(class);
         for (name, field) in field_map.iter() {
             if name == &dunder::INIT || name == &dunder::NEW {
                 continue;
