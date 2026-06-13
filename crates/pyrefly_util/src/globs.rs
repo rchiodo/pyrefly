@@ -58,41 +58,78 @@ static IGNORE_FILES_SEARCH: LazyLock<Vec<UpwardSearch<Arc<(PathBuf, PathBuf)>>>>
             .collect::<Vec<_>>()
     });
 
-#[derive(Clone, Eq, Default)]
-
+#[derive(Clone, Eq)]
 /// A glob pattern for matching files.
 /// Patterns must use `/` as the path separator for cross-platform consistency.
 ///
 /// Only matches Python files (.py, .pyi, .pyw) and automatically excludes:
 /// - Files that don't have .py, .pyi, or .pyw extensions
 /// - Files whose names start with '.' (dot files)
-pub struct Glob(Pattern);
+pub struct Glob {
+    /// The (already-normalized) glob pattern. Doubles as the source string via
+    /// [`Glob::as_str`].
+    pattern: Pattern,
+    /// Precompiled `<pattern>/**` variant, so a glob naming a directory matches
+    /// the files beneath it. Precomputed so [`Glob::matches`] stays allocation-
+    /// and parse-free on the discovery hot path. `None` when `pattern` already
+    /// ends in a `**` globstar and so matches its descendants on its own, or if
+    /// this best-effort variant cannot be parsed.
+    dir_pattern: Option<Pattern>,
+}
 
 impl Glob {
     /// Create a new `Glob`, but do not do absolutizing (since we don't want to do
     /// that until rewriting with a root).
     /// Patterns must use `/` as the path separator for cross-platform consistency.
-    pub fn new(mut pattern: String) -> anyhow::Result<Self> {
+    pub fn new(pattern: String) -> anyhow::Result<Self> {
+        Ok(Self::from_base_pattern(Self::base_pattern(pattern)?))
+    }
+
+    fn base_pattern(mut pattern: String) -> anyhow::Result<Pattern> {
         if pattern.ends_with("**") {
             pattern.push_str("/*");
         } else if pattern.ends_with("**/") {
             pattern.push('*');
         }
-        Ok(Self(Pattern::new(&pattern).with_context(|| {
-            format!("While constructing glob pattern from {pattern}")
-        })?))
+        Pattern::new(&pattern)
+            .with_context(|| format!("While constructing glob pattern from {pattern}"))
+    }
+
+    /// Build a `Glob` from an already-validated base [`Pattern`], precompiling the
+    /// `<pattern>/**` variant used to match files beneath a directory pattern.
+    fn from_base_pattern(pattern: Pattern) -> Self {
+        // A pattern ending in `**/*` (the normalized form of a trailing `**`)
+        // already matches every descendant, so the `<pattern>/**` variant would
+        // be redundant: `P/**/*` matches a superset of `P/**/*/**`.
+        let dir_pattern = if pattern.as_str().ends_with("**/*") {
+            None
+        } else {
+            let mut dir = pattern.as_str().to_owned();
+            if !dir.ends_with('/') {
+                dir.push('/');
+            }
+            dir.push_str("**");
+            Pattern::new(&dir).ok()
+        };
+        Self {
+            pattern,
+            dir_pattern,
+        }
     }
 
     /// Create a new `Glob`, with the pattern relative to `root`.
     /// `root` should be an absolute path.
     pub fn new_with_root(root: &Path, pattern: String) -> anyhow::Result<Self> {
-        Ok(Self::new(pattern)?.from_root(root))
+        Ok(Self::from_base_pattern(Self::pattern_relative_to_root(
+            root,
+            &Self::base_pattern(pattern)?,
+        )))
     }
 
     /// Rewrite the current `Glob` relative to `root`.
     /// `root` should be an absolute path.
     pub fn from_root(self, root: &Path) -> Self {
-        Self(Self::pattern_relative_to_root(root, &self.0))
+        Self::from_base_pattern(Self::pattern_relative_to_root(root, &self.pattern))
     }
 
     fn contains_glob_char(part: &OsStr) -> bool {
@@ -151,11 +188,11 @@ impl Glob {
     }
 
     pub fn as_path(&self) -> &Path {
-        Path::new(self.0.as_str())
+        Path::new(self.pattern.as_str())
     }
 
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        self.pattern.as_str()
     }
 
     fn is_python_extension(ext: Option<&OsStr>) -> bool {
@@ -241,40 +278,27 @@ impl Glob {
         Self::resolve_pattern_with_limit(pattern, filter, None)
     }
 
-    /// Returns true if the given file matches any of the contained globs.
-    /// We always attempt to append `**` in case
-    /// the pattern is meant to be a directory wildcard.
+    /// Returns true if the given file matches this glob. The precompiled
+    /// `<pattern>/**` variant lets a glob naming a directory match the files
+    /// beneath it.
     pub fn matches(&self, file: &Path) -> bool {
-        if self.0.matches_path(file) {
-            return true;
-        }
-
-        // if we could match before, see if it's because of some matching semantics
-        // around the glob library we're using, where the end MUST be a wildcard
-        let pattern_path = &self.0;
-        let mut pattern_str = pattern_path.as_str().to_owned();
-        if !pattern_str.ends_with('/') {
-            pattern_str.push('/');
-        }
-        pattern_str.push_str("**");
-
-        // don't return an error if we fail to construct a glob here, since it's something
-        // we automatically attempted and failed at. We should ignore failure here, since
-        // we attempted to do this automatically, and the pattern we're constructing should be valid
-        // (i.e. the previous pattern we constructed should have failed before we get to here).
-        glob::Pattern::new(&pattern_str).is_ok_and(|pattern| pattern.matches_path(file))
+        self.pattern.matches_path(file)
+            || self
+                .dir_pattern
+                .as_ref()
+                .is_some_and(|dir_pattern| dir_pattern.matches_path(file))
     }
 }
 
 impl Debug for Glob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.as_str())
+        write!(f, "{}", self.pattern.as_str())
     }
 }
 
 impl Display for Glob {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0.as_str())
+        write!(f, "{}", self.pattern.as_str())
     }
 }
 
@@ -335,7 +359,7 @@ impl PartialEq for Glob {
 
 impl Glob {
     fn files(&self, filter: &GlobFilter, limit: Option<usize>) -> anyhow::Result<Vec<PathBuf>> {
-        let pattern = &self.0;
+        let pattern = &self.pattern;
         if filter.is_excluded(self.as_path()) {
             return Err(anyhow::anyhow!(
                 "Pattern {} is matched by `project-excludes` or ignore file.\n{}",
@@ -407,8 +431,8 @@ impl Globs {
     }
 
     /// Returns true if the given file matches any of the contained globs.
-    /// We always attempt to append `**` if a pattern ends in `/` in case
-    /// the pattern is meant to be a directory wildcard.
+    /// Directory-style matching is handled by each [`Glob`]'s precomputed
+    /// `<pattern>/**` variant.
     fn matches(&self, file: &Path) -> bool {
         self.0.iter().any(|pattern| pattern.matches(file))
     }
