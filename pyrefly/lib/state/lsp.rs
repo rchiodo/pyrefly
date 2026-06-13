@@ -77,6 +77,7 @@ use crate::export::exports::ExportLocation;
 use crate::lsp::module_helpers::collect_symbol_def_paths;
 use crate::lsp::wasm::completion::CompletionOptions;
 use crate::lsp::wasm::signature_help::CallInfo;
+use crate::state::ide::ImportEdit;
 use crate::state::ide::IntermediateDefinition;
 use crate::state::ide::common_alias_target_module;
 use crate::state::ide::import_regular_import_edit;
@@ -755,12 +756,12 @@ impl<'a> Transaction<'a> {
         ast: &ModModule,
         module_name: ModuleName,
         import_format: ImportFormat,
-    ) -> Option<(String, TextSize, String, String)> {
+    ) -> Option<(String, ImportEdit)> {
         let (parent_module_str, submodule_name) = module_name.as_str().rsplit_once('.')?;
         let parent_handle = self
             .import_handle(handle, ModuleName::from_str(parent_module_str), None)
             .finding()?;
-        let (position, insert_text, imported_module) = insert_import_edit(
+        let import_edit = insert_import_edit(
             ast,
             self.config_finder(),
             handle.dupe(),
@@ -768,12 +769,10 @@ impl<'a> Transaction<'a> {
             submodule_name,
             import_format,
         );
-        Some((
-            submodule_name.to_owned(),
-            position,
-            insert_text,
-            imported_module,
-        ))
+        // Return the whole edit so callers can use `display_text` for human-facing
+        // strings (which stays "from parent import submodule" even when the actual
+        // edit merges into an existing line and `new_text` is just ", submodule").
+        Some((submodule_name.to_owned(), import_edit))
     }
 
     fn type_from_expression_at_impl(
@@ -2886,11 +2885,13 @@ impl<'a> Transaction<'a> {
                         if aliased_module.is_some_and(|m| m == module_name) {
                             continue;
                         }
-                        if let Some((_submodule_name, position, insert_text, _)) =
+                        if let Some((_submodule_name, import_edit)) =
                             self.submodule_autoimport_edit(handle, &ast, module_name, import_format)
                         {
-                            let range = TextRange::at(position, TextSize::new(0));
-                            let title = format!("Insert import: `{}`", insert_text.trim());
+                            // Use `display_text` for the human-facing title so a merge
+                            // edit shows "from parent import submodule" rather than the
+                            // raw ", submodule" insertion text.
+                            let title = format!("Insert import: `{}`", import_edit.display_text);
                             let is_private_import = module_name
                                 .components()
                                 .last()
@@ -2898,8 +2899,8 @@ impl<'a> Transaction<'a> {
                             import_actions.push(QuickfixAction {
                                 title,
                                 module_info: module_info.dupe(),
-                                range,
-                                insert_text,
+                                range: import_edit.range,
+                                insert_text: import_edit.insert_text,
                                 is_deprecated: false,
                                 is_private_import,
                             });
@@ -3033,7 +3034,7 @@ impl<'a> Transaction<'a> {
             .into_iter()
             .map(|(handle_to_import_from, _)| handle_to_import_from)
             .min_by_key(|candidate| usize::from(candidate.module().as_str() != "typing"))?;
-        let (position, insert_text, _) = insert_import_edit(
+        let edit = insert_import_edit(
             ast,
             self.config_finder(),
             handle.dupe(),
@@ -3041,11 +3042,7 @@ impl<'a> Transaction<'a> {
             "override",
             import_format,
         );
-        Some((
-            module_info.dupe(),
-            TextRange::at(position, TextSize::new(0)),
-            insert_text,
-        ))
+        Some((module_info.dupe(), edit.range, edit.insert_text))
     }
 
     fn create_quickfix_action_for_common_alias_import(
@@ -3119,7 +3116,7 @@ impl<'a> Transaction<'a> {
         handle_to_import_from: Handle,
         export: Export,
     ) {
-        let (position, insert_text, _) = insert_import_edit(
+        let import_edit = insert_import_edit(
             ast,
             self.config_finder(),
             handle.dupe(),
@@ -3127,11 +3124,11 @@ impl<'a> Transaction<'a> {
             unknown_name,
             import_format,
         );
-        let range = TextRange::at(position, TextSize::new(0));
+        let range = import_edit.range;
         let is_deprecated = export.deprecation.is_some();
         let title = format!(
             "Insert import: `{}`{}",
-            insert_text.trim(),
+            import_edit.display_text,
             if is_deprecated { " (deprecated)" } else { "" }
         );
 
@@ -3145,7 +3142,7 @@ impl<'a> Transaction<'a> {
             title,
             module_info: module_info.dupe(),
             range,
-            insert_text,
+            insert_text: import_edit.insert_text,
             is_deprecated,
             is_private_import,
         });
