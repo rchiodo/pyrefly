@@ -161,6 +161,9 @@ def get_mypy_primer_projects() -> list[Project]:
             pyrefly_cmd="{pyrefly} src",
             deps=["types-filelock", "types-freezegun", "types-setuptools"],
             expected_mypy_success=True,
+            # The upstream repo contains symlinks whose targets include a trailing newline.
+            # https://github.com/pypa/bandersnatch/pull/2280
+            skip_pyrefly=True,
         ),
         Project(
             location="https://github.com/hauntsaninja/boostedblob",

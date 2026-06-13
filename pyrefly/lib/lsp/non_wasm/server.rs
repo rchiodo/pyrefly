@@ -3303,18 +3303,19 @@ impl Server {
         info!("Populating all files in the config ({:?}).", config.source);
 
         let project_path_blobs = config.get_filtered_globs(None);
-        let paths = project_path_blobs.files().unwrap_or_default();
         let mut handles = Vec::new();
-        for path in paths {
-            let module_path = ModulePath::filesystem(path.clone());
-            let path_config = self
-                .state
-                .config_finder()
-                .python_file(ModuleNameWithKind::guaranteed(unknown), &module_path);
-            if config != path_config {
-                continue;
+        if let Ok(paths) = project_path_blobs.files_iter() {
+            for path in paths {
+                let module_path = ModulePath::filesystem(path.clone());
+                let path_config = self
+                    .state
+                    .config_finder()
+                    .python_file(ModuleNameWithKind::guaranteed(unknown), &module_path);
+                if config != path_config {
+                    continue;
+                }
+                handles.push(handle_from_module_path(&self.state, module_path));
             }
-            handles.push(handle_from_module_path(&self.state, module_path));
         }
 
         info!("Prepare to check {} files.", handles.len());
@@ -3352,15 +3353,14 @@ impl Server {
                 Some(workspace_root.as_path()),
                 HiddenDirFilter::RelativeTo(vec![workspace_root.clone()]),
             );
-            let paths = globs
-                .files_with_limit(self.workspace_indexing_limit)
-                .unwrap_or_default();
             let mut handles = Vec::new();
-            for path in paths {
-                handles.push(handle_from_module_path(
-                    &self.state,
-                    ModulePath::filesystem(path.clone()),
-                ));
+            if let Ok(paths) = globs.files_iter_with_limit(self.workspace_indexing_limit) {
+                for path in paths {
+                    handles.push(handle_from_module_path(
+                        &self.state,
+                        ModulePath::filesystem(path.clone()),
+                    ));
+                }
             }
 
             info!("Prepare to check {} files.", handles.len());

@@ -2131,7 +2131,6 @@ dependencies = [
  "anyhow",
  "append-only-vec",
  "argfile",
- "bstr",
  "compact_str",
  "dupe",
  "equivalent",
