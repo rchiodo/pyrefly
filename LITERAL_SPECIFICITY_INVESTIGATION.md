@@ -3,8 +3,9 @@
 ## Context
 
 [Pyright PR #11967](https://github.com/microsoft/pyright/pull/11967) compared
-Pyright 1.1.414 with Pyrefly 1.4.0 using 10,000 generated cases from 32
-templates plus 13 behavioral cases. Its reported generated-case results were:
+Pyright 1.1.414 with Pyrefly 1.4.0 using 10,000 generated precision cases from
+32 templates plus 13 behavioral cases. Across those 10,013 cases, its reported
+reveal-type classifications were:
 
 | Result | Cases |
 | --- | ---: |
@@ -13,11 +14,18 @@ templates plus 13 behavioral cases. Its reported generated-case results were:
 | Pyrefly inferred a narrower type | 0 |
 | Concrete display differences | 313 |
 
+The behavioral probes also found that Pyright diagnosed 5/5 expected invalid
+operations compared with Pyrefly's 1/5, and accepted 15/15 narrow-type
+capability probes compared with Pyrefly's 7/15.
+
 These numbers describe those versions and that corpus, not a permanent quality
 ordering. The benchmark should be rerun against current Pyright and Pyrefly
 before implementation decisions or progress claims are based on the totals.
-Pyrefly issue [#3977](https://github.com/facebook/pyrefly/issues/3977) tracks the
-related specificity gap.
+Pyrefly issue [#3977](https://github.com/pyrefly-org/pyrefly/issues/3977)
+tracked one related overload-materialization problem, but it has since been
+closed after a targeted non-spec-compliant overload fix. That resolution is
+evidence that the corpus must be reclassified before remaining differences are
+assigned to literal retention or ambiguous-result handling.
 
 Pyright's result is not automatically the correct result in every differing
 case. Some differences are presentation choices, some reflect deliberate
@@ -85,10 +93,14 @@ spec-compliant and ecosystem-compatibility disambiguation paths
 ([`overload.rs`](pyrefly/lib/alt/overload.rs#L860-L934),
 [`overload.rs`](pyrefly/lib/alt/overload.rs#L936-L972)). When viable overload
 returns cannot be disambiguated, the current result is implicit `Any`
-([`overload.rs`](pyrefly/lib/alt/overload.rs#L904-L916)). Retaining literals
-earlier can select a different overload, suppress or introduce an ambiguity,
-and change the diagnostic presented to the user. Existing tests already record
-the intentional spec/compatibility distinction
+([`overload.rs`](pyrefly/lib/alt/overload.rs#L904-L916)). The current typing
+specification permits `Any` or a more precise *gradual* result that is assignable
+to every remaining return type and permits operations supported by any of them.
+An ordinary union does not meet that requirement because it permits only
+operations common to every member. Retaining literals earlier can select a
+different overload, suppress or introduce an ambiguity, and change the
+diagnostic presented to the user. Existing tests already record the intentional
+spec/compatibility distinction
 ([`overload.rs`](pyrefly/lib/test/overload.rs#L1971-L2012)).
 
 Finally, literal retention has solver, representation, and performance costs.
@@ -103,22 +115,51 @@ resolution must measure type-size growth, allocation, and checking time.
 
 ## Recommended sequence
 
-### 1. Preserve bounded ambiguous-overload results
+### 0. Rerun and reclassify the benchmark
 
-Start with the clearest capability loss: when multiple overloads remain viable
-and their returns differ, form a bounded union or another explicit alternative
-result rather than immediately returning implicit `Any`. Reuse the existing
-union simplification and caps, and retain the current fallback when the
-alternative set cannot be represented cheaply. Add cases for ambiguous,
-defaulted, and disjoint arguments, generic receiver overloads, generic
-constructors, and higher-order callback results.
+Run the comparison against current Pyright and Pyrefly before selecting an
+implementation target. Preserve the generated inputs and classify every
+remaining difference by root cause rather than by surface feature:
 
-This stage should explicitly compare the compatibility mode and the
-spec-compliant overload mode. It should not assume that Pyright's selected
-overload is always preferable; the goal is to preserve common information when
-selection is genuinely ambiguous.
+- overload candidate elimination or materialization;
+- genuinely ambiguous overload returns;
+- literal promotion across a binding or generic solve;
+- contextual typing or partial inference;
+- flow narrowing;
+- display-only differences; and
+- intentional policy differences.
 
-### 2. Add context-sensitive literal preservation
+Record the behavioral probe results alongside reveal-type counts. A narrower
+display should not be counted as progress unless it improves checking or an
+explicitly chosen inference policy.
+
+### 1. Improve overload elimination before representing ambiguity
+
+Fix cases where Pyrefly can select an overload by using information it already
+has, including materialization, argument expansion, generic receiver
+specialization, and solved return variables. Issue #3977 is an example of a
+case that appeared to require a better ambiguous result but was instead fixed
+by eliminating an inapplicable fallback overload.
+
+Add focused cases for defaulted and disjoint arguments, generic receivers,
+generic constructors, and higher-order callback results. Keep the
+spec-compliant and ecosystem-compatibility expectations explicit in each test.
+
+### 2. Represent genuinely ambiguous overload results
+
+When multiple overloads genuinely remain viable and their returns differ,
+preserve more information only with a representation whose behavior satisfies
+the typing specification's gradual requirements. An ordinary union is not a
+valid replacement for `Any`: for `int` and `str` alternatives, the result must
+still permit both integer-only and string-only operations.
+
+Define a small local complexity budget for this representation rather than
+relying on the general 4,096-member union cap. Fall back to implicit `Any` when
+the alternatives cannot be represented cheaply. This stage should explicitly
+compare compatibility mode and spec-compliant mode; it should not assume that
+Pyright's selected overload is always preferable.
+
+### 3. Add context-sensitive literal preservation
 
 Preserve implicit literals only where the consumer is known to need them:
 
@@ -128,8 +169,12 @@ Preserve implicit literals only where the consumer is known to need them:
 - `LiteralString` propagation.
 
 Prefer carrying semantic evidence or a contextual expectation to delaying
-promotion everywhere. For example, current tests cover constrained generic
-`TypedDict` indexing
+promotion everywhere. Before implementation, choose where that evidence lives:
+for example, a promoted type paired with retained literal provenance, or an
+unpromoted alternative carried through a specific generic solve. This must not
+depend on contextual typing that is available only after overload selection.
+
+Current tests cover constrained generic `TypedDict` indexing
 ([`typed_dict.rs`](pyrefly/lib/test/typed_dict.rs#L2812-L2879)), literal-based
 overload selection
 ([`overload.rs`](pyrefly/lib/test/overload.rs#L1971-L2012)), and a known
@@ -137,14 +182,19 @@ overload selection
 ([`literal.rs`](pyrefly/lib/test/literal.rs#L482-L493)). Extend these focused
 areas before changing general expression inference.
 
-### 3. Model variance and mutability explicitly
+### 4. Refine promotion boundaries
 
-Allow greater retention in immutable or covariant results while keeping
-promotion at mutable or invariant boundaries. Tests should cover later mutation
-and assignment compatibility, not only `reveal_type`, so a narrower display
-does not hide a usability regression.
+Allow greater retention at proven-safe boundaries while keeping promotion where
+values become writable or form stable public types. Declared variance alone is
+not a reliable proxy for runtime mutability: an invariant user-defined class
+may be immutable, and a covariant protocol may expose behavior that requires
+careful checking. Start with concrete promotion sites and consumers rather than
+introducing a global mutability model.
 
-### 4. Keep recursive alias rendering separate
+Tests must cover later mutation and assignment compatibility, not only
+`reveal_type`, so a narrower display does not hide a usability regression.
+
+### 5. Keep recursive alias rendering separate
 
 Treat recursive-alias spelling, expansion depth, and hover/reveal output as a
 display project unless assignability changes. The recursive alias suite
@@ -152,7 +202,7 @@ display project unless assignability changes. The recursive alias suite
 behavioral baseline; display work should not be used to inflate inference
 specificity metrics.
 
-### 5. Expand behavioral and performance coverage
+### 6. Expand behavioral and performance coverage
 
 Recreate the 13 behavioral cases as focused regression tests, retain generated
 templates for breadth, and rerun the 10,000-case comparison on current releases.
@@ -164,5 +214,7 @@ For every inference change, record:
 - whether the result follows the typing specification, an intentional
   compatibility policy, or an unresolved specification question.
 
-The implementation should proceed only while those measurements remain bounded
-and mutable/invariant compatibility is preserved.
+Before each implementation stage, define its local type-size or candidate-count
+budget and acceptable performance regression. The implementation should
+proceed only while those budgets remain bounded, no new diagnostic regressions
+appear, and writable-value compatibility is preserved.
