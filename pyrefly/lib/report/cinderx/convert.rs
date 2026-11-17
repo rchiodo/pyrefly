@@ -221,6 +221,7 @@ pub(crate) fn type_to_structured(
                 type_to_structured(&Type::None, table, pending_class_traits)
             }
         }
+        Type::OverloadResult(_) => insert_simple_other_form("typing.Any", table),
         Type::Any(_) => insert_simple_other_form("typing.Any", table),
         Type::None => insert_simple_other_form("None", table),
         Type::Never(_) => insert_simple_other_form("typing.Never", table),

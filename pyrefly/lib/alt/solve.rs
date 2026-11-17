@@ -3540,12 +3540,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     let hint = annot_ty.as_ref().map(|t| (t, tcc));
                     self.expr_check(expr, hint, errors)
                 };
+                let preserve_literal_narrowing = annot_ty.as_ref().is_some_and(|annot| {
+                    matches!(expr, Expr::If(_))
+                        && matches!(annot, Type::Union(_))
+                        && !annot.any(|ty| matches!(ty, Type::Literal(_) | Type::LiteralString(_)))
+                        && expr_ty.any(Type::is_implicit_literal)
+                });
                 let ty = if style == &AnnotationStyle::Direct {
                     if attrs_field_specifier.is_some() {
                         self.heap.mk_any_implicit()
+                    } else if preserve_literal_narrowing {
+                        // Broad union annotations remain authoritative for later assignments,
+                        // but the compatible literal-valued initializer can still guide flow.
+                        expr_ty
                     } else {
-                        // For direct assignments, user-provided annotation takes
-                        // precedence over inferred expr type.
                         annot_ty.unwrap_or(expr_ty)
                     }
                 } else if style == &AnnotationStyle::ForwardedInitial
@@ -4753,7 +4761,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     // Filter out all `@overload`-decorated types except the one that
                     // accumulates all signatures into a Type::Overload.
                     if matches!(t.ty(), Type::Overload(_)) || !t.ty().is_overload() {
-                        Some(t.arc_clone())
+                        Some(
+                            t.arc_clone()
+                                .map_ty(|ty| ty.promote_implicit_literals(self.stdlib)),
+                        )
                     } else {
                         None
                     }

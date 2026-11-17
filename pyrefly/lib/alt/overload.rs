@@ -789,6 +789,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // ambiguity in overload selection. This matches pyright, mypy, and ty.
                 let owner = Owner::new();
                 let mut changed = false;
+                let materialized_self_obj = self_obj.map(|obj| {
+                    let materialized = obj.materialize();
+                    changed |= materialized != *obj;
+                    materialized
+                });
                 let should_materialize = |arg_range| {
                     if spec_compliant {
                         return true;
@@ -838,7 +843,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 o.func,
                                 metadata,
                                 shape_transform,
-                                self_obj,
+                                materialized_self_obj.as_ref(),
                                 &materialized_args,
                                 &materialized_keywords,
                                 arguments_range,
@@ -892,14 +897,30 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     true,
                 )
             } else {
-                // Ambiguous call, return Any. Arbitrarily use the first overload as the matched one.
+                // Preserve a bounded set of return alternatives in compatibility mode. This
+                // supports operations available on any viable result without turning unrelated
+                // operations into Any. Spec-compliant mode retains the existing Any behavior.
+                const MAX_OVERLOAD_RESULT_ALTERNATIVES: usize = 8;
+                let mut alternatives = Vec::new();
+                if !spec_compliant {
+                    for overload in &matched_overloads {
+                        if !alternatives.contains(&overload.res) {
+                            alternatives.push(overload.res.clone());
+                        }
+                    }
+                }
                 let first_overload = matched_overloads
                     .into_iter()
                     .next()
                     .expect("Expected at least one overload");
                 (
                     CalledOverload {
-                        res: self.heap.mk_any_implicit(),
+                        res: if (2..=MAX_OVERLOAD_RESULT_ALTERNATIVES).contains(&alternatives.len())
+                        {
+                            self.heap.mk_overload_result(alternatives)
+                        } else {
+                            self.heap.mk_any_implicit()
+                        },
                         ..first_overload
                     },
                     true,

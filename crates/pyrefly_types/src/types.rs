@@ -758,6 +758,11 @@ pub enum Type {
     Overload(Overload),
     /// Unions will hold an optional name to use when displaying the type
     Union(Box<Union>),
+    /// Return alternatives from a genuinely ambiguous overload call.
+    ///
+    /// Operations are allowed when at least one alternative supports them, while operations
+    /// supported by none of the alternatives are rejected.
+    OverloadResult(Box<Vec<Type>>),
     /// Our intersection support is partial, so we store a fallback type that we use for operations
     /// that are not yet supported on intersections.
     Intersect(Box<(Vec<Type>, Type)>),
@@ -902,6 +907,7 @@ impl Visit for Type {
             Type::BoundMethod(x) => x.visit(f),
             Type::Overload(x) => x.visit(f),
             Type::Union(x) => x.visit(f),
+            Type::OverloadResult(x) => x.visit(f),
             Type::Intersect(x) => x.visit(f),
             Type::ClassDef(x) => x.visit(f),
             Type::ClassType(x) => x.visit(f),
@@ -959,6 +965,7 @@ impl VisitMut for Type {
             Type::BoundMethod(x) => x.visit_mut(f),
             Type::Overload(x) => x.visit_mut(f),
             Type::Union(x) => x.visit_mut(f),
+            Type::OverloadResult(x) => x.visit_mut(f),
             Type::Intersect(x) => x.visit_mut(f),
             Type::ClassDef(x) => x.visit_mut(f),
             Type::ClassType(x) => x.visit_mut(f),
@@ -1791,6 +1798,32 @@ impl Type {
         g(&mut self, &mut |ty| {
             Self::promote_one_implicit_literal(ty, stdlib)
         });
+        self
+    }
+
+    /// Promote literals for generic inference, preserving them only within immutable tuples.
+    pub fn promote_implicit_literals_for_generic_inference(mut self, stdlib: &Stdlib) -> Type {
+        fn promote_all(ty: &mut Type, stdlib: &Stdlib) {
+            ty.recurse_mut(&mut |ty| promote_all(ty, stdlib));
+            Type::promote_one_implicit_literal(ty, stdlib);
+        }
+
+        fn promote(ty: &mut Type, preserve_literals: bool, stdlib: &Stdlib) {
+            match ty {
+                Type::Literal(_) | Type::LiteralString(_) if preserve_literals => {}
+                Type::Tuple(tuple) => {
+                    tuple.visit_mut(&mut |ty| promote(ty, true, stdlib));
+                }
+                Type::Union(union) => {
+                    for member in &mut union.members {
+                        promote(member, preserve_literals, stdlib);
+                    }
+                }
+                _ => promote_all(ty, stdlib),
+            }
+        }
+
+        promote(&mut self, false, stdlib);
         self
     }
 

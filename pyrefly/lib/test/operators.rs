@@ -1149,6 +1149,16 @@ def f[T: (bytes, str)](x: T) -> T:
 );
 
 testcase!(
+    test_add_integer_literals,
+    r#"
+from typing import assert_type, Literal
+
+assert_type(1 + 2, Literal[3])
+assert_type(9223372036854775807 + 1, Literal[9223372036854775808])
+"#,
+);
+
+testcase!(
     test_containment_with_typevars,
     r#"
 from typing import Iterable

@@ -116,6 +116,18 @@ impl LitInt {
         }
     }
 
+    pub fn add(&self, other: &Self) -> Self {
+        match (&self.0, &other.0) {
+            (LitIntInner::Small(x), LitIntInner::Small(y)) => match x.checked_add(*y) {
+                Some(value) => Self::new(value),
+                None => Self::new_big(BigInt::from(*x) + BigInt::from(*y)),
+            },
+            (LitIntInner::Small(x), LitIntInner::Big(y)) => Self::new_big(BigInt::from(*x) + &**y),
+            (LitIntInner::Big(x), LitIntInner::Small(y)) => Self::new_big(&**x + BigInt::from(*y)),
+            (LitIntInner::Big(x), LitIntInner::Big(y)) => Self::new_big(&**x + &**y),
+        }
+    }
+
     pub fn invert(&self) -> LitInt {
         match &self.0 {
             LitIntInner::Small(x) => Self(LitIntInner::Small(!*x)),

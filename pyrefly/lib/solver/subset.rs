@@ -1701,6 +1701,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                 )
             }
             (Type::Intersect(l), u) => any(l.0.iter(), |l| self.is_subset_eq(l, u)),
+            (Type::OverloadResult(alternatives), u) => all(alternatives.iter(), |alternative| {
+                self.is_subset_eq(alternative, u)
+            }),
             (Type::Union(l_union), u) => all(l_union.members.iter(), |l| self.is_subset_eq(l, u)),
             // Size <: Size - expand bound Vars, canonicalize, and compare for structural equality
             (Type::Size(s1), Type::Size(s2)) => {
@@ -1776,6 +1779,9 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             }
             (_, Type::Quantified(_)) => Err(SubsetError::Other),
             (l, Type::Intersect(u)) => all(u.0.iter(), |u| self.is_subset_eq(l, u)),
+            (l, Type::OverloadResult(alternatives)) => any(alternatives.iter(), |alternative| {
+                self.is_subset_eq(l, alternative)
+            }),
             (l, Type::Union(u_union)) => {
                 let ordered_us = self.solver.partial_sort_by_vars(&u_union.members);
                 let mut error = None;

@@ -414,6 +414,7 @@ fn type_kind_name(ty: &Type) -> &'static str {
         Type::Overload(_) => "overload",
         Type::Forall(_) => "forall",
         Type::Union(_) => "union",
+        Type::OverloadResult(_) => "overload_result",
         Type::Intersect(_) => "intersect",
         Type::Tuple(_) => "tuple",
         Type::Literal(_) => "literal",
@@ -518,6 +519,13 @@ fn type_shape_kind(context: &TypeShapeContext, ty: &Type) -> TypeShapeKind {
             type_shape_kind(context, &body_type)
         }
         Type::Union(union) => union_shape(context, union),
+        Type::OverloadResult(alternatives) => named_type_shape_kind(
+            "OverloadResult",
+            alternatives
+                .iter()
+                .map(|ty| type_to_shape(context, ty))
+                .collect(),
+        ),
         Type::Intersect(intersection) => {
             let (members, _fallback) = &**intersection;
             named_type_shape_kind(

@@ -337,6 +337,13 @@ pub(super) fn type_to_indexed_shape(
             type_to_indexed_shape(context, &body_type, table)
         }
         Type::Union(union) => union_to_indexed_shape(context, union, table),
+        Type::OverloadResult(alternatives) => {
+            let args = alternatives
+                .iter()
+                .map(|ty| type_to_indexed_shape(context, ty, table))
+                .collect::<Vec<_>>();
+            insert_indexed_named(table, "OverloadResult", args, None, Vec::new())
+        }
         Type::Intersect(intersection) => {
             let (members, _fallback) = &**intersection;
             let args = members

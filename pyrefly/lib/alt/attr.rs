@@ -592,6 +592,50 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         todo_ctx: &str,
     ) -> Type {
+        if let Type::OverloadResult(alternatives) = base {
+            let mut successful = Vec::new();
+            let mut closest_failure = None;
+            for alternative in alternatives.iter() {
+                let candidate_errors = self.error_collector();
+                let result = self.type_of_attr_get(
+                    alternative,
+                    attr_name,
+                    range,
+                    &candidate_errors,
+                    context,
+                    todo_ctx,
+                );
+                if candidate_errors.has_hard() {
+                    if closest_failure.as_ref().is_none_or(
+                        |(_, best_errors): &(Type, ErrorCollector)| {
+                            candidate_errors.len_hard() < best_errors.len_hard()
+                        },
+                    ) {
+                        closest_failure = Some((result, candidate_errors));
+                    }
+                } else {
+                    successful.push((result, candidate_errors));
+                }
+            }
+            if successful.is_empty() {
+                let (result, candidate_errors) =
+                    closest_failure.expect("overload result has at least one alternative");
+                errors.extend(candidate_errors);
+                return result;
+            }
+            let mut results = Vec::new();
+            for (result, candidate_errors) in successful {
+                errors.extend(candidate_errors);
+                if !results.contains(&result) {
+                    results.push(result);
+                }
+            }
+            return if results.len() == 1 {
+                results.pop().unwrap()
+            } else {
+                self.heap.mk_overload_result(results)
+            };
+        }
         let attr_base = self.as_attribute_base(base.clone());
         let lookup_result = attr_base.clone().map_or_else(
             || LookupResult::internal_error(InternalError::AttributeBaseUndefined(base.clone())),
@@ -809,6 +853,32 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         todo_ctx: &str,
         allow_getattr_fallback: bool,
     ) -> Option<Type> {
+        if let Type::OverloadResult(alternatives) = base {
+            let mut results = Vec::new();
+            for alternative in alternatives.iter() {
+                let candidate_errors = self.error_collector();
+                if let Some(result) = self.type_of_magic_dunder_attr(
+                    alternative,
+                    attr_name,
+                    range,
+                    &candidate_errors,
+                    context,
+                    todo_ctx,
+                    allow_getattr_fallback,
+                ) && !candidate_errors.has_hard()
+                    && !results.contains(&result)
+                {
+                    results.push(result);
+                }
+            }
+            return if results.len() == 1 {
+                results.pop()
+            } else if results.is_empty() {
+                None
+            } else {
+                Some(self.heap.mk_overload_result(results))
+            };
+        }
         let mut not_found = false;
         let mut attr_tys = Vec::new();
         let lookup_result = match self.as_attribute_base(base.clone()) {
@@ -2606,6 +2676,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Type::Union(f) => {
                 for ty in f.members {
+                    self.as_attribute_base1(ty, acc)
+                }
+            }
+            Type::OverloadResult(alternatives) => {
+                for ty in *alternatives {
                     self.as_attribute_base1(ty, acc)
                 }
             }

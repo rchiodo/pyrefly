@@ -517,6 +517,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.heap.mk_type_of(self.union(l, r))
                 } else if x.op == Operator::Add
+                    && let Type::Literal(left) = lhs
+                    && let Lit::Int(left) = &left.value
+                    && let Type::Literal(right) = rhs
+                    && let Lit::Int(right) = &right.value
+                {
+                    left.add(right).to_implicit_type()
+                } else if x.op == Operator::Add
                     && let Some(lhs_style) = lhs.lit_string_style()
                     && let Some(rhs_style) = rhs.lit_string_style()
                 {

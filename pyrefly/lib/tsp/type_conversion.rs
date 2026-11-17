@@ -225,6 +225,7 @@ impl TypeConverter<'_> {
         match ty {
             // --- Built-in special types ---
             PyreflyType::Any(_) => builtin("any"),
+            PyreflyType::OverloadResult(_) => builtin("any"),
             PyreflyType::Never(_) => builtin("never"),
             // `None` → the stdlib's real `NoneType` class (see `stdlib`).
             PyreflyType::None => {

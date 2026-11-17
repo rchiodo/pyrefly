@@ -553,10 +553,17 @@ assert_type(f(), tuple[Any, int])
 testcase!(
     test_pass_tuple_literal_through_identity_function,
     r#"
+from typing import assert_type, Literal
+
 def f[T](x: T) -> T:
     return x
-def g() -> int:
-    return f((1, "hello world"))[0]
+
+assert_type(f((1, "hello world")), tuple[Literal[1], Literal["hello world"]])
+
+# Mutable values nested inside the tuple must still widen.
+value = f(([1], "hello world"))
+assert_type(value, tuple[list[int], Literal["hello world"]])
+value[0].append(2)
     "#,
 );
 

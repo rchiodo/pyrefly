@@ -360,6 +360,10 @@ impl TypeHeap {
         Type::Overload(overload)
     }
 
+    pub fn mk_overload_result(&self, alternatives: Vec<Type>) -> Type {
+        Type::OverloadResult(Box::new(alternatives))
+    }
+
     /// Create a `Type::Intersect` from members and a fallback type.
     pub fn mk_intersect(&self, members: Vec<Type>, fallback: Type) -> Type {
         Type::Intersect(Box::new((members, fallback)))

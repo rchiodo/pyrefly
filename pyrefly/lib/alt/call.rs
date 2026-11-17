@@ -107,6 +107,9 @@ pub enum CallTarget {
     BoundMethodOverload(Type, Vec1<TargetWithTParams<Function>>, FuncMetadata),
     /// A union of call targets.
     Union(Vec<CallTarget>),
+    /// Call targets obtained from an ambiguous overload result. The call succeeds if any target
+    /// accepts the arguments.
+    OverloadResult(Vec<CallTarget>),
     /// Any, as a call target.
     Any(AnyStyle),
 }
@@ -420,6 +423,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     CallTargetLookup::Ok(Box::new(targets.into_iter().next().unwrap()))
                 } else {
                     CallTargetLookup::Ok(Box::new(CallTarget::Union(targets)))
+                }
+            }
+            Type::OverloadResult(alternatives) => {
+                let targets = alternatives
+                    .into_iter()
+                    .filter_map(
+                        |ty| match self.as_call_target_impl(ty, quantified.clone()) {
+                            CallTargetLookup::Ok(target) => Some(*target),
+                            CallTargetLookup::Error(..) | CallTargetLookup::CircularCall => None,
+                        },
+                    )
+                    .collect::<Vec<_>>();
+                if targets.is_empty() {
+                    CallTargetLookup::Error(Vec::new())
+                } else {
+                    CallTargetLookup::Ok(Box::new(CallTarget::OverloadResult(targets)))
                 }
             }
             Type::Intersect(intersect) => {
@@ -1560,6 +1579,57 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         ctor_targs,
                     )
                 }))
+            }
+            CallTarget::OverloadResult(targets) => {
+                let call = CallWithTypes::new();
+                let args = call.vec_call_arg(args, self, errors);
+                let keywords = call.vec_call_keyword(keywords, self, errors);
+                let mut successful = Vec::new();
+                let mut closest_failure = None;
+                for target in targets {
+                    let candidate_errors = self.error_collector();
+                    let result = self.call_infer_with_callee_range(
+                        target,
+                        &args,
+                        &keywords,
+                        arguments_range,
+                        callee_range,
+                        &candidate_errors,
+                        context,
+                        hint,
+                        None,
+                    );
+                    if candidate_errors.has_hard() {
+                        if closest_failure.as_ref().is_none_or(
+                            |(_, best_errors): &(Type, ErrorCollector)| {
+                                candidate_errors.len_hard() < best_errors.len_hard()
+                            },
+                        ) {
+                            closest_failure = Some((result, candidate_errors));
+                        }
+                    } else {
+                        successful.push((result, candidate_errors));
+                    }
+                }
+                if successful.is_empty() {
+                    let (result, candidate_errors) =
+                        closest_failure.expect("overload result has at least one call target");
+                    errors.extend(candidate_errors);
+                    result
+                } else {
+                    let mut results = Vec::new();
+                    for (result, candidate_errors) in successful {
+                        errors.extend(candidate_errors);
+                        if !results.contains(&result) {
+                            results.push(result);
+                        }
+                    }
+                    if results.len() == 1 {
+                        results.pop().unwrap()
+                    } else {
+                        self.heap.mk_overload_result(results)
+                    }
+                }
             }
             CallTarget::Any(style) => {
                 // Make sure we still catch errors in the arguments.

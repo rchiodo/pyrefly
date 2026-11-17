@@ -1393,7 +1393,7 @@ def g(x: list[Any]):
 testcase!(
     test_materialization_does_not_eliminate_overload,
     r#"
-from typing import Any, assert_type, overload
+from typing import Any, assert_type, overload, reveal_type
 
 @overload
 def f(x: list[int]) -> int: ...
@@ -1403,9 +1403,8 @@ def f(x: Any) -> int | str: ...
 
 def g(x: list[Any]):
     # There's no overload for which all materializations of `list[Any]` are assignable to the
-    # parameter type, so we keep all overloads. Their return types are not equivalent, so we fall
-    # back to `Any`.
-    assert_type(f(x), Any)
+    # parameter type, so we keep all overloads and preserve both return alternatives.
+    reveal_type(f(x))  # E: revealed type: OverloadResult[int, str]
 
     "#,
 );
@@ -1413,7 +1412,7 @@ def g(x: list[Any]):
 testcase!(
     test_callable_param_materialization,
     r#"
-from typing import Any, assert_type, Callable, Never, overload
+from typing import Any, assert_type, Callable, Never, overload, reveal_type
 
 @overload
 def f1(x: Callable[[int], None]) -> int: ...
@@ -1434,7 +1433,7 @@ def f3(x: Callable[[str], None]) -> str: ...
 def f3(x: Any) -> int | str: ...
 
 def g(x: Callable[[Any], None]):
-    assert_type(f1(x), Any)
+    reveal_type(f1(x))  # E: revealed type: OverloadResult[int, str]
     assert_type(f2(x), int)
     assert_type(f3(x), int)
     "#,
@@ -1476,7 +1475,7 @@ def g(x: Callable[..., None], y: Callable[[Callable[..., None]], None]):
 testcase!(
     test_list_vs_sequence_materialization,
     r#"
-from typing import Any, assert_type, overload, Sequence
+from typing import Any, assert_type, overload, reveal_type, Sequence
 
 @overload
 def f1(x: list[object]) -> int: ...
@@ -1491,7 +1490,7 @@ def f2(x: Sequence[Any]) -> str: ...
 def f2(x: Any) -> int | str: ...
 
 def g(x: list[Any]):
-    assert_type(f1(x), Any)
+    reveal_type(f1(x))  # E: revealed type: OverloadResult[int, str]
     assert_type(f2(x), int)
     "#,
 );
@@ -1499,7 +1498,7 @@ def g(x: list[Any]):
 testcase!(
     test_tuple_materialization,
     r#"
-from typing import Any, assert_type, overload
+from typing import Any, assert_type, overload, reveal_type
 
 @overload
 def f1(x: tuple[Any, ...]) -> int: ...
@@ -1515,7 +1514,7 @@ def f2(x: Any) -> int | str: ...
 
 def g(x: tuple[Any, ...]):
     assert_type(f1(x), int)
-    assert_type(f2(x), Any)
+    reveal_type(f2(x))  # E: revealed type: OverloadResult[int, str]
     "#,
 );
 
@@ -1590,7 +1589,7 @@ f(3.14)  # E: `float` is not assignable to parameter `x` with type `int`
 testcase!(
     test_varargs_materialization,
     r#"
-from typing import Any, assert_type, overload
+from typing import Any, assert_type, overload, reveal_type
 
 @overload
 def f1(*args: int) -> int: ...
@@ -1605,14 +1604,14 @@ def f2(*args: str) -> str: ...
 def f2(*args) -> int | str: ...
 
 def g(*args):
-    # ambiguous whether this matches `f1`'s first or second overload, so fall back to return type Any
-    assert_type(f1(*args), Any)
+    # ambiguous whether this matches `f1`'s first or second overload
+    reveal_type(f1(*args))  # E: revealed type: OverloadResult[int, str]
     # this matches `f2`'s first overload via https://typing.python.org/en/latest/spec/overload.html#step-5
     assert_type(f2(*args), int)
 
 def h(args: Any):
     # make sure the entire iterable being `Any` works
-    assert_type(f1(*args), Any)
+    reveal_type(f1(*args))  # E: revealed type: OverloadResult[int, str]
     assert_type(f2(*args), int)
     "#,
 );
@@ -1620,7 +1619,7 @@ def h(args: Any):
 testcase!(
     test_kwargs_materialization,
     r#"
-from typing import Any, assert_type, overload
+from typing import Any, assert_type, overload, reveal_type
 
 @overload
 def f1(**kwargs: int) -> int: ...
@@ -1635,14 +1634,14 @@ def f2(**kwargs: str) -> str: ...
 def f2(**kwargs) -> int | str: ...
 
 def g(**kwargs):
-    # ambiguous whether this matches `f1`'s first or second overload, so fall back to return type Any
-    assert_type(f1(**kwargs), Any)
+    # ambiguous whether this matches `f1`'s first or second overload
+    reveal_type(f1(**kwargs))  # E: revealed type: OverloadResult[int, str]
     # this matches `f2`'s first overload via https://typing.python.org/en/latest/spec/overload.html#step-5
     assert_type(f2(**kwargs), int)
 
 def h(kwargs: Any):
     # make sure the entire mapping being `Any` works
-    assert_type(f1(**kwargs), Any)
+    reveal_type(f1(**kwargs))  # E: revealed type: OverloadResult[int, str]
     assert_type(f2(**kwargs), int)
     "#,
 );
@@ -1857,6 +1856,79 @@ def test(x: A[None], y: A[Any]) -> None:
     "#,
 );
 
+testcase!(
+    test_ambiguous_overload_result_preserves_operations,
+    r#"
+from typing import Any, Generic, TypeVar, overload
+
+T = TypeVar("T")
+
+@overload
+def choose(value: list[int]) -> list[int]: ...
+@overload
+def choose(value: list[str]) -> list[str]: ...
+def choose(value: Any) -> Any:
+    return value
+
+class IntResult:
+    def int_only(self) -> int:
+        return 1
+
+class StrResult:
+    def str_only(self) -> str:
+        return ""
+
+@overload
+def disjoint(value: list[int]) -> IntResult: ...
+@overload
+def disjoint(value: list[str]) -> StrResult: ...
+def disjoint(value: Any) -> Any:
+    return IntResult()
+
+@overload
+def scalar(value: list[int]) -> int: ...
+@overload
+def scalar(value: list[str]) -> str: ...
+def scalar(value: Any) -> Any:
+    return 0
+
+class Container(Generic[T]):
+    @overload
+    def copy(self: "Container[int]") -> "Container[int]": ...
+    @overload
+    def copy(self: "Container[str]") -> "Container[str]": ...
+    def copy(self) -> "Container[Any]":
+        return self
+
+    def item(self) -> T:
+        raise NotImplementedError
+
+def test(source: list[Any], container: Container[Any]) -> None:
+    value = choose(source)
+    object_value: object = value
+    gradual_value: list[Any] = value
+    value.append(1)
+    value.append("x")
+    value.append(3.14)  # E: Argument
+    value.missing()  # E: Object of class
+
+    result = disjoint(source)
+    result.int_only()
+    result.str_only()
+    result.missing()  # E: Object of class
+
+    scalar_value = scalar(source)
+    scalar_value - 1
+    scalar_value + "x"
+    scalar_value - "x"  # E: not supported
+
+    copied = container.copy()
+    copied.item().bit_length()
+    copied.item().upper()
+    copied.item().missing()  # E: Object of class
+    "#,
+);
+
 // Regression test for https://github.com/facebook/pyrefly/issues/2043
 testcase!(
     test_overload_paramspec_unify_with_ellipsis_callable,
@@ -1932,7 +2004,7 @@ def g(x):
 testcase!(
     test_do_not_eliminate_variadic,
     r#"
-from typing import Any, assert_type, overload
+from typing import Any, assert_type, overload, reveal_type
 
 @overload
 def f(x: str) -> str: ...
@@ -1942,7 +2014,7 @@ def f(x: str | bytes, *args: int) -> str | int:
     return 0
 
 def g(x):
-    assert_type(f(x), Any)
+    reveal_type(f(x))  # E: revealed type: OverloadResult[str, int]
     "#,
 );
 

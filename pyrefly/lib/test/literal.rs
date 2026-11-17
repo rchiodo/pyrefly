@@ -80,6 +80,7 @@ class Foo[T]:
 
 x: Literal[42] = 42
 assert_type(Foo(x), Foo[Literal[42]])
+assert_type(Foo(("tag", 15)), Foo[tuple[str, int]])
 "#,
 );
 
@@ -133,6 +134,36 @@ def f(x: LiteralString):
     assert_type([x], list[LiteralString])
     xs: list[str] = [x]
 "#,
+);
+
+testcase!(
+    test_annotated_assignment_preserves_literal_flow,
+    r#"
+from typing import assert_type, Literal, LiteralString
+
+def accepts_literal_string(value: LiteralString) -> None:
+    pass
+
+simple: str | None = "value"
+assert_type(simple, str | None)
+
+def f(flag: bool) -> None:
+    optional: int | None = 7 if flag else None
+    if optional is not None:
+        narrowed = optional
+    else:
+        narrowed = 0
+    assert_type(narrowed, Literal[7, 0])
+
+    candidate: int | str = 11 if flag else "value"
+    if isinstance(candidate, str):
+        value = candidate.upper()
+    else:
+        value = candidate + 1
+    assert_type(value, LiteralString | Literal[12])
+    if isinstance(value, str):
+        accepts_literal_string(value)
+    "#,
 );
 
 testcase!(

@@ -222,6 +222,7 @@ enum Variable {
     Quantified {
         quantified: Quantified,
         bounds: Bounds,
+        preserve_tuple_literals: bool,
     },
     /// A variable caused by general recursion, e.g. `x = f(); def f(): return x`.
     Recursive,
@@ -254,6 +255,7 @@ impl Display for Variable {
             | Variable::Quantified {
                 quantified: q,
                 bounds: _,
+                preserve_tuple_literals: _,
             } => {
                 let label = if matches!(self, Variable::PartialQuantified(_)) {
                     "PartialQuantified"
@@ -591,6 +593,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: q,
                 bounds: _,
+                ..
             } => {
                 // A Variable::Quantified should always be finished (see `finish_quantified`) by
                 // the code that creates it, because we need to know when we're done collecting
@@ -871,6 +874,7 @@ impl Solver {
                     Variable::Quantified {
                         quantified: _,
                         bounds,
+                        ..
                     }
                     | Variable::Unwrap(bounds)
                         if policy == VarExpansionPolicy::ExpandWithBounds
@@ -888,6 +892,7 @@ impl Solver {
                             Variable::Quantified {
                                 quantified: q,
                                 bounds,
+                                ..
                             } => self
                                 .solve_bounds(mem::take(bounds))
                                 .unwrap_or_else(|| q.as_gradual_type()),
@@ -956,6 +961,7 @@ impl Solver {
                     Variable::Quantified {
                         quantified: q,
                         bounds,
+                        ..
                     } => self
                         .solve_bounds(mem::take(bounds))
                         .unwrap_or_else(|| q.as_gradual_type()),
@@ -1202,6 +1208,7 @@ impl Solver {
                 Variable::Quantified {
                     quantified: (*q).clone(),
                     bounds: Bounds::new(),
+                    preserve_tuple_literals: q.kind() == QuantifiedKind::TypeVar,
                 },
             );
         }
@@ -1394,6 +1401,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => (
                 bounds.lower.first().cloned(),
@@ -1422,6 +1430,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.lower, new_bound),
             _ => {}
@@ -1441,6 +1450,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => (
                 bounds.upper.first().cloned(),
@@ -1469,6 +1479,7 @@ impl Solver {
             Variable::Quantified {
                 quantified: _,
                 bounds,
+                ..
             }
             | Variable::Unwrap(bounds) => self.add_bound(&mut bounds.upper, new_bound),
             _ => {}
@@ -1527,7 +1538,9 @@ impl Solver {
     ) -> Type {
         match value {
             Variable::Answer(ty) | Variable::ResidualAnswer { ty, .. } => ty.clone(),
-            Variable::Quantified { quantified, bounds } => {
+            Variable::Quantified {
+                quantified, bounds, ..
+            } => {
                 if let Some(bound) = self.solve_bounds(bounds.clone()) {
                     return bound;
                 }
@@ -1888,6 +1901,7 @@ impl Solver {
                 Variable::Quantified {
                     quantified: q,
                     bounds,
+                    ..
                 } => {
                     if let Some(e) = self.instantiation_errors.read().get(&v) {
                         err.push(e.clone());
@@ -1995,6 +2009,7 @@ impl Solver {
             if let Variable::Quantified {
                 quantified: q,
                 bounds,
+                ..
             } = &mut *e
             {
                 let solved_bound = self.solve_bounds(mem::take(bounds));
@@ -2098,6 +2113,7 @@ impl Solver {
                     Variable::Quantified {
                         quantified: param.clone(),
                         bounds: Bounds::new(),
+                        preserve_tuple_literals: false,
                     },
                 );
             }
@@ -2122,6 +2138,7 @@ impl Solver {
                 if let Variable::Quantified {
                     quantified: q,
                     bounds,
+                    ..
                 } = &mut *e
                     && *q == *param
                 {
@@ -3247,11 +3264,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         t1: &Type,
         q: &Quantified,
         upper_bound: Option<&Type>,
+        preserve_tuple_literals: bool,
     ) -> (Type, Option<TypeVarSpecializationError>) {
         let t1_p = {
-            let t1_p = t1
-                .clone()
-                .promote_implicit_literals(self.type_order.stdlib());
+            let t1_p = if preserve_tuple_literals {
+                t1.clone()
+                    .promote_implicit_literals_for_generic_inference(self.type_order.stdlib())
+            } else {
+                t1.clone()
+                    .promote_implicit_literals(self.type_order.stdlib())
+            };
             if let Some(upper_bound) = upper_bound {
                 // Don't promote literals if doing so would violate a literal upper bound.
                 if self.is_subset_eq(&t1_p, upper_bound).is_ok() {
@@ -3343,11 +3365,13 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: v1_bounds,
+                                ..
                             }
                             | Variable::Unwrap(v1_bounds),
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: v2_bounds,
+                                ..
                             }
                             | Variable::Unwrap(v2_bounds),
                         ) => {
@@ -3402,10 +3426,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             Variable::Quantified {
                                 quantified: q1,
                                 bounds: _,
+                                ..
                             },
                             Variable::Quantified {
                                 quantified: q2,
                                 bounds: _,
+                                ..
                             },
                         )
                         | (Variable::PartialQuantified(q1), Variable::PartialQuantified(q2)) => {
@@ -3460,6 +3486,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             Variable::Quantified {
                                 quantified: _,
                                 bounds: _,
+                                ..
                             },
                         ) => {
                             drop(variable1);
@@ -3504,6 +3531,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         bounds: _,
+                        ..
                     } if q.kind() == QuantifiedKind::ParamSpec => {
                         // TODO(https://github.com/facebook/pyrefly/issues/105): figure out what to
                         // do with ParamSpec.
@@ -3634,13 +3662,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variable::Quantified {
                         quantified: q,
                         bounds,
+                        preserve_tuple_literals,
                     } => {
                         let q = q.clone();
+                        let preserve_tuple_literals = *preserve_tuple_literals;
                         let upper_bound = self.solver.get_current_bound(bounds.upper.clone());
                         drop(v2_ref);
                         drop(variables);
-                        let (answer, specialization_error) =
-                            self.is_subset_eq_quantified(t1, &q, upper_bound.as_ref());
+                        let (answer, specialization_error) = self.is_subset_eq_quantified(
+                            t1,
+                            &q,
+                            upper_bound.as_ref(),
+                            preserve_tuple_literals,
+                        );
                         if let Some(specialization_error) = specialization_error {
                             self.solver
                                 .instantiation_errors
@@ -3671,7 +3705,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         drop(v2_ref);
                         drop(variables);
                         let (answer, specialization_error) =
-                            self.is_subset_eq_quantified(t1, &q, None);
+                            self.is_subset_eq_quantified(t1, &q, None, false);
                         if let Some(specialization_error) = specialization_error {
                             self.solver
                                 .instantiation_errors
