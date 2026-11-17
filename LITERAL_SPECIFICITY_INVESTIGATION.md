@@ -218,3 +218,38 @@ Before each implementation stage, define its local type-size or candidate-count
 budget and acceptable performance regression. The implementation should
 proceed only while those budgets remain bounded, no new diagnostic regressions
 appear, and writable-value compatibility is preserved.
+
+## Adjudication of the remaining benchmark differences
+
+After the overload and literal-retention changes, the remaining differences
+fall into three groups. None is evidence that Pyrefly should copy Pyright's
+displayed type unconditionally.
+
+1. **Mutable generic construction.** Pyright infers
+   `Box[tuple[Literal["tag"], Literal[15]]]` for a mutable dataclass and then
+   rejects `box.value = ("other", 16)`. Pyrefly infers
+   `Box[tuple[str, int]]` and accepts the write. The wider result is the intended
+   policy for invariant, writable generic storage. Literal preservation remains
+   worth considering for a future boundary that can prove the inferred type is
+   read-only, but not for the benchmark's mutable `Box`. Declared covariance is
+   insufficient because Pyrefly intentionally does not enforce variance on
+   ordinary fields.
+2. **Recursive aliases.** Pyright expands one layer as
+   `list[int | str | list[JsonValue]]`; Pyrefly retains the alias as
+   `list[JsonValue]`. Both accept valid nested assignments and list writes,
+   expose the same recursive element type, and reject non-`JsonValue` elements.
+   This is a display-only difference and should be excluded from specificity
+   progress totals.
+3. **Defaulted ambiguous overloads.** Pyright commits to the first viable
+   result, while Pyrefly retains
+   `OverloadResult[list[int], list[str]]`. Pyright consequently accepts an
+   integer append and rejects a string append; Pyrefly accepts either operation
+   because each is supported by a viable alternative, while rejecting values
+   supported by neither. This is the intentional gradual compatibility policy,
+   not a result that should be changed to improve reveal-string agreement.
+
+The actionable follow-up is therefore benchmark accounting: report these as
+one intentional promotion-policy difference, one display-only family, and one
+intentional overload-policy difference. Future implementation work should
+target a behavioral incompatibility or a proven read-only constructor boundary,
+not the remaining raw string mismatch count.

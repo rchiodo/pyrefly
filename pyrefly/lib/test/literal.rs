@@ -73,6 +73,7 @@ assert_type(b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 testcase!(
     test_generic_create_literal,
     r#"
+from dataclasses import dataclass
 from typing import assert_type, Literal
 
 class Foo[T]:
@@ -81,6 +82,14 @@ class Foo[T]:
 x: Literal[42] = 42
 assert_type(Foo(x), Foo[Literal[42]])
 assert_type(Foo(("tag", 15)), Foo[tuple[str, int]])
+
+@dataclass
+class Box[T]:
+    value: T
+
+box = Box(("tag", 15))
+assert_type(box, Box[tuple[str, int]])
+box.value = ("other", 16)
 "#,
 );
 
