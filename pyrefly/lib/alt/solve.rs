@@ -1950,6 +1950,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         })
     }
 
+    fn context_can_suppress_exception(&self, exit_type: &Type) -> bool {
+        match exit_type {
+            Type::Literal(lit) if let Lit::Bool(value) = lit.value => value,
+            Type::ClassType(cls) => cls == self.stdlib.bool(),
+            _ => false,
+        }
+    }
+
     fn quantified_from_type_parameter(
         &self,
         tp: &TypeParameter,
@@ -3934,14 +3942,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn binding_to_type_return_implicit(&self, x: &ReturnImplicit) -> Type {
         // Would context have caught something:
         // https://typing.python.org/en/latest/spec/exceptions.html#context-managers.
-        let context_catch = |x: &Type| -> bool {
-            match x {
-                Type::Literal(lit) if let Lit::Bool(b) = lit.value => b,
-                Type::ClassType(cls) => cls == self.stdlib.bool(),
-                _ => false, // Default to assuming exceptions are not suppressed
-            }
-        };
-
         if self.module().path().is_interface() {
             self.heap.mk_any_implicit() // .pyi file, functions don't have bodies
         } else if x.last_exprs.as_ref().is_some_and(|xs| {
@@ -3957,7 +3957,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             &self.error_swallower(),
                             None,
                         );
-                        !context_catch(&res)
+                        !self.context_can_suppress_exception(&res)
                     }
                     LastStmt::Exhaustive(_, _) => {
                         // Check if the Exhaustive binding at this range resolved to Never
@@ -5574,6 +5574,24 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             Binding::ContextValue(ann, e, range, kind) => {
                 self.binding_to_type_context_value(*ann, *e, *range, *kind, errors)
+            }
+            Binding::ContextExitTermination(contexts) => {
+                let can_suppress = contexts.iter().any(|(e, range, kind)| {
+                    let context_manager = self.get_idx(*e);
+                    let exit_type = self.context_value_exit(
+                        context_manager.ty(),
+                        *kind,
+                        *range,
+                        &self.error_swallower(),
+                        None,
+                    );
+                    self.context_can_suppress_exception(&exit_type)
+                });
+                if can_suppress {
+                    self.heap.mk_none()
+                } else {
+                    self.heap.mk_never()
+                }
             }
             Binding::UnpackedValue(ann, to_unpack, range, pos, receiver) => self
                 .binding_to_type_unpacked_value(

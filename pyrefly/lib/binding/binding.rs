@@ -2263,6 +2263,9 @@ pub enum Binding {
     /// The second argument is the expression of the context manager and its range.
     /// The fourth argument indicates whether the context manager is async or not.
     ContextValue(Option<Idx<KeyAnnotation>>, Idx<Key>, TextRange, IsAsync),
+    /// A possibly-suppressed exception leaving one or more nested context managers.
+    /// Resolves to `Never` when none of the managers can suppress the exception.
+    ContextExitTermination(Box<[(Idx<Key>, TextRange, IsAsync)]>),
     /// A value at a specific position in an unpacked iterable expression.
     /// Example: UnpackedValue(('a', 'b')), 1) represents 'b'.
     /// The optional `MultiTargetReceiver` carries the canonical class identity
@@ -2469,6 +2472,15 @@ impl DisplayWith<Bindings> for Binding {
             Self::ExceptionHandler(x, b) => write!(f, "ExceptionHandler({}, {b:?})", m.display(x)),
             Self::ContextValue(a, x, _, kind) => {
                 write!(f, "ContextValue({}, {}, {kind:?})", ann(a), ctx.display(*x))
+            }
+            Self::ContextExitTermination(contexts) => {
+                write!(
+                    f,
+                    "ContextExitTermination({})",
+                    intersperse_iter("; ", || contexts
+                        .iter()
+                        .map(|(x, _, kind)| format!("{} ({kind:?})", ctx.display(*x)))),
+                )
             }
             Self::UnpackedValue(a, x, range, pos, receiver) => {
                 let pos = match pos {
@@ -2769,6 +2781,7 @@ impl Binding {
             | Binding::ReturnExplicit(_)
             | Binding::ReturnImplicit(_)
             | Binding::ReturnType(_)
+            | Binding::ContextExitTermination(_)
             | Binding::AnnotatedType(_, _)
             | Binding::None
             | Binding::Any(_)

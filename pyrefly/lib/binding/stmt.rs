@@ -1342,6 +1342,7 @@ impl<'a> BindingsBuilder<'a> {
                 }
             }
             Stmt::With(x) => {
+                let with_range = x.range();
                 if x.is_async
                     && !self.scopes.is_in_async_def()
                     && !self.module_info.path().is_notebook()
@@ -1353,6 +1354,7 @@ impl<'a> BindingsBuilder<'a> {
                     );
                 }
                 let kind = IsAsync::new(x.is_async);
+                let mut contexts = Vec::with_capacity(x.items.len());
                 for mut item in x.items {
                     let item_range = item.range();
                     let expr_range = item.context_expr.range();
@@ -1362,6 +1364,7 @@ impl<'a> BindingsBuilder<'a> {
                         context,
                         Binding::Expr(None, Box::new(item.context_expr)),
                     );
+                    contexts.push((context_idx, expr_range, kind));
                     if let Some(mut opts) = item.optional_vars {
                         let make_binding =
                             |ann| Binding::ContextValue(ann, context_idx, expr_range, kind);
@@ -1376,6 +1379,11 @@ impl<'a> BindingsBuilder<'a> {
                 self.scopes.enter_with();
                 self.stmts(x.body, parent);
                 self.scopes.exit_with();
+                let key = self.insert_binding(
+                    Key::Anon(with_range),
+                    Binding::ContextExitTermination(contexts.into_boxed_slice()),
+                );
+                self.scopes.revive_exception_termination(key);
             }
             Stmt::Match(x) => {
                 self.stmt_match(x, parent);
@@ -1401,7 +1409,7 @@ impl<'a> BindingsBuilder<'a> {
                 } else {
                     // If there's no exception raised, don't bother checking the cause.
                 }
-                self.scopes.mark_flow_termination(false);
+                self.scopes.mark_exception_termination();
             }
             Stmt::Try(x) => {
                 self.start_fork_and_branch(x.range);

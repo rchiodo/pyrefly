@@ -575,6 +575,9 @@ pub struct Flow {
     // We continue to analyze the rest of the code after a flow terminates, but
     // we don't include terminated flows when merging after loops and branches.
     has_terminated: bool,
+    // Whether the flow terminated by raising an exception. Unlike return/break/continue,
+    // this termination may be reversed by an enclosing context manager.
+    has_exception_termination: bool,
     // This flag is set in a subset of cases when has_terminated is set; it's more conservative so it can be used for error reporting.
     // The key differences are as follows:
     // - Static tests based on stuff like sys.version_info don't exclude branches at runtime, since the program may execute in different environments
@@ -2626,8 +2629,27 @@ impl Scopes {
     }
     pub fn mark_flow_termination(&mut self, from_static_test: bool) {
         self.current_mut().flow.has_terminated = true;
+        self.current_mut().flow.has_exception_termination = false;
         if self.current_mut().with_depth == 0 && !from_static_test {
             self.current_mut().flow.is_definitely_unreachable = true;
+        }
+    }
+
+    pub fn mark_exception_termination(&mut self) {
+        self.current_mut().flow.has_terminated = true;
+        self.current_mut().flow.has_exception_termination = true;
+        if self.current_mut().with_depth == 0 {
+            self.current_mut().flow.is_definitely_unreachable = true;
+        }
+    }
+
+    pub fn revive_exception_termination(&mut self, key: Idx<Key>) {
+        let flow = &mut self.current_mut().flow;
+        if flow.has_exception_termination {
+            flow.has_terminated = false;
+            flow.has_exception_termination = false;
+            flow.is_definitely_unreachable = false;
+            flow.last_stmt_expr = Some(key);
         }
     }
 
@@ -3743,6 +3765,8 @@ impl<'a> BindingsBuilder<'a> {
         } else {
             live_branches
         };
+        let has_exception_termination =
+            has_terminated && flows.iter().all(|flow| flow.has_exception_termination);
         // Determine reachability of the merged flow.
         // For Loop style with empty flows (all branches terminated), the loop body might
         // never execute (empty iterable), so we use the base flow's reachability.
@@ -3827,6 +3851,7 @@ impl<'a> BindingsBuilder<'a> {
         let flow = Flow {
             info: merged_flow_infos,
             has_terminated,
+            has_exception_termination,
             is_definitely_unreachable: all_are_unreachable,
             last_stmt_expr: None,
         };

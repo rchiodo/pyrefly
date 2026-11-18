@@ -322,7 +322,6 @@ with Foo() as foo:
 );
 
 testcase!(
-    bug = "conformance: Context manager with bool/__exit__ should not narrow type after raise in if block",
     test_context_manager_exception_suppression_conformance,
     r#"
 from typing import Any, Literal, assert_type
@@ -339,20 +338,36 @@ class Suppress2(CMBase):
     def __exit__(self, exc_type, exc_value, traceback) -> Literal[True]:
         return True
 
-# When __exit__ returns bool or Literal[True], exceptions may be suppressed
-# so we should NOT narrow x based on the raise
+class NoSuppress1(CMBase):
+    def __exit__(self, exc_type, exc_value, traceback) -> Any:
+        return False
+
+class NoSuppress2(CMBase):
+    def __exit__(self, exc_type, exc_value, traceback) -> Literal[False]:
+        return False
+
 def suppress1(x: int | str) -> None:
     if isinstance(x, int):
         with Suppress1():
             raise ValueError
-    # pyrefly incorrectly narrows x to str here, but exception might be suppressed
-    assert_type(x, int | str)  # E: assert_type(str, int | str) failed
+    assert_type(x, int | str)
 
 def suppress2(x: int | str) -> None:
     if isinstance(x, int):
         with Suppress2():
             raise ValueError
-    # pyrefly incorrectly narrows x to str here, but exception might be suppressed
-    assert_type(x, int | str)  # E: assert_type(str, int | str) failed
+    assert_type(x, int | str)
+
+def no_suppress1(x: int | str) -> None:
+    if isinstance(x, int):
+        with NoSuppress1():
+            raise ValueError
+    assert_type(x, str)
+
+def no_suppress2(x: int | str) -> None:
+    if isinstance(x, int):
+        with NoSuppress2():
+            raise ValueError
+    assert_type(x, str)
 "#,
 );
