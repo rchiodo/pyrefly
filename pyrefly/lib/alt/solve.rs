@@ -1453,14 +1453,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// inhabitable (e.g. `C(x=C(x=None))`), so we can't assume all generic
     /// containers require their type parameter.
     /// Returns `true` if a cyclic self-reference was found.
-    fn type_alias_has_cyclic_reference(&self, name: &Name, ta: &TypeAlias) -> bool {
+    fn type_alias_has_cyclic_reference(&self, name: &Name, ty: &Type) -> bool {
         // Unwrap the type[body] wrapper. We operate on the inner body because
         // map_over_union wraps inner union members in type[...] when traversing
         // inside Type::Type, which would prevent matching UntypedAlias nodes.
         // Note: TypeAlias::error() and TypeAlias::unknown() store raw types
         // (not wrapped in Type::Type), so we skip the check for those.
-        let ty = ta.as_type();
-        let body = match &ty {
+        let body = match ty {
             Type::Type(inner) => inner.as_ref(),
             _ => return false,
         };
@@ -1547,19 +1546,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             return self.heap.mk_any_error();
         }
 
-        // Step 1: Expand non-recursive UntypedAlias(Ref(...)) nodes by
-        // inlining the referenced alias's body. Only runs for binding-time
-        // aliases (current_index is Some); implicit legacy aliases detected
-        // at solve time skip expansion.
+        // Step 1: Fully expand a copy for cycle validation, while preserving recursive
+        // alias references in the stored type so display retains the alias identity.
         if let Some(index) = current_index {
-            self.expand_type_alias_refs(ta.as_type_mut(), index);
+            let mut expanded = ta.as_type();
+            self.expand_type_alias_refs(&mut expanded, index, false);
+            if self.type_alias_has_cyclic_reference(name, &expanded) {
+                return self.error(
+                    errors,
+                    range,
+                    ErrorKind::InvalidTypeAlias,
+                    format!("Found cyclic self-reference in `{name}`"),
+                );
+            }
+            self.expand_type_alias_refs(ta.as_type_mut(), index, true);
         }
 
-        // Step 2: Check for cyclic self-references after expansion.
+        // Step 2: Check for cyclic self-references after expansion. This path handles
+        // implicit legacy aliases, which are detected at solve time and skip Step 1.
         // If a cycle is found, replace the body with an error type to prevent
         // infinite recursion when downstream operations (e.g. attribute lookup,
         // subset checks) try to resolve the alias.
-        if self.type_alias_has_cyclic_reference(name, &ta) {
+        if current_index.is_none() && self.type_alias_has_cyclic_reference(name, &ta.as_type()) {
             return self.error(
                 errors,
                 range,
@@ -1718,10 +1726,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     /// Recursive references (detected via a visiting set) are left in place.
     /// `current_index` is the alias being defined — pre-seeded in the
     /// visiting set so self-references are immediately recognized as recursive.
-    fn expand_type_alias_refs(&self, ty: &mut Type, current_index: TypeAliasIndex) {
+    fn expand_type_alias_refs(
+        &self,
+        ty: &mut Type,
+        current_index: TypeAliasIndex,
+        preserve_recursive_refs: bool,
+    ) {
         let mut visiting = SmallSet::new();
         visiting.insert((self.module().name(), current_index));
-        self.expand_type_alias_refs_inner(ty, &mut visiting);
+        self.expand_type_alias_refs_inner(ty, &mut visiting, preserve_recursive_refs);
     }
 
     /// Inner recursive walker for `expand_type_alias_refs`. Matches
@@ -1732,7 +1745,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         ty: &mut Type,
         visiting: &mut SmallSet<(ModuleName, TypeAliasIndex)>,
-    ) {
+        preserve_recursive_refs: bool,
+    ) -> bool {
         match ty {
             Type::UntypedAlias(f)
                 if let TypeAliasData::Ref(r) = &**f
@@ -1741,7 +1755,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let key = (r.module_name, r.index);
                 if visiting.contains(&key) {
                     // Recursive reference — leave as Ref for cycle detection
-                    return;
+                    return true;
                 }
                 let key_type_alias = KeyTypeAlias(r.index);
                 let idx = self
@@ -1759,13 +1773,17 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Type::Type(inner) => *inner,
                     // If the body was an Annotated type, return it without the wrapper
                     Type::Annotated(inner, _) => *inner,
-                    _ => return,
+                    _ => return false,
                 };
                 // Recursively expand any Refs in the inlined body, so that all nested
                 // alias bodies are inlined before we apply the outer substitution.
                 visiting.insert(key);
-                self.expand_type_alias_refs_inner(&mut body, visiting);
+                let is_recursive =
+                    self.expand_type_alias_refs_inner(&mut body, visiting, preserve_recursive_refs);
                 visiting.shift_remove(&key);
+                if preserve_recursive_refs && is_recursive {
+                    return true;
+                }
                 // Apply type arguments if the reference was parameterized.
                 // For generic aliases used without explicit args, promote_forall
                 // in untype_opt will have already injected implicit Any args.
@@ -1773,10 +1791,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     args.substitute_into_mut(&mut body);
                 }
                 *ty = body;
+                is_recursive
             }
-            _ => ty.recurse_mut(&mut |child: &mut Type| {
-                self.expand_type_alias_refs_inner(child, visiting);
-            }),
+            _ => {
+                let mut is_recursive = false;
+                ty.recurse_mut(&mut |child: &mut Type| {
+                    is_recursive |=
+                        self.expand_type_alias_refs_inner(child, visiting, preserve_recursive_refs);
+                });
+                is_recursive
+            }
         }
     }
 

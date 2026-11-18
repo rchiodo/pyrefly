@@ -38,8 +38,38 @@ def f(x1: X1, x2: X2, x3: X3, y1: Y1, y2: Y2):
     reveal_type(x1)  # E: int | list[X1]
     reveal_type(x2)  # E: int | list[X2]
     reveal_type(x3)  # E: int | list[X3]
-    reveal_type(y1)  # E: int | list[int | list[Y1]]
-    reveal_type(y2)  # E: int | list[int | list[Y2]]
+    reveal_type(y1)  # E: int | list[Y2]
+    reveal_type(y2)  # E: int | list[Y1]
+    "#,
+);
+
+testcase!(
+    test_display_mutually_recursive_generic,
+    r#"
+from typing import reveal_type
+
+type Left[T] = T | list["Right[T]"]
+type Right[T] = T | dict[str, "Left[T]"]
+
+def f[T](left: Left[T], right: Right[T]):
+    reveal_type(left)  # E: list[Right[T]] | T
+    reveal_type(right)  # E: dict[str, Left[T]] | T
+    "#,
+);
+
+testcase!(
+    test_display_recursive_alias_diagnostics,
+    r#"
+type Json = int | list[Json]
+
+class Holder:
+    value: Json
+
+def assign_bad_member(holder: Holder) -> None:
+    holder.value = "bad"  # E: `Literal['bad']` is not assignable to attribute `value` with type `int | list[Json]`
+
+def assign_bad(x: Json) -> None:
+    x = "bad"  # E: `Literal['bad']` is not assignable to variable `x` with type `int | list[Json]`
     "#,
 );
 
