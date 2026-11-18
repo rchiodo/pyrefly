@@ -885,6 +885,27 @@ assert_type(out2, C[str])
 );
 
 testcase!(
+    test_class_scoped_typevars_in_constructor_callable,
+    r#"
+from typing import Callable, Generic, Self, TypeVar, assert_type, reveal_type
+
+T = TypeVar("T")
+
+def accepts_callable[**P, R](cb: Callable[P, R]) -> Callable[P, R]:
+    return cb
+
+class Class8(Generic[T]):
+    def __new__(cls, x: list[T], y: list[T]) -> Self:
+        return super().__new__(cls)
+
+r8 = accepts_callable(Class8)
+reveal_type(r8)  # E: revealed type: [T](x: list[T], y: list[T]) -> Class8[T]
+assert_type(r8([""], [""]), Class8[str])
+r8([1], [""])  # E: Argument `list[str]` is not assignable to parameter `y` with type `list[int]`
+"#,
+);
+
+testcase!(
     test_init_class_scoped_typevars_in_self,
     r#"
 from typing import Generic, TypeVar

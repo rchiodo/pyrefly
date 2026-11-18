@@ -20,6 +20,7 @@ use pyrefly_util::display::commas_iter;
 use ruff_python_ast::Expr;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::small_set::SmallSet;
 
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
@@ -299,6 +300,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             })
             .collect::<Vec<_>>();
+
+        let class_tparams = self.get_class_tparams(cls);
+        for (base, range) in &base_types_with_ranges {
+            let mut quantifieds = SmallSet::new();
+            base.collect_quantifieds(&mut quantifieds);
+            for quantified in quantifieds {
+                if !class_tparams.iter().any(|tparam| tparam == quantified) {
+                    self.error(
+                        errors,
+                        *range,
+                        ErrorKind::InvalidTypeVar,
+                        format!("Type variable `{}` is not in scope", quantified.name()),
+                    );
+                }
+            }
+        }
 
         let mut tuple_ancestor = base_types_with_ranges.iter().find_map(|(ty, _)| {
             if let Type::Tuple(tuple) = ty {

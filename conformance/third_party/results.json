@@ -1,9 +1,9 @@
 {
   "total": 140,
-  "pass": 134,
-  "fail": 6,
-  "pass_rate": 0.96,
-  "differences": 13,
+  "pass": 136,
+  "fail": 4,
+  "pass_rate": 0.97,
+  "differences": 7,
   "passing": [
     "aliases_explicit.py",
     "aliases_implicit.py",
@@ -25,6 +25,7 @@
     "constructors_call_metaclass.py",
     "constructors_call_new.py",
     "constructors_call_type.py",
+    "constructors_callable.py",
     "constructors_consistency.py",
     "dataclasses_final.py",
     "dataclasses_frozen.py",
@@ -67,6 +68,7 @@
     "generics_paramspec_components.py",
     "generics_paramspec_semantics.py",
     "generics_paramspec_specialization.py",
+    "generics_scoping.py",
     "generics_self_advanced.py",
     "generics_self_attributes.py",
     "generics_self_basic.py",
@@ -143,10 +145,8 @@
   "failing": {
     "annotations_forward_refs.py": 2,
     "callables_annotation.py": 1,
-    "constructors_callable.py": 2,
     "dataclasses_descriptors.py": 2,
-    "exceptions_context_managers.py": 2,
-    "generics_scoping.py": 4
+    "exceptions_context_managers.py": 2
   },
   "comment": "@generated"
 }

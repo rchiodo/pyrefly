@@ -2408,6 +2408,77 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         self.bind_function(&func_type, &m.obj, true, &mut |_, _| false)
     }
 
+    /// Make class parameters used by a synthesized constructor callable inferable at its call site.
+    pub fn promote_constructor_class_tparams(&self, ty: Type, cls: &Class) -> Type {
+        let class_tparams = self.get_class_tparams(cls);
+        let used_class_tparams = |body: &Forallable| {
+            let mut used = SmallSet::new();
+            body.clone()
+                .as_type()
+                .for_each_quantified(&mut |quantified| {
+                    if class_tparams.iter().any(|tparam| tparam == quantified) {
+                        used.insert(quantified.clone());
+                    }
+                });
+            class_tparams
+                .iter()
+                .filter(|tparam| used.contains(*tparam))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        let promote_forall = |forall: Forall<Function>| {
+            let body = Forallable::Function(forall.body.clone());
+            let mut tparams = used_class_tparams(&body);
+            for tparam in forall.tparams.iter() {
+                if !tparams.contains(tparam) {
+                    tparams.push(tparam.clone());
+                }
+            }
+            Forall {
+                tparams: Arc::new(TParams::new(tparams)),
+                body: forall.body,
+            }
+        };
+        let promote_function = |function: Function| {
+            let body = Forallable::Function(function.clone());
+            let tparams = used_class_tparams(&body);
+            if tparams.is_empty() {
+                OverloadType::Function(function)
+            } else {
+                OverloadType::Forall(Forall {
+                    tparams: Arc::new(TParams::new(tparams)),
+                    body: function,
+                })
+            }
+        };
+        match ty {
+            Type::Function(function) => match promote_function(*function) {
+                OverloadType::Function(function) => Type::Function(Box::new(function)),
+                OverloadType::Forall(forall) => {
+                    Forallable::Function(forall.body).forall(forall.tparams)
+                }
+            },
+            Type::Forall(forall) => match forall.body {
+                Forallable::Function(function) => {
+                    let forall = promote_forall(Forall {
+                        tparams: forall.tparams,
+                        body: function,
+                    });
+                    Forallable::Function(forall.body).forall(forall.tparams)
+                }
+                _ => Type::Forall(forall),
+            },
+            Type::Overload(overload) => Type::Overload(Overload {
+                signatures: overload.signatures.mapped(|signature| match signature {
+                    OverloadType::Function(function) => promote_function(function),
+                    OverloadType::Forall(forall) => OverloadType::Forall(promote_forall(forall)),
+                }),
+                metadata: overload.metadata,
+            }),
+            _ => ty,
+        }
+    }
+
     /// Strip the first parameter from a BoundMethodType and optionally instantiate
     /// type variables. This is the shared implementation for `bind_boundmethod` and
     /// `bind_function` (for the Function/Forall<Function>/Overload arms they share).

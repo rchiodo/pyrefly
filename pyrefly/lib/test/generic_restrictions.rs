@@ -1167,8 +1167,6 @@ reveal_type(f)  # E: revealed type: [T, U: int, V = str](x: T, y: U, z: V) -> tu
 );
 
 testcase!(
-    bug =
-        "conformance: Should error on unbound TypeVars in class bases, TypeAlias, and expressions",
     test_typevar_scoping_restrictions,
     r#"
 from typing import TypeVar, Generic, TypeAlias
@@ -1183,28 +1181,35 @@ def fun_3(x: T) -> list[T]:
     z: list[S] = []  # E: Type variable `S` is not in scope
     return y
 
+def fun_4(x: T) -> list[T]:
+    class MyGeneric(Generic[T]):  # E: Redundant type parameter declaration
+        ...
+    return []
+
 # Unbound TypeVar S in class body (not in method)
 class Bar(Generic[T]):
     an_attr: list[S] = []  # E: Type variable `S` is not in scope
 
 # Nested class using outer class's TypeVar
 class Outer(Generic[T]):
-    class Bad(Iterable[T]):  # should error: T from outer not in scope
+    class Bad(Iterable[T]):  # E: Type variable `T` is not in scope
         ...
     class AlsoBad:
-        x: list[T]  # should error: T from outer not in scope
+        x: list[T]  # E: Type variable `T` is not in scope
 
-    alias: TypeAlias = list[T]  # should error: T not allowed in TypeAlias here
+        def __init__(self, x: list[T]) -> None:  # E: Type variable `T` is not in scope
+            self.x = x
+
+    alias: TypeAlias = list[T]  # E: Type variable `T` is not in scope
 
 # Unbound TypeVars at global scope
 global_var1: T  # E: Type variable `T` is not in scope
 global_var2: list[T] = []  # E: Type variable `T` is not in scope
-list[T]()  # should error
+list[T]()  # E: Type variable `T` is not in scope
 "#,
 );
 
 testcase!(
-    bug = "Follow-on errors on TypeVar usages inside nested class that shadows outer TypeVars",
     test_nested_class_independent_typevar_adoption,
     r#"
 from typing import Generic, Type, TypeVar
@@ -1215,15 +1220,15 @@ _Serialized = TypeVar("_Serialized")
 class CustomCoercer(Generic[_Deserialized, _Serialized]):
     # CoercerMapping uses the same TypeVars as CustomCoercer, which the spec forbids.
     class CoercerMapping(
-        dict[
+        dict[  # E: Type variable `_Deserialized` is not in scope # E: Type variable `_Serialized` is not in scope
             Type[_Deserialized],  # should error: _Deserialized already bound by CustomCoercer
             Type["CustomCoercer[_Deserialized, _Serialized]"],  # should error: both TypeVars
         ]
     ):
         def __getitem__(
             self,
-            key: type[_Deserialized],
-        ) -> type["CustomCoercer[_Deserialized, _Serialized]"]: ...
+            key: type[_Deserialized],  # E: Type variable `_Deserialized` is not in scope
+        ) -> type["CustomCoercer[_Deserialized, _Serialized]"]: ...  # E: Type variable `_Deserialized` is not in scope # E: Type variable `_Serialized` is not in scope
 "#,
 );
 

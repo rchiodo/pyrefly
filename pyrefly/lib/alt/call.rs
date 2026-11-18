@@ -859,6 +859,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         context: Option<&dyn Fn() -> ErrorContext>,
         hint: Option<HintRef>,
     ) -> Type {
+        self.check_raw_legacy_type_variables(
+            &self.heap.mk_class_type(cls.clone()),
+            callee_range.unwrap_or(arguments_range),
+            errors,
+        );
         self.construct_with_hint(arguments_range, errors, context, hint, |hint| {
             self.construct_class_inner(
                 cls.clone(),
@@ -1964,6 +1969,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .get_dunder_new(cls, false)
             .and_then(|t| self.bind_dunder_new(&t, cls.clone()))
         {
+            let t = self.promote_constructor_class_tparams(t, cls.class_object());
             if t.callable_return_type(self.heap)
                 .is_some_and(|ret| !self.is_compatible_constructor_return(&ret, cls.class_object()))
             {
@@ -1980,7 +1986,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             let t = if let Type::BoundMethod(ref method) = t
                 && let Some(bound) = self.bind_dunder_init_for_callable(method)
             {
-                bound
+                self.promote_constructor_class_tparams(bound, cls.class_object())
             } else {
                 // Fallback: just set the return type without stripping self
                 let ret_type = t
@@ -1988,7 +1994,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     .unwrap_or_else(|| class_type.clone());
                 let mut t = t;
                 t.transform_toplevel_callable(&mut |c: &mut Callable| c.ret = ret_type.clone());
-                t
+                self.promote_constructor_class_tparams(t, cls.class_object())
             };
             (t, true)
         } else {

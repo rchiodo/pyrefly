@@ -439,12 +439,17 @@ impl Bindings {
     /// `class_scopes` is populated in source/visit order, so reverse
     /// iteration yields the most-recently-pushed (innermost) class first.
     pub fn enclosing_class(&self, range: TextRange) -> Option<Idx<KeyClass>> {
+        self.enclosing_class_scope(range).map(|(_, idx)| idx)
+    }
+
+    /// Returns the body range and key of the innermost class containing `range`.
+    pub fn enclosing_class_scope(&self, range: TextRange) -> Option<(TextRange, Idx<KeyClass>)> {
         self.0
             .class_scopes
             .iter()
             .rev()
             .find(|(r, _)| r.contains_range(range))
-            .map(|(_, idx)| *idx)
+            .copied()
     }
 
     /// Returns `true` if the given annotation-only declaration was subsequently

@@ -2596,6 +2596,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     self.check_final_reassignment(annot, expr.range(), errors);
                 }
+                if *is_explicit {
+                    self.check_raw_legacy_type_variables(&ty, expr.range(), errors);
+                    if self.bindings().enclosing_class(expr.range()).is_some() {
+                        let mut quantifieds = SmallSet::new();
+                        ty.collect_quantifieds(&mut quantifieds);
+                        for quantified in quantifieds {
+                            self.error(
+                                errors,
+                                expr.range(),
+                                ErrorKind::InvalidTypeVar,
+                                format!("Type variable `{}` is not in scope", quantified.name()),
+                            );
+                        }
+                    }
+                }
                 Arc::new(self.as_type_alias(
                     name,
                     if *is_explicit {
@@ -5274,12 +5289,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn check_legacy_typevar_scoping(&self, ty: &Type, range: TextRange, errors: &ErrorCollector) {
         let wrapped = self.wrap_callable_legacy_typevars(ty.clone());
         self.check_raw_legacy_type_variables(&wrapped, range, errors);
+        self.check_enclosing_class_typevar_scoping(&wrapped, range, errors);
     }
 
     /// Check for raw legacy type variables in a resolved annotation type.
     /// Raw legacy TypeVars in annotations indicate out-of-scope usage — in-scope
     /// TypeVars are replaced with Quantified by LegacyTParamCollector.
-    fn check_raw_legacy_type_variables(
+    pub(crate) fn check_raw_legacy_type_variables(
         &self,
         ty: &Type,
         range: TextRange,
@@ -5294,6 +5310,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 ErrorKind::InvalidTypeVar,
                 format!("Type variable `{name}` is not in scope"),
             );
+        }
+    }
+
+    fn check_enclosing_class_typevar_scoping(
+        &self,
+        ty: &Type,
+        range: TextRange,
+        errors: &ErrorCollector,
+    ) {
+        let Some((class_body, class_idx)) = self.bindings().enclosing_class_scope(range) else {
+            return;
+        };
+        let class = self.get_idx(class_idx);
+        let Some(class) = &class.0 else {
+            return;
+        };
+        let class_tparams = self.get_class_tparams(class);
+        let mut quantifieds = SmallSet::new();
+        ty.collect_quantifieds(&mut quantifieds);
+        for quantified in quantifieds {
+            if matches!(
+                quantified.identity().origin,
+                QuantifiedOrigin::ScopedLegacy | QuantifiedOrigin::Pep695
+            ) && !class_tparams.iter().any(|tparam| tparam == quantified)
+                && !class_body.contains_range(quantified.identity().anchor.range)
+            {
+                self.error(
+                    errors,
+                    range,
+                    ErrorKind::InvalidTypeVar,
+                    format!("Type variable `{}` is not in scope", quantified.name()),
+                );
+            }
         }
     }
 

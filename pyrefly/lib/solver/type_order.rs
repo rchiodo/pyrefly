@@ -172,6 +172,11 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
         self.0.constructor_to_callable(cls)
     }
 
+    pub fn class_constructor_to_callable(self, cls: &Class) -> Type {
+        self.0
+            .constructor_to_callable(&self.0.as_class_type_unchecked(cls))
+    }
+
     pub fn instantiate_fresh_forall(self, forall: Forall<Forallable>) -> (QuantifiedHandle, Type) {
         self.0.instantiate_fresh_forall(forall)
     }
