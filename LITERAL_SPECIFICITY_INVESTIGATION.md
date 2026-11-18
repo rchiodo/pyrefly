@@ -366,20 +366,19 @@ The current branch build and Pyright 1.1.414 produce:
 
 | Checker | Range | Category | Actual type | Expected type | Name | Related candidates | Hint | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 7/8 | 7/7 | 6/8 | 0/1 | 8/8 | 44/48 |
+| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 7/8 | 6/7 | 6/8 | 0/1 | 8/8 | 43/48 |
 | Pyright 1.1.414 | 8/8 | 6/8 | 7/8 | 6/7 | 6/8 | 0/1 | 8/8 | 41/48 |
 
 Both checkers select useful primary ranges and provide the expected actionable
 explanation in all eight cases. Neither exposes overload declarations through
-structured related locations; Pyrefly lists candidates inline, while Pyright
-reports only the closest argument mismatch. Both omit the annotated assignment
-target's name. Pyrefly additionally omits the source type for TypedDict
-unpacking and the parameter name for the bound violation. Pyright does not
-identify the TypedDict key/category, loses the source type and category for the
-unpack error, and presents only one expected overload parameter type.
+structured related locations, and both report the closest argument mismatch
+inline. Both omit the annotated assignment target's name. Pyrefly additionally
+omits the source type for TypedDict unpacking, the parameter name for the bound
+violation, and one expected overload parameter type. Pyright does not identify
+the TypedDict key/category and loses the source type and category for the unpack
+error.
 
 Behavioral scoring remains separate from wording quality. On the expanded
-36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 33/36. Pyright misses
-one guarded TypedDict-key capability and two gradual ambiguous-overload
-rejections; the mutable-generic and comprehension cases remain unscored policy
-comparisons.
+36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 35/36. Pyright misses
+the gradual ambiguous-overload capability probe; the mutable-generic and
+comprehension cases remain unscored policy comparisons.
