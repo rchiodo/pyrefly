@@ -316,12 +316,70 @@ produces:
 | Errors | 813/813 | 813/813 |
 | Specificity | 413/413 | 413/413 |
 | Members | 262/262 | 262/262 |
-| Overloads | 40/40 | 40/40 |
-| Total | 1528/1528 | 1528/1528 |
-| Unexpected diagnostic locations | 37 | 39 |
+| Overloads | 48/48 | 48/48 |
+| Total | 1536/1536 | 1536/1536 |
+| Unexpected diagnostic locations | 2 | 2 |
 
 The normative corpus therefore no longer favors either checker. The targeted
 corpus favors Pyrefly by one scored overload capability and two unscored
 inference-policy comparisons. Diagnostics outside the scored oracle locations
 still require individual adjudication before they can be classified as false
 positives.
+
+The location totals changed substantially after correcting two accounting
+problems in the comparison script. Optional `# E?` sites are valid diagnostic
+locations even though they are excluded from normative scores, and the
+conformance corpus includes `.pyi` files whose grouped overload oracles were
+previously omitted. Counting both as known locations reduced the apparent
+unexpected totals from 37/39 to 2/2 and added eight required stub-file overload
+probes. This is a scorecard fix, not a checker behavior change.
+
+The four remaining locations were adjudicated from their surrounding
+conformance cases:
+
+- Pyrefly reports two dataclass descriptor-definition diagnostics on cases the
+  suite expects to be valid. These look like genuine descriptor/dataclass
+  compatibility gaps, but changing descriptor semantics is not isolated enough
+  for this measurement-only change.
+- Pyright reports an invariant assignment on the line explicitly marked `# OK`
+  in the variance-inference case. This looks like a variance-inference gap.
+- Pyright also reports that a static method should not name its first parameter
+  `self`. That is an additional style diagnostic rather than a failed protocol
+  compatibility requirement.
+
+## Diagnostic-quality scorecard
+
+The targeted corpus now attaches structured quality oracles to eight invalid
+operations covering assignments, calls, member access, protocols, TypedDicts,
+generic bounds, and overload selection. The score does not compare complete
+message strings. Instead, each oracle independently checks:
+
+- whether the primary range overlaps the offending expression;
+- whether the diagnostic kind or message identifies the broad category;
+- whether expected and actual type fragments are present, allowing equivalent
+  literal and widened forms;
+- whether the relevant variable, parameter, member, or key is named;
+- whether candidate declarations are exposed as related locations; and
+- whether the message includes the expected actionable explanation.
+
+The current branch build and Pyright 1.1.414 produce:
+
+| Checker | Range | Category | Actual type | Expected type | Name | Related candidates | Hint | Total |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 7/8 | 7/7 | 6/8 | 0/1 | 8/8 | 44/48 |
+| Pyright 1.1.414 | 8/8 | 6/8 | 7/8 | 6/7 | 6/8 | 0/1 | 8/8 | 41/48 |
+
+Both checkers select useful primary ranges and provide the expected actionable
+explanation in all eight cases. Neither exposes overload declarations through
+structured related locations; Pyrefly lists candidates inline, while Pyright
+reports only the closest argument mismatch. Both omit the annotated assignment
+target's name. Pyrefly additionally omits the source type for TypedDict
+unpacking and the parameter name for the bound violation. Pyright does not
+identify the TypedDict key/category, loses the source type and category for the
+unpack error, and presents only one expected overload parameter type.
+
+Behavioral scoring remains separate from wording quality. On the expanded
+36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 33/36. Pyright misses
+one guarded TypedDict-key capability and two gradual ambiguous-overload
+rejections; the mutable-generic and comprehension cases remain unscored policy
+comparisons.

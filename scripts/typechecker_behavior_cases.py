@@ -3,22 +3,25 @@ from typing import (
     Any,
     Generic,
     Literal,
+    Protocol,
+    TypedDict,
     TypeGuard,
     TypeIs,
     TypeVar,
-    TypedDict,
     overload,
 )
 
+# The comparison markers describe the source on their physical line.
+# fmt: off
 
 def takes_int(value: int) -> None:
     pass
 
 
 good_assignment: int = 1  # benchmark: errors/accept
-bad_assignment: int = "not an int"  # benchmark: errors/error
+bad_assignment: int = "not an int"  # benchmark: errors/error | quality: category=assignment; span="not an int"; actual-type=str/Literal['not an int']; expected-type=int; name=bad_assignment; hint=assignable
 takes_int(1)  # benchmark: errors/accept
-takes_int("not an int")  # benchmark: errors/error
+takes_int("not an int")  # benchmark: errors/error | quality: category=call; span="not an int"; actual-type=str/Literal['not an int']; expected-type=int; name=value; hint=assignable
 
 
 def bad_return() -> int:
@@ -31,7 +34,18 @@ class HasMember:
 
 
 HasMember().present()  # benchmark: errors/accept
-HasMember().missing()  # benchmark: errors/error
+HasMember().missing()  # benchmark: errors/error | quality: category=member; span=missing; actual-type=HasMember; name=missing; hint=missing-member
+
+
+class Closable(Protocol):
+    def close(self) -> None: ...
+
+
+class NotClosable:
+    pass
+
+
+closable: Closable = NotClosable()  # benchmark: errors/error | quality: category=protocol; span=NotClosable(); actual-type=NotClosable; expected-type=Closable; name=close; hint=missing-member
 
 T = TypeVar("T")
 
@@ -88,6 +102,7 @@ class Record(TypedDict):
 
 
 record: Record = {"name": "name", "age": 1}
+bad_record: Record = {"name": 1, "age": 1}  # benchmark: errors/error | quality: category=typed-dict; span=1; actual-type=int/Literal[1]; expected-type=str; name=name; hint=assignable
 key_pair = identity(("name", 1))
 record[key_pair[0]].upper()  # benchmark: members/accept
 record[key_pair[1]]  # benchmark: members/error
@@ -147,7 +162,17 @@ class TargetRecord(TypedDict):
 
 
 def unpack_missing_key(value: OpenRecord) -> TargetRecord:
-    return {**value}  # benchmark: errors/error
+    return {**value}  # benchmark: errors/error | quality: category=typed-dict; span={**value}; actual-type=OpenRecord; expected-type=TargetRecord; name=y; hint=missing-key
+
+
+BoundedInt = TypeVar("BoundedInt", bound=int)
+
+
+def bounded_identity(value: BoundedInt) -> BoundedInt:
+    return value
+
+
+bounded_identity("bad")  # benchmark: errors/error | quality: category=generic; span="bad"; actual-type=str/Literal['bad']; expected-type=int; name=value; hint=assignable
 
 
 @overload
@@ -167,6 +192,21 @@ Zero = Literal["zero"]
 One = Literal["one"]
 zero: Zero = convert(literal_pair[0])  # benchmark: overloads/accept
 not_one: One = convert(literal_pair[0])  # benchmark: overloads/error
+
+
+@overload
+def choose(value: int) -> int: ...
+
+
+@overload
+def choose(value: str) -> str: ...
+
+
+def choose(value: object) -> object:
+    return value
+
+
+choose(object())  # benchmark: overloads/error | quality: category=overload; span=object(); actual-type=object; expected-type=int,str; name=value; related-candidates=true; hint=candidate-overloads
 
 
 class IntResult:
@@ -215,3 +255,6 @@ def defaulted_members(source: list[Any]) -> None:
     result.append(1)  # benchmark: overloads/accept
     result.append("text")  # benchmark: overloads/accept
     result.append(object())  # benchmark: overloads/error
+
+
+# fmt: on

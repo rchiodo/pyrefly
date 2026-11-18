@@ -55,7 +55,7 @@ def category_for(file: str, expected: str) -> str:
 
 def parse_conformance_probes(root: Path) -> list[ConformanceProbe]:
     probes = []
-    for path in sorted(root.glob("*.py")):
+    for path in sorted([*root.glob("*.py"), *root.glob("*.pyi")]):
         if path.name.startswith("_"):
             continue
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -66,7 +66,18 @@ def parse_conformance_probes(root: Path) -> list[ConformanceProbe]:
                 continue
             for group in ERROR_GROUP_MARKER.findall(line):
                 groups.setdefault(group, []).append(line_number)
-            if OPTIONAL_ERROR_MARKER.search(line) or ERROR_GROUP_MARKER.search(line):
+            if OPTIONAL_ERROR_MARKER.search(line):
+                probes.append(
+                    ConformanceProbe(
+                        file=path.name,
+                        lines=(line_number,),
+                        category=category_for(path.name, "error"),
+                        expected="optional",
+                        source=code,
+                    )
+                )
+                continue
+            if ERROR_GROUP_MARKER.search(line):
                 continue
             if ERROR_MARKER.search(line):
                 probes.append(
@@ -83,6 +94,15 @@ def parse_conformance_probes(root: Path) -> list[ConformanceProbe]:
                     path.name == "overloads_evaluation.py"
                     and code in OVERLOAD_ANY_COMPATIBILITY_PROBES
                 ):
+                    probes.append(
+                        ConformanceProbe(
+                            file=path.name,
+                            lines=(line_number,),
+                            category="overloads",
+                            expected="optional",
+                            source=code,
+                        )
+                    )
                     continue
                 probes.append(
                     ConformanceProbe(
@@ -114,15 +134,12 @@ def score_conformance(
         for diagnostic in diagnostics
         if diagnostic.get("severity") in {"error", "warn", "warning"}
     }
-    probed_locations = {
-        (probe.file, line) for probe in probes for line in probe.lines
-    }
-    scores = {
-        category: {"correct": 0, "total": 0}
-        for category in CATEGORIES
-    }
+    probed_locations = {(probe.file, line) for probe in probes for line in probe.lines}
+    scores = {category: {"correct": 0, "total": 0} for category in CATEGORIES}
     failures = []
     for probe in probes:
+        if probe.expected == "optional":
+            continue
         has_diagnostic = any(
             (probe.file, line) in diagnostic_locations for line in probe.lines
         )
@@ -133,6 +150,35 @@ def score_conformance(
             failures.append(probe)
     unexpected = len(diagnostic_locations - probed_locations)
     return scores, failures, unexpected
+
+
+def unexpected_diagnostics(
+    probes: list[ConformanceProbe], diagnostics: list[dict[str, object]]
+) -> list[tuple[dict[str, object], str]]:
+    probed_locations = {(probe.file, line) for probe in probes for line in probe.lines}
+    unexpected = []
+    for diagnostic in diagnostics:
+        if diagnostic.get("severity") not in {"error", "warn", "warning"}:
+            continue
+        file = Path(str(diagnostic["file"])).name
+        line = int(diagnostic["line"])
+        if (file, line) in probed_locations:
+            continue
+        end_line = int(diagnostic.get("end_line", line))
+        if any(
+            (file, covered_line) in probed_locations
+            for covered_line in range(line, end_line + 1)
+        ):
+            classification = "multiline range reaches an oracle line"
+        elif any(
+            probe_file == file and abs(probe_line - line) == 1
+            for probe_file, probe_line in probed_locations
+        ):
+            classification = "adjacent to an oracle line"
+        else:
+            classification = "requires semantic adjudication"
+        unexpected.append((diagnostic, classification))
+    return unexpected
 
 
 def render_report(
@@ -168,10 +214,16 @@ def render_report(
         )
 
     lines.extend(["", "## First 100 differing outcomes", ""])
-    lines.append("| Category | Expected | Location | Probe | " + " | ".join(failures_by_checker) + " |")
+    lines.append(
+        "| Category | Expected | Location | Probe | "
+        + " | ".join(failures_by_checker)
+        + " |"
+    )
     lines.append("|---|---|---|---|" + "---|" * len(failures_by_checker))
     emitted = 0
     for probe in probes:
+        if probe.expected == "optional":
+            continue
         outcomes = {
             name: "failed" if probe in failures else "passed"
             for name, failures in failures_by_checker.items()
@@ -181,13 +233,31 @@ def render_report(
         location = f"{probe.file}:{','.join(map(str, probe.lines))}"
         lines.append(
             f"| {probe.category} | {probe.expected} | `{location}` | "
-            f"`{probe.source}` | "
-            + " | ".join(outcomes.values())
-            + " |"
+            f"`{probe.source}` | " + " | ".join(outcomes.values()) + " |"
         )
         emitted += 1
         if emitted == 100:
             break
+    lines.extend(["", "## First 40 unexpected diagnostic locations", ""])
+    lines.append("| Checker | Location | Kind | Classification | Message |")
+    lines.append("|---|---|---|---|---|")
+    for name, _version, diagnostics in checker_results:
+        for diagnostic, classification in unexpected_diagnostics(probes, diagnostics)[
+            :40
+        ]:
+            message = (
+                str(diagnostic.get("message", ""))
+                .replace("|", "\\|")
+                .replace("\n", "<br>")
+            )
+            location = (
+                f"{Path(str(diagnostic['file'])).name}:"
+                f"{diagnostic['line']}:{diagnostic.get('col', 0)}"
+            )
+            lines.append(
+                f"| {name} | `{location}` | `{diagnostic.get('kind', '')}` | "
+                f"{classification} | {message} |"
+            )
     return "\n".join(lines) + "\n"
 
 

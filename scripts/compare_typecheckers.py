@@ -274,9 +274,12 @@ def parse_full_errors_pyrefly(stdout: str) -> list[dict[str, object]]:
                 "file": e.get("path", ""),
                 "line": e.get("line", 0),
                 "col": e.get("column", 0),
+                "end_line": e.get("stop_line", e.get("line", 0)),
+                "end_col": e.get("stop_column", e.get("column", 0)),
                 "kind": e.get("name", ""),
                 "message": e.get("description", ""),
                 "severity": e.get("severity", "error"),
+                "related": [],
             }
         )
     return errors
@@ -307,25 +310,32 @@ def parse_full_errors_pyright(stdout: str, repo_dir: str) -> list[dict[str, obje
         logging.warning("Failed to parse pyright JSON output")
         return []
     errors = []
-    # Ensure repo_dir ends with separator for clean prefix stripping.
     # Use realpath to resolve symlinks (e.g. /tmp -> /private/tmp on macOS)
-    # so that the prefix matches pyright's resolved absolute paths.
-    prefix = os.path.realpath(repo_dir) + os.sep
+    # before determining whether the diagnostic belongs to the repository.
+    repo_path = os.path.realpath(repo_dir)
     for d in data.get("generalDiagnostics", []):
         range_info = d.get("range", {})
         start = range_info.get("start", {})
         file_path = d.get("file", "")
-        # Make absolute paths relative to repo_dir
-        if file_path.startswith(prefix):
-            file_path = file_path[len(prefix) :]
+        # Make absolute paths relative to repo_dir.
+        normalized_path = os.path.realpath(file_path)
+        try:
+            if os.path.commonpath([repo_path, normalized_path]) == repo_path:
+                file_path = os.path.relpath(normalized_path, repo_path)
+        except ValueError:
+            pass
+        file_path = file_path.replace("\\", "/")
         errors.append(
             {
                 "file": file_path,
                 "line": start.get("line", 0) + 1,
                 "col": start.get("character", 0) + 1,
+                "end_line": range_info.get("end", {}).get("line", 0) + 1,
+                "end_col": range_info.get("end", {}).get("character", 0) + 1,
                 "kind": d.get("rule", ""),
                 "message": d.get("message", ""),
                 "severity": d.get("severity", "error"),
+                "related": d.get("relatedInformation", []),
             }
         )
     return errors

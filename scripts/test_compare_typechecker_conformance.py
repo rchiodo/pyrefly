@@ -9,8 +9,10 @@ import unittest
 from pathlib import Path
 
 from compare_typechecker_conformance import (
+    ConformanceProbe,
     parse_conformance_probes,
     score_conformance,
+    unexpected_diagnostics,
 )
 
 
@@ -27,11 +29,20 @@ class TestCompareTypecheckerConformance(unittest.TestCase):
                 "assert_type(value, int)\n"
             )
             probes = parse_conformance_probes(Path(directory))
-        self.assertEqual(len(probes), 3)
+        self.assertEqual(len(probes), 4)
         self.assertEqual(probes[0].expected, "error")
-        self.assertEqual(probes[1].expected, "accept")
-        self.assertEqual(probes[2].lines, (4, 5))
+        self.assertEqual(probes[1].expected, "optional")
+        self.assertEqual(probes[2].expected, "accept")
+        self.assertEqual(probes[3].lines, (4, 5))
         self.assertTrue(all(probe.category == "overloads" for probe in probes))
+
+    def test_parse_stub_probes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "overloads_sample.pyi"
+            path.write_text("@overload  # E[group]\ndef sample(): ...  # E[group]\n")
+            probes = parse_conformance_probes(Path(directory))
+        self.assertEqual(len(probes), 1)
+        self.assertEqual(probes[0].lines, (1, 2))
 
     def test_score_probes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -74,8 +85,12 @@ class TestCompareTypecheckerConformance(unittest.TestCase):
                 "assert_type(required, int)\n"
             )
             probes = parse_conformance_probes(Path(directory))
-        self.assertEqual(len(probes), 1)
-        self.assertEqual(probes[0].source, "assert_type(required, int)")
+        self.assertEqual(len(probes), 4)
+        self.assertEqual(
+            [probe.expected for probe in probes],
+            ["optional", "optional", "optional", "accept"],
+        )
+        self.assertEqual(probes[-1].source, "assert_type(required, int)")
 
     def test_unexpected_diagnostic(self) -> None:
         scores, failures, unexpected = score_conformance(
@@ -85,6 +100,42 @@ class TestCompareTypecheckerConformance(unittest.TestCase):
         self.assertEqual(sum(score["total"] for score in scores.values()), 0)
         self.assertEqual(failures, [])
         self.assertEqual(unexpected, 1)
+
+    def test_optional_diagnostic_is_not_unexpected_or_scored(self) -> None:
+        probes = [
+            ConformanceProbe(
+                file="sample.py",
+                lines=(3,),
+                category="errors",
+                expected="optional",
+                source="optional()",
+            )
+        ]
+        scores, failures, unexpected = score_conformance(
+            probes,
+            [{"file": "sample.py", "line": 3, "severity": "error"}],
+        )
+        self.assertEqual(sum(score["total"] for score in scores.values()), 0)
+        self.assertEqual(failures, [])
+        self.assertEqual(unexpected, 0)
+
+    def test_classifies_multiline_location_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.py"
+            path.write_text("call(\n    bad,  # E: required\n)\n")
+            probes = parse_conformance_probes(Path(directory))
+        unexpected = unexpected_diagnostics(
+            probes,
+            [
+                {
+                    "file": "sample.py",
+                    "line": 1,
+                    "end_line": 2,
+                    "severity": "error",
+                }
+            ],
+        )
+        self.assertEqual(unexpected[0][1], "multiline range reaches an oracle line")
 
 
 if __name__ == "__main__":

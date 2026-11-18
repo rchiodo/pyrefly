@@ -82,6 +82,9 @@ class TestParseFullErrorsPyrefly(unittest.TestCase):
         self.assertEqual(errors[0]["kind"], "bad-return")
         self.assertEqual(errors[0]["message"], "Expected `str`, got `int`")
         self.assertEqual(errors[0]["severity"], "error")
+        self.assertEqual(errors[0]["end_line"], 10)
+        self.assertEqual(errors[0]["end_col"], 15)
+        self.assertEqual(errors[0]["related"], [])
 
     def test_second_error(self) -> None:
         errors = parse_full_errors_pyrefly(self.SAMPLE_OUTPUT)
@@ -176,6 +179,8 @@ class TestParseFullErrorsPyright(unittest.TestCase):
         errors = parse_full_errors_pyright(self.SAMPLE_OUTPUT, self.REPO_DIR)
         self.assertEqual(errors[0]["line"], 10)  # 9 + 1
         self.assertEqual(errors[0]["col"], 5)  # 4 + 1
+        self.assertEqual(errors[0]["end_line"], 10)
+        self.assertEqual(errors[0]["end_col"], 16)
 
     def test_makes_paths_relative(self) -> None:
         errors = parse_full_errors_pyright(self.SAMPLE_OUTPUT, self.REPO_DIR)
