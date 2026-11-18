@@ -25,6 +25,41 @@ def baz(c: Coord) -> Mapping[str, str]:
 );
 
 testcase!(
+    test_typed_dict_mismatch_explains_key,
+    r#"
+from typing import TypedDict
+
+class Target(TypedDict):
+    name: str
+    count: int
+    enabled: bool
+
+class Good(TypedDict):
+    name: str
+    count: int
+    enabled: bool
+
+class Missing(TypedDict):
+    name: str
+
+class WrongValue(TypedDict):
+    name: str
+    count: str
+    enabled: bool
+
+good: Target = Good(name="", count=0, enabled=True)
+missing: Target = Missing(name="")  # E: `Missing` is not assignable to `Target`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+wrong_value: Target = WrongValue(name="", count="", enabled=True)  # E: `WrongValue` is not assignable to `Target`: Field `count` in `WrongValue` has type `str`
+
+def choose(flag: bool) -> Good | Missing:
+    return Good(name="", count=0, enabled=True) if flag else Missing(name="")
+
+from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+nested: tuple[Target] = (Missing(name=""),)  # E: `tuple[Missing]` is not assignable to `tuple[Target]`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+"#,
+);
+
+testcase!(
     test_fields_named_like_builtins,
     r#"
 from typing import TypedDict

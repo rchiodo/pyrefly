@@ -48,6 +48,47 @@ def g(p: P, c1: C1, c2: C2, c3: C3, c4: C4, c5: C5) -> None:
 );
 
 testcase!(
+    test_protocol_mismatch_explains_member,
+    r#"
+from typing import Protocol
+
+class Target(Protocol):
+    value: int
+    def transform(self, x: int) -> str: ...
+
+class Good:
+    value: int
+    def transform(self, x: int) -> str:
+        return str(x)
+
+class Missing:
+    def transform(self, x: int) -> str:
+        return str(x)
+
+class WrongValue:
+    value: str
+    def transform(self, x: int) -> str:
+        return str(x)
+
+class WrongSignature:
+    value: int
+    def transform(self, x: str) -> str:
+        return x
+
+good: Target = Good()
+missing: Target = Missing()  # E: `Missing` is not assignable to `Target`: Protocol `Target` requires attribute `value`
+wrong_value: Target = WrongValue()  # E: `WrongValue` is not assignable to `Target`: `WrongValue.value` has type `str`
+wrong_signature: Target = WrongSignature()  # E: `WrongSignature` is not assignable to `Target`: `WrongSignature.transform` has type
+
+def choose(flag: bool) -> Good | Missing:
+    return Good() if flag else Missing()
+
+from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Protocol `Target` requires attribute `value`
+nested: tuple[Target] = (Missing(),)  # E: `tuple[Missing]` is not assignable to `tuple[Target]`: Protocol `Target` requires attribute `value`
+"#,
+);
+
+testcase!(
     test_proxy_method_direct_call_and_attribute_access,
     proxy_method_env(),
     r#"

@@ -2255,17 +2255,28 @@ impl Solver {
             return errors.error_builder(loc, ErrorKind::InternalError, String::new());
         }
         let tcc = tcc();
-        let msg = tcc.kind.format_error(
+        let inline_subset_error = matches!(
+            subset_error,
+            SubsetError::MissingAttribute(..)
+                | SubsetError::IncompatibleAttribute(..)
+                | SubsetError::TypedDict(..)
+        );
+        let detail = subset_error.to_error_msg();
+        let mut msg = tcc.kind.format_error(
             &self.for_display(got.clone()),
             &self.for_display(want.clone()),
             errors.module().name(),
         );
+        if inline_subset_error && let Some(detail) = &detail {
+            msg.push_str(": ");
+            msg.push_str(detail);
+        }
         let mut builder = errors.error_builder(loc, tcc.kind.as_error_kind(), msg);
         builder = builder.with_context(tcc.context.map(|ctx| || ctx));
         for (range, label) in tcc.annotations {
             builder = builder.with_annotation(range, label);
         }
-        if let Some(detail) = subset_error.to_error_msg() {
+        if !inline_subset_error && let Some(detail) = detail {
             builder = builder.with_detail(detail);
         }
         builder
