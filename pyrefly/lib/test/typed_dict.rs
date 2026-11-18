@@ -55,7 +55,7 @@ def choose(flag: bool) -> Good | Missing:
     return Good(name="", count=0, enabled=True) if flag else Missing(name="")
 
 from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
-nested: tuple[Target] = (Missing(name=""),)  # E: `tuple[Missing]` is not assignable to `tuple[Target]`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+nested: tuple[Target] = (Missing(name=""),)  # E: Tuple element 1 is incompatible # !E: Field `enabled`
 "#,
 );
 

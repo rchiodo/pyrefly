@@ -84,7 +84,7 @@ def choose(flag: bool) -> Good | Missing:
     return Good() if flag else Missing()
 
 from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Protocol `Target` requires attribute `value`
-nested: tuple[Target] = (Missing(),)  # E: `tuple[Missing]` is not assignable to `tuple[Target]`: Protocol `Target` requires attribute `value`
+nested: tuple[Target] = (Missing(),)  # E: Tuple element 1 is incompatible
 "#,
 );
 
