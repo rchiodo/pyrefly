@@ -13,6 +13,7 @@ use pyrefly_types::callable::ArgCount;
 use pyrefly_types::callable::ArgCounts;
 use pyrefly_types::callable::Param;
 use pyrefly_types::callable::ParamOverlay;
+use pyrefly_types::callable::Required;
 use pyrefly_types::display::TypeDisplayContext;
 use pyrefly_types::meta_shape_dsl::ShapeTransform;
 use pyrefly_types::tuple::Tuple;
@@ -441,7 +442,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 );
             }
             self.overload_error(
-                &overloads,
                 metadata,
                 self_obj.as_ref(),
                 &args,
@@ -503,7 +503,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
 
     fn overload_error(
         &self,
-        overloads: &[TargetWithTParams<Function>],
         metadata: &FuncMetadata,
         self_obj: Option<&Type>,
         args: &[CallArg],
@@ -541,7 +540,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             metadata.kind.format(self.module().name()),
             args_display
         );
-        let mut details = vec!["Possible overloads:".to_owned()];
+        let mut details = vec!["Closest overload:".to_owned()];
         // Build an overlay of relevant parameters. We'll show only these parameters when printing overloads.
         if self_obj.is_some() {
             // We strip `self` from the displayed signatures, so drop it from the overlay as well.
@@ -579,65 +578,39 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
         };
-        for overload in overloads {
-            let suffix = if overload.1.signature == *closest_overload_signature {
-                " [closest match]"
-            } else {
-                ""
-            };
-            let signature = match self_obj {
-                Some(_) => overload
-                    .1
-                    .signature
-                    .strip_first_param()
-                    .unwrap_or_else(|| overload.1.signature.clone()),
-                None => overload.1.signature.clone(),
-            };
-            let type_for_display = self
-                .solver()
-                .for_display(self.heap.mk_callable_from(signature));
-            let display_context = TypeDisplayContext::new(&[&type_for_display]);
-            let signature_for_display = match &type_for_display {
-                Type::Callable(callable) => callable,
-                _ => unreachable!("Expected a callable"),
-            };
-            let signature_for_display = match &signature_for_display.params {
-                Params::List(params) => {
-                    if let ParamOverlay::Subset(names) = &signature_overlay
-                        && let cur_names = params
-                            .items()
-                            .iter()
-                            .filter_map(|p| p.name())
-                            .collect::<SmallSet<_>>()
-                        && names.iter().any(|name| !cur_names.contains(name))
-                    {
-                        // If any of the parameters we want to show don't exist in the current
-                        // signature, be conservative and show everything.
-                        format!("{type_for_display}")
-                    } else {
-                        format!(
-                            "{}",
-                            Fmt(|f| {
-                                let mut output = DisplayOutput::new(&display_context, f);
-                                let write_type = |t: &Type, o: &mut DisplayOutput| {
-                                    display_context.fmt_helper_generic(t, false, o)
-                                };
-                                output.write_str("(")?;
-                                params.fmt_with_type(
-                                    &mut output,
-                                    &write_type,
-                                    &signature_overlay,
-                                )?;
-                                output.write_str(") -> ")?;
-                                write_type(&signature_for_display.ret, &mut output)
-                            })
-                        )
-                    }
-                }
-                _ => format!("{type_for_display}"),
-            };
-            details.push(format!("  {signature_for_display}{suffix}"));
-        }
+        let signature = match self_obj {
+            Some(_) => closest_overload_signature
+                .strip_first_param()
+                .unwrap_or_else(|| closest_overload_signature.clone()),
+            None => closest_overload_signature.clone(),
+        };
+        let type_for_display = self
+            .solver()
+            .for_display(self.heap.mk_callable_from(signature));
+        let display_context = TypeDisplayContext::new(&[&type_for_display]);
+        let signature_for_display = match &type_for_display {
+            Type::Callable(callable) => callable,
+            _ => unreachable!("Expected a callable"),
+        };
+        let signature_for_display = match &signature_for_display.params {
+            Params::List(params) => {
+                format!(
+                    "{}",
+                    Fmt(|f| {
+                        let mut output = DisplayOutput::new(&display_context, f);
+                        let write_type = |t: &Type, o: &mut DisplayOutput| {
+                            display_context.fmt_helper_generic(t, false, o)
+                        };
+                        output.write_str("(")?;
+                        params.fmt_with_type(&mut output, &write_type, &signature_overlay)?;
+                        output.write_str(") -> ")?;
+                        write_type(&signature_for_display.ret, &mut output)
+                    })
+                )
+            }
+            _ => format!("{type_for_display}"),
+        };
+        details.push(format!("  {signature_for_display}"));
         let mut builder = errors
             .error_builder(arguments_range, ErrorKind::NoMatchingOverload, header)
             .with_context(context)
@@ -675,16 +648,41 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     None
                 }
             };
-            let arity_mismatch =
+            let missing_keyword = match &closest_overload_signature.params {
+                Params::List(params) if keywords.iter().all(|kw| kw.arg.is_some()) => {
+                    params.items().iter().find_map(|param| match param {
+                        Param::KwOnly(name, _, Required::Required)
+                            if !keywords.iter().any(|kw| {
+                                kw.arg.is_some_and(|arg| arg.as_str() == name.as_str())
+                            }) =>
+                        {
+                            Some(format!("Missing keyword argument `{name}`"))
+                        }
+                        _ => None,
+                    })
+                }
+                _ => None,
+            };
+            let arity_mismatch = missing_keyword.unwrap_or_else(|| {
                 check(nposargs + nkwargs, arg_counts.overall, "").unwrap_or_else(|| {
                     check(nposargs, arg_counts.positional, "positional ").unwrap_or_else(|| {
                         check(nkwargs, arg_counts.keyword, "keyword ")
                             .expect("Overload evaluation: expected arity mismatch not found")
                     })
-                });
-            builder = builder.with_detail(arity_mismatch);
+                })
+            });
+            builder = builder.with_detail(format!("Reason: {arity_mismatch}"));
         } else {
-            builder = builder.with_errors_as_details(closest_overload_call_errors);
+            builder = builder.with_best_error_as_detail(
+                "Reason: ",
+                closest_overload_call_errors,
+                |error| match error.error_kind() {
+                    ErrorKind::UnexpectedKeyword => 0,
+                    ErrorKind::BadArgumentType => 1,
+                    ErrorKind::MissingArgument => 2,
+                    _ => 3,
+                },
+            );
         }
         builder.emit();
     }

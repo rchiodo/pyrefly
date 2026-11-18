@@ -1278,7 +1278,7 @@ def f(x: int, y: int) -> int: ...
 def f(x: int, y: int = 0) -> int:
     return x + y
 
-f(0, 1, 2)  # E: (x: int, y: int) -> int [closest match]\n  Expected at most 2 arguments, got 3
+f(0, 1, 2)  # E: Reason: Expected at most 2 arguments, got 3
     "#,
 );
 
@@ -1583,6 +1583,39 @@ def f(x: str) -> str: ...
 def f(x): return x
 
 f(3.14)  # E: `float` is not assignable to parameter `x` with type `int`
+    "#,
+);
+
+testcase!(
+    test_overload_error_reports_closest_rejection,
+    r#"
+from typing import overload
+
+@overload
+def configure(*, mode: int) -> int: ...
+@overload
+def configure(*, mode: str, label: str = ...) -> str: ...
+def configure(*, mode, label=""): return mode
+
+configure(extra=1)  # E: Reason: Unexpected keyword argument `extra`
+configure()  # E: Missing keyword argument `mode`
+
+class C:
+    @overload
+    def convert(self, value: int) -> int: ...
+    @overload
+    def convert(self, value: str) -> str: ...
+    def convert(self, value): return value
+
+C().convert(1.0)  # E: Reason: Argument `float` is not assignable to parameter `value` with type `int`
+
+@overload
+def choose[T](value: T, priority: int) -> T: ...
+@overload
+def choose[T](value: T, priority: str) -> tuple[T, str]: ...
+def choose(value, priority): return value
+
+choose("value", 1.0)  # E: Reason: Argument `float` is not assignable to parameter `priority` with type `int`
     "#,
 );
 
@@ -2316,12 +2349,12 @@ def f(*args: str, **kwargs: int) -> str: ...
 def f(*args, **kwargs):
     return args[0]
 
-f(4.2)  # E: (*args: int, ...) -> int [closest match]\n    (*args: str, ...) -> str
-f(x=4.2)  # E: (..., **kwargs: str) -> int [closest match]\n    (..., **kwargs: int) -> str
+f(4.2)  # E: Reason: Argument `float` is not assignable to parameter `*args` with type `int`
+f(x=4.2)  # E: Reason: Keyword argument `x` with type `float` is not assignable to parameter `**kwargs` with type `str`
 
 # When any arguments are unpacked, we conservatively fall back to showing full signatures
-f(*[4.2])  # E: (*args: int, **kwargs: str) -> int [closest match]\n    (*args: str, **kwargs: int) -> str
-f(**{"x": 4.2})  # E: (*args: int, **kwargs: str) -> int [closest match]\n    (*args: str, **kwargs: int) -> str
+f(*[4.2])  # E: (*args: int, **kwargs: str) -> int
+f(**{"x": 4.2})  # E: (*args: int, **kwargs: str) -> int
     "#,
 );
 
@@ -2340,7 +2373,7 @@ def f(x: str = ..., **kwargs: Unpack[TD]) -> str: ...
 def f(x=0, **kwargs):
     return x
 
-f(y=4.2)  # E: (..., **kwargs: Unpack[TD]) -> int [closest match]\n    (..., **kwargs: Unpack[TD]) -> str
+f(y=4.2)  # E: Reason: Argument `float` is not assignable to parameter `y` with type `int`
     "#,
 );
 
@@ -2355,8 +2388,8 @@ def f(x: int, /) -> int: ...
 def f(y: str, /) -> str: ...
 def f(x, /): return x
 
-# Make sure we show 'y' in the second overload even though 'x' was matched in the first overload
-f(4.2)  # E: (x: int, /) -> int [closest match]\n    (y: str, /) -> str
+# Only the closest overload is shown.
+f(4.2)  # E: (x: int, /) -> int # !E: (y: str, /) -> str
     "#,
 );
 
@@ -2372,7 +2405,7 @@ class A:
     def f(self, x: int, y: str = ...) -> int: ...
     def f(self, x, y=0): return x
 
-A().f(4.2)  # E: (x: str, ...) -> str [closest match]\n    (x: int, ...) -> int
+A().f(4.2)  # E: Reason: Argument `float` is not assignable to parameter `x` with type `str`
     "#,
 );
 
@@ -2388,6 +2421,6 @@ def f(x: str, y: int = ..., z: float = ...) -> str: ...
 def f(x, y="", z=0.0): return x
 
 y: Any = ...
-f(y=y)  # E: (x: int, y: str = ..., ...) -> int [closest match]\n    (x: str, y: int = ..., ...) -> str
+f(y=y)  # E: Reason: Missing argument `x`
     "#,
 );

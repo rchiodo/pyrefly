@@ -335,10 +335,16 @@ impl ErrorBuilder<'_> {
         self
     }
 
-    /// Adds the errors from `collector` as detail lines.
-    pub fn with_errors_as_details(mut self, collector: ErrorCollector) -> Self {
-        for error in collector.errors.into_inner().iter() {
-            self.details.push(error.msg_header().to_owned());
+    /// Adds the highest-priority error from `collector` as a detail line.
+    pub fn with_best_error_as_detail(
+        mut self,
+        prefix: &str,
+        collector: ErrorCollector,
+        priority: impl Fn(&Error) -> usize,
+    ) -> Self {
+        let mut errors = collector.errors.into_inner();
+        if let Some(error) = errors.iter().min_by_key(|error| priority(error)) {
+            self.details.push(format!("{prefix}{}", error.msg_header()));
         }
         self
     }
