@@ -191,6 +191,32 @@ foo({"x": 1, "y": 2})
 );
 
 testcase!(
+    test_typed_dict_unpack_required_keys,
+    r#"
+from typing import TypedDict
+
+class Open(TypedDict):
+    x: int
+
+class Closed(TypedDict, closed=True):
+    x: int
+
+class Target(TypedDict):
+    x: int
+    y: int
+
+def from_open(a: Open) -> Target:
+    return {**a}  # E: Missing required key `y` for TypedDict `Target`
+
+def from_closed(a: Closed) -> Target:
+    return {**a}  # E: Missing required key `y` for TypedDict `Target`
+
+def complete(a: Open) -> Target:
+    return {**a, "y": 1}
+"#,
+);
+
+testcase!(
     test_typed_dict_callable,
     r#"
 from typing import TypedDict

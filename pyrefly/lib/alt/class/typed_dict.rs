@@ -87,7 +87,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     ) {
         let fields = self.typed_dict_fields(typed_dict);
         let extra_items = self.typed_dict_extra_items(typed_dict);
-        let mut has_expansion = false;
+        let mut has_unknown_expansion = false;
         let mut keys: SmallSet<Name> = SmallSet::new();
         dict_items.iter().for_each(|x| match &x.key {
             Some(key) => {
@@ -173,13 +173,21 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             None => {
                 // This is an unpacked item (`**some_dict`).
-                has_expansion = true;
                 let partial_td_ty = self.heap.mk_partial_typed_dict(typed_dict.clone());
                 let item_ty = self.expr_infer_with_hint(
                     &x.value,
                     Some(HintRef::soft(&partial_td_ty)),
                     item_errors,
                 );
+                if let Type::TypedDict(unpacked) = &item_ty {
+                    for (key, field) in self.typed_dict_fields(unpacked) {
+                        if field.required {
+                            keys.insert(key);
+                        }
+                    }
+                } else {
+                    has_unknown_expansion = true;
+                }
                 let subset_result = self.is_subset_eq_with_reason(&item_ty, &partial_td_ty);
                 if let Some(subset_error) = subset_result.err() {
                     let tcc: &dyn Fn() -> TypeCheckContext =
@@ -206,7 +214,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         });
         // You can update a TypedDict with a subset of its items. Otherwise, all required fields must be present.
-        if !has_expansion && !is_update {
+        if !has_unknown_expansion && !is_update {
             for (key, field) in &fields {
                 if field.required && !keys.contains(key) {
                     self.error(

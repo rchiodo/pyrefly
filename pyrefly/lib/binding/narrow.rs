@@ -106,9 +106,9 @@ pub enum AtomicNarrowOp {
     /// Used to narrow to mapping types (types that extend typing.Mapping)
     IsMapping,
     IsNotMapping,
-    /// (func, args) for a function call that may narrow the type of its first argument.
-    Call(Box<Expr>, Arguments),
-    NotCall(Box<Expr>, Arguments),
+    /// (func, args, subject range) for a function call that may narrow an argument.
+    Call(Box<Expr>, Arguments, TextRange),
+    NotCall(Box<Expr>, Arguments, TextRange),
     /// A narrow op applies to a name; these operations mean we are narrowing to the case
     /// when that name evaluates to a truthy or falsy value.
     IsTruthy,
@@ -203,13 +203,13 @@ impl DisplayWith<ModuleInfo> for AtomicNarrowOp {
             AtomicNarrowOp::IsNotSequence => write!(f, "IsNotSequence"),
             AtomicNarrowOp::IsMapping => write!(f, "IsMapping"),
             AtomicNarrowOp::IsNotMapping => write!(f, "IsNotMapping"),
-            AtomicNarrowOp::Call(expr, arguments) => write!(
+            AtomicNarrowOp::Call(expr, arguments, _) => write!(
                 f,
                 "Call({}, {})",
                 expr.display_with(ctx),
                 arguments.display_with(ctx)
             ),
-            AtomicNarrowOp::NotCall(expr, arguments) => write!(
+            AtomicNarrowOp::NotCall(expr, arguments, _) => write!(
                 f,
                 "NotCall({}, {})",
                 expr.display_with(ctx),
@@ -310,12 +310,12 @@ impl AtomicNarrowOp {
             Self::IsNotSequence => Some(format!("not isinstance({subject}, Sequence)")),
             Self::IsMapping => Some(format!("isinstance({subject}, Mapping)")),
             Self::IsNotMapping => Some(format!("not isinstance({subject}, Mapping)")),
-            Self::Call(expr, arguments) => {
+            Self::Call(expr, arguments, _) => {
                 let func = snippet(expr.range())?;
                 let args = snippet(arguments.range()).unwrap_or_default();
                 Some(format!("{func}{args}"))
             }
-            Self::NotCall(expr, arguments) => {
+            Self::NotCall(expr, arguments, _) => {
                 let func = snippet(expr.range())?;
                 let args = snippet(arguments.range()).unwrap_or_default();
                 Some(format!("not {func}{args}"))
@@ -376,8 +376,8 @@ impl AtomicNarrowOp {
             Self::NotTypeIs(ty, args) => Self::TypeIs(ty.clone(), args.clone()),
             Self::TypeEq(v) => Self::TypeNotEq(v.clone()),
             Self::TypeNotEq(v) => Self::TypeEq(v.clone()),
-            Self::Call(f, args) => Self::NotCall(f.clone(), args.clone()),
-            Self::NotCall(f, args) => Self::Call(f.clone(), args.clone()),
+            Self::Call(f, args, subject) => Self::NotCall(f.clone(), args.clone(), *subject),
+            Self::NotCall(f, args, subject) => Self::Call(f.clone(), args.clone(), *subject),
             Self::IsTruthy => Self::IsFalsy,
             Self::IsFalsy => Self::IsTruthy,
             Self::Placeholder => Self::Placeholder,
@@ -1067,15 +1067,36 @@ impl NarrowOps {
                 node_index: _,
                 range,
                 func,
-                arguments: args @ Arguments { args: posargs, .. },
-            }) if !posargs.is_empty() => {
-                // This may be a function call that narrows the type of its first argument. Record
-                // it as a possible narrowing operation that we'll resolve in the answers phase.
-                Self::from_single_narrow_op(
-                    &posargs[0],
-                    AtomicNarrowOp::Call(Box::new((**func).clone()), args.clone()),
-                    *range,
-                )
+                arguments: args,
+            }) if !args.args.is_empty() || !args.keywords.is_empty() => {
+                // Resolve which actual argument is bound to the guarded parameter in the answers
+                // phase, once the callable's signature is known.
+                let mut narrow_ops = Self::new();
+                for candidate in args
+                    .args
+                    .first()
+                    .into_iter()
+                    .chain(args.keywords.iter().map(|keyword| &keyword.value))
+                {
+                    let candidate_narrows = Self::from_single_narrow_op(
+                        candidate,
+                        AtomicNarrowOp::Call(
+                            Box::new((**func).clone()),
+                            args.clone(),
+                            candidate.range(),
+                        ),
+                        *range,
+                    );
+                    for (name, (op, op_range)) in candidate_narrows.0 {
+                        match narrow_ops.0.entry(name) {
+                            Entry::Occupied(mut entry) => entry.get_mut().0.and(op),
+                            Entry::Vacant(entry) => {
+                                entry.insert((op, op_range));
+                            }
+                        }
+                    }
+                }
+                narrow_ops
             }
             Expr::Named(named) => {
                 let mut target_narrow = Self::from_single_narrow_op(

@@ -58,14 +58,20 @@ use crate::binding::narrow::NarrowSource;
 use crate::binding::narrow::NarrowingSubject;
 use crate::error::collector::ErrorCollector;
 use crate::error::style::ErrorStyle;
+use crate::types::callable::Callable;
 use crate::types::callable::FunctionKind;
+use crate::types::callable::Param;
+use crate::types::callable::Params;
 use crate::types::class::ClassType;
 use crate::types::lit_int::LitInt;
 use crate::types::literal::Lit;
 use crate::types::tuple::Tuple;
 use crate::types::type_info::TypeInfo;
 use crate::types::type_var::Restriction;
+use crate::types::types::BoundMethodType;
 use crate::types::types::CalleeKind;
+use crate::types::types::Forallable;
+use crate::types::types::OverloadType;
 use crate::types::types::TParams;
 use crate::types::types::Type;
 
@@ -367,10 +373,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         func: &Expr,
         args: &Arguments,
+        subject_range: TextRange,
         errors: &ErrorCollector,
     ) -> Option<AtomicNarrowOp> {
         let func_ty = self.expr_infer(func, errors);
-        if args.args.len() > 1 {
+        if args.args.len() > 1 && args.args[0].range() == subject_range {
             let second_arg = &args.args[1];
             let op = match func_ty.callee_kind() {
                 Some(CalleeKind::Function(FunctionKind::IsInstance)) => Some(
@@ -385,6 +392,20 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 return op;
             }
         }
+        let guarded_parameter_names = Self::guarded_parameter_names(&func_ty);
+        let is_guarded_argument =
+            args.args
+                .first()
+                .is_some_and(|arg| arg.range() == subject_range)
+                || args.keywords.iter().any(|keyword| {
+                    keyword.value.range() == subject_range
+                        && keyword.arg.as_ref().is_some_and(|identifier| {
+                            guarded_parameter_names.contains(&identifier.id)
+                        })
+                });
+        if !is_guarded_argument {
+            return None;
+        }
         if func_ty.is_typeis() {
             Some(AtomicNarrowOp::TypeIs(func_ty.clone(), args.clone()))
         } else if func_ty.is_typeguard() {
@@ -392,6 +413,70 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             None
         }
+    }
+
+    fn guarded_parameter_names(func_ty: &Type) -> SmallSet<Name> {
+        fn add_callable(callable: &Callable, skip_first: bool, names: &mut SmallSet<Name>) {
+            if !callable.is_typeguard() && !callable.is_typeis() {
+                return;
+            }
+            let (Params::List(params) | Params::Partial(params)) = &callable.params else {
+                return;
+            };
+            let Some(param) = params.items().get(usize::from(skip_first)) else {
+                return;
+            };
+            if let Param::Pos(name, _, _) = param {
+                names.insert(name.clone());
+            }
+        }
+
+        let mut names = SmallSet::new();
+        match func_ty {
+            Type::Callable(callable) => add_callable(callable, false, &mut names),
+            Type::Function(function) => add_callable(&function.signature, false, &mut names),
+            Type::Forall(forall) => match &forall.body {
+                Forallable::Callable(callable) => add_callable(callable, false, &mut names),
+                Forallable::Function(function) => {
+                    add_callable(&function.signature, false, &mut names)
+                }
+                Forallable::TypeAlias(_) => {}
+            },
+            Type::BoundMethod(method) => match &method.func {
+                BoundMethodType::Function(function) => {
+                    add_callable(&function.signature, true, &mut names)
+                }
+                BoundMethodType::Forall(forall) => {
+                    add_callable(&forall.body.signature, true, &mut names)
+                }
+                BoundMethodType::Overload(overload) => {
+                    for signature in overload.signatures.iter() {
+                        match signature {
+                            OverloadType::Function(function) => {
+                                add_callable(&function.signature, true, &mut names)
+                            }
+                            OverloadType::Forall(forall) => {
+                                add_callable(&forall.body.signature, true, &mut names)
+                            }
+                        }
+                    }
+                }
+            },
+            Type::Overload(overload) => {
+                for signature in overload.signatures.iter() {
+                    match signature {
+                        OverloadType::Function(function) => {
+                            add_callable(&function.signature, false, &mut names)
+                        }
+                        OverloadType::Forall(forall) => {
+                            add_callable(&forall.body.signature, false, &mut names)
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        names
     }
 
     /// Extract element expressions from a literal container (list, tuple, set)
@@ -1696,8 +1781,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     ty.clone()
                 }
             }
-            AtomicNarrowOp::Call(func, args) | AtomicNarrowOp::NotCall(func, args) => {
-                if let Some(resolved_op) = self.resolve_narrowing_call(func, args, errors) {
+            AtomicNarrowOp::Call(func, args, subject_range)
+            | AtomicNarrowOp::NotCall(func, args, subject_range) => {
+                if let Some(resolved_op) =
+                    self.resolve_narrowing_call(func, args, *subject_range, errors)
+                {
                     if matches!(op, AtomicNarrowOp::Call(..)) {
                         self.atomic_narrow(ty, &resolved_op, range, errors)
                     } else {
@@ -1959,11 +2047,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     return type_info.clone();
                 };
                 let Some(op_for_narrow) = (match op {
-                    AtomicNarrowOp::Call(func, args) => {
-                        self.resolve_narrowing_call(func.as_ref(), args, errors)
+                    AtomicNarrowOp::Call(func, args, subject_range) => {
+                        self.resolve_narrowing_call(func.as_ref(), args, *subject_range, errors)
                     }
-                    AtomicNarrowOp::NotCall(func, args) => self
-                        .resolve_narrowing_call(func.as_ref(), args, errors)
+                    AtomicNarrowOp::NotCall(func, args, subject_range) => self
+                        .resolve_narrowing_call(func.as_ref(), args, *subject_range, errors)
                         .map(|resolved_op| resolved_op.negate()),
                     _ => Some(op.clone()),
                 }) else {

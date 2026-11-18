@@ -1455,6 +1455,23 @@ def f(x: Cat | Dog):
 );
 
 testcase!(
+    test_typeguard_keyword_argument,
+    r#"
+from typing import TypeGuard, assert_type
+
+def is_str(value: object, other: object) -> TypeGuard[str]:
+    return isinstance(value, str)
+
+def f(x: object, y: object) -> None:
+    if is_str(other=y, value=x):
+        assert_type(x, str)
+        assert_type(y, object)
+    if is_str(x, y):
+        assert_type(x, str)
+"#,
+);
+
+testcase!(
     test_typeis,
     r#"
 from typing import TypeIs, assert_type
@@ -1470,6 +1487,25 @@ def f(x: Cat | Dog):
     else:
         assert_type(x, Dog)
     "#,
+);
+
+testcase!(
+    test_typeis_keyword_argument,
+    r#"
+from typing import TypeIs, assert_type
+
+def is_str(value: object, other: object) -> TypeIs[str]:
+    return isinstance(value, str)
+
+def f(x: object, y: object) -> None:
+    if is_str(other=y, value=x):
+        assert_type(x, str)
+        assert_type(y, object)
+    else:
+        assert_type(x, object)
+    if is_str(x, y):
+        assert_type(x, str)
+"#,
 );
 
 testcase!(
