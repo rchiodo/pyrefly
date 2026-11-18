@@ -107,6 +107,12 @@ impl<'a, Ans: LookupAnswer> TypeOrder<'a, Ans> {
         }
     }
 
+    pub fn get_current_class_member_type(self, cls: &Class, name: &Name) -> Option<Type> {
+        self.0
+            .get_field_from_current_class_only(cls, name)
+            .map(|field| field.ty())
+    }
+
     pub fn get_enum_member_count(self, cls: &Class) -> Option<usize> {
         self.0.get_enum_member_count(cls)
     }

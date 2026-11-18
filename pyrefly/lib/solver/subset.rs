@@ -67,6 +67,7 @@ use crate::types::tuple::Tuple;
 use crate::types::type_alias::TypeAliasData;
 use crate::types::type_var::Restriction;
 use crate::types::type_var::Variance;
+use crate::types::types::AnyStyle;
 use crate::types::types::Forallable;
 use crate::types::types::TArgs;
 use crate::types::types::Type;
@@ -161,6 +162,22 @@ fn params_have_any_args_and_kwargs(params: &Params) -> bool {
     }
 }
 
+fn callable_declares_any_args_and_kwargs(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::Callable(callable) => Some(params_have_any_args_and_kwargs(&callable.params)),
+        Type::Function(function) => {
+            Some(params_have_any_args_and_kwargs(&function.signature.params))
+        }
+        Type::Forall(forall) => match &forall.body {
+            Forallable::Function(function) => {
+                Some(params_have_any_args_and_kwargs(&function.signature.params))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 fn all<T>(
     it: impl Iterator<Item = T>,
     mut check: impl FnMut(T) -> Result<(), SubsetError>,
@@ -193,6 +210,18 @@ struct FreshForall {
 }
 
 impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
+    fn allows_gradual_callable_fallback(&self) -> bool {
+        !self.solver.strict_callable_subtyping && !self.force_strict_callable_subtyping
+    }
+
+    fn with_strict_callable_subtyping<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let previous = self.force_strict_callable_subtyping;
+        self.force_strict_callable_subtyping = true;
+        let result = f(self);
+        self.force_strict_callable_subtyping = previous;
+        result
+    }
+
     /// Can a function with l_args be called as a function with u_args?
     fn is_subset_param_list(
         &mut self,
@@ -203,7 +232,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let result = self.is_subset_param_list_impl(l_args, u_args);
         match result {
             Err(_)
-                if !self.solver.strict_callable_subtyping
+                if self.allows_gradual_callable_fallback()
                     && (has_any_args_and_kwargs(l_args) || has_any_args_and_kwargs(u_args)) =>
             {
                 Ok(())
@@ -576,7 +605,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         };
         match result {
             Err(_)
-                if !self.solver.strict_callable_subtyping
+                if self.allows_gradual_callable_fallback()
                     && (params_have_any_args_and_kwargs(l_params)
                         || params_have_any_args_and_kwargs(u_params)) =>
             {
@@ -671,6 +700,17 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             .get_protocol_member_names(protocol.class_object());
         for name in protocol_members {
             let allow_residual_capture = name == dunder::CALL;
+            let force_strict_callable_subtyping = name == dunder::CALL
+                && protocol
+                    .targs()
+                    .as_slice()
+                    .iter()
+                    .any(|targ| matches!(targ, Type::Any(AnyStyle::Explicit)))
+                && self
+                    .type_order
+                    .get_current_class_member_type(protocol.class_object(), &name)
+                    .and_then(|call| callable_declares_any_args_and_kwargs(&call))
+                    .is_some_and(|declares_gradual_params| !declares_gradual_params);
             if name == dunder::INIT || name == dunder::NEW {
                 // Protocols can't be instantiated
                 continue;
@@ -691,13 +731,19 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                             self.is_subset_eq(got, want).is_ok()
                         })
                 {
-                    self.is_subset_eq_for_protocol_member(
+                    self.is_subset_eq_for_protocol_member_with_strictness(
                         &got,
                         &want_no_self,
                         allow_residual_capture,
+                        force_strict_callable_subtyping,
                     )?;
                 } else {
-                    self.is_subset_eq_for_protocol_member(&got, &want, allow_residual_capture)?;
+                    self.is_subset_eq_for_protocol_member_with_strictness(
+                        &got,
+                        &want,
+                        allow_residual_capture,
+                        force_strict_callable_subtyping,
+                    )?;
                 }
             } else {
                 self.type_order.is_protocol_subset_at_attr(
@@ -705,12 +751,33 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     &protocol,
                     &name,
                     &mut |got, want| {
-                        self.is_subset_eq_for_protocol_member(got, want, allow_residual_capture)
+                        self.is_subset_eq_for_protocol_member_with_strictness(
+                            got,
+                            want,
+                            allow_residual_capture,
+                            force_strict_callable_subtyping,
+                        )
                     },
                 )?;
             }
         }
         Ok(())
+    }
+
+    fn is_subset_eq_for_protocol_member_with_strictness(
+        &mut self,
+        got: &Type,
+        want: &Type,
+        allow_residual_capture: bool,
+        force_strict_callable_subtyping: bool,
+    ) -> Result<(), SubsetError> {
+        if force_strict_callable_subtyping {
+            self.with_strict_callable_subtyping(|me| {
+                me.is_subset_eq_for_protocol_member(got, want, allow_residual_capture)
+            })
+        } else {
+            self.is_subset_eq_for_protocol_member(got, want, allow_residual_capture)
+        }
     }
 
     fn is_subset_eq_for_protocol_member(
@@ -1838,7 +1905,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     self.is_subset_eq(l, &u.as_type())
                 });
                 match result {
-                    Err(_) if !self.solver.strict_callable_subtyping && has_any_args_kwargs => {
+                    Err(_) if self.allows_gradual_callable_fallback() && has_any_args_kwargs => {
                         Ok(())
                     }
                     _ => result,

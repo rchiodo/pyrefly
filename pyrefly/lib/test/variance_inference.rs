@@ -495,11 +495,18 @@ testcase!(
 from typing import Protocol, TypeVar
 
 T1 = TypeVar("T1")
+T2 = TypeVar("T2", bound=int)
+T3 = TypeVar("T3", bytes, str)
 T1_co = TypeVar("T1_co", covariant=True)
 T1_contra = TypeVar("T1_contra", contravariant=True)
 
 class AnotherBox(Protocol[T1]):  # E: Type variable `T1` in class `AnotherBox` is declared as invariant, but could be covariant based on its usage
     def content(self) -> T1: ...
+
+class Protocol2(Protocol[T1, T2, T3]):  # E: Type variable `T3` in class `Protocol2` is declared as invariant, but could be contravariant based on its usage
+    def m1(self, p0: T1, p1: T2, p2: T3) -> T1: ...
+    def m2(self) -> T1: ...
+    def m3(self) -> T2: ...
 
 class Protocol4(Protocol[T1]):  # E: Type variable `T1` in class `Protocol4` is declared as invariant, but could be contravariant based on its usage
     def m1(self, p0: T1) -> None: ...

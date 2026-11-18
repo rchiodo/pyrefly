@@ -741,6 +741,24 @@ def g(p: P) -> None:
 );
 
 testcase!(
+    test_generic_callable_protocol_specialized_with_any_is_not_ellipsis,
+    r#"
+from typing import Any, Protocol, TypeVar
+
+T_contra = TypeVar("T_contra", contravariant=True)
+
+class GenericCallable(Protocol[T_contra]):
+    def __call__(self, *args: T_contra, **kwargs: T_contra) -> None: ...
+
+class NoArgs(Protocol):
+    def __call__(self) -> None: ...
+
+def test(got: NoArgs):
+    bad: GenericCallable[Any] = got  # E: `NoArgs` is not assignable to `GenericCallable[Any]`
+"#,
+);
+
+testcase!(
     test_protocol_variance,
     r#"
 from typing import Protocol

@@ -2450,6 +2450,7 @@ impl Solver {
             subset_cache: SmallMap::new(),
             class_protocol_assumptions: SmallSet::new(),
             coinductive_assumptions_used: false,
+            force_strict_callable_subtyping: false,
             witness_deferred_vars: SmallMap::new(),
         }
     }
@@ -3072,6 +3073,7 @@ pub struct Subset<'a, Ans: LookupAnswer> {
     /// the current computation. Used to avoid caching protocol results in the
     /// persistent cross-call cache when they depend on coinductive assumptions.
     pub coinductive_assumptions_used: bool,
+    pub force_strict_callable_subtyping: bool,
     witness_deferred_vars: SmallMap<u64, SmallSet<Var>>,
 }
 
