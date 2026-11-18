@@ -253,3 +253,75 @@ one intentional promotion-policy difference, one display-only family, and one
 intentional overload-policy difference. Future implementation work should
 target a behavioral incompatibility or a proven read-only constructor boundary,
 not the remaining raw string mismatch count.
+
+## Behavioral comparison scorecard
+
+The next comparison should use explicit behavioral oracles rather than treating
+checker agreement or a narrower reveal string as correctness. The checked-in
+`scripts/typechecker_behavior_cases.py` corpus pairs accepted and rejected
+operations in four categories:
+
+- identifying type errors;
+- preserving useful specificity;
+- exposing valid members while rejecting invalid members; and
+- selecting or retaining overload alternatives.
+
+Run `scripts/compare_typechecker_behavior.py` with Pyrefly and Pyright binaries
+to produce a scorecard and a table of disagreements. Every precision or member
+probe has a negative counterpart so implicit `Any` cannot receive credit merely
+for accepting an operation. Disputed policy cases remain visible individually
+rather than being converted into an unexplained aggregate winner.
+
+The initial 27-probe run against Pyrefly 1.2.0-dev.2 and Pyright 1.1.414 scored
+27/27 and 25/27 respectively. The two disagreements are the intentional mutable
+generic and ambiguous-overload policies described above. This targeted result
+validates the scorecard, but the corpus is too small and too closely related to
+this investigation to support a general claim that either checker is better.
+
+The bug-augmented corpus separates normative probes from unscored compatibility
+comparisons. After fixing keyword-bound `TypeGuard`/`TypeIs` narrowing
+([#5263](https://github.com/pyrefly-org/pyrefly/issues/5263)) and required-key
+checks through TypedDict unpacking
+([#5405](https://github.com/pyrefly-org/pyrefly/issues/5405)), its 32 scored
+probes give Pyrefly 32/32 and Pyright 31/32. Pyright loses the gradual
+ambiguous-overload capability probe. Mutable generic writes and literal
+retention through comprehensions
+([microsoft/pyright#7586](https://github.com/microsoft/pyright/issues/7586))
+remain visible as unscored policy comparisons.
+
+For a broader baseline, `scripts/compare_typechecker_conformance.py` derives
+1,528 hard-oracle probes from the checked-in official typing conformance files.
+It scores required diagnostics, including warning-level requirements such as
+PEP 702 deprecations, and single-line `assert_type` assertions using the suite's
+Python 3.13 configuration. Optional `# E?` behavior is excluded, as are three
+overload assertions that require the result to render exactly as `Any` even
+though the typing specification permits a more precise gradual result.
+
+The first run against the same checker versions produced:
+
+| Category | Pyrefly | Pyright |
+|---|---:|---:|
+| Errors | 794/813 | 812/813 |
+| Specificity | 409/413 | 413/413 |
+| Members | 256/262 | 257/262 |
+| Overloads | 40/43 | 42/43 |
+| Total | 1499/1531 | 1524/1531 |
+| Unexpected diagnostic locations | 34 | 37 |
+
+After implementing the identified workstreams, the same normative comparison
+produces:
+
+| Category | Pyrefly | Pyright |
+|---|---:|---:|
+| Errors | 813/813 | 813/813 |
+| Specificity | 413/413 | 413/413 |
+| Members | 262/262 | 262/262 |
+| Overloads | 40/40 | 40/40 |
+| Total | 1528/1528 | 1528/1528 |
+| Unexpected diagnostic locations | 37 | 39 |
+
+The normative corpus therefore no longer favors either checker. The targeted
+corpus favors Pyrefly by one scored overload capability and two unscored
+inference-policy comparisons. Diagnostics outside the scored oracle locations
+still require individual adjudication before they can be classified as false
+positives.
