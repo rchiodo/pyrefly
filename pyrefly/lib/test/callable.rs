@@ -19,9 +19,22 @@ f3: Callable[[int], int] = lambda x: 1
 reveal_type(f3)  # E: revealed type: (int) -> int
 f4: Callable[[int], int] = lambda x: reveal_type(x)  # E: revealed type: int
 f5: Callable[[int], int] = lambda x: x
-f6: Callable[[int], int] = lambda x: "foo"  # E: `(x: int) -> Literal['foo']` is not assignable to `(int) -> int`
+f6: Callable[[int], int] = lambda x: "foo"  # E: Callable return type is incompatible: `Literal['foo']` is not assignable to `int`
 f7: Callable[[int, int], int] = lambda x: 1  # E: `(x: int) -> Literal[1]` is not assignable to `(int, int) -> int`
 f8: Callable[[int], int] = lambda x: x + "foo" # E: Argument `Literal['foo']` is not assignable to parameter `value` with type `int`
+"#,
+);
+
+testcase!(
+    test_callable_assignability_reasons,
+    r#"
+from typing import Callable
+
+def accepts_str(x: str) -> int:
+    return 0
+
+parameter_mismatch: Callable[[int], int] = accepts_str  # E: Callable parameter 1 is incompatible: assigned callable parameter has type `str`, but expected callable parameter has type `int`
+return_mismatch: Callable[[int], int] = lambda x: "wrong"  # E: Callable return type is incompatible: `Literal['wrong']` is not assignable to `int`
 "#,
 );
 

@@ -44,7 +44,17 @@ b: A[int] = B[int]()
 c: A[int] = C()
 oops1: A[int] = D[int]()  # E: `D[int]` is not assignable to `A[int]`
 # Although T is bivariant in A, we follow mypy and pyright's lead in treating it as invariant.
-oops2: A[int] = A[str]()  # E: `A[str]` is not assignable to `A[int]`
+oops2: A[int] = A[str]()  # E: Type argument `T` is invariant: `str` is not equivalent to `int`
+"#,
+);
+
+testcase!(
+    test_nested_assignability_reasons,
+    r#"
+class Box[T]: pass
+
+generic_mismatch: Box[int] = Box[str]()  # E: Type argument `T` is invariant: `str` is not equivalent to `int`
+tuple_mismatch: tuple[int, str] = (1, 2)  # E: Tuple element 2 is incompatible: `Literal[2]` is not assignable to `str`
 "#,
 );
 

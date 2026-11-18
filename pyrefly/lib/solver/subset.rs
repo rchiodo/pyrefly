@@ -52,6 +52,7 @@ use crate::solver::solver::ResidualWitnessContext;
 use crate::solver::solver::Subset;
 use crate::solver::solver::SubsetCacheEntry;
 use crate::solver::solver::SubsetError;
+use crate::solver::solver::SubsetMismatchContext;
 use crate::solver::solver::SubsetWithSnapshotResult;
 use crate::solver::solver::TypedDictSubsetError;
 use crate::types::callable::Param;
@@ -251,6 +252,7 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         let mut u_args = u_args.iter();
         let mut l_arg = l_args.next();
         let mut u_arg = u_args.next();
+        let mut positional_index = 0;
         // This holds any Param::Pos from `u` that matched *args from `l`.
         // When handling keyword params, we make sure that they can be passed by name.
         let mut u_param_matched_with_l_varargs = Vec::new();
@@ -270,7 +272,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Some(Param::PosOnly(_, l, l_req) | Param::Pos(_, l, l_req)),
                     Some(Param::PosOnly(_, u, u_req)),
                 ) if (*u_req == Required::Required || matches!(l_req, Required::Optional(_))) => {
-                    self.is_subset_eq(u, l)?;
+                    self.is_subset_eq(u, l).map_err(|error| {
+                        SubsetError::mismatch(
+                            SubsetMismatchContext::CallableParameter(positional_index),
+                            l.clone(),
+                            u.clone(),
+                            error,
+                        )
+                    })?;
+                    positional_index += 1;
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
@@ -280,7 +290,15 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     if l_name != u_name {
                         return Err(SubsetError::PosParamName(l_name.clone(), u_name.clone()));
                     }
-                    self.is_subset_eq(u, l)?;
+                    self.is_subset_eq(u, l).map_err(|error| {
+                        SubsetError::mismatch(
+                            SubsetMismatchContext::CallableParameter(positional_index),
+                            l.clone(),
+                            u.clone(),
+                            error,
+                        )
+                    })?;
+                    positional_index += 1;
                     l_arg = l_args.next();
                     u_arg = u_args.next();
                 }
@@ -800,7 +818,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
         match (got, want) {
             (Tuple::Concrete(lelts), Tuple::Concrete(uelts)) => {
                 if lelts.len() == uelts.len() {
-                    all(lelts.iter().zip(uelts), |(l, u)| self.is_subset_eq(l, u))
+                    all(lelts.iter().zip(uelts).enumerate(), |(index, (l, u))| {
+                        self.is_subset_eq(l, u).map_err(|error| {
+                            SubsetError::mismatch(
+                                SubsetMismatchContext::TupleElement(index),
+                                l.clone(),
+                                u.clone(),
+                                error,
+                            )
+                        })
+                    })
                 } else {
                     Err(SubsetError::Other)
                 }
@@ -2006,7 +2033,14 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         .with_argument_side(argument_side.negated()),
                     |me| me.is_subset_params(&l_sig.params, &u_sig.params),
                 )?;
-                self.is_subset_eq(&l_sig.ret, &u_sig.ret)
+                self.is_subset_eq(&l_sig.ret, &u_sig.ret).map_err(|error| {
+                    SubsetError::mismatch(
+                        SubsetMismatchContext::CallableReturn,
+                        l_sig.ret.clone(),
+                        u_sig.ret.clone(),
+                        error,
+                    )
+                })
             }
             (Type::TypedDict(TypedDict::Anonymous(got)), Type::TypedDict(want)) => {
                 self.is_subset_anonymous_typed_dict(got, want)
@@ -2637,16 +2671,50 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
 
         for (got_arg, want_arg, param) in izip!(got, want, params.iter()) {
             if param.kind() == QuantifiedKind::TypeVarTuple {
-                self.is_consistent(got_arg, want_arg)?;
+                self.is_consistent(got_arg, want_arg).map_err(|error| {
+                    SubsetError::mismatch(
+                        SubsetMismatchContext::InvariantTypeArgument(param.name().clone()),
+                        got_arg.clone(),
+                        want_arg.clone(),
+                        error,
+                    )
+                })?;
             } else {
                 match variances.get(param.name()) {
-                    Variance::Covariant => self.is_subset_eq(got_arg, want_arg)?,
-                    Variance::Contravariant => self.is_subset_eq(want_arg, got_arg)?,
+                    Variance::Covariant => {
+                        self.is_subset_eq(got_arg, want_arg).map_err(|error| {
+                            SubsetError::mismatch(
+                                SubsetMismatchContext::CovariantTypeArgument(param.name().clone()),
+                                got_arg.clone(),
+                                want_arg.clone(),
+                                error,
+                            )
+                        })?
+                    }
+                    Variance::Contravariant => {
+                        self.is_subset_eq(want_arg, got_arg).map_err(|error| {
+                            SubsetError::mismatch(
+                                SubsetMismatchContext::ContravariantTypeArgument(
+                                    param.name().clone(),
+                                ),
+                                got_arg.clone(),
+                                want_arg.clone(),
+                                error,
+                            )
+                        })?
+                    }
                     // Technically, the right thing to do for bivariance would be to skip the
                     // subset check. However, this leads to confusing and unintuitive behavior,
                     // so we treat bivariant type parameters as invariant instead.
                     Variance::Invariant | Variance::Bivariant => {
-                        self.is_consistent(got_arg, want_arg)?
+                        self.is_consistent(got_arg, want_arg).map_err(|error| {
+                            SubsetError::mismatch(
+                                SubsetMismatchContext::InvariantTypeArgument(param.name().clone()),
+                                got_arg.clone(),
+                                want_arg.clone(),
+                                error,
+                            )
+                        })?
                     }
                 }
             }

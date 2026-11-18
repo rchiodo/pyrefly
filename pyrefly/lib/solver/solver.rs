@@ -2634,7 +2634,27 @@ impl OpenTypedDictSubsetError {
 
 /// If a got <: want check fails, the failure reason
 #[derive(Debug, Clone)]
+pub enum SubsetMismatchContext {
+    CallableParameter(usize),
+    CallableReturn,
+    TupleElement(usize),
+    CovariantTypeArgument(Name),
+    ContravariantTypeArgument(Name),
+    InvariantTypeArgument(Name),
+}
+
+#[derive(Debug, Clone)]
+pub struct SubsetMismatch {
+    context: SubsetMismatchContext,
+    got: Type,
+    want: Type,
+    cause: Box<SubsetError>,
+}
+
+#[derive(Debug, Clone)]
 pub enum SubsetError {
+    /// A nested type comparison failed. The context preserves where the mismatch occurred.
+    Mismatch(Box<SubsetMismatch>),
     /// The name of a positional parameter differs between `got` and `want`.
     PosParamName(Name, Name),
     /// Instantiations for quantified vars are incompatible with bounds
@@ -2671,8 +2691,52 @@ pub enum SubsetError {
 }
 
 impl SubsetError {
+    pub fn mismatch(
+        context: SubsetMismatchContext,
+        got: Type,
+        want: Type,
+        cause: SubsetError,
+    ) -> Self {
+        Self::Mismatch(Box::new(SubsetMismatch {
+            context,
+            got,
+            want,
+            cause: Box::new(cause),
+        }))
+    }
+
     pub fn to_error_msg(self) -> Option<String> {
         match self {
+            SubsetError::Mismatch(mismatch) => {
+                let got = mismatch.got.deterministic_printing();
+                let want = mismatch.want.deterministic_printing();
+                let message = match mismatch.context {
+                    SubsetMismatchContext::CallableParameter(index) => format!(
+                        "Callable parameter {} is incompatible: assigned callable parameter has type `{got}`, but expected callable parameter has type `{want}`",
+                        index + 1
+                    ),
+                    SubsetMismatchContext::CallableReturn => format!(
+                        "Callable return type is incompatible: `{got}` is not assignable to `{want}`"
+                    ),
+                    SubsetMismatchContext::TupleElement(index) => format!(
+                        "Tuple element {} is incompatible: `{got}` is not assignable to `{want}`",
+                        index + 1
+                    ),
+                    SubsetMismatchContext::CovariantTypeArgument(name) => format!(
+                        "Type argument `{name}` is covariant: `{got}` is not assignable to `{want}`"
+                    ),
+                    SubsetMismatchContext::ContravariantTypeArgument(name) => format!(
+                        "Type argument `{name}` is contravariant: `{want}` is not assignable to `{got}`"
+                    ),
+                    SubsetMismatchContext::InvariantTypeArgument(name) => format!(
+                        "Type argument `{name}` is invariant: `{got}` is not equivalent to `{want}`"
+                    ),
+                };
+                match mismatch.cause.to_error_msg() {
+                    Some(cause) => Some(format!("{message}\n{cause}")),
+                    None => Some(message),
+                }
+            }
             SubsetError::PosParamName(got, want) => Some(format!(
                 "Positional parameter name mismatch: got `{got}`, want `{want}`"
             )),
