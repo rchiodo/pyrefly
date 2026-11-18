@@ -28,6 +28,7 @@ mod dataclass_transform;
 mod dataclasses;
 mod decorators;
 mod delayed_inference;
+mod deprecated;
 mod descriptors;
 mod dict;
 mod django;
