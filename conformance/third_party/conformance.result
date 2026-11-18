@@ -8,10 +8,7 @@
   "aliases_typealiastype.py": [],
   "aliases_variance.py": [],
   "annotations_coroutines.py": [],
-  "annotations_forward_refs.py": [
-    "Line 87: Unexpected errors ['Expected a type form, got instance of `(self: Self@ClassD) -> None`']",
-    "Line 96: Unexpected errors ['assert_type(Unknown, int) failed']"
-  ],
+  "annotations_forward_refs.py": [],
   "annotations_generators.py": [],
   "annotations_methods.py": [],
   "annotations_typeexpr.py": [],
@@ -63,10 +60,7 @@
   "enums_member_names.py": [],
   "enums_member_values.py": [],
   "enums_members.py": [],
-  "exceptions_context_managers.py": [
-    "Line 50: Unexpected errors ['assert_type(str, int | str) failed']",
-    "Line 57: Unexpected errors ['assert_type(str, int | str) failed']"
-  ],
+  "exceptions_context_managers.py": [],
   "generics_base_class.py": [],
   "generics_basic.py": [],
   "generics_defaults.py": [],
@@ -111,7 +105,11 @@
   "overloads_basic.py": [],
   "overloads_consistency.py": [],
   "overloads_definitions.py": [],
-  "overloads_evaluation.py": [],
+  "overloads_evaluation.py": [
+    "Line 265: Unexpected errors ['assert_type(OverloadResult[list[int], list[str]], Any) failed']",
+    "Line 281: Unexpected errors ['assert_type(OverloadResult[list[int], list[str]], Any) failed']",
+    "Line 347: Unexpected errors ['assert_type(OverloadResult[list[int], list[str]], Any) failed']"
+  ],
   "protocols_class_objects.py": [],
   "protocols_definition.py": [],
   "protocols_explicit.py": [],

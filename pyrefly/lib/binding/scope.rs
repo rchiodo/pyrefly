@@ -2387,6 +2387,7 @@ impl Scopes {
                 &Usage::NonPinningValue(None),
                 lookup,
                 current_module,
+                false,
             ) {
                 // An already-materialized builtin, or a fresh builtin fallback: check whether the
                 // resolving builtin module makes it a special export.
@@ -3117,6 +3118,7 @@ impl Scopes {
         usage: &Usage,
         lookup: &dyn LookupExport,
         current_module: ModuleName,
+        skip_class_scope: bool,
     ) -> NameReadInfo {
         let skip_class_overload_function_definitions = matches!(
             usage,
@@ -3124,6 +3126,9 @@ impl Scopes {
         );
         self.visit_scopes(|_, scope, flow_barrier| {
             let is_class = matches!(scope.kind, ScopeKind::Class(_));
+            if is_class && skip_class_scope {
+                return None;
+            }
 
             let flow_info = scope.flow.get_info_hashed(name);
             let is_class_overload = is_class

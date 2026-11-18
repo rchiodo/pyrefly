@@ -17,8 +17,8 @@ from typing import assert_type
 class D:
     def int(self) -> None:
         ...
-    x: "int" = 0  # E: Expected a type form
-assert_type(D.x, int)  # E: assert_type(Unknown, int) failed
+    x: "int" = 0
+assert_type(D.x, int)
 "#,
 );
 

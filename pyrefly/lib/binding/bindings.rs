@@ -1099,7 +1099,16 @@ impl<'a> BindingsBuilder<'a> {
     /// context (the `lookup` and current module) so call sites don't repeat it.
     pub(crate) fn look_up_name_for_read(&self, name: Hashed<&Name>, usage: &Usage) -> NameReadInfo {
         self.scopes
-            .look_up_name_for_read(name, usage, self.lookup, self.module_info.name())
+            .look_up_name_for_read(name, usage, self.lookup, self.module_info.name(), false)
+    }
+
+    fn look_up_name_for_forward_reference(
+        &self,
+        name: Hashed<&Name>,
+        usage: &Usage,
+    ) -> NameReadInfo {
+        self.scopes
+            .look_up_name_for_read(name, usage, self.lookup, self.module_info.name(), true)
     }
 
     fn inject_shadowed_implicit_builtins(&mut self) {
@@ -1522,11 +1531,32 @@ impl<'a> BindingsBuilder<'a> {
     /// First-use detection happens later in `process_deferred_bound_names`
     /// when all phi nodes are populated.
     pub fn lookup_name(&mut self, name: Hashed<&Name>, usage: &mut Usage) -> NameLookupResult {
+        self.lookup_name_impl(name, usage, false)
+    }
+
+    pub fn lookup_name_for_forward_reference(
+        &mut self,
+        name: Hashed<&Name>,
+        usage: &mut Usage,
+    ) -> NameLookupResult {
+        self.lookup_name_impl(name, usage, true)
+    }
+
+    fn lookup_name_impl(
+        &mut self,
+        name: Hashed<&Name>,
+        usage: &mut Usage,
+        skip_class_scope: bool,
+    ) -> NameLookupResult {
         let may_prove_initialized = !matches!(
             usage,
             Usage::StaticTypeInformation { .. } | Usage::TypeAliasRhs
         );
-        let name_read_info = self.look_up_name_for_read(name, usage);
+        let name_read_info = if skip_class_scope {
+            self.look_up_name_for_forward_reference(name, usage)
+        } else {
+            self.look_up_name_for_read(name, usage)
+        };
         match name_read_info {
             NameReadInfo::Flow { idx, initialized } => {
                 // Mark as used (this must happen during traversal for unused-variable detection)

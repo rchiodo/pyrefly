@@ -1723,17 +1723,6 @@
     },
     {
       "code": -2,
-      "column": 9,
-      "concise_description": "Expected a type form, got instance of `(self: Self@ClassD) -> None`",
-      "description": "Expected a type form, got instance of `(self: Self@ClassD) -> None`",
-      "line": 87,
-      "name": "not-a-type",
-      "severity": "error",
-      "stop_column": 12,
-      "stop_line": 87
-    },
-    {
-      "code": -2,
       "column": 8,
       "concise_description": "Expected a type form, got instance of `(self: Self@ClassD) -> None`",
       "description": "Expected a type form, got instance of `(self: Self@ClassD) -> None`",
@@ -1742,17 +1731,6 @@
       "severity": "error",
       "stop_column": 11,
       "stop_line": 89
-    },
-    {
-      "code": -2,
-      "column": 12,
-      "concise_description": "assert_type(Unknown, int) failed",
-      "description": "assert_type(Unknown, int) failed",
-      "line": 96,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 27,
-      "stop_line": 96
     }
   ],
   "annotations_generators.py": [
@@ -5488,30 +5466,7 @@
       "stop_line": 151
     }
   ],
-  "exceptions_context_managers.py": [
-    {
-      "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(str, int | str) failed",
-      "description": "assert_type(str, int | str) failed",
-      "line": 50,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 30,
-      "stop_line": 50
-    },
-    {
-      "code": -2,
-      "column": 16,
-      "concise_description": "assert_type(str, int | str) failed",
-      "description": "assert_type(str, int | str) failed",
-      "line": 57,
-      "name": "assert-type",
-      "severity": "error",
-      "stop_column": 30,
-      "stop_line": 57
-    }
-  ],
+  "exceptions_context_managers.py": [],
   "generics_base_class.py": [
     {
       "code": -2,
@@ -9359,6 +9314,39 @@
       "severity": "error",
       "stop_column": 22,
       "stop_line": 116
+    },
+    {
+      "code": -2,
+      "column": 16,
+      "concise_description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "line": 265,
+      "name": "assert-type",
+      "severity": "error",
+      "stop_column": 27,
+      "stop_line": 265
+    },
+    {
+      "code": -2,
+      "column": 16,
+      "concise_description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "line": 281,
+      "name": "assert-type",
+      "severity": "error",
+      "stop_column": 34,
+      "stop_line": 281
+    },
+    {
+      "code": -2,
+      "column": 16,
+      "concise_description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "description": "assert_type(OverloadResult[list[int], list[str]], Any) failed",
+      "line": 347,
+      "name": "assert-type",
+      "severity": "error",
+      "stop_column": 27,
+      "stop_line": 347
     }
   ],
   "protocols_class_objects.py": [
