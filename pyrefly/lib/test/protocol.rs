@@ -83,7 +83,7 @@ wrong_signature: Target = WrongSignature()  # E: `WrongSignature` is not assigna
 def choose(flag: bool) -> Good | Missing:
     return Good() if flag else Missing()
 
-from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target` for variable `from_union`: Protocol `Target` requires attribute `value`
+from_union: Target = choose(True)  # E: Union member `Missing` is not assignable to `Target`
 nested: tuple[Target] = (WrongValue(),)  # E: Tuple element 1 is incompatible: `WrongValue` is not assignable to `Target`\nProtocol `Target`: `WrongValue.value` has type `str`
 "#,
 );

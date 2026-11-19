@@ -318,12 +318,13 @@ produces:
 | Members | 262/262 | 262/262 |
 | Overloads | 48/48 | 48/48 |
 | Total | 1536/1536 | 1536/1536 |
-| Unexpected diagnostic locations | 2 | 2 |
+| Unexpected diagnostic locations | 0 | 2 |
 
-The normative corpus therefore no longer favors either checker. The targeted
-corpus favors Pyrefly by one scored overload capability and two unscored
-inference-policy comparisons. Diagnostics outside the scored oracle locations
-still require individual adjudication before they can be classified as false
+Both checkers satisfy every normative probe. Pyrefly has no diagnostics outside
+the scored or optional oracle locations, while Pyright has two. The targeted
+corpus also favors Pyrefly by three scored probes and two unscored
+inference-policy comparisons. Diagnostics outside scored oracle locations still
+require individual adjudication before they can be classified as false
 positives.
 
 The location totals changed substantially after correcting two accounting
@@ -332,15 +333,12 @@ locations even though they are excluded from normative scores, and the
 conformance corpus includes `.pyi` files whose grouped overload oracles were
 previously omitted. Counting both as known locations reduced the apparent
 unexpected totals from 37/39 to 2/2 and added eight required stub-file overload
-probes. This is a scorecard fix, not a checker behavior change.
+probes. The subsequent overloaded-descriptor fix removed Pyrefly's remaining two
+locations.
 
-The four remaining locations were adjudicated from their surrounding
+The two remaining locations were adjudicated from their surrounding
 conformance cases:
 
-- Pyrefly reports two dataclass descriptor-definition diagnostics on cases the
-  suite expects to be valid. These look like genuine descriptor/dataclass
-  compatibility gaps, but changing descriptor semantics is not isolated enough
-  for this measurement-only change.
 - Pyright reports an invariant assignment on the line explicitly marked `# OK`
   in the variance-inference case. This looks like a variance-inference gap.
 - Pyright also reports that a static method should not name its first parameter
@@ -372,17 +370,15 @@ The current branch build and Pyright 1.1.414 produce:
 
 | Checker | Range | Category | Actual type | Expected type | Name | Related candidates | Hint | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Pyrefly 1.2.0-dev.2 | 64/64 | 62/64 | 59/60 | 58/60 | 60/63 | 6/6 | 63/63 | 372/380 |
-| Pyright 1.1.414 | 62/64 | 55/64 | 56/60 | 50/60 | 48/63 | 0/6 | 63/63 | 334/380 |
+| Pyrefly 1.2.0-dev.2 | 64/64 | 64/64 | 60/60 | 60/60 | 63/63 | 6/6 | 63/63 | 380/380 |
+| Pyright 1.1.414 | 62/64 | 55/64 | 56/60 | 50/60 | 50/63 | 0/6 | 63/63 | 336/380 |
 
-Both checkers provide every scored actionable hint. Pyrefly also selects an
-overlapping primary range for every operation and links all six locally defined
-overload groups through structured related locations. Its recurring misses are
-narrower: two protocol incompatibilities are reported as assignments without a
-protocol category signal, one union member diagnostic omits the receiver type,
-one imported overload reports only its closest candidate, one discriminated
-union diagnostic omits the expected tags, and three constructor or union
-diagnostics omit the relevant subject name.
+Both checkers provide every scored actionable hint. Pyrefly satisfies every
+structured quality oracle, including overlapping primary ranges, category and
+type context, relevant subject names, and related locations for all six scored
+overload groups. Imported source-backed overloads also expose their own
+cross-file URI and range, although the current corpus only scores structured
+candidate locations for the six local groups.
 
 Pyright's recurring gaps are broader. It exposes none of the six overload
 candidate groups through structured related locations, frequently omits
@@ -446,15 +442,15 @@ run-to-run stability.
 
 ### Exact local commands
 
-The reproducible Windows run used released checker binaries because the machine
-did not have the repository's Rust `stable` toolchain installed:
+The reproducible Windows run used the optimized binary from this branch and
+Pyright 1.1.414:
 
 ```powershell
-python -m pip install pyrefly==1.4.1 pyright==1.1.414
+$env:MSRUSTUP_TOOLCHAIN = "ms-prod-1.95"
+cargo build --release -p pyrefly
 $cache = Join-Path $env:TEMP "pyrefly-project-quality"
-$pyrefly = (Get-Command pyrefly).Source
 python scripts\compare_project_quality.py `
-  --pyrefly $pyrefly `
+  --pyrefly target\release\pyrefly.exe `
   --cache-dir $cache `
   --runs 3 `
   --timeout 300 `
@@ -473,20 +469,20 @@ python -m unittest test_compare_project_quality test_compare_typecheckers
 
 Environment:
 
-- Windows 10.0.26300, Python 3.11.9;
-- Pyrefly 1.4.1 and Pyright 1.1.414;
+- Windows 11 10.0.26300, Python 3.14.6;
+- current-branch Pyrefly 1.2.0-dev.2 and Pyright 1.1.414;
 - `mypy_primer` at `09201ae7e61c935e0d975b80ee8619d774c80300`;
 - `black` at `c0e143e75443afd3be50c3b63ed2ee2fd108f509`; and
 - `attrs` at `2a1fb86d44816afcc60e86d57956ce3604820326`.
 
 | Project | Checker | Successful runs | Median (s) | Errors min-max | Exact duplicates | Unstable signatures | Timeouts | Crashes |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| mypy_primer | Pyrefly | 3/3 | 0.741 | 3-3 | 0 | 0 | 0 | 0 |
-| mypy_primer | Pyright | 3/3 | 4.026 | 3-3 | 0 | 0 | 0 | 0 |
-| black | Pyrefly | 3/3 | 0.670 | 9-9 | 0 | 0 | 0 | 0 |
-| black | Pyright | 3/3 | 7.247 | 16-16 | 0 | 0 | 0 | 0 |
-| attrs | Pyrefly | 3/3 | 0.521 | 1-1 | 0 | 0 | 0 | 0 |
-| attrs | Pyright | 3/3 | 1.799 | 0-0 | 0 | 0 | 0 | 0 |
+| mypy_primer | Pyrefly | 3/3 | 0.448 | 3-3 | 0 | 0 | 0 | 0 |
+| mypy_primer | Pyright | 3/3 | 3.035 | 3-3 | 0 | 0 | 0 | 0 |
+| black | Pyrefly | 3/3 | 1.117 | 6-6 | 0 | 0 | 0 | 0 |
+| black | Pyright | 3/3 | 6.128 | 16-16 | 0 | 0 | 0 | 0 |
+| attrs | Pyrefly | 3/3 | 0.352 | 1-1 | 0 | 0 | 0 | 0 |
+| attrs | Pyright | 3/3 | 1.552 | 0-0 | 0 | 0 | 0 | 0 |
 
 All six checker/project combinations produced identical diagnostic signatures
 across their three runs, with no exact duplicates, crashes, or timeouts.
@@ -497,7 +493,7 @@ comparison, not as a universal speed ratio.
 | Project | Stable Pyrefly-only candidates | Stable Pyright-only candidates |
 |---|---:|---:|
 | mypy_primer | 0 | 0 |
-| black | 4 | 11 |
+| black | 1 | 11 |
 | attrs | 1 | 0 |
 
 The `black` and `attrs` candidates remain an adjudication backlog. The automated

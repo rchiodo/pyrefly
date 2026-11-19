@@ -48,13 +48,13 @@ class WrongValue(TypedDict):
     enabled: bool
 
 good: Target = Good(name="", count=0, enabled=True)
-missing: Target = Missing(name="")  # E: `Missing` is not assignable to `Target`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
-wrong_value: Target = WrongValue(name="", count="", enabled=True)  # E: `WrongValue` is not assignable to `Target`: Field `count` in `WrongValue` has type `str`
+missing: Target = Missing(name="")  # E: `Missing` is not assignable to `Target` for variable `missing`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+wrong_value: Target = WrongValue(name="", count="", enabled=True)  # E: `WrongValue` is not assignable to `Target` for variable `wrong_value`: Field `count` in `WrongValue` has type `str`
 
 def choose(flag: bool) -> Good | Missing:
     return Good(name="", count=0, enabled=True) if flag else Missing(name="")
 
-from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Field `count` is present in `Target` and absent in `Missing` # !E: Field `enabled`
+from_union: Target = choose(True)  # E: Union member `Missing` is not assignable to `Target` # !E: Field `enabled`
 nested: tuple[Target] = (Missing(name=""),)  # E: Tuple element 1 is incompatible # !E: Field `enabled`
 "#,
 );

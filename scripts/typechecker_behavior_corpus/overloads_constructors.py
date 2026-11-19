@@ -115,7 +115,7 @@ class Holder(Generic[T]):
         self.fallback = fallback
 
 
-bad_holder: Holder[int] = Holder(1, "bad fallback")  # benchmark: errors/error | quality: topic=constructors; category=constructor; span="bad fallback"; actual-type=str/Literal['bad fallback']; expected-type=int; name=fallback; hint=assignable
+bad_holder: Holder[int] = Holder[int](1, "bad fallback")  # benchmark: errors/error | quality: topic=constructors; category=constructor; span="bad fallback"; actual-type=str/Literal['bad fallback']; expected-type=int; name=fallback; hint=assignable
 
 
 class KeywordConstructed:

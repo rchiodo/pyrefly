@@ -35,7 +35,7 @@ class Store(Generic[T]):
         self.value = value
 
 
-integer_store: Store[int] = Store("text")  # benchmark: errors/error | quality: topic=generics; category=constructor; span="text"; actual-type=str/Literal['text']; expected-type=int; name=value; hint=assignable
+integer_store: Store[int] = Store[int]("text")  # benchmark: errors/error | quality: topic=generics; category=constructor; span="text"; actual-type=str/Literal['text']; expected-type=int; name=value; hint=assignable
 
 
 integer_store.value = "replacement"  # benchmark: errors/error | quality: topic=generics; category=assignment; span="replacement"; actual-type=str/Literal['replacement']; expected-type=int; name=value; hint=assignable
