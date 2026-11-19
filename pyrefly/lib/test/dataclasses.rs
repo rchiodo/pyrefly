@@ -2403,12 +2403,28 @@ assert_type(c.y, int)
 );
 
 testcase!(
-    test_dataclass_generic_descriptor_conformance,
+    test_dataclass_overloaded_descriptor_conformance,
     r#"
 from dataclasses import dataclass
 from typing import Any, Generic, TypeVar, assert_type, overload
 
 T = TypeVar("T")
+
+class Desc1:
+    @overload
+    def __get__(self, obj: None, owner: Any) -> "Desc1": ...
+    @overload
+    def __get__(self, obj: object, owner: Any) -> int: ...
+    def __get__(self, obj: object | None, owner: Any) -> "int | Desc1": ...
+    def __set__(self, obj: object, value: int) -> None: ...
+
+@dataclass
+class DC1:
+    y: Desc1 = Desc1()
+
+dc1 = DC1(3)
+assert_type(dc1.y, int)
+assert_type(DC1.y, Desc1)
 
 class Desc2(Generic[T]):
     @overload
@@ -2421,14 +2437,16 @@ class Desc2(Generic[T]):
 class DC2:
     x: Desc2[int]
     y: Desc2[str]
-    z: Desc2[str] = Desc2()  # E: Cannot set field `z` to non-data descriptor `Desc2`
+    z: Desc2[str] = Desc2()
 
 assert_type(DC2.x, list[int])
 assert_type(DC2.y, list[str])
+assert_type(DC2.z, list[str])
 
 dc2 = DC2(Desc2(), Desc2(), Desc2())
 assert_type(dc2.x, int)
 assert_type(dc2.y, str)
+assert_type(dc2.z, str)
 "#,
 );
 

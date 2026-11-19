@@ -346,6 +346,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if let DataclassMember::Field(field, _) = self.get_dataclass_member(cls, name)
                 && let Some((range, descriptor_cls)) = field.value.non_data_descriptor_info()
             {
+                // Overloaded getters commonly distinguish class and instance access. The typing
+                // conformance suite treats these as valid dataclass fields even though a
+                // non-data descriptor can be shadowed by the generated __init__ assignment.
+                if self.dataclass_descriptor_getter_is_overloaded(&descriptor_cls) {
+                    continue;
+                }
+
                 let get_return_ty = self
                     .get_class_member(descriptor_cls.class_object(), &dunder::GET)
                     .and_then(|get_field| get_field.ty().callable_return_type(self.heap));
@@ -388,6 +395,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             if let DataclassMember::Field(field, _) = self.get_dataclass_member(cls, name)
                 && let Some((range, descriptor_cls)) = field.value.data_descriptor_info()
             {
+                // Collapsing overload returns loses the class-vs-instance distinction and can
+                // produce a spurious incompatibility with __set__. Follow the conformance suite
+                // and leave overloaded descriptor defaults unchecked.
+                if self.dataclass_descriptor_getter_is_overloaded(&descriptor_cls) {
+                    continue;
+                }
+
                 // Get the __get__ method's return type from the descriptor class.
                 let get_return_ty = self
                     .get_class_member(descriptor_cls.class_object(), &dunder::GET)
@@ -433,6 +447,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
         }
+    }
+
+    fn dataclass_descriptor_getter_is_overloaded(&self, descriptor_cls: &ClassType) -> bool {
+        self.get_class_member(descriptor_cls.class_object(), &dunder::GET)
+            .is_some_and(|get_field| matches!(get_field.ty(), Type::Overload(_)))
     }
 
     pub fn call_dataclasses_replace(
