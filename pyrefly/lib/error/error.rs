@@ -38,10 +38,10 @@ use yansi::Paint;
 use crate::config::error_kind::ErrorKind;
 use crate::config::error_kind::Severity;
 
-/// A secondary annotation that labels a span in the same file as the primary error.
-/// Used to show additional context, e.g. the types of both operands in a binary operation.
+/// A secondary annotation that labels a source-backed span related to the primary error.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SecondaryAnnotation {
+    pub module: Module,
     pub range: TextRange,
     pub label: Box<str>,
 }
@@ -123,6 +123,20 @@ impl<W: Write> ErrorRenderer<W> {
             self.write_header(error)?;
             let snippet = error.get_source_snippet(&origin);
             self.write_snippet(snippet)?;
+            for annotation in error
+                .secondary_annotations
+                .iter()
+                .filter(|annotation| annotation.module != error.module)
+            {
+                let annotation_origin = Error::path_string_with_fragment_for(
+                    &annotation.module,
+                    annotation.range,
+                    project_root,
+                );
+                self.write_snippet(
+                    error.get_secondary_source_snippet(annotation, &annotation_origin),
+                )?;
+            }
             if let Some(details) = &error.msg_details {
                 writeln!(self.writer, "{details}")?;
             }
@@ -186,9 +200,17 @@ impl<W: Write> ErrorRenderer<W> {
 impl Error {
     /// Return the path with a cell fragment if the error is in a notebook cell.
     fn path_string_with_fragment(&self, project_root: &Path) -> String {
-        let path = self.path().as_path();
+        Self::path_string_with_fragment_for(&self.module, self.range, project_root)
+    }
+
+    fn path_string_with_fragment_for(
+        module: &Module,
+        range: TextRange,
+        project_root: &Path,
+    ) -> String {
+        let path = module.path().as_path();
         let path = path.strip_prefix(project_root).unwrap_or(path);
-        if let Some(cell) = self.display_range.start.cell() {
+        if let Some(cell) = module.display_range(range).start.cell() {
             format!("{}#{cell}", path.to_string_lossy())
         } else {
             path.to_string_lossy().to_string()
@@ -213,8 +235,12 @@ impl Error {
         );
         let mut nearby_annotations = Vec::new();
         let mut distant_annotations = Vec::new();
-        for ann in &self.secondary_annotations {
-            let ann_display = self.module.display_range(ann.range);
+        for ann in self
+            .secondary_annotations
+            .iter()
+            .filter(|annotation| annotation.module == self.module)
+        {
+            let ann_display = ann.module.display_range(ann.range);
             let ann_start = ann_display.start.line_within_file();
             let ann_end = ann_display.end.line_within_file();
             let is_nearby = ann_start
@@ -243,6 +269,7 @@ impl Error {
 
         // Primary snippet with nearby annotations inline.
         let primary_snippet = self.make_snippet(
+            &self.module,
             origin,
             start_line,
             end_line,
@@ -256,6 +283,7 @@ impl Error {
             let ann_start_line = ann_display.start.line_within_file();
             let ann_end_line = ann_display.end.line_within_file();
             message = message.snippet(self.make_snippet(
+                &ann.module,
                 origin,
                 ann_start_line,
                 ann_end_line,
@@ -266,10 +294,27 @@ impl Error {
         message
     }
 
+    fn get_secondary_source_snippet<'a>(
+        &'a self,
+        annotation: &'a SecondaryAnnotation,
+        origin: &'a str,
+    ) -> Message<'a> {
+        let display_range = annotation.module.display_range(annotation.range);
+        Level::None.title("").snippet(self.make_snippet(
+            &annotation.module,
+            origin,
+            display_range.start.line_within_file(),
+            display_range.end.line_within_file(),
+            None,
+            &[annotation],
+        ))
+    }
+
     /// Build a source snippet for a line range with an optional primary annotation and
     /// secondary annotations. Used for both the main error snippet and distant annotation snippets.
     fn make_snippet<'a>(
         &'a self,
+        module: &'a Module,
         origin: &'a str,
         from_line: LineNumber,
         to_line: LineNumber,
@@ -277,13 +322,11 @@ impl Error {
         annotations: &[&'a SecondaryAnnotation],
     ) -> Snippet<'a> {
         // Warning: The SourceRange is char indexed, while the snippet is byte indexed.
-        let source = self
-            .module
+        let source = module
             .lined_buffer()
             .content_in_line_range(from_line, to_line);
-        let line_start = self.module.lined_buffer().line_start(from_line);
-        let cell_line = self
-            .module
+        let line_start = module.lined_buffer().line_start(from_line);
+        let cell_line = module
             .display_range(TextRange::new(line_start, line_start))
             .start
             .line_within_cell()
@@ -324,20 +367,20 @@ impl Error {
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
-            Url::from_file_path(self.module.path().as_path())
-                .ok()
-                .map(|uri| {
-                    self.secondary_annotations
-                        .iter()
-                        .map(|annotation| DiagnosticRelatedInformation {
+            self.secondary_annotations
+                .iter()
+                .map(|annotation| {
+                    Url::from_file_path(annotation.module.path().as_path())
+                        .ok()
+                        .map(|uri| DiagnosticRelatedInformation {
                             location: Location {
-                                uri: uri.clone(),
-                                range: self.module.to_lsp_range(annotation.range),
+                                uri,
+                                range: annotation.module.to_lsp_range(annotation.range),
                             },
                             message: annotation.label.to_string(),
                         })
-                        .collect()
                 })
+                .collect()
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -462,6 +505,22 @@ impl Error {
     /// underlined spans with labels in the source snippet.
     pub fn with_annotation(mut self, range: TextRange, label: String) -> Self {
         self.secondary_annotations.push(SecondaryAnnotation {
+            module: self.module.clone(),
+            range,
+            label: label.into_boxed_str(),
+        });
+        self
+    }
+
+    /// Add a secondary labeled annotation from a source-backed module.
+    pub fn with_module_annotation(
+        mut self,
+        module: Module,
+        range: TextRange,
+        label: String,
+    ) -> Self {
+        self.secondary_annotations.push(SecondaryAnnotation {
+            module,
             range,
             label: label.into_boxed_str(),
         });

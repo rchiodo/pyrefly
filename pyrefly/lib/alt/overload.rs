@@ -46,6 +46,7 @@ use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
+use crate::module::module_info::ModuleInfo;
 use crate::solver::solver::TypeVarSpecializationError;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncMetadata;
@@ -706,39 +707,52 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 }
             }
         }
-        if let Some(range) = self.overload_definition_range(closest_overload_metadata) {
-            builder = builder.with_annotation(range, closest_overload_label);
+        if let Some((module, range)) = self.overload_definition_range(closest_overload_metadata) {
+            builder = builder.with_module_annotation(module.clone(), range, closest_overload_label);
             for overload in overloads {
-                let Some(other_range) = self.overload_definition_range(&overload.1.metadata) else {
+                let Some((other_module, other_range)) =
+                    self.overload_definition_range(&overload.1.metadata)
+                else {
                     continue;
                 };
-                if other_range == range {
+                if other_module == module && other_range == range {
                     continue;
                 }
                 let signature =
                     self.for_display(self.heap.mk_callable_from(overload.1.signature.clone()));
-                builder =
-                    builder.with_annotation(other_range, format!("Other overload: {signature}"));
+                builder = builder.with_module_annotation(
+                    other_module,
+                    other_range,
+                    format!("Other overload: {signature}"),
+                );
             }
         }
         builder.emit();
     }
 
-    fn overload_definition_range(&self, metadata: &FuncMetadata) -> Option<TextRange> {
+    fn overload_definition_range(
+        &self,
+        metadata: &FuncMetadata,
+    ) -> Option<(ModuleInfo, TextRange)> {
         let func_id = match &metadata.kind {
             FunctionKind::Def(func_id) | FunctionKind::ShapeDsl(func_id, ..) => func_id,
             _ => return None,
         };
+        let def_index = func_id.def_index?;
         if func_id.module.name() != self.module().name()
             || func_id.module.path() != self.module().path()
         {
-            return None;
+            let range = self.get_function_definition_range(
+                func_id.module.name(),
+                func_id.module.path(),
+                def_index,
+            )?;
+            return Some((func_id.module.clone(), range));
         }
-        let def_index = func_id.def_index?;
         let idx = self
             .bindings()
             .key_to_idx_hashed_opt(Hashed::new(&KeyUndecoratedFunctionRange(def_index)))?;
-        Some(self.get_idx(idx).0.range())
+        Some((func_id.module.clone(), self.get_idx(idx).0.range()))
     }
 
     /// Returns the overload that matches the given arguments, or the one that produces the fewest

@@ -62,6 +62,7 @@ use crate::table_for_each;
 use crate::table_mut_for_each;
 use crate::table_try_for_each;
 use crate::types::callable::Callable;
+use crate::types::callable::FuncDefIndex;
 use crate::types::class::Class;
 use crate::types::class::ClassFields;
 use crate::types::equality::TypeEq;
@@ -579,6 +580,16 @@ pub trait LookupAnswer: Sized {
         AnswerTable: TableKeyed<K, Value = AnswerEntry<K>>,
         BindingTable: TableKeyed<K, Value = BindingEntry<K>>,
         SolutionsTable: TableKeyed<K, Value = SolutionsEntry<K>>;
+
+    /// Resolve a function definition range from its source module metadata.
+    fn get_function_definition_range(
+        &self,
+        _module: ModuleName,
+        _path: &ModulePath,
+        _def_index: FuncDefIndex,
+    ) -> Option<TextRange> {
+        None
+    }
 
     /// Commit a preliminary answer to a specific module's Calculation cell.
     /// Used for cross-module batch commit when an SCC spans module boundaries.

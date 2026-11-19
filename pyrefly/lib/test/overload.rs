@@ -9,6 +9,7 @@
 
 use crate::error::error::Error;
 use crate::error::error::ErrorRenderer;
+use crate::error::legacy::LegacyError;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -1674,7 +1675,7 @@ choose("value", 1.0)
         assert!(
             annotations
                 .iter()
-                .all(|annotation| error.module().code_at(annotation.range) == definition)
+                .all(|annotation| annotation.module.code_at(annotation.range) == definition)
         );
         assert_eq!(&*annotations[0].label, closest_label);
         assert!(annotations[1].label.contains("str"));
@@ -1727,6 +1728,103 @@ choose("value", 1.0)
     assert!(rendered.contains("def convert(value: int) -> int: ..."));
     assert!(rendered.contains("def convert(self, value: int) -> int: ..."));
     assert!(rendered.contains("def choose[T](value: T, priority: int) -> T: ..."));
+}
+
+#[test]
+fn test_imported_overload_error_links_candidates() {
+    let project = std::env::current_dir().unwrap();
+    let definitions_path = project.join("imported_overload_definitions.pyi");
+    let usage_path = project.join("imported_overload_usage.py");
+    let definitions = r#"
+from typing import overload
+
+@overload
+def choose[T](value: T, priority: int) -> T: ...
+@overload
+def choose[T](value: T, priority: str) -> tuple[T, str]: ...
+
+class Converter:
+    @overload
+    def convert(self, value: bytes) -> bytes: ...
+    @overload
+    def convert(self, value: int) -> int: ...
+"#;
+    let usage = r#"
+from imported_overload_definitions import Converter, choose
+
+choose("value", 1.0)
+Converter().convert("value")
+"#;
+    let mut env = TestEnv::new();
+    env.add_with_path(
+        "imported_overload_definitions",
+        definitions_path.to_str().unwrap(),
+        definitions,
+    );
+    env.add_with_path("main", usage_path.to_str().unwrap(), usage);
+    let (state, handle) = env.to_state();
+    let errors = state
+        .transaction()
+        .get_errors(&[handle("main")])
+        .collect_errors()
+        .ordinary;
+    assert_eq!(errors.len(), 2);
+
+    let check = |error: &Error, expected_type: &str| {
+        let annotations = error.secondary_annotations();
+        assert_eq!(annotations.len(), 2, "{error:?}");
+        assert!(annotations.iter().all(|annotation| {
+            annotation.module.path().as_path() == definitions_path
+                && annotation.module.code_at(annotation.range)
+                    == if expected_type == "int" {
+                        "choose"
+                    } else {
+                        "convert"
+                    }
+        }));
+        assert_eq!(
+            &*annotations[0].label,
+            format!(
+                "Closest overload expects parameter `{}` with type `{expected_type}`",
+                if expected_type == "int" {
+                    "priority"
+                } else {
+                    "value"
+                }
+            )
+        );
+
+        let diagnostic = serde_json::to_value(error.to_diagnostic()).unwrap();
+        let related = diagnostic["relatedInformation"]
+            .as_array()
+            .expect("expected LSP related information");
+        assert_eq!(related.len(), 2);
+        assert!(related.iter().all(|information| {
+            information["location"]["uri"]
+                == lsp_types::Url::from_file_path(&definitions_path)
+                    .unwrap()
+                    .as_str()
+        }));
+
+        let json = serde_json::to_value(LegacyError::from_error(&project, error)).unwrap();
+        assert_eq!(json["relatedInformation"], diagnostic["relatedInformation"]);
+    };
+
+    check(&errors[0], "int");
+    check(&errors[1], "bytes");
+
+    let mut rendered = Vec::new();
+    {
+        let mut renderer = ErrorRenderer::plain(&mut rendered);
+        for error in &errors {
+            renderer.write(error, project.as_path(), true).unwrap();
+        }
+        renderer.flush().unwrap();
+    }
+    let rendered = String::from_utf8(rendered).unwrap();
+    assert!(rendered.contains("imported_overload_definitions.pyi"));
+    assert!(rendered.contains("Closest overload expects parameter `priority` with type `int`"));
+    assert!(rendered.contains("Closest overload expects parameter `value` with type `bytes`"));
 }
 
 testcase!(

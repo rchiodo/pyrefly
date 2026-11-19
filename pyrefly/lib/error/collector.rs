@@ -320,7 +320,7 @@ pub struct ErrorBuilder<'a> {
     header: String,
     details: Vec<String>,
     context: Option<ErrorContext>,
-    annotations: Vec<(TextRange, String)>,
+    annotations: Vec<(ModuleInfo, TextRange, String)>,
     quick_fixes: Vec<ErrorQuickFix>,
 }
 
@@ -344,7 +344,21 @@ impl ErrorBuilder<'_> {
     /// Add a secondary labeled span.
     pub fn with_annotation(mut self, range: TextRange, label: String) -> Self {
         if self.active {
-            self.annotations.push((range, label));
+            self.annotations
+                .push((self.collector.module_info.dupe(), range, label));
+        }
+        self
+    }
+
+    /// Add a secondary labeled span from a source-backed module.
+    pub fn with_module_annotation(
+        mut self,
+        module: ModuleInfo,
+        range: TextRange,
+        label: String,
+    ) -> Self {
+        if self.active {
+            self.annotations.push((module, range, label));
         }
         self
     }
@@ -380,8 +394,11 @@ impl ErrorBuilder<'_> {
             details.insert(0, header);
             header = ctx.format();
             let mut ctx_annotations = ctx.annotations();
-            ctx_annotations.extend(annotations);
-            annotations = ctx_annotations;
+            annotations = ctx_annotations
+                .drain(..)
+                .map(|(range, label)| (self.collector.module_info.dupe(), range, label))
+                .chain(annotations)
+                .collect();
         }
         let mut err = Error::new(
             self.collector.module_info.dupe(),
@@ -390,8 +407,8 @@ impl ErrorBuilder<'_> {
             details,
             kind,
         );
-        for (range, label) in annotations {
-            err = err.with_annotation(range, label);
+        for (module, range, label) in annotations {
+            err = err.with_module_annotation(module, range, label);
         }
         for fix in self.quick_fixes {
             err = err.with_quick_fix(fix);

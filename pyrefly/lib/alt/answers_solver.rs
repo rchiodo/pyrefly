@@ -27,6 +27,7 @@ use pyrefly_graph::calculation::ProposalResult;
 use pyrefly_graph::index::Idx;
 use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
+use pyrefly_types::callable::FuncDefIndex;
 use pyrefly_types::heap::TypeHeap;
 use pyrefly_types::quantified::AnchorIndex;
 use pyrefly_types::quantified::Quantified;
@@ -3048,6 +3049,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else {
             self.answers.get(module, path, k, self.thread_state)
         }
+    }
+
+    pub fn get_function_definition_range(
+        &self,
+        module: ModuleName,
+        path: &ModulePath,
+        def_index: FuncDefIndex,
+    ) -> Option<TextRange> {
+        self.answers
+            .get_function_definition_range(module, path, def_index)
     }
 
     pub fn get_from_export(

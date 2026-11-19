@@ -39,6 +39,7 @@ use pyrefly_python::module_name::ModuleName;
 use pyrefly_python::module_path::ModulePath;
 use pyrefly_python::module_path::ModulePathDetails;
 use pyrefly_python::sys_info::SysInfo;
+use pyrefly_types::callable::FuncDefIndex;
 use pyrefly_types::type_alias::TypeAliasIndex;
 use pyrefly_util::arc_id::ArcId;
 use pyrefly_util::demand_tree::DemandCollector;
@@ -62,6 +63,7 @@ use pyrefly_util::thread_pool::ThreadCount;
 use pyrefly_util::thread_pool::ThreadPool;
 use pyrefly_util::uniques::UniqueFactory;
 use ruff_python_ast::name::Name;
+use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
 use starlark_map::Hashed;
 use starlark_map::small_map::SmallMap;
@@ -94,6 +96,7 @@ use crate::binding::binding::KeyClassSubscriptSymmetry;
 use crate::binding::binding::KeyClassSynthesizedFields;
 use crate::binding::binding::KeyExport;
 use crate::binding::binding::KeyTParams;
+use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::binding::binding::KeyVariance;
 use crate::binding::binding::Keyed;
 use crate::binding::bindings::BindingEntry;
@@ -3013,6 +3016,22 @@ impl<'a> LookupAnswer for TransactionHandle<'a> {
             }
         }
         res
+    }
+
+    fn get_function_definition_range(
+        &self,
+        module: ModuleName,
+        path: &ModulePath,
+        def_index: FuncDefIndex,
+    ) -> Option<TextRange> {
+        let module_data = self
+            .get_module(module, Some(path), ModuleDep::Exists)
+            .finding()?;
+        self.transaction.demand(module_data, Step::Answers);
+        let bindings = self.transaction.get_bindings(&module_data.handle)?;
+        let key = KeyUndecoratedFunctionRange(def_index);
+        let idx = bindings.key_to_idx_hashed_opt(Hashed::new(&key))?;
+        Some(bindings.get(idx).0.range())
     }
 
     fn commit_to_module(
