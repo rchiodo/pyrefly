@@ -505,11 +505,16 @@ impl CallArgPreEval<'_> {
 pub struct MatchedParam {
     pub ty: Type,
     pub name: Option<Name>,
+    pub argument_ty: Option<Type>,
 }
 
 impl MatchedParam {
-    fn new(ty: Type, name: Option<Name>) -> Self {
-        Self { ty, name }
+    fn new(ty: Type, name: Option<Name>, argument_ty: Option<Type>) -> Self {
+        Self {
+            ty,
+            name,
+            argument_ty,
+        }
     }
 }
 
@@ -528,9 +533,15 @@ impl ArgMap {
         }
     }
 
-    fn insert(&mut self, range: TextRange, ty: Type, name: Option<Name>) -> Option<MatchedParam> {
+    fn insert(
+        &mut self,
+        range: TextRange,
+        ty: Type,
+        name: Option<Name>,
+        argument_ty: Option<Type>,
+    ) -> Option<MatchedParam> {
         self.range_to_param
-            .insert(range, MatchedParam::new(ty, name))
+            .insert(range, MatchedParam::new(ty, name, argument_ty))
     }
 
     pub fn single_parameter_name(&self) -> Option<&Name> {
@@ -837,7 +848,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             // We ignore positional-only parameters because they can't be passed in by name.
                             seen_names.insert(name, (ty, NameOrigin::Param, true));
                         }
-                        argmap.insert(arg.range(), ty.clone(), name.cloned());
                         let unhinted_arg_ty = bound_args
                             .as_ref()
                             .map(|_| arg_pre.inferred_type(self, arg_errors));
@@ -853,6 +863,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             context,
                             call_context,
                         );
+                        argmap.insert(arg.range(), ty.clone(), name.cloned(), arg_ty.clone());
                         if let Some(name) = name
                             && let Some(ty) = unhinted_arg_ty.or(arg_ty)
                         {
@@ -866,7 +877,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }) => {
                         // Store args that get matched to an unpacked *args param
                         // Matched args are typechecked separately later
-                        argmap.insert(arg.range(), ty.clone(), name.cloned());
+                        argmap.insert(arg.range(), ty.clone(), name.cloned(), None);
                         unpacked_vararg = Some((name, ty));
                         unpacked_vararg_matched_args.push(arg_pre.clone());
                         arg_pre.post_skip();
@@ -876,7 +887,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         name,
                         kind: PosParamKind::Variadic,
                     }) => {
-                        argmap.insert(arg.range(), ty.clone(), name.cloned());
                         let unhinted_arg_ty = bound_args
                             .as_ref()
                             .map(|_| arg_pre.inferred_type(self, arg_errors));
@@ -892,6 +902,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             context,
                             call_context,
                         );
+                        argmap.insert(arg.range(), ty.clone(), name.cloned(), arg_ty.clone());
                         if bound_args.is_some() {
                             if let Some(name) = name {
                                 variadic_name = Some(name);
@@ -1288,13 +1299,6 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     } else if kwargs.is_none_or(|(_, ty)| ty.is_none()) {
                         unexpected_keyword_error(&id.id, id.range);
                     }
-                    if let Some((origin, expected)) = &hint {
-                        let name = match origin {
-                            NameOrigin::Param => Some(id.id.clone()),
-                            NameOrigin::UnpackedKwargs(kwargs_name) => kwargs_name.cloned(),
-                        };
-                        argmap.insert(kw.range, (*expected).clone(), name);
-                    }
                     let unhinted_arg_ty = bound_args
                         .as_ref()
                         .map(|_| kw.value.infer(self, arg_errors));
@@ -1342,6 +1346,13 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             (*x).clone()
                         }
                     };
+                    if let Some((origin, expected)) = &hint {
+                        let name = match origin {
+                            NameOrigin::Param => Some(id.id.clone()),
+                            NameOrigin::UnpackedKwargs(kwargs_name) => kwargs_name.cloned(),
+                        };
+                        argmap.insert(kw.range, (*expected).clone(), name, Some(arg_ty.clone()));
+                    }
                     record(bound_args, &id.id, unhinted_arg_ty.unwrap_or(arg_ty));
                 }
             }

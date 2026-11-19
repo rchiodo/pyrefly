@@ -35,6 +35,7 @@ use vec1::Vec1;
 use crate::alt::answers::LookupAnswer;
 use crate::alt::answers_solver::AnswersSolver;
 use crate::alt::attr::NoAccessReason;
+use crate::alt::callable::ArgMap;
 use crate::alt::callable::CallArg;
 use crate::alt::callable::CallKeyword;
 use crate::alt::callable::CallWithTypes;
@@ -809,6 +810,28 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 context,
             );
         }
+    }
+
+    fn specialization_parameter(
+        &self,
+        argmap: &ArgMap,
+        errors: &Vec1<TypeVarSpecializationError>,
+    ) -> Option<Name> {
+        let got = errors.iter().filter_map(|error| match error {
+            TypeVarSpecializationError::BadBoundSpecialization { got, .. }
+            | TypeVarSpecializationError::BadConstraintSpecialization { got, .. } => Some(got),
+            TypeVarSpecializationError::IncompatibleOverloadResidual { .. } => None,
+        });
+        let mut names = got.flat_map(|got| {
+            argmap.range_to_param.values().filter_map(move |param| {
+                let argument_ty = param.argument_ty.as_ref()?;
+                self.is_subset_eq(argument_ty, got)
+                    .then(|| param.name.clone())
+                    .flatten()
+            })
+        });
+        let name = names.next()?;
+        names.all(|other| other == name).then_some(name)
     }
 
     /// Handles union hint decomposition for class and TypedDict construction.
@@ -1767,10 +1790,11 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         let (ty, specialization_errors, argmap) = chosen_res;
         if let Ok(errors) = Vec1::try_from_vec(specialization_errors) {
+            let parameter = self.specialization_parameter(&argmap, &errors);
             self.add_specialization_errors(
                 errors,
                 arguments_range,
-                argmap.single_parameter_name(),
+                parameter.as_ref(),
                 call_errors,
                 context,
             );
