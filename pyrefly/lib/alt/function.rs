@@ -1642,9 +1642,41 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         metadata: &FuncMetadata,
         original_decoratee: &Type,
     ) -> Type {
+        let restore_parameter_names = |mut returned: Callable| {
+            let original_signatures = original_decoratee.callable_signatures();
+            let [original] = original_signatures.as_slice() else {
+                return returned;
+            };
+            let (Params::List(returned_params), Params::List(original_params)) =
+                (&mut returned.params, &original.params)
+            else {
+                return returned;
+            };
+            if returned_params.len() != original_params.len() {
+                return returned;
+            }
+            for (returned, original) in returned_params
+                .items_mut()
+                .iter_mut()
+                .zip(original_params.items())
+            {
+                match (returned, original) {
+                    (
+                        Param::PosOnly(name @ None, ..),
+                        Param::PosOnly(Some(original_name), ..) | Param::Pos(original_name, ..),
+                    )
+                    | (Param::Varargs(name @ None, ..), Param::Varargs(Some(original_name), ..))
+                    | (Param::Kwargs(name @ None, ..), Param::Kwargs(Some(original_name), ..)) => {
+                        *name = Some(original_name.clone())
+                    }
+                    _ => {}
+                }
+            }
+            returned
+        };
         match returned_ty {
             Type::Callable(c) => self.heap.mk_function(Function {
-                signature: *c,
+                signature: restore_parameter_names(*c),
                 metadata: metadata.clone(),
             }),
             Type::Forall(f) if let Forallable::Callable(_) = &f.body => {
@@ -1656,7 +1688,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     unreachable!("guarded above")
                 };
                 Forallable::Function(Function {
-                    signature: c,
+                    signature: restore_parameter_names(c),
                     metadata: metadata.clone(),
                 })
                 .forall(tparams)

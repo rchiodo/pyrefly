@@ -69,6 +69,21 @@ assert_type(decorated, Callable[[int, int], str])
 );
 
 testcase!(
+    test_signature_modifying_decorator_preserves_parameter_names,
+    r#"
+from typing import Callable
+
+def decorator(f: Callable[[int], int]) -> Callable[[str], int]: ...
+
+@decorator
+def decorated(value: int) -> int:
+    return value
+
+decorated(0)  # E: Argument `Literal[0]` is not assignable to parameter `value` with type `str` in function `decorated`
+    "#,
+);
+
+testcase!(
     test_chaining_decorators,
     r#"
 from typing import assert_type, Callable, Any
@@ -305,6 +320,32 @@ class C:
         return x
 
 assert_type(C().f(42), int)
+    "#,
+);
+
+testcase!(
+    test_class_decorator_argument,
+    r#"
+class Expected: ...
+
+def require_expected(cls: type[Expected]) -> type[Expected]: ...
+
+@require_expected  # E: Argument `type[Actual]` is not assignable to parameter `cls` with type `type[Expected]` in function `require_expected`
+class Actual: ...
+    "#,
+);
+
+testcase!(
+    test_class_decorator_constructor_callable_argument,
+    r#"
+from typing import Callable, Self
+
+def require_factory[T](factory: Callable[[bool], T]) -> type[T]: ...
+
+@require_factory  # E: Callable parameter 1 is incompatible: assigned callable parameter has type `str`, but expected callable parameter has type `bool`
+class ProductFactory:
+    def __new__(cls, value: int) -> Self: ...
+    def __init__(self, value: str) -> None: ...
     "#,
 );
 
@@ -699,7 +740,7 @@ def add_generic[T](f: Callable[[T], T]) -> Callable[[object], None]:
 def my_func[T](x: T) -> T:
     return x
 
-reveal_type(my_func)  # E: revealed type: (object) -> None
+reveal_type(my_func)  # E: revealed type: (x: object, /) -> None
 "#,
 );
 

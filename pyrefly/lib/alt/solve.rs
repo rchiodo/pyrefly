@@ -5699,13 +5699,43 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             );
                         }
                     }
+                    // Stub modules include bundled typeshed while the standard library is still
+                    // bootstrapping, so defer application checks to source modules.
+                    if !self.module().path().is_interface() {
+                        let mut decorated_class = self.heap.mk_class_def(cls.dupe());
+                        for idx in decorators.iter().rev() {
+                            let decorator = self.get_idx(*idx).ty.clone();
+                            let binding = self.bindings().get(*idx);
+                            let factory = match &binding.expr {
+                                Expr::Call(call) => {
+                                    self.expr_infer(&call.func, &self.error_swallower())
+                                }
+                                _ => decorator.clone(),
+                            };
+                            if factory.dataclass_transform_metadata().is_some() {
+                                continue;
+                            }
+                            let range = self.bindings().idx_to_key(*idx).range();
+                            let next = self.freeform_call_infer(
+                                decorator,
+                                &[CallArg::ty(&decorated_class, range)],
+                                &[],
+                                range,
+                                range,
+                                None,
+                                errors,
+                            );
+                            decorated_class = next;
+                        }
+                    }
                     // TODO: analyze the class decorators beyond the `Any` check above. We don't
-                    // support general type-level analysis of class decorators (the ones we do
-                    // support, like dataclass-related ones, are handled via custom bindings).
+                    // use their return types to transform the class (the ones we do support, like
+                    // dataclass-related ones, are handled via custom bindings).
                     //
-                    // Note that all decorators have their own binding so they are still type checked for errors
-                    // *inside* the decorator. The only application-level effect we honor is an
-                    // explicit `type[Any]` return, which intentionally erases the class interface.
+                    // We check each application above so ordinary call diagnostics preserve the
+                    // decorator's callable, parameter, and type context. The only return-type effect
+                    // we honor is an explicit `type[Any]`, which intentionally erases the class
+                    // interface.
                     //
                     // We use `.any()` across the chain because if *any* decorator is annotated
                     // with `-> type[Any]`, all *later* decorators receive whatever class that
