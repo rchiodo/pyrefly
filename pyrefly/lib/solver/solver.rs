@@ -2495,13 +2495,25 @@ impl TypeVarSpecializationError {
     }
 
     pub fn to_error_msg<Ans: LookupAnswer>(self, ans: &AnswersSolver<Ans>) -> String {
+        self.to_error_msg_with_parameter(ans, None)
+    }
+
+    pub fn to_error_msg_with_parameter<Ans: LookupAnswer>(
+        self,
+        ans: &AnswersSolver<Ans>,
+        parameter: Option<&Name>,
+    ) -> String {
         match self {
             Self::BadBoundSpecialization { name, got, want } => {
-                TypeCheckKind::TypeVarSpecialization(name).format_error(
+                let mut msg = TypeCheckKind::TypeVarSpecialization(name).format_error(
                     &ans.for_display(got),
                     &ans.for_display(want),
                     ans.module().name(),
-                )
+                );
+                if let Some(parameter) = parameter {
+                    msg.push_str(&format!(" for parameter `{parameter}`"));
+                }
+                msg
             }
             Self::BadConstraintSpecialization { name, got, want } => {
                 format!(

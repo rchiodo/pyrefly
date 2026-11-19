@@ -532,6 +532,14 @@ impl ArgMap {
         self.range_to_param
             .insert(range, MatchedParam::new(ty, name))
     }
+
+    pub fn single_parameter_name(&self) -> Option<&Name> {
+        let mut params = self.range_to_param.values();
+        let name = params.next()?.name.as_ref()?;
+        params
+            .all(|param| param.name.as_ref() == Some(name))
+            .then_some(name)
+    }
 }
 
 /// Helps track matching of arguments against positional parameters in AnswersSolver::callable_infer_params.
@@ -918,7 +926,16 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let specialization_errors =
                     self.finish_quantified(self_qs, self.solver().infer_with_first_use);
                 if let Err(errors) = specialization_errors {
-                    self.add_specialization_errors(errors, arg.range(), call_errors, context);
+                    self.add_specialization_errors(
+                        errors,
+                        arg.range(),
+                        argmap
+                            .range_to_param
+                            .get(&arg.range())
+                            .and_then(|param| param.name.as_ref()),
+                        call_errors,
+                        context,
+                    );
                 }
             }
         }

@@ -425,6 +425,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.add_specialization_errors(
                     specialization_errors,
                     arguments_range,
+                    closest_overload.argmap.single_parameter_name(),
                     errors,
                     None,
                 );
@@ -440,6 +441,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 self.add_specialization_errors(
                     specialization_errors,
                     arguments_range,
+                    closest_overload.argmap.single_parameter_name(),
                     &closest_overload.call_errors,
                     None,
                 );

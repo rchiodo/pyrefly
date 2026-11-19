@@ -3534,7 +3534,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 let annot_range = self.annotation_range(*k);
                 let tcc: &dyn Fn() -> TypeCheckContext = &|| {
                     TypeCheckContext::of_kind(match style {
-                        AnnotationStyle::Direct => TypeCheckKind::AnnAssign,
+                        AnnotationStyle::Direct => TypeCheckKind::AnnAssign(name.clone()),
                         AnnotationStyle::ForwardedInitial | AnnotationStyle::Forwarded => {
                             TypeCheckKind::AnnotatedName(name.clone())
                         }
@@ -4330,7 +4330,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             self.check_final_reassignment(&annot, range, errors);
             if let Some(annot_ty) = annot.ty(self.heap, self.stdlib) {
                 let tcc: &dyn Fn() -> TypeCheckContext = &|| {
-                    TypeCheckContext::of_kind(TypeCheckKind::AnnAssign)
+                    TypeCheckContext::of_kind(TypeCheckKind::UnpackedAssign)
                         .with_annotation(self.annotation_range(ann_idx), "declared type".to_owned())
                 };
                 if !self.check_type(ty, &annot_ty, range, errors, tcc) {

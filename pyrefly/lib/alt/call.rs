@@ -173,6 +173,7 @@ impl ConstructedInstance {
             answers.add_specialization_errors(
                 specialization_errors,
                 arguments_range,
+                None,
                 errors,
                 context,
             );
@@ -794,12 +795,19 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         &self,
         specialization_errors: Vec1<TypeVarSpecializationError>,
         range: TextRange,
+        parameter: Option<&Name>,
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
     ) {
         for e in specialization_errors {
             let kind = e.error_kind();
-            self.error_with_context(errors, range, kind, e.to_error_msg(self), context);
+            self.error_with_context(
+                errors,
+                range,
+                kind,
+                e.to_error_msg_with_parameter(self, parameter),
+                context,
+            );
         }
     }
 
@@ -1757,9 +1765,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         {
             *targs = chosen_targs;
         }
-        let (ty, specialization_errors, _expected_types) = chosen_res;
+        let (ty, specialization_errors, argmap) = chosen_res;
         if let Ok(errors) = Vec1::try_from_vec(specialization_errors) {
-            self.add_specialization_errors(errors, arguments_range, call_errors, context);
+            self.add_specialization_errors(
+                errors,
+                arguments_range,
+                argmap.single_parameter_name(),
+                call_errors,
+                context,
+            );
         }
         ty
     }

@@ -46,7 +46,7 @@ def f(x: int) -> None:
 testcase!(
     test_error_assign,
     r#"
-x: str = 1  # E: `Literal[1]` is not assignable to `str`
+x: str = 1  # E: `Literal[1]` is not assignable to `str` for variable `x`
 y = x
 "#,
 );

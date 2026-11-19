@@ -3277,7 +3277,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if Self::type_contains_none(got) && !Self::type_contains_none(want) {
             let hint = match tcc().kind {
                 TypeCheckKind::ExplicitFunctionReturn
-                | TypeCheckKind::AnnAssign
+                | TypeCheckKind::AnnAssign(_)
                 | TypeCheckKind::AnnotatedName(_)
                     if !got.is_none() =>
                 {

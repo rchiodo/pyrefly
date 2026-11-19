@@ -102,6 +102,20 @@ f("hello")  # E: `str` is not assignable to upper bound `int` of type variable `
 );
 
 testcase!(
+    test_bounded_typevar_call_names_parameter,
+    r#"
+from typing import TypeVar
+
+T = TypeVar("T", bound=int)
+
+def f(value: T) -> T:
+    return value
+
+f("hello")  # E: `str` is not assignable to upper bound `int` of type variable `T` for parameter `value`
+"#,
+);
+
+testcase!(
     test_callable_typevartuple_varargs_homogeneous_tuple,
     r#"
 from typing import Callable
