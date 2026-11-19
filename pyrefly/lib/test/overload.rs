@@ -1661,7 +1661,7 @@ choose("value", 1.0)
         .ordinary;
     assert_eq!(errors.len(), 3);
 
-    let check = |error: &Error, definition: &str, label: &str| {
+    let check = |error: &Error, definition: &str, closest_label: &str| {
         assert!(
             error
                 .msg_details()
@@ -1669,19 +1669,27 @@ choose("value", 1.0)
             "{}",
             error.msg()
         );
-        let [annotation] = error.secondary_annotations() else {
-            panic!("expected one closest-overload annotation: {error:?}");
-        };
-        assert_eq!(error.module().code_at(annotation.range), definition);
-        assert_eq!(&*annotation.label, label);
+        let annotations = error.secondary_annotations();
+        assert_eq!(annotations.len(), 2, "{error:?}");
+        assert!(
+            annotations
+                .iter()
+                .all(|annotation| error.module().code_at(annotation.range) == definition)
+        );
+        assert_eq!(&*annotations[0].label, closest_label);
+        assert!(annotations[1].label.contains("str"));
 
         let diagnostic = serde_json::to_value(error.to_diagnostic()).unwrap();
         let related = diagnostic["relatedInformation"]
             .as_array()
             .expect("expected LSP related information");
-        assert_eq!(related.len(), 1);
-        assert_eq!(related[0]["message"], label);
-        assert!(related[0]["location"]["range"].is_object());
+        assert_eq!(related.len(), 2);
+        assert_eq!(related[0]["message"], closest_label);
+        assert!(
+            related
+                .iter()
+                .all(|information| information["location"]["range"].is_object())
+        );
     };
 
     check(

@@ -366,18 +366,21 @@ The current branch build and Pyright 1.1.414 produce:
 
 | Checker | Range | Category | Actual type | Expected type | Name | Related candidates | Hint | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 7/8 | 6/7 | 8/8 | 0/1 | 8/8 | 45/48 |
+| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 8/8 | 7/7 | 8/8 | 1/1 | 8/8 | 48/48 |
 | Pyright 1.1.414 | 8/8 | 6/8 | 7/8 | 6/7 | 6/8 | 0/1 | 8/8 | 41/48 |
 
-Both checkers select useful primary ranges and provide the expected actionable
-explanation in all eight cases. Neither exposes overload declarations through
-structured related locations, and both report the closest argument mismatch
-inline. Pyright omits the annotated assignment target's name and bounded-generic
-parameter name. Pyrefly omits the source type for TypedDict unpacking and one
-expected overload parameter type. Pyright does not identify the TypedDict
-key/category and loses the source type and category for the unpack error.
+Pyrefly satisfies every structured quality oracle. It selects useful primary
+ranges, identifies diagnostic subjects and both sides of type mismatches,
+includes TypedDict unpack source types, and links locally defined overload
+candidates through structured related locations with their expected signatures.
+Imported or synthesized overloads without a local definition range retain the
+closest-signature prose instead. Pyright provides every actionable hint but
+omits the annotated assignment target and bounded-generic parameter names, does
+not identify the TypedDict key/category or unpack source type, and does not
+expose overload candidates through structured related locations.
 
 Behavioral scoring remains separate from wording quality. On the expanded
-36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 35/36. Pyright misses
-the gradual ambiguous-overload capability probe; the mutable-generic and
-comprehension cases remain unscored policy comparisons.
+36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 33/36. Pyright misses
+the guarded literal-union TypedDict member probe and two gradual
+ambiguous-overload capability probes; the mutable-generic and comprehension
+cases remain unscored policy comparisons.

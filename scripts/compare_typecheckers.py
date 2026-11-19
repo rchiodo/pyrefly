@@ -279,7 +279,7 @@ def parse_full_errors_pyrefly(stdout: str) -> list[dict[str, object]]:
                 "kind": e.get("name", ""),
                 "message": e.get("description", ""),
                 "severity": e.get("severity", "error"),
-                "related": [],
+                "related": e.get("relatedInformation", []),
             }
         )
     return errors

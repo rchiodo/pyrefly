@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use lsp_types::DiagnosticRelatedInformation;
 use pyrefly_config::error_kind::Severity;
 use pyrefly_util::absolutize::Absolutize;
 use pyrefly_util::prelude::SliceExt;
@@ -51,6 +52,13 @@ pub struct LegacyError {
     /// Optional notebook cell number for errors in notebook files
     #[serde(skip_serializing_if = "Option::is_none")]
     cell: Option<usize>,
+    /// Structured context associated with this error.
+    #[serde(
+        default,
+        rename = "relatedInformation",
+        skip_serializing_if = "Option::is_none"
+    )]
+    related_information: Option<Vec<DiagnosticRelatedInformation>>,
 }
 
 impl LegacyError {
@@ -73,6 +81,7 @@ impl LegacyError {
             description: error.msg(),
             concise_description: error.msg_header().to_owned(),
             severity: severity_to_str(error.severity()),
+            related_information: error.related_information(),
         }
     }
 }
@@ -120,5 +129,28 @@ mod tests {
         );
         let legacy = LegacyError::from_error(Path::new("/repo/src"), &error);
         assert_eq!(legacy.path, "../libs/foo.py");
+    }
+
+    #[test]
+    fn test_serializes_related_information() {
+        let project = std::env::current_dir().unwrap();
+        let module = Module::new(
+            ModuleName::from_str("foo"),
+            ModulePath::filesystem(project.join("foo.py")),
+            Arc::new("x = 1\n".to_owned()),
+        );
+        let error = Error::new(
+            module,
+            TextRange::new(TextSize::new(0), TextSize::new(1)),
+            "err".to_owned(),
+            Vec::new(),
+            ErrorKind::BadAssignment,
+        )
+        .with_annotation(
+            TextRange::new(TextSize::new(4), TextSize::new(5)),
+            "related".to_owned(),
+        );
+        let legacy = LegacyError::from_error(&project, &error);
+        assert_eq!(legacy.related_information.unwrap().len(), 1);
     }
 }

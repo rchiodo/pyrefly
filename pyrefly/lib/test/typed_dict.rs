@@ -241,10 +241,10 @@ class Target(TypedDict):
     y: int
 
 def from_open(a: Open) -> Target:
-    return {**a}  # E: Missing required key `y` for TypedDict `Target`
+    return {**a}  # E: Unpacked source type: `Open`
 
 def from_closed(a: Closed) -> Target:
-    return {**a}  # E: Missing required key `y` for TypedDict `Target`
+    return {**a}  # E: Unpacked source type: `Closed`
 
 def complete(a: Open) -> Target:
     return {**a, "y": 1}

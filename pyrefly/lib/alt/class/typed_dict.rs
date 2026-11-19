@@ -89,6 +89,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         let extra_items = self.typed_dict_extra_items(typed_dict);
         let mut has_unknown_expansion = false;
         let mut keys: SmallSet<Name> = SmallSet::new();
+        let mut unpacked_source_types = Vec::new();
         dict_items.iter().for_each(|x| match &x.key {
             Some(key) => {
                 let key_type = self.expr_infer(key, item_errors);
@@ -179,6 +180,10 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     Some(HintRef::soft(&partial_td_ty)),
                     item_errors,
                 );
+                let source_type = self.for_display(item_ty.clone()).to_string();
+                if !unpacked_source_types.contains(&source_type) {
+                    unpacked_source_types.push(source_type);
+                }
                 if let Type::TypedDict(unpacked) = &item_ty {
                     for (key, field) in self.typed_dict_fields(unpacked) {
                         if field.required {
@@ -217,8 +222,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         if !has_unknown_expansion && !is_update {
             for (key, field) in &fields {
                 if field.required && !keys.contains(key) {
-                    self.error(
-                        check_errors,
+                    let mut builder = check_errors.error_builder(
                         range,
                         ErrorKind::BadTypedDictKey,
                         format!(
@@ -227,6 +231,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             typed_dict.name(),
                         ),
                     );
+                    if !unpacked_source_types.is_empty() {
+                        builder = builder.with_detail(format!(
+                            "Unpacked source type{}: {}",
+                            if unpacked_source_types.len() == 1 {
+                                ""
+                            } else {
+                                "s"
+                            },
+                            unpacked_source_types
+                                .iter()
+                                .map(|ty| format!("`{ty}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
+                    builder.emit();
                 }
             }
         }

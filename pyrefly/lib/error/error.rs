@@ -14,10 +14,8 @@ use std::path::Path;
 use itertools::Itertools;
 use lsp_types::CodeDescription;
 use lsp_types::Diagnostic;
-#[cfg(not(target_arch = "wasm32"))]
 use lsp_types::DiagnosticRelatedInformation;
 use lsp_types::DiagnosticTag;
-#[cfg(not(target_arch = "wasm32"))]
 use lsp_types::Location;
 use lsp_types::Url;
 use pyrefly_python::ignore::Tool;
@@ -320,14 +318,12 @@ impl Error {
         self.severity
     }
 
-    /// Create a diagnostic suitable for use in LSP.
-    pub fn to_diagnostic(&self) -> Diagnostic {
-        let code = self.error_kind().to_name().to_owned();
-        let code_description = Url::parse(&self.error_kind().docs_url())
-            .ok()
-            .map(|href| CodeDescription { href });
+    pub fn related_information(&self) -> Option<Vec<DiagnosticRelatedInformation>> {
+        if self.secondary_annotations.is_empty() {
+            return None;
+        }
         #[cfg(not(target_arch = "wasm32"))]
-        let related_information =
+        {
             Url::from_file_path(self.module.path().as_path())
                 .ok()
                 .map(|uri| {
@@ -341,9 +337,20 @@ impl Error {
                             message: annotation.label.to_string(),
                         })
                         .collect()
-                });
+                })
+        }
         #[cfg(target_arch = "wasm32")]
-        let related_information = None;
+        {
+            None
+        }
+    }
+
+    /// Create a diagnostic suitable for use in LSP.
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        let code = self.error_kind().to_name().to_owned();
+        let code_description = Url::parse(&self.error_kind().docs_url())
+            .ok()
+            .map(|href| CodeDescription { href });
         Diagnostic {
             range: self.module.to_lsp_range(self.range()),
             severity: Some(match self.severity() {
@@ -362,7 +369,7 @@ impl Error {
             } else {
                 None
             },
-            related_information,
+            related_information: self.related_information(),
             ..Default::default()
         }
     }

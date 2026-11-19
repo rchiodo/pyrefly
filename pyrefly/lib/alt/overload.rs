@@ -448,6 +448,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
             self.overload_error(
                 metadata,
+                &overloads,
                 self_obj.as_ref(),
                 &args,
                 &keywords,
@@ -510,6 +511,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
     fn overload_error(
         &self,
         metadata: &FuncMetadata,
+        overloads: &Vec1<TargetWithTParams<Function>>,
         self_obj: Option<&Type>,
         args: &[CallArg],
         keywords: &[CallKeyword],
@@ -706,6 +708,18 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         }
         if let Some(range) = self.overload_definition_range(closest_overload_metadata) {
             builder = builder.with_annotation(range, closest_overload_label);
+            for overload in overloads {
+                let Some(other_range) = self.overload_definition_range(&overload.1.metadata) else {
+                    continue;
+                };
+                if other_range == range {
+                    continue;
+                }
+                let signature =
+                    self.for_display(self.heap.mk_callable_from(overload.1.signature.clone()));
+                builder =
+                    builder.with_annotation(other_range, format!("Other overload: {signature}"));
+            }
         }
         builder.emit();
     }

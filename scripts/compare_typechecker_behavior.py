@@ -165,7 +165,14 @@ def score_probes(
 
 
 def diagnostic_text(diagnostic: dict[str, object]) -> str:
-    return f"{diagnostic.get('kind', '')} {diagnostic.get('message', '')}".lower()
+    related = " ".join(
+        information.get("message", "")
+        for information in diagnostic.get("related", [])
+        if isinstance(information, dict)
+    )
+    return (
+        f"{diagnostic.get('kind', '')} {diagnostic.get('message', '')} {related}".lower()
+    )
 
 
 def contains_type(text: str, expected: str) -> bool:

@@ -56,6 +56,18 @@ class TestParseFullErrorsPyrefly(unittest.TestCase):
                     "description": "Expected `str`, got `int`",
                     "concise_description": "bad return type",
                     "severity": "error",
+                    "relatedInformation": [
+                        {
+                            "location": {
+                                "uri": "file:///repo/mypy/nodes.py",
+                                "range": {
+                                    "start": {"line": 1, "character": 0},
+                                    "end": {"line": 1, "character": 3},
+                                },
+                            },
+                            "message": "Closest overload accepts `str`",
+                        }
+                    ],
                 },
                 {
                     "line": 20,
@@ -84,7 +96,7 @@ class TestParseFullErrorsPyrefly(unittest.TestCase):
         self.assertEqual(errors[0]["severity"], "error")
         self.assertEqual(errors[0]["end_line"], 10)
         self.assertEqual(errors[0]["end_col"], 15)
-        self.assertEqual(errors[0]["related"], [])
+        self.assertEqual(len(errors[0]["related"]), 1)
 
     def test_second_error(self) -> None:
         errors = parse_full_errors_pyrefly(self.SAMPLE_OUTPUT)
