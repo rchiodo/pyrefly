@@ -1798,7 +1798,16 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             (Type::OverloadResult(alternatives), u) => all(alternatives.iter(), |alternative| {
                 self.is_subset_eq(alternative, u)
             }),
-            (Type::Union(l_union), u) => all(l_union.members.iter(), |l| self.is_subset_eq(l, u)),
+            (Type::Union(l_union), u) => all(l_union.members.iter(), |l| {
+                self.is_subset_eq(l, u).map_err(|error| {
+                    SubsetError::mismatch(
+                        SubsetMismatchContext::UnionMember,
+                        l.clone(),
+                        u.clone(),
+                        error,
+                    )
+                })
+            }),
             // Size <: Size - expand bound Vars, canonicalize, and compare for structural equality
             (Type::Size(s1), Type::Size(s2)) => {
                 // Expand any bound Vars in both expressions
@@ -1890,7 +1899,12 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                         SubsetWithSnapshotResult::Ok => return Ok(()),
                         SubsetWithSnapshotResult::Err(e) => {
                             if error.is_none() {
-                                error = Some(e);
+                                error = Some(SubsetError::mismatch(
+                                    SubsetMismatchContext::UnionAlternative,
+                                    l.clone(),
+                                    u.clone(),
+                                    e,
+                                ));
                             }
                         }
                     }
@@ -2673,7 +2687,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
             if param.kind() == QuantifiedKind::TypeVarTuple {
                 self.is_consistent(got_arg, want_arg).map_err(|error| {
                     SubsetError::mismatch(
-                        SubsetMismatchContext::InvariantTypeArgument(param.name().clone()),
+                        SubsetMismatchContext::InvariantTypeArgument {
+                            class: want_class.name().clone(),
+                            parameter: param.name().clone(),
+                        },
                         got_arg.clone(),
                         want_arg.clone(),
                         error,
@@ -2684,7 +2701,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variance::Covariant => {
                         self.is_subset_eq(got_arg, want_arg).map_err(|error| {
                             SubsetError::mismatch(
-                                SubsetMismatchContext::CovariantTypeArgument(param.name().clone()),
+                                SubsetMismatchContext::CovariantTypeArgument {
+                                    class: want_class.name().clone(),
+                                    parameter: param.name().clone(),
+                                },
                                 got_arg.clone(),
                                 want_arg.clone(),
                                 error,
@@ -2694,9 +2714,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variance::Contravariant => {
                         self.is_subset_eq(want_arg, got_arg).map_err(|error| {
                             SubsetError::mismatch(
-                                SubsetMismatchContext::ContravariantTypeArgument(
-                                    param.name().clone(),
-                                ),
+                                SubsetMismatchContext::ContravariantTypeArgument {
+                                    class: want_class.name().clone(),
+                                    parameter: param.name().clone(),
+                                },
                                 got_arg.clone(),
                                 want_arg.clone(),
                                 error,
@@ -2709,7 +2730,10 @@ impl<'a, Ans: LookupAnswer> Subset<'a, Ans> {
                     Variance::Invariant | Variance::Bivariant => {
                         self.is_consistent(got_arg, want_arg).map_err(|error| {
                             SubsetError::mismatch(
-                                SubsetMismatchContext::InvariantTypeArgument(param.name().clone()),
+                                SubsetMismatchContext::InvariantTypeArgument {
+                                    class: want_class.name().clone(),
+                                    parameter: param.name().clone(),
+                                },
                                 got_arg.clone(),
                                 want_arg.clone(),
                                 error,

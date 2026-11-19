@@ -59,6 +59,26 @@ tuple_mismatch: tuple[int, str] = (1, 2)  # E: Tuple element 2 is incompatible: 
 );
 
 testcase!(
+    test_deeply_nested_assignability_reasons,
+    r#"
+class Box[T]: pass
+
+nested: Box[list[dict[str, int]]] = Box[list[dict[str, str]]]()  # E: Type argument `T` is invariant: `list[dict[str, str]]` is not equivalent to `list[dict[str, int]]` (in `Box`)\nType argument `_T` is invariant: `dict[str, str]` is not equivalent to `dict[str, int]` (in `list`)\nType argument `_VT` is invariant: `str` is not equivalent to `int` (in `dict`)
+"#,
+);
+
+testcase!(
+    test_union_assignability_reasons,
+    r#"
+class Box[T]: pass
+
+def test(source: int | Box[str], value: Box[str]) -> None:
+    target: Box[int] = source  # E: Union member `Box[str]` is not assignable to `Box[int]`  # !E: Union member `int`
+    destination: int | Box[int] = value  # E: Union alternative `Box[int]` does not accept `Box[str]`  # !E: Union alternative `int`
+"#,
+);
+
+testcase!(
     test_simple_class_object_subtyping,
     r#"
 class A: pass

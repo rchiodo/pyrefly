@@ -2661,9 +2661,11 @@ pub enum SubsetMismatchContext {
     CallableParameter(usize),
     CallableReturn,
     TupleElement(usize),
-    CovariantTypeArgument(Name),
-    ContravariantTypeArgument(Name),
-    InvariantTypeArgument(Name),
+    UnionMember,
+    UnionAlternative,
+    CovariantTypeArgument { class: Name, parameter: Name },
+    ContravariantTypeArgument { class: Name, parameter: Name },
+    InvariantTypeArgument { class: Name, parameter: Name },
 }
 
 #[derive(Debug, Clone)]
@@ -2745,14 +2747,22 @@ impl SubsetError {
                         "Tuple element {} is incompatible: `{got}` is not assignable to `{want}`",
                         index + 1
                     ),
-                    SubsetMismatchContext::CovariantTypeArgument(name) => format!(
-                        "Type argument `{name}` is covariant: `{got}` is not assignable to `{want}`"
+                    SubsetMismatchContext::UnionMember => {
+                        format!("Union member `{got}` is not assignable to `{want}`")
+                    }
+                    SubsetMismatchContext::UnionAlternative => {
+                        format!("Union alternative `{want}` does not accept `{got}`")
+                    }
+                    SubsetMismatchContext::CovariantTypeArgument { class, parameter } => format!(
+                        "Type argument `{parameter}` is covariant: `{got}` is not assignable to `{want}` (in `{class}`)"
                     ),
-                    SubsetMismatchContext::ContravariantTypeArgument(name) => format!(
-                        "Type argument `{name}` is contravariant: `{want}` is not assignable to `{got}`"
-                    ),
-                    SubsetMismatchContext::InvariantTypeArgument(name) => format!(
-                        "Type argument `{name}` is invariant: `{got}` is not equivalent to `{want}`"
+                    SubsetMismatchContext::ContravariantTypeArgument { class, parameter } => {
+                        format!(
+                            "Type argument `{parameter}` is contravariant: `{want}` is not assignable to `{got}` (in `{class}`)"
+                        )
+                    }
+                    SubsetMismatchContext::InvariantTypeArgument { class, parameter } => format!(
+                        "Type argument `{parameter}` is invariant: `{got}` is not equivalent to `{want}` (in `{class}`)"
                     ),
                 };
                 match mismatch.cause.to_error_msg() {
