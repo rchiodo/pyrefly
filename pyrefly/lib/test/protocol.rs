@@ -76,15 +76,40 @@ class WrongSignature:
         return x
 
 good: Target = Good()
-missing: Target = Missing()  # E: `Missing` is not assignable to `Target`: Protocol `Target` requires attribute `value`
-wrong_value: Target = WrongValue()  # E: `WrongValue` is not assignable to `Target`: `WrongValue.value` has type `str`
-wrong_signature: Target = WrongSignature()  # E: `WrongSignature` is not assignable to `Target`: `WrongSignature.transform` has type
+missing: Target = Missing()  # E: `Missing` is not assignable to `Target` for variable `missing`: Protocol `Target` requires attribute `value`
+wrong_value: Target = WrongValue()  # E: `WrongValue` is not assignable to `Target` for variable `wrong_value`: Protocol `Target`: `WrongValue.value` has type `str`
+wrong_signature: Target = WrongSignature()  # E: `WrongSignature` is not assignable to `Target` for variable `wrong_signature`: Protocol `Target`: `WrongSignature.transform` has type
 
 def choose(flag: bool) -> Good | Missing:
     return Good() if flag else Missing()
 
-from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target`: Protocol `Target` requires attribute `value`
-nested: tuple[Target] = (Missing(),)  # E: Tuple element 1 is incompatible
+from_union: Target = choose(True)  # E: `Good | Missing` is not assignable to `Target` for variable `from_union`: Protocol `Target` requires attribute `value`
+nested: tuple[Target] = (WrongValue(),)  # E: Tuple element 1 is incompatible: `WrongValue` is not assignable to `Target`\nProtocol `Target`: `WrongValue.value` has type `str`
+"#,
+);
+
+testcase!(
+    test_protocol_incompatible_member_identifies_protocol,
+    r#"
+from typing import Protocol
+
+class Reader(Protocol):
+    def read(self) -> str: ...
+
+class WrongRead:
+    def read(self) -> int:
+        return 0
+
+class Writable(Protocol):
+    value: str
+
+class TextValue:
+    @property
+    def value(self) -> str:
+        return ""
+
+wrong_reader: Reader = WrongRead()  # E: `WrongRead` is not assignable to `Reader` for variable `wrong_reader`: Protocol `Reader`: `WrongRead.read` has type
+writable: Writable = TextValue()  # E: `TextValue` is not assignable to `Writable` for variable `writable`: Protocol `Writable`: `TextValue.value` is a property
 "#,
 );
 

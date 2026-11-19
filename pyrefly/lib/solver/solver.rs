@@ -2782,7 +2782,10 @@ impl SubsetError {
             )),
             SubsetError::IncompatibleAttribute(inner) => {
                 let (protocol, got, attribute, err) = &*inner;
-                Some(err.to_error_msg(&Name::new(format!("{got}")), protocol, attribute))
+                Some(format!(
+                    "Protocol `{protocol}`: {}",
+                    err.to_error_msg(&Name::new(format!("{got}")), protocol, attribute)
+                ))
             }
             SubsetError::TypedDict(err) => Some(err.to_error_msg()),
             SubsetError::OpenTypedDict(err) => Some(err.to_error_msg()),
