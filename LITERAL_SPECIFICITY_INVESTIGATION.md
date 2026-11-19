@@ -258,7 +258,7 @@ not the remaining raw string mismatch count.
 
 The next comparison should use explicit behavioral oracles rather than treating
 checker agreement or a narrower reveal string as correctness. The checked-in
-`scripts/typechecker_behavior_cases.py` corpus pairs accepted and rejected
+`scripts/typechecker_behavior_corpus/` corpus pairs accepted and rejected
 operations in four categories:
 
 - identifying type errors;
@@ -349,10 +349,16 @@ conformance cases:
 
 ## Diagnostic-quality scorecard
 
-The targeted corpus now attaches structured quality oracles to eight invalid
-operations covering assignments, calls, member access, protocols, TypedDicts,
-generic bounds, and overload selection. The score does not compare complete
-message strings. Instead, each oracle independently checks:
+The targeted corpus now attaches structured quality oracles to 64 invalid
+operations across a directory of source files. It covers assignments, calls,
+overloads, protocols, TypedDicts, unions, constructors, decorators, generics,
+recursive and nested containers, and uses whose declarations come from another
+file. Probe identity includes the relative file path and line, so diagnostics
+from equal line numbers in different files cannot satisfy one another. Range
+oracles retain physical indentation when computing columns.
+
+The score does not compare complete message strings. Instead, each oracle
+independently checks:
 
 - whether the primary range overlaps the offending expression;
 - whether the diagnostic kind or message identifies the broad category;
@@ -366,24 +372,50 @@ The current branch build and Pyright 1.1.414 produce:
 
 | Checker | Range | Category | Actual type | Expected type | Name | Related candidates | Hint | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| Pyrefly 1.2.0-dev.2 | 8/8 | 8/8 | 8/8 | 7/7 | 8/8 | 1/1 | 8/8 | 48/48 |
-| Pyright 1.1.414 | 8/8 | 6/8 | 7/8 | 6/7 | 6/8 | 0/1 | 8/8 | 41/48 |
+| Pyrefly 1.2.0-dev.2 | 64/64 | 62/64 | 59/60 | 58/60 | 60/63 | 6/6 | 63/63 | 372/380 |
+| Pyright 1.1.414 | 62/64 | 55/64 | 56/60 | 50/60 | 48/63 | 0/6 | 63/63 | 334/380 |
 
-Pyrefly satisfies every structured quality oracle. It selects useful primary
-ranges, identifies diagnostic subjects and both sides of type mismatches,
-includes TypedDict unpack source types, and links locally defined overload
-candidates through structured related locations with their expected signatures.
-Imported or synthesized overloads without a local definition range retain the
-closest-signature prose instead. Pyright provides every actionable hint but
-omits the annotated assignment target and bounded-generic parameter names, does
-not identify the TypedDict key/category or unpack source type, and does not
-expose overload candidates through structured related locations.
+Both checkers provide every scored actionable hint. Pyrefly also selects an
+overlapping primary range for every operation and links all six locally defined
+overload groups through structured related locations. Its recurring misses are
+narrower: two protocol incompatibilities are reported as assignments without a
+protocol category signal, one union member diagnostic omits the receiver type,
+one imported overload reports only its closest candidate, one discriminated
+union diagnostic omits the expected tags, and three constructor or union
+diagnostics omit the relevant subject name.
 
-Behavioral scoring remains separate from wording quality. On the expanded
-36-probe targeted corpus, Pyrefly scores 36/36 and Pyright 33/36. Pyright misses
-the guarded literal-union TypedDict member probe and two gradual
+Pyright's recurring gaps are broader. It exposes none of the six overload
+candidate groups through structured related locations, frequently omits
+annotated assignment targets and TypedDict key names, often reports TypedDict
+problems without a TypedDict/category signal, and less consistently includes
+expected union or overload alternatives. Its two range misses are nested item
+assignments where the primary range selects the container access rather than
+the rejected value. These results describe the structured properties in this
+corpus; they do not require identical prose or imply that every omitted property
+must be added to every diagnostic.
+
+Behavioral scoring remains separate from diagnostic quality. The directory
+contains 94 behavioral probes, of which 92 are scored and two remain unscored
+policy comparisons. Pyrefly scores 92/92 and Pyright 89/92. Pyright misses the
+guarded literal-union TypedDict member probe and two gradual
 ambiguous-overload capability probes; the mutable-generic and comprehension
 cases remain unscored policy comparisons.
+
+The 64 invalid operations are distributed as follows:
+
+| Topic | Operations |
+|---|---:|
+| Assignments | 6 |
+| Calls | 7 |
+| Overloads | 6 |
+| Protocols | 6 |
+| TypedDicts | 7 |
+| Unions | 5 |
+| Constructors | 5 |
+| Decorators | 5 |
+| Generics | 6 |
+| Recursive/nested containers | 5 |
+| Cross-file diagnostics | 6 |
 
 ## Reproducible real-project quality comparison
 

@@ -19,6 +19,19 @@ MARKER = re.compile(
     r"(?: \| quality: (.*))?\s*$"
 )
 CATEGORIES = ("errors", "specificity", "members", "overloads")
+QUALITY_TOPICS = (
+    "assignments",
+    "calls",
+    "overloads",
+    "protocols",
+    "typed-dicts",
+    "unions",
+    "constructors",
+    "decorators",
+    "generics",
+    "recursive-containers",
+    "cross-file",
+)
 QUALITY_DIMENSIONS = (
     "range",
     "category",
@@ -32,11 +45,15 @@ QUALITY_DIMENSIONS = (
 CATEGORY_SIGNALS = {
     "assignment": ("bad-assignment", "reportassignmenttype", "declared type"),
     "call": ("argument", "parameter", "reportargumenttype"),
+    "constructor": ("argument", "parameter", "constructor", "reportargumenttype"),
+    "decorator": ("decorator", "callable", "return type"),
     "member": ("attribute", "member", "reportattributeaccessissue"),
     "overload": ("overload", "reportcallissue"),
     "protocol": ("protocol",),
+    "return": ("return", "reportreturntype"),
     "typed-dict": ("typeddict", "typed-dict", "key"),
     "generic": ("type variable", "bound", "constraint"),
+    "union": ("union", "assignable", "assignment", "argument"),
 }
 
 HINT_SIGNALS = {
@@ -49,6 +66,7 @@ HINT_SIGNALS = {
 
 @dataclass(frozen=True)
 class QualityExpectation:
+    topic: str | None = None
     category: str | None = None
     span: str | None = None
     actual_type: str | None = None
@@ -60,6 +78,7 @@ class QualityExpectation:
 
 @dataclass(frozen=True)
 class Probe:
+    file: str
     line: int
     category: str
     expected: str
@@ -82,6 +101,7 @@ def parse_quality(
         fields[key.replace("-", "_")] = value.strip()
     unknown = set(fields) - {
         "category",
+        "topic",
         "span",
         "actual_type",
         "expected_type",
@@ -94,6 +114,9 @@ def parse_quality(
     category = fields.get("category")
     if category is not None and category not in CATEGORY_SIGNALS:
         raise ValueError(f"Unknown diagnostic category: {category}")
+    topic = fields.get("topic")
+    if topic is not None and topic not in QUALITY_TOPICS:
+        raise ValueError(f"Unknown diagnostic topic: {topic}")
     hint = fields.get("hint")
     if hint is not None and hint not in HINT_SIGNALS:
         raise ValueError(f"Unknown actionable hint: {hint}")
@@ -107,6 +130,7 @@ def parse_quality(
         raise ValueError("related-candidates must be true or false")
     return (
         QualityExpectation(
+            topic=topic,
             category=category,
             span=span,
             actual_type=fields.get("actual_type"),
@@ -119,15 +143,17 @@ def parse_quality(
     )
 
 
-def parse_probes(source: str) -> list[Probe]:
+def parse_probes(source: str, file: str = "<memory>") -> list[Probe]:
     probes = []
     for line_number, line in enumerate(source.splitlines(), 1):
         match = MARKER.search(line)
         if match:
-            probe_source = line[: match.start()].strip()
-            quality, span_columns = parse_quality(match.group(4), probe_source)
+            probe_code = line[: match.start()].rstrip()
+            probe_source = probe_code.strip()
+            quality, span_columns = parse_quality(match.group(4), probe_code)
             probes.append(
                 Probe(
+                    file=file,
                     line=line_number,
                     category=match.group(2),
                     expected=match.group(3),
@@ -140,11 +166,36 @@ def parse_probes(source: str) -> list[Probe]:
     return probes
 
 
+def parse_corpus_probes(corpus: Path) -> list[Probe]:
+    paths = (
+        [corpus]
+        if corpus.is_file()
+        else sorted(path for path in corpus.rglob("*.py") if "__pycache__" not in path.parts)
+    )
+    base = corpus.parent
+    probes = []
+    for path in paths:
+        file = path.relative_to(base).as_posix()
+        probes.extend(parse_probes(path.read_text(encoding="utf-8"), file))
+    return probes
+
+
+def diagnostic_location(diagnostic: dict[str, object]) -> tuple[str, int]:
+    file = str(diagnostic.get("file", "")).replace("\\", "/") or "<memory>"
+    return file, int(diagnostic["line"])
+
+
+def probe_label(probe: Probe) -> str:
+    if probe.file == "<memory>":
+        return f"`{probe.source}`"
+    return f"`{probe.file}:{probe.line}` `{probe.source}`"
+
+
 def score_probes(
     probes: list[Probe], diagnostics: list[dict[str, object]]
 ) -> dict[str, dict[str, int]]:
-    error_lines = {
-        int(diagnostic["line"])
+    error_locations = {
+        diagnostic_location(diagnostic)
         for diagnostic in diagnostics
         if diagnostic.get("severity") == "error"
     }
@@ -155,7 +206,7 @@ def score_probes(
     for probe in probes:
         if not probe.scored:
             continue
-        has_error = probe.line in error_lines
+        has_error = (probe.file, probe.line) in error_locations
         correct = has_error == (probe.expected == "error")
         category = scores[probe.category]
         category["total"] += 1
@@ -209,6 +260,8 @@ def diagnostic_quality_checks(
         diagnostic
         for diagnostic in diagnostics
         if diagnostic.get("severity") == "error"
+        and (str(diagnostic.get("file", "")).replace("\\", "/") or "<memory>")
+        == probe.file
         and int(diagnostic.get("line", 0))
         <= probe.line
         <= int(diagnostic.get("end_line", diagnostic.get("line", 0)))
@@ -261,6 +314,20 @@ def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=cwd, capture_output=True, text=True)
 
 
+def normalize_diagnostic_files(
+    diagnostics: list[dict[str, object]], base: Path
+) -> list[dict[str, object]]:
+    for diagnostic in diagnostics:
+        file = Path(str(diagnostic.get("file", "")))
+        if file.is_absolute():
+            try:
+                file = file.resolve().relative_to(base.resolve())
+            except ValueError:
+                pass
+        diagnostic["file"] = file.as_posix()
+    return diagnostics
+
+
 def pyrefly_diagnostics(
     command: list[str],
     corpus: Path,
@@ -285,7 +352,9 @@ def pyrefly_diagnostics(
         ],
         corpus.parent,
     )
-    return version, parse_full_errors_pyrefly(result.stdout)
+    return version, normalize_diagnostic_files(
+        parse_full_errors_pyrefly(result.stdout), corpus.parent
+    )
 
 
 def pyright_diagnostics(
@@ -296,7 +365,9 @@ def pyright_diagnostics(
         [*command, str(corpus), "--outputjson", "--pythonversion", python_version],
         corpus.parent,
     )
-    return version, parse_full_errors_pyright(result.stdout, str(corpus.parent))
+    return version, normalize_diagnostic_files(
+        parse_full_errors_pyright(result.stdout, str(corpus.parent)), corpus.parent
+    )
 
 
 def render_report(
@@ -371,15 +442,33 @@ def render_report(
         if not any(missing.values()):
             continue
         lines.append(
-            f"| `{probe.source}` | "
+            f"| {probe_label(probe)} | "
             + " | ".join(", ".join(missing[name]) or "-" for name in missing)
             + " |"
         )
 
+    topic_counts = {
+        topic: sum(
+            probe.quality is not None and probe.quality.topic == topic for probe in probes
+        )
+        for topic in QUALITY_TOPICS
+    }
+    lines.extend(
+        [
+            "",
+            "### Diagnostic corpus coverage",
+            "",
+            "| Topic | Invalid operations |",
+            "|---|---:|",
+        ]
+    )
+    for topic, count in topic_counts.items():
+        lines.append(f"| {topic} | {count} |")
+
     lines.extend(["", "## Differences", ""])
     diagnostics_by_checker = {
         name: {
-            int(diagnostic["line"])
+            diagnostic_location(diagnostic)
             for diagnostic in diagnostics
             if diagnostic.get("severity") == "error"
         }
@@ -391,15 +480,21 @@ def render_report(
     lines.append("|---|---|---|" + "---|" * len(diagnostics_by_checker))
     for probe in probes:
         outcomes = {
-            name: ("error" if probe.line in error_lines else "accepted")
-            for name, error_lines in diagnostics_by_checker.items()
+            name: (
+                "error"
+                if (probe.file, probe.line) in error_locations
+                else "accepted"
+            )
+            for name, error_locations in diagnostics_by_checker.items()
         }
         if len(set(outcomes.values())) == 1:
             continue
         lines.append(
             f"| {probe.category} | "
             f"{'scored' if probe.scored else 'comparison'} {probe.expected} | "
-            f"`{probe.source}` | " + " | ".join(outcomes.values()) + " |"
+            f"{probe_label(probe)} | "
+            + " | ".join(outcomes.values())
+            + " |"
         )
     return "\n".join(lines) + "\n"
 
@@ -411,14 +506,13 @@ def main() -> None:
     parser.add_argument(
         "--corpus",
         type=Path,
-        default=Path(__file__).with_name("typechecker_behavior_cases.py"),
+        default=Path(__file__).with_name("typechecker_behavior_corpus"),
     )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     corpus = args.corpus.resolve()
-    source = corpus.read_text()
-    probes = parse_probes(source)
+    probes = parse_corpus_probes(corpus)
     unknown_categories = {probe.category for probe in probes} - set(CATEGORIES)
     if unknown_categories:
         raise ValueError(f"Unknown probe categories: {sorted(unknown_categories)}")

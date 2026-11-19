@@ -5,9 +5,13 @@
 # LICENSE file in the root directory of this source tree.
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from compare_typechecker_behavior import (
+    QUALITY_TOPICS,
     contains_type,
+    parse_corpus_probes,
     parse_probes,
     render_report,
     score_diagnostic_quality,
@@ -27,6 +31,7 @@ class TestCompareTypecheckerBehavior(unittest.TestCase):
         )
         self.assertEqual(len(probes), 2)
         self.assertEqual(probes[0].line, 1)
+        self.assertEqual(probes[0].file, "<memory>")
         self.assertEqual(probes[0].category, "members")
         self.assertEqual(probes[0].expected, "accept")
         self.assertEqual(probes[0].source, "good()")
@@ -41,6 +46,60 @@ class TestCompareTypecheckerBehavior(unittest.TestCase):
         self.assertEqual(probes[0].quality.category, "call")
         self.assertEqual(probes[0].quality.actual_type, "str")
         self.assertEqual(probes[0].span_columns, (11, 16))
+
+    def test_quality_span_preserves_indentation_columns(self) -> None:
+        probes = parse_probes(
+            '    return "bad"  # benchmark: errors/error'
+            ' | quality: span="bad"\n'
+        )
+        self.assertEqual(probes[0].source, 'return "bad"')
+        self.assertEqual(probes[0].span_columns, (12, 17))
+
+    def test_parse_directory_corpus_with_file_identity(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory) / "corpus"
+            root.mkdir()
+            (root / "first.py").write_text(
+                'bad: int = "x"  # benchmark: errors/error\n',
+                encoding="utf-8",
+            )
+            (root / "second.py").write_text(
+                "good: int = 1  # benchmark: errors/accept\n",
+                encoding="utf-8",
+            )
+            probes = parse_corpus_probes(root)
+        self.assertEqual(
+            [(probe.file, probe.line) for probe in probes],
+            [("corpus/first.py", 1), ("corpus/second.py", 1)],
+        )
+
+    def test_same_line_in_different_files_does_not_cross_match(self) -> None:
+        first = parse_probes(
+            "bad()  # benchmark: errors/error\n", "corpus/first.py"
+        )
+        second = parse_probes(
+            "good()  # benchmark: errors/accept\n", "corpus/second.py"
+        )
+        scores = score_probes(
+            [*first, *second],
+            [{"file": "corpus/first.py", "line": 1, "severity": "error"}],
+        )
+        self.assertEqual(scores["errors"], {
+            "correct": 2,
+            "total": 2,
+            "accepts": 1,
+            "errors": 1,
+        })
+
+    def test_checked_in_corpus_has_broad_quality_coverage(self) -> None:
+        corpus = Path(__file__).with_name("typechecker_behavior_corpus")
+        probes = parse_corpus_probes(corpus)
+        quality_probes = [probe for probe in probes if probe.quality is not None]
+        self.assertEqual(len(quality_probes), 64)
+        self.assertEqual(
+            {probe.quality.topic for probe in quality_probes},
+            set(QUALITY_TOPICS),
+        )
 
     def test_score_probes(self) -> None:
         probes = parse_probes(
