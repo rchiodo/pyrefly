@@ -15,6 +15,7 @@ mod definition;
 mod diagnostic;
 mod document_highlight;
 mod document_symbols;
+mod editor_scorecard;
 mod expected_type;
 mod folding_ranges;
 mod hover;
