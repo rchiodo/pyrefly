@@ -163,10 +163,17 @@ pub enum TypeCheckKind {
     CallArgument(Option<Name>, Option<FunctionKind>),
     /// Function call argument against *arg parameter type. The bool indicates whether the argument is unpacked.
     CallVarArgs(bool, Option<Name>, Option<FunctionKind>),
-    /// Keyword argument against parameter or **kwargs type, as (argument name, parameter name, function name).
-    CallKwArgs(Option<Name>, Option<Name>, Option<FunctionKind>),
-    /// Unpacked keyword argument against named parameter.
-    CallUnpackKwArg(Name, Option<FunctionKind>),
+    /// Keyword argument against parameter or **kwargs type, as
+    /// (argument name, parameter name, unpacked source type, function name).
+    CallKwArgs(
+        Option<Name>,
+        Option<Name>,
+        Option<Type>,
+        Option<FunctionKind>,
+    ),
+    /// Unpacked keyword argument against named parameter, as
+    /// (parameter name, unpacked source type, function name).
+    CallUnpackKwArg(Name, Type, Option<FunctionKind>),
     /// Check of a parameter's default value against its type annotation.
     FunctionParameterDefault(Name),
     /// Check against type of a TypedDict key. The name may be None if the type comes from

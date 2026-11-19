@@ -737,7 +737,7 @@ def f(x: str, y: int, z: int): ...
 def test(kwargs: dict[str, int]):
     f("foo", **kwargs) # OK
     f(x="foo", **kwargs) # OK
-    f(**kwargs) # E: Unpacked keyword argument `int` is not assignable to parameter `x` with type `str` in function `f`
+    f(**kwargs) # E: Unpacked keyword argument from `dict[str, int]` for key `x` has type `int`, which is not assignable to parameter `x` with type `str` in function `f`
 "#,
 );
 
@@ -746,7 +746,7 @@ testcase!(
     r#"
 def f(x: int, y: int, z: int): ...
 def test(kwargs1: dict[str, int], kwargs2: dict[str, str]):
-    f(**kwargs1, **kwargs2) # E: Unpacked keyword argument `str` is not assignable to parameter `x` with type `int` in function `f` # E: Unpacked keyword argument `str` is not assignable to parameter `y` with type `int` in function `f` # E: Unpacked keyword argument `str` is not assignable to parameter `z` with type `int` in function `f`
+    f(**kwargs1, **kwargs2) # E: Unpacked keyword argument from `dict[str, str]` for key `x` has type `str`, which is not assignable to parameter `x` with type `int` in function `f` # E: Unpacked keyword argument from `dict[str, str]` for key `y` has type `str`, which is not assignable to parameter `y` with type `int` in function `f` # E: Unpacked keyword argument from `dict[str, str]` for key `z` has type `str`, which is not assignable to parameter `z` with type `int` in function `f`
 "#,
 );
 
@@ -757,6 +757,49 @@ from typing import Mapping
 def f(x: int, y: int, z: int): ...
 def test(kwargs: Mapping[str, int]):
     f(**kwargs) # OK
+"#,
+);
+
+testcase!(
+    test_splat_kwargs_typed_dict_source_diagnostics,
+    r#"
+from typing import Mapping, TypedDict
+
+class WrongValue(TypedDict):
+    x: str
+    y: int
+
+class MissingKey(TypedDict):
+    x: int
+
+class ExtraKey(TypedDict):
+    x: int
+    y: int
+    z: int
+
+class OnlyX(TypedDict):
+    x: int
+
+class OnlyY(TypedDict):
+    y: int
+
+def f(x: int, y: int): ...
+def g(x: int): ...
+def accepts_object(x: object, y: object): ...
+
+def test(
+    wrong: WrongValue,
+    missing: MissingKey,
+    extra: ExtraKey,
+    unknown: Mapping[str, int],
+    union: OnlyX | OnlyY,
+):
+    f(**wrong)  # E: Unpacked keyword argument from `WrongValue` for key `x` has type `str`, which is not assignable to parameter `x` with type `int` in function `f`
+    f(**missing)  # E: Unpacked TypedDict `MissingKey` does not provide required argument `y`
+    f(**extra)  # E: Unpacked TypedDict `ExtraKey` provides unexpected keyword argument `z`
+    g(x=0, **missing)  # E: Unpacked TypedDict `MissingKey` provides multiple values for argument `x`
+    f(**unknown)  # OK: an unknown mapping may provide both required keys
+    accepts_object(**union)  # OK: preserve conservative handling when exact union keys are unknown
 "#,
 );
 
@@ -786,7 +829,7 @@ def f(**kwargs: int): ...
 def g(**kwargs: str): ...
 def test(kwargs: dict[str, int]):
     f(**kwargs) # OK
-    g(**kwargs) # E: Unpacked keyword argument `int` is not assignable to parameter `**kwargs` with type `str` in function `g`
+    g(**kwargs) # E: Unpacked keyword argument from `dict[str, int]` with value type `int` is not assignable to parameter `**kwargs` with type `str` in function `g`
 "#,
 );
 

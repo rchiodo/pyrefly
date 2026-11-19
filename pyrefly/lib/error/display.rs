@@ -134,10 +134,21 @@ impl TypeCheckKind {
                     function_suffix(func_id.as_ref(), current_module),
                 )
             }
-            Self::CallKwArgs(arg, param, func_id) => {
+            Self::CallKwArgs(arg, param, unpacked_source, func_id) => {
+                if let Some(source) = unpacked_source {
+                    ctx.add(source);
+                }
                 let arg_desc = match arg {
                     Some(arg) => format!("Keyword argument `{arg}` with type"),
-                    None => "Unpacked keyword argument".to_owned(),
+                    None => match unpacked_source {
+                        Some(source) => {
+                            format!(
+                                "Unpacked keyword argument from `{}` with value type",
+                                ctx.display(source)
+                            )
+                        }
+                        None => "Unpacked keyword argument".to_owned(),
+                    },
                 };
                 let param_desc = match param {
                     Some(param) => format!("parameter `**{param}` with type"),
@@ -152,13 +163,18 @@ impl TypeCheckKind {
                     function_suffix(func_id.as_ref(), current_module),
                 )
             }
-            Self::CallUnpackKwArg(param, func_id) => format!(
-                "Unpacked keyword argument `{}` is not assignable to parameter `{}` with type `{}`{}",
-                ctx.display(got),
-                param,
-                ctx.display(want),
-                function_suffix(func_id.as_ref(), current_module),
-            ),
+            Self::CallUnpackKwArg(param, source, func_id) => {
+                ctx.add(source);
+                format!(
+                    "Unpacked keyword argument from `{}` for key `{}` has type `{}`, which is not assignable to parameter `{}` with type `{}`{}",
+                    ctx.display(source),
+                    param,
+                    ctx.display(got),
+                    param,
+                    ctx.display(want),
+                    function_suffix(func_id.as_ref(), current_module),
+                )
+            }
             Self::FunctionParameterDefault(param) => format!(
                 "Default `{}` is not assignable to parameter `{}` with type `{}`",
                 ctx.display(got),

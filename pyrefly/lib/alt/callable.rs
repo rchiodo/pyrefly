@@ -1142,12 +1142,14 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             }
         };
         let mut splat_kwargs = Vec::new();
+        let mut typed_dict_sources = Vec::new();
         for kw in keywords {
             match kw.arg {
                 None => {
-                    let ty = kw.value.infer(self, arg_errors);
-                    if let Type::TypedDict(typed_dict) = ty {
-                        for (name, field) in self.typed_dict_fields(&typed_dict).into_iter() {
+                    let source_ty = kw.value.infer(self, arg_errors);
+                    let source_ty_for_display = self.for_display(source_ty.clone());
+                    if let Type::TypedDict(typed_dict) = &source_ty {
+                        for (name, field) in self.typed_dict_fields(typed_dict).into_iter() {
                             let name = name_owner.push(name);
                             let mut hint = kwargs.as_ref().and_then(|(_, ty)| *ty);
                             if let Some((ty, _, definitely_seen)) = seen_names.get(name) {
@@ -1166,14 +1168,25 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     call_errors,
                                     kw.range,
                                     error_kind,
-                                    format!("Multiple values for argument `{name}`"),
+                                    format!(
+                                        "Unpacked TypedDict `{}` provides multiple values for argument `{name}`",
+                                        self.for_display(source_ty.clone()),
+                                    ),
                                 );
                                 hint = Some(*ty);
                             } else if let Some((ty, origin, _)) = kwparams.get(name) {
                                 seen_names.insert(name, (*ty, origin.clone(), field.required));
                                 hint = Some(*ty)
                             } else if kwargs.is_none() {
-                                unexpected_keyword_error(name, kw.range);
+                                error(
+                                    call_errors,
+                                    kw.range,
+                                    ErrorKind::UnexpectedKeyword,
+                                    format!(
+                                        "Unpacked TypedDict `{}` provides unexpected keyword argument `{name}`",
+                                        self.for_display(source_ty.clone()),
+                                    ),
+                                );
                             }
                             if let Some(want) = &hint {
                                 self.check_type_with_options(
@@ -1181,8 +1194,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     want,
                                     kw.range,
                                     TypeCheckOptions::new(call_errors, &|| {
-                                        TypeCheckContext::of_kind(TypeCheckKind::CallArgument(
-                                            Some(name.clone()),
+                                        TypeCheckContext::of_kind(TypeCheckKind::CallUnpackKwArg(
+                                            name.clone(),
+                                            source_ty_for_display.clone(),
                                             callable_name.cloned(),
                                         ))
                                         .with_context(context.map(|ctx| ctx()))
@@ -1191,8 +1205,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                 );
                             }
                         }
+                        typed_dict_sources.push(source_ty_for_display);
                     } else {
-                        match self.unwrap_mapping(&ty) {
+                        match self.unwrap_mapping(&source_ty) {
                             Some((key, value)) => {
                                 if self.is_subset_eq(
                                     &key,
@@ -1208,6 +1223,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                                     TypeCheckKind::CallKwArgs(
                                                         None,
                                                         name.cloned(),
+                                                        Some(source_ty_for_display.clone()),
                                                         callable_name.cloned(),
                                                     ),
                                                 )
@@ -1216,7 +1232,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                             .with_call_context(call_context),
                                         );
                                     };
-                                    splat_kwargs.push((value, kw.range));
+                                    splat_kwargs.push((source_ty_for_display, value, kw.range));
                                 } else {
                                     error(
                                         call_errors,
@@ -1236,7 +1252,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     ErrorKind::BadUnpacking,
                                     format!(
                                         "Expected argument after ** to be a mapping, got: {}",
-                                        self.for_display(ty)
+                                        self.for_display(source_ty)
                                     ),
                                 );
                             }
@@ -1289,6 +1305,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                             TypeCheckKind::CallKwArgs(
                                 Some(id.id.clone()),
                                 kwargs.as_ref().and_then(|(name, _)| name.cloned()),
+                                None,
                                 callable_name.cloned(),
                             )
                         })
@@ -1377,11 +1394,22 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                                     NameOrigin::Param => Some((*name).clone()),
                                     NameOrigin::UnpackedKwargs(name) => name.cloned(),
                                 });
+                                let message = if typed_dict_sources.is_empty() {
+                                    format!("Missing argument `{name}`")
+                                } else {
+                                    let sources = typed_dict_sources
+                                        .iter()
+                                        .map(|ty| format!("`{}`", self.for_display(ty.clone())))
+                                        .join(" and ");
+                                    format!(
+                                        "Unpacked TypedDict {sources} does not provide required argument `{name}`"
+                                    )
+                                };
                                 error(
                                     call_errors,
                                     arguments_range,
                                     ErrorKind::MissingArgument,
-                                    format!("Missing argument `{name}`"),
+                                    message,
                                 );
                             }
                         }
@@ -1391,7 +1419,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                     }
                     Required::Optional(None) => {}
                 }
-                for (ty, range) in &splat_kwargs {
+                for (source, ty, range) in &splat_kwargs {
                     self.check_type_with_options(
                         ty,
                         want,
@@ -1399,6 +1427,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                         TypeCheckOptions::new(call_errors, &|| {
                             TypeCheckContext::of_kind(TypeCheckKind::CallUnpackKwArg(
                                 (*name).clone(),
+                                source.clone(),
                                 callable_name.cloned(),
                             ))
                             .with_context(context.map(|ctx| ctx()))
