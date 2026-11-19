@@ -2398,11 +2398,19 @@ def f(x: str | None):
 );
 
 testcase!(
+    test_union_attribute_error_includes_receiver,
+    r#"
+def f(value: int | str) -> None:
+    value.append(1)  # E: Union type `int | str` has no attribute `append` # !E: Object of class `str`
+"#,
+);
+
+testcase!(
     test_union_attribute_missing_no_suggestion_three_types,
     r#"
 # Partial union failure with 3 types: attribute exists on 1, missing on 2
 def f(x: str | int | None):
-    return x.split()  # E: Object of class `NoneType` has no attribute `split`\nObject of class `int` has no attribute `split` # !E: Did you mean
+    return x.split()  # E: Union type # !E: Object of class `int` # !E: Did you mean
 "#,
 );
 
@@ -2421,7 +2429,7 @@ class C:
 def f(x: C | A | B):
     # C has "upper" method, A and B have "upper" attribute
     # But C doesn't have "lower" attribute, A and B do
-    x.lowerr  # E: Object of class `C` has no attribute `lowerr` # !E: Did you mean
+    x.lowerr  # E: Union type `A | B | C` has no attribute `lowerr` # !E: Did you mean
 "#,
 );
 
@@ -2434,7 +2442,7 @@ class A:
 class B:
     value: str
 def f(x: A | B):
-    return x.vaule  # E: Object of class `A` has no attribute `vaule`\nObject of class `B` has no attribute `vaule`\n  Did you mean `value`?
+    return x.vaule  # E: Union type `A | B` has no attribute `vaule`\n  Object of class `A` has no attribute `vaule`\n  Did you mean `value`? # !E: Object of class `B`
 "#,
 );
 

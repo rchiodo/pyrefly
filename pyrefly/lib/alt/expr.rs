@@ -91,6 +91,7 @@ use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
 use crate::error::context::TypeCheckContext;
+use crate::error::context::TypeCheckKind;
 use crate::solver::solver::CallContext;
 use crate::types::callable::DefaultValue;
 use crate::types::callable::Param;
@@ -1374,6 +1375,49 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 {
                     errors.extend(item_errors);
                     return hint_ty.clone();
+                }
+            }
+            if hint.types().len() > 1
+                && let Some(hint_errors) = hint.errors()
+            {
+                for item in &flattened_items {
+                    let Some(key) = &item.key else {
+                        continue;
+                    };
+                    let Expr::StringLiteral(key) = key else {
+                        continue;
+                    };
+                    let key = Name::new(key.value.to_string());
+                    let mut field_types = Vec::new();
+                    for hint_ty in hint.types() {
+                        let typed_dict = match hint_ty {
+                            Type::TypedDict(td) | Type::PartialTypedDict(td) => td,
+                            _ => break,
+                        };
+                        let Some(field) = self.typed_dict_field(typed_dict, &key) else {
+                            break;
+                        };
+                        field_types.push(field.ty);
+                    }
+                    if field_types.len() != hint.types().len() {
+                        continue;
+                    }
+                    let field_ty = self.unions(field_types);
+                    let candidate_errors = self.error_collector();
+                    self.expr_check(
+                        &item.value,
+                        Some((&field_ty, &|| {
+                            TypeCheckContext::of_kind(TypeCheckKind::TypedDictKey(
+                                Some(key.clone()),
+                                false,
+                            ))
+                        })),
+                        &candidate_errors,
+                    );
+                    if candidate_errors.has_hard() {
+                        hint_errors.extend(candidate_errors);
+                        return self.unions(hint.types().to_vec());
+                    }
                 }
             }
         }

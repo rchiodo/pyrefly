@@ -637,6 +637,8 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             };
         }
         let attr_base = self.as_attribute_base(base.clone());
+        let union_receiver = matches!(base, Type::Union(_))
+            .then(|| base.clone().deterministic_printing().to_string());
         let lookup_result = attr_base.clone().map_or_else(
             || LookupResult::internal_error(InternalError::AttributeBaseUndefined(base.clone())),
             |attr_base| self.lookup_attr(attr_base, attr_name),
@@ -675,7 +677,15 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         } else if !error_messages.is_empty() {
             error_messages.sort();
             error_messages.dedup();
-            let mut msg = vec1![error_messages.join("\n")];
+            let mut msg = if let Some(union_receiver) = union_receiver {
+                let mut msg = vec1![format!(
+                    "Union type `{union_receiver}` has no attribute `{attr_name}`"
+                )];
+                msg.push(error_messages[0].clone());
+                msg
+            } else {
+                vec1![error_messages.join("\n")]
+            };
             // Skip suggestions when we have a partial union failure to avoid suggesting
             // attributes from the types that have them when the problem is that some types
             // don't have the attribute at all.

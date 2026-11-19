@@ -60,6 +60,25 @@ nested: tuple[Target] = (Missing(name=""),)  # E: Tuple element 1 is incompatibl
 );
 
 testcase!(
+    test_tagged_union_literal_mismatch_explains_discriminator,
+    r#"
+from typing import Literal, TypedDict
+
+class Cat(TypedDict):
+    kind: Literal["cat"]
+    lives: int
+
+class Dog(TypedDict):
+    kind: Literal["dog"]
+    bark: bool
+
+type Pet = Cat | Dog
+
+bad_pet_tag: Pet = {"kind": "bird", "lives": 1}  # E: `Literal['bird']` is not assignable to TypedDict key `kind` with type `Literal['cat', 'dog']`
+"#,
+);
+
+testcase!(
     test_fields_named_like_builtins,
     r#"
 from typing import TypedDict
