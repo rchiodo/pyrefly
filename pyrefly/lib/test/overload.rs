@@ -7,6 +7,8 @@
 
 // @lint-ignore-every SPELL
 
+use crate::error::error::Error;
+use crate::error::error::ErrorRenderer;
 use crate::test::util::TestEnv;
 use crate::testcase;
 
@@ -1618,6 +1620,106 @@ def choose(value, priority): return value
 choose("value", 1.0)  # E: Reason: Argument `float` is not assignable to parameter `priority` with type `int`
     "#,
 );
+
+#[test]
+fn test_overload_error_links_closest_candidate() {
+    let code = r#"
+from typing import overload
+
+@overload
+def convert(value: int) -> int: ...
+@overload
+def convert(value: str) -> str: ...
+def convert(value): return value
+
+convert(1.0)
+
+class C:
+    @overload
+    def convert(self, value: int) -> int: ...
+    @overload
+    def convert(self, value: str) -> str: ...
+    def convert(self, value): return value
+
+C().convert(1.0)
+
+@overload
+def choose[T](value: T, priority: int) -> T: ...
+@overload
+def choose[T](value: T, priority: str) -> tuple[T, str]: ...
+def choose(value, priority): return value
+
+choose("value", 1.0)
+"#;
+    let project = std::env::current_dir().unwrap();
+    let path = project.join("overload_related_information.py");
+    let (state, handle) = TestEnv::one_with_path("main", path.to_str().unwrap(), code).to_state();
+    let errors = state
+        .transaction()
+        .get_errors(&[handle("main")])
+        .collect_errors()
+        .ordinary;
+    assert_eq!(errors.len(), 3);
+
+    let check = |error: &Error, definition: &str, label: &str| {
+        assert!(
+            error
+                .msg_details()
+                .is_some_and(|details| details.contains("Reason: Argument `float`")),
+            "{}",
+            error.msg()
+        );
+        let [annotation] = error.secondary_annotations() else {
+            panic!("expected one closest-overload annotation: {error:?}");
+        };
+        assert_eq!(error.module().code_at(annotation.range), definition);
+        assert_eq!(&*annotation.label, label);
+
+        let diagnostic = serde_json::to_value(error.to_diagnostic()).unwrap();
+        let related = diagnostic["relatedInformation"]
+            .as_array()
+            .expect("expected LSP related information");
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0]["message"], label);
+        assert!(related[0]["location"]["range"].is_object());
+    };
+
+    check(
+        &errors[0],
+        "convert",
+        "Closest overload expects parameter `value` with type `int`",
+    );
+    check(
+        &errors[1],
+        "convert",
+        "Closest overload expects parameter `value` with type `int`",
+    );
+    check(
+        &errors[2],
+        "choose",
+        "Closest overload expects parameter `priority` with type `int`",
+    );
+
+    let mut rendered = Vec::new();
+    {
+        let mut renderer = ErrorRenderer::plain(&mut rendered);
+        for error in &errors {
+            renderer.write(error, project.as_path(), true).unwrap();
+        }
+        renderer.flush().unwrap();
+    }
+    let rendered = String::from_utf8(rendered).unwrap();
+    assert_eq!(
+        rendered
+            .matches("Closest overload expects parameter")
+            .count(),
+        3
+    );
+    assert_eq!(rendered.matches("Reason: Argument `float`").count(), 3);
+    assert!(rendered.contains("def convert(value: int) -> int: ..."));
+    assert!(rendered.contains("def convert(self, value: int) -> int: ..."));
+    assert!(rendered.contains("def choose[T](value: T, priority: int) -> T: ..."));
+}
 
 testcase!(
     test_varargs_materialization,

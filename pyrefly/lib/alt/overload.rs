@@ -28,6 +28,7 @@ use pyrefly_util::prelude::SliceExt;
 use pyrefly_util::prelude::VecExt;
 use ruff_text_size::Ranged;
 use ruff_text_size::TextRange;
+use starlark_map::Hashed;
 use starlark_map::small_set::SmallSet;
 use vec1::Vec1;
 
@@ -41,6 +42,7 @@ use crate::alt::callable::CallKeyword;
 use crate::alt::callable::CallWithTypes;
 use crate::alt::expr::TypeOrExpr;
 use crate::alt::unwrap::HintRef;
+use crate::binding::binding::KeyUndecoratedFunctionRange;
 use crate::config::error_kind::ErrorKind;
 use crate::error::collector::ErrorCollector;
 use crate::error::context::ErrorContext;
@@ -48,6 +50,7 @@ use crate::solver::solver::TypeVarSpecializationError;
 use crate::types::callable::Callable;
 use crate::types::callable::FuncMetadata;
 use crate::types::callable::Function;
+use crate::types::callable::FunctionKind;
 use crate::types::callable::Params;
 use crate::types::literal::Lit;
 use crate::types::types::Type;
@@ -450,6 +453,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 errors,
                 context,
                 &closest_overload.func.1.signature,
+                &closest_overload.func.1.metadata,
                 closest_overload.call_errors,
                 closest_overload.argmap,
             );
@@ -511,6 +515,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
         errors: &ErrorCollector,
         context: Option<&dyn Fn() -> ErrorContext>,
         closest_overload_signature: &Callable,
+        closest_overload_metadata: &FuncMetadata,
         closest_overload_call_errors: ErrorCollector,
         mut closest_overload_argmap: ArgMap,
     ) {
@@ -568,9 +573,9 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
                 // parameters that were not matched.
                 let names = closest_overload_argmap
                     .range_to_param
-                    .into_values()
-                    .map(|p| p.name)
-                    .chain(closest_overload_argmap.unmatched_params)
+                    .values()
+                    .map(|p| p.name.clone())
+                    .chain(closest_overload_argmap.unmatched_params.iter().cloned())
                     .collect::<Option<SmallSet<_>>>();
                 match names {
                     Some(names) => ParamOverlay::Subset(names),
@@ -615,6 +620,7 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             .error_builder(arguments_range, ErrorKind::NoMatchingOverload, header)
             .with_context(context)
             .with_details(details);
+        let mut closest_overload_label = format!("Closest overload: {signature_for_display}");
         if closest_overload_call_errors.is_empty() {
             // If there were no call errors, the failure must have been an arity mismatch.
             let mut arg_counts = closest_overload_signature.arg_counts();
@@ -673,18 +679,50 @@ impl<'a, Ans: LookupAnswer> AnswersSolver<'a, Ans> {
             });
             builder = builder.with_detail(format!("Reason: {arity_mismatch}"));
         } else {
-            builder = builder.with_best_error_as_detail(
-                "Reason: ",
-                closest_overload_call_errors,
-                |error| match error.error_kind() {
+            let best_error =
+                closest_overload_call_errors.best_error(|error| match error.error_kind() {
                     ErrorKind::UnexpectedKeyword => 0,
                     ErrorKind::BadArgumentType => 1,
                     ErrorKind::MissingArgument => 2,
                     _ => 3,
-                },
-            );
+                });
+            if let Some(best_error) = best_error {
+                builder = builder.with_detail(format!("Reason: {}", best_error.msg_header()));
+                if let Some(param) = closest_overload_argmap
+                    .range_to_param
+                    .get(&best_error.range())
+                {
+                    let expected = self.for_display(param.ty.clone());
+                    closest_overload_label = match &param.name {
+                        Some(name) => format!(
+                            "Closest overload expects parameter `{name}` with type `{expected}`"
+                        ),
+                        None => format!("Closest overload expects type `{expected}`"),
+                    };
+                }
+            }
+        }
+        if let Some(range) = self.overload_definition_range(closest_overload_metadata) {
+            builder = builder.with_annotation(range, closest_overload_label);
         }
         builder.emit();
+    }
+
+    fn overload_definition_range(&self, metadata: &FuncMetadata) -> Option<TextRange> {
+        let func_id = match &metadata.kind {
+            FunctionKind::Def(func_id) | FunctionKind::ShapeDsl(func_id, ..) => func_id,
+            _ => return None,
+        };
+        if func_id.module.name() != self.module().name()
+            || func_id.module.path() != self.module().path()
+        {
+            return None;
+        }
+        let def_index = func_id.def_index?;
+        let idx = self
+            .bindings()
+            .key_to_idx_hashed_opt(Hashed::new(&KeyUndecoratedFunctionRange(def_index)))?;
+        Some(self.get_idx(idx).0.range())
     }
 
     /// Returns the overload that matches the given arguments, or the one that produces the fewest

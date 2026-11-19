@@ -14,7 +14,11 @@ use std::path::Path;
 use itertools::Itertools;
 use lsp_types::CodeDescription;
 use lsp_types::Diagnostic;
+#[cfg(not(target_arch = "wasm32"))]
+use lsp_types::DiagnosticRelatedInformation;
 use lsp_types::DiagnosticTag;
+#[cfg(not(target_arch = "wasm32"))]
+use lsp_types::Location;
 use lsp_types::Url;
 use pyrefly_python::ignore::Tool;
 use pyrefly_python::module::Module;
@@ -322,8 +326,24 @@ impl Error {
         let code_description = Url::parse(&self.error_kind().docs_url())
             .ok()
             .map(|href| CodeDescription { href });
-        // TODO: Map secondary_annotations to DiagnosticRelatedInformation for LSP clients.
-        // This requires constructing a Url from the module path, which may not always succeed.
+        #[cfg(not(target_arch = "wasm32"))]
+        let related_information =
+            Url::from_file_path(self.module.path().as_path())
+                .ok()
+                .map(|uri| {
+                    self.secondary_annotations
+                        .iter()
+                        .map(|annotation| DiagnosticRelatedInformation {
+                            location: Location {
+                                uri: uri.clone(),
+                                range: self.module.to_lsp_range(annotation.range),
+                            },
+                            message: annotation.label.to_string(),
+                        })
+                        .collect()
+                });
+        #[cfg(target_arch = "wasm32")]
+        let related_information = None;
         Diagnostic {
             range: self.module.to_lsp_range(self.range()),
             severity: Some(match self.severity() {
@@ -342,6 +362,7 @@ impl Error {
             } else {
                 None
             },
+            related_information,
             ..Default::default()
         }
     }

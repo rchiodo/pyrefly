@@ -148,6 +148,12 @@ impl ErrorCollector {
         }
     }
 
+    /// Return the highest-priority error collected so far.
+    pub fn best_error(&self, priority: impl Fn(&Error) -> usize) -> Option<Error> {
+        let mut errors = self.errors.lock();
+        errors.iter().min_by_key(|error| priority(error)).cloned()
+    }
+
     /// Start building an error. Returns a no-op builder if style is Never.
     pub fn error_builder(
         &self,
@@ -331,20 +337,6 @@ impl ErrorBuilder<'_> {
     pub fn with_details(mut self, details: Vec<String>) -> Self {
         if self.active {
             self.details.extend(details);
-        }
-        self
-    }
-
-    /// Adds the highest-priority error from `collector` as a detail line.
-    pub fn with_best_error_as_detail(
-        mut self,
-        prefix: &str,
-        collector: ErrorCollector,
-        priority: impl Fn(&Error) -> usize,
-    ) -> Self {
-        let mut errors = collector.errors.into_inner();
-        if let Some(error) = errors.iter().min_by_key(|error| priority(error)) {
-            self.details.push(format!("{prefix}{}", error.msg_header()));
         }
         self
     }
