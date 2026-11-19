@@ -384,3 +384,91 @@ Behavioral scoring remains separate from wording quality. On the expanded
 the guarded literal-union TypedDict member probe and two gradual
 ambiguous-overload capability probes; the mutable-generic and comprehension
 cases remain unscored policy comparisons.
+
+## Reproducible real-project quality comparison
+
+`scripts/compare_project_quality.py` adds a bounded primer-based comparison that
+reuses the project definitions, cache layout, config migration, path selection,
+and diagnostic parsers from `scripts/compare_typecheckers.py`. Its default
+corpus is deliberately small enough for a local run:
+
+- `mypy_primer`, a small typed application;
+- `black`, a larger `src`-layout application with runtime dependencies; and
+- `attrs`, a stub-heavy library target.
+
+Each checker runs three times after cloning and dependency setup. The JSON
+output retains every run and diagnostic. The Markdown summary reports:
+
+- median/minimum/maximum wall time;
+- exact duplicate diagnostics within a run;
+- crashes and timeouts;
+- diagnostic-count ranges and signatures that changed between runs; and
+- stable diagnostics that have no overlapping error from the other checker.
+
+The last metric is only an automated **false-positive candidate queue**.
+Checker-only diagnostics still need source-level semantic adjudication and are
+not counted as false positives automatically. Different checker rules and
+messages at an overlapping source range count as agreement that the location is
+diagnostic-worthy, while exact fingerprints are used for duplicates and
+run-to-run stability.
+
+### Exact local commands
+
+The reproducible Windows run used released checker binaries because the machine
+did not have the repository's Rust `stable` toolchain installed:
+
+```powershell
+python -m pip install pyrefly==1.4.1 pyright==1.1.414
+$cache = Join-Path $env:TEMP "pyrefly-project-quality"
+$pyrefly = (Get-Command pyrefly).Source
+python scripts\compare_project_quality.py `
+  --pyrefly $pyrefly `
+  --cache-dir $cache `
+  --runs 3 `
+  --timeout 300 `
+  --output-json (Join-Path $env:TEMP "project-quality-results.json") `
+  --output-markdown (Join-Path $env:TEMP "project-quality-results.md")
+```
+
+The aggregation tests run independently of either checker:
+
+```powershell
+Set-Location scripts
+python -m unittest test_compare_project_quality test_compare_typecheckers
+```
+
+### Reproduced results
+
+Environment:
+
+- Windows 10.0.26300, Python 3.11.9;
+- Pyrefly 1.4.1 and Pyright 1.1.414;
+- `mypy_primer` at `09201ae7e61c935e0d975b80ee8619d774c80300`;
+- `black` at `c0e143e75443afd3be50c3b63ed2ee2fd108f509`; and
+- `attrs` at `2a1fb86d44816afcc60e86d57956ce3604820326`.
+
+| Project | Checker | Successful runs | Median (s) | Errors min-max | Exact duplicates | Unstable signatures | Timeouts | Crashes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| mypy_primer | Pyrefly | 3/3 | 0.741 | 3-3 | 0 | 0 | 0 | 0 |
+| mypy_primer | Pyright | 3/3 | 4.026 | 3-3 | 0 | 0 | 0 | 0 |
+| black | Pyrefly | 3/3 | 0.670 | 9-9 | 0 | 0 | 0 | 0 |
+| black | Pyright | 3/3 | 7.247 | 16-16 | 0 | 0 | 0 | 0 |
+| attrs | Pyrefly | 3/3 | 0.521 | 1-1 | 0 | 0 | 0 | 0 |
+| attrs | Pyright | 3/3 | 1.799 | 0-0 | 0 | 0 | 0 | 0 |
+
+All six checker/project combinations produced identical diagnostic signatures
+across their three runs, with no exact duplicates, crashes, or timeouts.
+Runtime is machine-specific and the table measures warm checker processes after
+one-time clone and dependency preparation; it is useful for regression
+comparison, not as a universal speed ratio.
+
+| Project | Stable Pyrefly-only candidates | Stable Pyright-only candidates |
+|---|---:|---:|
+| mypy_primer | 0 | 0 |
+| black | 4 | 11 |
+| attrs | 1 | 0 |
+
+The `black` and `attrs` candidates remain an adjudication backlog. The automated
+run establishes that they are stable and checker-specific at the source-range
+level, but does not determine whether they are true positives, false positives,
+configuration differences, or intentional policy differences.

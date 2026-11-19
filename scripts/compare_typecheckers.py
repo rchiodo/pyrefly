@@ -219,7 +219,7 @@ def _get_package_name(repo_dir: str) -> str | None:
     """
     pyproject = os.path.join(repo_dir, "pyproject.toml")
     if os.path.exists(pyproject):
-        with open(pyproject) as f:
+        with open(pyproject, encoding="utf-8") as f:
             for line in f:
                 m = re.match(r'\s*name\s*=\s*["\'](.+?)["\']', line)
                 if m:
@@ -511,7 +511,7 @@ def _has_pyright_config(repo_dir: str) -> bool:
         return True
     pyproject = os.path.join(repo_dir, "pyproject.toml")
     if os.path.exists(pyproject):
-        with open(pyproject) as f:
+        with open(pyproject, encoding="utf-8") as f:
             for line in f:
                 if re.match(r"\s*\[tool\.pyright\]", line):
                     return True
@@ -524,7 +524,7 @@ def _remove_pyrefly_section(pyproject_path: str) -> None:
     Needed because repos may have [tool.pyrefly] with error codes from a
     newer pyrefly version that cause config parse errors on older versions.
     """
-    with open(pyproject_path) as f:
+    with open(pyproject_path, encoding="utf-8") as f:
         lines = f.readlines()
 
     result = []
@@ -544,7 +544,7 @@ def _remove_pyrefly_section(pyproject_path: str) -> None:
         if not in_pyrefly:
             result.append(line)
 
-    with open(pyproject_path, "w") as f:
+    with open(pyproject_path, "w", encoding="utf-8") as f:
         f.writelines(result)
 
 
